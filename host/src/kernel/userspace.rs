@@ -4,14 +4,14 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures::future::Future;
-use log::debug;
+use log::{debug, info, trace};
 
-use crate::chain::BlockChain;
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath};
 
+use crate::chain::BlockChain;
 use crate::cluster::{Cluster, Dir, DirEntry, Legacy, Replica};
 use crate::object::InstanceExt;
 use crate::route::{Public, Route};
@@ -82,7 +82,7 @@ impl UserSpace {
 }
 
 #[async_trait]
-impl<T: Transact + Clone + Send + Sync> Dispatch for Cluster<Dir<T>>
+impl<T: Transact + Clone + Send + Sync + 'static> Dispatch for Cluster<Dir<T>>
 where
     Cluster<BlockChain<T>>: Route,
     BlockChain<T>: Replica,
@@ -512,21 +512,29 @@ fn execute_legacy<
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> {
     Box::pin(async move {
         if let Some(owner) = txn.owner() {
+            let self_link = txn.link(cluster.link().path().clone());
             if owner.path() == cluster.path() {
                 debug!("{} owns this transaction, no need to notify", cluster);
             } else if txn.is_leader(cluster.path()) {
-                let self_link = txn.link(cluster.link().path().clone());
-                txn.put(owner.clone(), Value::default(), self_link.into())
+                txn.put(owner.clone(), Value::default(), self_link.clone().into())
                     .await?;
             } else {
-                let self_link = txn.link(cluster.link().path().clone());
                 debug!(
                     "{} is not leading this transaction, no need to notify owner",
                     self_link
                 );
             }
 
-            handler(txn.clone(), cluster).await
+            trace!("execute write for owner {}", owner);
+            let result = handler(txn.clone(), cluster).await;
+
+            if result.is_ok() {
+                info!("replica at {} succeeded", self_link);
+            } else {
+                info!("replica at {} failed", self_link);
+            }
+
+            result
         } else {
             // Claim and execute the transaction
             let txn = cluster.claim(&txn).await?;
@@ -536,6 +544,7 @@ fn execute_legacy<
                 Ok(_) => {
                     debug!("commit {}", cluster);
                     cluster.distribute_commit(&txn).await?;
+                    debug!("committed {}", cluster);
                 }
                 Err(cause) => {
                     debug!("rollback {} due to {}", cluster, cause);

@@ -32,8 +32,8 @@ impl Version {
 
         let mut classes = Map::new();
         for block_id in file.block_ids() {
-            let class = file.read_block(block_id).await?;
-            classes.insert(block_id.clone().into(), class.clone().into());
+            let class = file.read_block(&block_id).await?;
+            classes.insert(block_id.into(), class.clone().into());
         }
 
         Ok(State::Map(classes))
@@ -90,7 +90,7 @@ impl Class {
         let mut versions = Map::new();
         for (number, file) in dir.iter() {
             let file = match file {
-                fs::DirEntry::File(fs::FileEntry::Class(file)) => Ok(file),
+                fs::DirEntry::File(fs::FileEntry::Class(file)) => Ok(file.clone()),
                 other => Err(TCError::internal(format!(
                     "class directory contains invalid file: {}",
                     other

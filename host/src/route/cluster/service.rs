@@ -1,3 +1,4 @@
+use futures::executor::block_on;
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
@@ -199,7 +200,10 @@ impl<'a> Handler<'a> for DirHandler<'a, Service> {
                     TCError::bad_request("invalid path segment for cluster directory entry", v)
                 })?;
 
-                if let Some(_) = self.dir.entry(*txn.id(), &name).await? {
+                // the Rust compiler (as of v1.66) is unable to validate the Send trait boundary
+                // for this operation, so it has to be done synchronously
+
+                if let Some(_) = block_on(self.dir.entry(*txn.id(), &name))? {
                     return Err(TCError::bad_request(
                         "there is already a directory entry at",
                         name,

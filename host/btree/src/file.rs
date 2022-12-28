@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::fs::*;
-use tc_transact::lock::{TxnLock, TxnLockCommitGuard};
+use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream, Tuple};
@@ -227,14 +227,14 @@ impl<F: File<Key = NodeId, Block = Node>, D: Dir, T: Transaction<D>> BTreeFile<F
 where
     Self: Clone,
 {
-    fn new(file: F, schema: RowSchema, order: usize, root: NodeId) -> Self {
+    fn new(file: F, txn_id: TxnId, schema: RowSchema, order: usize, root: NodeId) -> Self {
         BTreeFile {
             inner: Arc::new(Inner {
                 file,
                 schema,
                 order,
                 collator: ValueCollator::default(),
-                root: TxnLock::new("BTree root", root.into()),
+                root: TxnLock::new("BTree root block ID", txn_id, root.into()),
                 dir: PhantomData,
                 txn: PhantomData,
             }),
@@ -708,19 +708,20 @@ where
     D: Dir,
     T: Transaction<D>,
 {
-    type Commit = TxnLockCommitGuard<NodeId>;
+    type Commit = ();
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
-        let guard = self.inner.root.commit(txn_id).await;
-        self.inner.file.commit(txn_id).await;
-        guard
+        join!(
+            self.inner.root.commit(txn_id),
+            self.inner.file.commit(txn_id),
+        );
+
+        trace!("committed BTree");
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        join!(
-            self.inner.file.finalize(txn_id),
-            self.inner.root.finalize(txn_id)
-        );
+        self.inner.file.finalize(txn_id).await;
+        self.inner.root.finalize(txn_id)
     }
 }
 
@@ -757,7 +758,7 @@ where
 
         assert!(file.contains(&root));
 
-        Ok(BTreeFile::new(store, schema, order, root))
+        Ok(BTreeFile::new(store, *txn.id(), schema, order, root))
     }
 
     async fn load(txn: &T, schema: RowSchema, store: D::Store) -> TCResult<Self> {
@@ -786,7 +787,7 @@ where
             root.ok_or_else(|| TCError::internal("BTree corrupted (no root block configured)"))?;
 
         if blocks.contains(&root) {
-            Ok(BTreeFile::new(file, schema, order, root))
+            Ok(BTreeFile::new(file, txn_id, schema, order, root))
         } else {
             Err(TCError::internal("BTree corrupted (missing root block)"))
         }

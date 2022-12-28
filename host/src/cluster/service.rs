@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt;
 
@@ -9,14 +9,14 @@ use safecast::{as_type, AsType};
 
 use tc_error::*;
 use tc_transact::fs::*;
-use tc_transact::lock::{TxnMapLock, TxnMapLockCommitGuard, TxnMapRead, TxnMapWrite};
+use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, Transaction};
 use tc_value::Version as VersionNumber;
 use tcgeneric::{label, Id, Label, Map, NativeClass};
 
 use crate::chain::{Chain, ChainType};
 use crate::cluster::{DirItem, Replica};
-use crate::collection::{CollectionBase, CollectionBaseCommitGuard, CollectionSchema};
+use crate::collection::{CollectionBase, CollectionSchema};
 use crate::fs;
 use crate::scalar::value::Link;
 use crate::scalar::{OpRef, Scalar, Subject, TCRef};
@@ -148,18 +148,16 @@ impl Persist<fs::Dir> for Version {
 
 #[async_trait]
 impl Transact for Version {
-    type Commit = Map<CollectionBaseCommitGuard>;
+    type Commit = ();
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
-        let guards = join_all(
+        join_all(
             self.attrs
                 .iter()
                 .filter_map(|(name, attr)| attr.as_type().map(|chain: &Chain<_>| (name, chain)))
                 .map(|(name, attr)| attr.commit(txn_id).map(move |guard| (name.clone(), guard))),
         )
         .await;
-
-        guards.into_iter().collect()
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -183,7 +181,7 @@ impl fmt::Display for Version {
 pub struct Service {
     dir: fs::Dir,
     schema: fs::File<VersionNumber, super::library::Version>,
-    versions: TxnMapLock<VersionNumber, Version>,
+    versions: TxnLock<BTreeMap<VersionNumber, Version>>,
 }
 
 impl Service {
@@ -192,13 +190,14 @@ impl Service {
 
         versions
             .get(number)
+            .cloned()
             .ok_or_else(|| TCError::not_found(format!("Service version {}", number)))
     }
 
     pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
         self.schema
             .read(txn_id)
-            .map_ok(|file| file.block_ids().last().cloned())
+            .map_ok(|file| file.block_ids().iter().last().cloned())
             .await
     }
 
@@ -230,7 +229,7 @@ impl DirItem for Service {
         let (dir, mut schemata, mut versions) = try_join!(
             self.dir.write(txn_id),
             self.schema.write(txn_id),
-            self.versions.write(txn_id)
+            self.versions.write(txn_id).map_err(TCError::from),
         )?;
 
         schemata
@@ -248,7 +247,7 @@ impl DirItem for Service {
 
 #[async_trait]
 impl Transact for Service {
-    type Commit = TxnMapLockCommitGuard<VersionNumber, Version>;
+    type Commit = ();
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         let versions = self.versions.commit(txn_id).await;
@@ -259,8 +258,6 @@ impl Transact for Service {
                 .map(|(_name, version)| async move { version.commit(txn_id).await }),
         )
         .await;
-
-        versions
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -275,7 +272,7 @@ impl Transact for Service {
             .await
         };
 
-        self.versions.finalize(txn_id).await
+        self.versions.finalize(txn_id)
     }
 }
 
@@ -286,14 +283,15 @@ impl Persist<fs::Dir> for Service {
 
     async fn create(txn: &Self::Txn, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
-        let mut contents = dir.write(*txn.id()).await?;
+        let txn_id = *txn.id();
+        let mut contents = dir.write(txn_id).await?;
         if contents.is_empty() {
             let schema = contents.create_file(SCHEMA.into())?;
 
             Ok(Self {
                 dir,
                 schema,
-                versions: TxnMapLock::new("service versions"),
+                versions: TxnLock::new("service", txn_id, BTreeMap::new()),
             })
         } else {
             Err(TCError::unsupported(
@@ -312,7 +310,7 @@ impl Persist<fs::Dir> for Service {
                 .get_file(&SCHEMA.into())?
                 .ok_or_else(|| TCError::internal("service missing schema file"))?;
 
-            (schema, HashMap::with_capacity(dir.len()))
+            (schema, BTreeMap::new())
         };
 
         let version_schema = schema.read(txn_id).await?;
@@ -338,7 +336,7 @@ impl Persist<fs::Dir> for Service {
         Ok(Self {
             dir,
             schema,
-            versions: TxnMapLock::with_contents("service versions", versions),
+            versions: TxnLock::new("service", txn_id, versions),
         })
     }
 

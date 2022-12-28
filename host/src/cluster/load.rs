@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
@@ -116,7 +116,7 @@ pub async fn instantiate(
 
     trace!("Cluster::load got write lock on data directory");
 
-    let mut replicas = HashSet::new();
+    let mut replicas = BTreeSet::new();
     replicas.insert((host, link.path().clone()).into());
 
     let mut chains = Map::<Chain<CollectionBase>>::new();
@@ -125,7 +125,7 @@ pub async fn instantiate(
 
         let store = dir.get_or_create_store(txn_id, id.clone()).await?;
         let chain = Chain::load_or_create(txn, (class, schema), store).await?;
-        trace!("loaded chain {}", id);
+        trace!("loaded chain {} at {}", id, txn_id);
 
         chains.insert(id, chain);
     }
@@ -135,8 +135,8 @@ pub async fn instantiate(
     let cluster = Cluster {
         link: Arc::new(link.clone()),
         actor: Arc::new(Actor::new(actor_id)),
-        led: Arc::new(RwLock::new(HashMap::new())),
-        replicas: TxnLock::new(format!("Cluster {} replicas", link), replicas),
+        led: Arc::new(RwLock::new(BTreeMap::new())),
+        replicas: TxnLock::new("cluster replica set", txn_id, replicas),
         state: Legacy { chains, classes },
     };
 

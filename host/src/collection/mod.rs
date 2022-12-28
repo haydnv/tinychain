@@ -25,7 +25,7 @@ pub use tc_table::TableType;
 #[cfg(feature = "tensor")]
 pub use tc_tensor::{DenseAccess, SparseAccess, TensorType};
 
-pub use base::{CollectionBase, CollectionBaseCommitGuard, CollectionVisitor};
+pub use base::{CollectionBase, CollectionVisitor};
 pub use schema::{CollectionSchema, CollectionType};
 
 mod base;

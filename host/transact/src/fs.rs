@@ -1,6 +1,7 @@
 //! Transactional filesystem traits and data structures.
 
 use std::borrow::Borrow;
+use std::collections::BTreeSet;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
@@ -47,8 +48,8 @@ pub trait FileRead: Sized + Send + Sync {
     /// The type of this [`File`]
     type File: File;
 
-    /// Iterate over the names of each block in this [`File`].
-    fn block_ids(&self) -> crate::lock::Keys<<Self::File as File>::Key>;
+    /// Return the set of names of each block in this [`File`].
+    fn block_ids(&self) -> BTreeSet<<Self::File as File>::Key>;
 
     /// Return `true` if this [`File`] contains a block with the given `name`.
     fn contains<Q>(&self, name: Q) -> bool
@@ -261,6 +262,9 @@ pub trait Dir: Store + Clone + Send + Sized + 'static {
 
     /// Lock this [`Dir`] for reading.
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read>;
+
+    /// Lock this [`Dir`] for reading synchronously, if possible.
+    fn try_read(&self, txn_id: TxnId) -> TCResult<Self::Read>;
 
     /// Lock this [`Dir`] for writing.
     async fn write(&self, txn_id: TxnId) -> TCResult<Self::Write>;

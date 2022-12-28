@@ -237,21 +237,25 @@ impl Txn {
     }
 
     /// Resolve a GET op within this transaction context.
+    // TODO: accept a Borrow<Link>
     pub async fn get(&self, link: Link, key: Value) -> TCResult<State> {
         self.gateway.get(self, link, key).await
     }
 
     /// Resolve a PUT op within this transaction context.
+    // TODO: accept a Borrow<Link>
     pub async fn put(&self, link: Link, key: Value, value: State) -> TCResult<()> {
         self.gateway.put(self, link, key, value).await
     }
 
     /// Resolve a POST op within this transaction context.
+    // TODO: accept a Borrow<Link>
     pub async fn post(&self, link: Link, params: State) -> TCResult<State> {
         self.gateway.post(self, link, params).await
     }
 
     /// Resolve a DELETE op within this transaction context.
+    // TODO: accept a Borrow<Link>
     pub async fn delete(&self, link: Link, key: Value) -> TCResult<()> {
         self.gateway.delete(self, link, key).await
     }

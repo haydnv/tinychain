@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use futures::{future, TryFutureExt};
-use log::debug;
+use log::{debug, info};
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -93,26 +93,46 @@ where
                 }
 
                 #[cfg(debug_assertions)]
-                log::info!(
+                info!(
                     "{} got commit message for {}",
                     txn.link(self.cluster.link().path().clone()),
                     txn.id()
                 );
 
-                if !txn.has_leader(self.cluster.path()) {
+                let result = if !txn.has_leader(self.cluster.path()) {
                     // in this case, the kernel did not claim leadership
                     // since a POST request is not necessarily a write
                     // but there's no need to notify the txn owner
                     // because it has already sent a commit message
                     // so just claim leadership on this host and replicate the commit
-                    self.cluster.lead_and_distribute_commit(txn.clone()).await?;
+                    info!(
+                        "{} will lead and distribute the commit of {}...",
+                        self.cluster,
+                        txn.id()
+                    );
+
+                    self.cluster.lead_and_distribute_commit(txn.clone()).await
                 } else if txn.is_leader(self.cluster.path()) {
-                    self.cluster.distribute_commit(txn).await?;
+                    info!(
+                        "{} will distribute the commit of {}...",
+                        self.cluster,
+                        txn.id()
+                    );
+
+                    self.cluster.distribute_commit(txn).await
                 } else {
+                    info!("{} will commit {}...", self.cluster, txn.id());
                     self.cluster.commit(txn.id()).await;
+                    Ok(())
+                };
+
+                if result.is_ok() {
+                    info!("{} commit {} succeeded", self.cluster, txn.id());
+                } else {
+                    info!("{} commit {} failed", self.cluster, txn.id());
                 }
 
-                Ok(State::default())
+                result.map(State::from)
             })
         }))
     }

@@ -248,6 +248,8 @@ impl Transact for Store {
     type Commit = <fs::Dir as Transact>::Commit;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+        debug!("commit chain data store at {}", txn_id);
+
         self.dir.commit(txn_id).await
     }
 

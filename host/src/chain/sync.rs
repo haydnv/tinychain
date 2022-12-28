@@ -8,7 +8,7 @@ use destream::{de, FromStream};
 use freqfs::{FileLock, FileWriteGuard};
 use futures::future::TryFutureExt;
 use futures::try_join;
-use log::debug;
+use log::{debug, trace};
 use safecast::{TryCastFrom, TryCastInto};
 use sha2::digest::Output;
 use sha2::Sha256;
@@ -44,6 +44,8 @@ pub struct SyncChain<T> {
 
 impl<T> SyncChain<T> {
     async fn write_ahead(&self, txn_id: &TxnId) {
+        trace!("SyncChain::write_ahead {}", txn_id);
+
         self.store.commit(txn_id).await;
 
         {
@@ -152,8 +154,10 @@ where
         debug!("SyncChain::commit");
 
         self.write_ahead(txn_id).await;
+        trace!("SyncChain::commit logged the mutations to be applied");
 
         let guard = self.subject.commit(txn_id).await;
+        trace!("SyncChain committed subject, moving its mutations out of the write-head log...");
 
         // assume the mutations for the transaction have already been moved and sync'd
         // from `self.pending` to `self.committed` by calling the `write_ahead` method
@@ -162,9 +166,12 @@ where
                 self.committed.write().await.expect("committed");
 
             committed.mutations.remove(txn_id);
+            trace!("mutations are out of the write-ahead log");
         }
 
+        trace!("sync commit block...");
         self.committed.sync(false).await.expect("sync commit block");
+        trace!("sync'd commit block");
 
         guard
     }
@@ -200,7 +207,7 @@ where
         let store = dir
             .create_dir(STORE.to_string())
             .map_err(fs::io_err)
-            .map(fs::Dir::new)
+            .map(|dir| fs::Dir::new(dir, *txn.id()))
             .map(super::data::Store::new)?;
 
         let mut blocks_dir = dir
@@ -237,7 +244,7 @@ where
         let store = dir
             .get_or_create_dir(STORE.to_string())
             .map_err(fs::io_err)
-            .map(fs::Dir::new)
+            .map(|dir| fs::Dir::new(dir, *txn.id()))
             .map(super::data::Store::new)?;
 
         let mut blocks_dir = dir

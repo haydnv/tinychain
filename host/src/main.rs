@@ -16,6 +16,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, LinkHost, LinkProtocol};
 use tcgeneric::PathLabel;
 
+use crate::future::join_all;
 use tinychain::cluster::{Cluster, Replica};
 use tinychain::fs::Dir;
 use tinychain::gateway::Gateway;
@@ -209,6 +210,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         }
     }
 
+    join_all(clusters.iter().map(|cluster| cluster.commit(&txn_id))).await;
     data_dir.commit(&txn_id).await;
 
     let txn_id = TxnId::new(Gateway::time());
@@ -222,7 +224,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     join!(
         class.commit(&txn_id),
         library.commit(&txn_id),
-        service.commit(&txn_id),
+        service.commit(&txn_id)
     );
 
     let kernel = tinychain::Kernel::with_userspace(
@@ -286,9 +288,8 @@ async fn replicate(
         cluster.distribute_commit(&txn).await
     }
 
-    replicate_cluster(&txn, class).await?;
-
     try_join!(
+        replicate_cluster(&txn, class),
         replicate_cluster(&txn, library),
         replicate_cluster(&txn, service),
     )?;

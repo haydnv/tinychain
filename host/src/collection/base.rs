@@ -2,7 +2,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use destream::de;
-use futures::future::{FutureExt, TryFutureExt};
+use futures::future::TryFutureExt;
 use log::debug;
 use safecast::TryCastFrom;
 use sha2::digest::Output;
@@ -194,47 +194,18 @@ impl Restore<fs::Dir> for CollectionBase {
     }
 }
 
-pub enum CollectionBaseCommitGuard {
-    BTree(<BTreeFile as Transact>::Commit),
-    Table(<TableIndex as Transact>::Commit),
-    #[cfg(feature = "tensor")]
-    Dense(<DenseTensorFile as Transact>::Commit),
-    #[cfg(feature = "tensor")]
-    Sparse(<SparseTable as Transact>::Commit),
-}
-
 #[async_trait]
 impl Transact for CollectionBase {
-    type Commit = CollectionBaseCommitGuard;
+    type Commit = ();
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         match self {
-            Self::BTree(btree) => {
-                btree
-                    .commit(txn_id)
-                    .map(CollectionBaseCommitGuard::BTree)
-                    .await
-            }
-            Self::Table(table) => {
-                table
-                    .commit(txn_id)
-                    .map(CollectionBaseCommitGuard::Table)
-                    .await
-            }
+            Self::BTree(btree) => btree.commit(txn_id).await,
+            Self::Table(table) => table.commit(txn_id).await,
             #[cfg(feature = "tensor")]
-            Self::Dense(dense) => {
-                dense
-                    .commit(txn_id)
-                    .map(CollectionBaseCommitGuard::Dense)
-                    .await
-            }
+            Self::Dense(dense) => dense.commit(txn_id).await,
             #[cfg(feature = "tensor")]
-            Self::Sparse(sparse) => {
-                sparse
-                    .commit(txn_id)
-                    .map(CollectionBaseCommitGuard::Sparse)
-                    .await
-            }
+            Self::Sparse(sparse) => sparse.commit(txn_id).await,
         }
     }
 

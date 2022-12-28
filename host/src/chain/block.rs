@@ -199,7 +199,7 @@ where
 
         let history = dir
             .create_dir(HISTORY.to_string())
-            .map(fs::Dir::new)
+            .map(|dir| fs::Dir::new(dir, *txn.id()))
             .map_err(fs::io_err)?;
 
         let history = History::create(txn, (), history.into()).await?;
@@ -214,7 +214,7 @@ where
 
         let history = dir
             .get_or_create_dir(HISTORY.to_string())
-            .map(fs::Dir::new)
+            .map(|dir| fs::Dir::new(dir, *txn.id()))
             .map_err(fs::io_err)?;
 
         let history = History::load(txn, (), history.into()).await?;

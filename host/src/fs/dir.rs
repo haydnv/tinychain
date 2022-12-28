@@ -1,5 +1,6 @@
 //! A transactional filesystem directory.
 
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
@@ -19,7 +20,7 @@ use tc_transact::fs;
 use tc_transact::lock::*;
 use tc_transact::{Transact, TxnId};
 use tc_value::Version as VersionNumber;
-use tcgeneric::{Id, Map, PathSegment, TCBoxTryFuture};
+use tcgeneric::{Id, PathSegment, TCBoxTryFuture};
 
 use crate::chain::{ChainBlock, ChainType};
 use crate::cluster::library;
@@ -186,15 +187,15 @@ impl fs::Store for Store {
         let entry = match self {
             Self::Create(parent, name) => match parent.contents.get(name) {
                 None => return Ok(true),
-                Some(entry) => entry,
+                Some(entry) => entry.clone(),
             },
             Self::GetOrCreate(parent, name) => match parent.contents.get(name) {
                 None => return Ok(true),
-                Some(entry) => entry,
+                Some(entry) => entry.clone(),
             },
             Self::Get(parent, name) => match parent.contents.get(name) {
                 None => return Ok(true),
-                Some(entry) => entry,
+                Some(entry) => entry.clone(),
             },
             Self::Dir(dir) => DirEntry::Dir(dir.clone()),
             Self::File(file) => DirEntry::File(file.clone()),
@@ -216,6 +217,7 @@ impl fs::Store for Store {
 
 /// A lock guard for a [`Dir`]
 pub struct DirGuard<C, L> {
+    txn_id: TxnId,
     cache: C,
     contents: L,
 }
@@ -223,15 +225,15 @@ pub struct DirGuard<C, L> {
 impl<C, L> DirGuard<C, L>
 where
     C: Deref<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
-    L: TxnMapRead<PathSegment, DirEntry> + Send + Sync,
+    L: Deref<Target = BTreeMap<PathSegment, DirEntry>> + Send + Sync,
 {
     // Iterate over the contents of this directory
-    pub fn file_names(&self) -> tc_transact::lock::Keys<PathSegment> {
+    pub fn file_names(&self) -> impl Iterator<Item = &PathSegment> {
         self.contents.keys()
     }
 
     // Iterate over the contents of this directory
-    pub fn iter(&self) -> tc_transact::lock::Iter<PathSegment, DirEntry> {
+    pub fn iter(&self) -> impl Iterator<Item = (&PathSegment, &DirEntry)> {
         self.contents.iter()
     }
 }
@@ -239,7 +241,7 @@ where
 impl<C, L> fs::DirRead for DirGuard<C, L>
 where
     C: Deref<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
-    L: TxnMapRead<PathSegment, DirEntry> + Send + Sync,
+    L: Deref<Target = BTreeMap<PathSegment, DirEntry>> + Send + Sync,
 {
     type Lock = Dir;
 
@@ -271,7 +273,7 @@ impl<C, L, K, B> fs::DirReadFile<File<K, B>> for DirGuard<C, L>
 where
     K: FromStr + fmt::Display + Ord + Clone + Send + Sync + 'static,
     C: Deref<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
-    L: TxnMapRead<PathSegment, DirEntry> + Send + Sync,
+    L: Deref<Target = BTreeMap<PathSegment, DirEntry>> + Send + Sync,
     B: BlockData,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
     CacheBlock: AsType<B>,
@@ -302,7 +304,7 @@ where
 impl<C, L> fs::DirCreate for DirGuard<C, L>
 where
     C: DerefMut<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
-    L: TxnMapWrite<PathSegment, DirEntry> + Send + Sync,
+    L: DerefMut<Target = BTreeMap<PathSegment, DirEntry>> + Send + Sync,
 {
     fn create_dir(&mut self, name: PathSegment) -> TCResult<Self::Lock> {
         if self.contents.contains_key(&name) {
@@ -320,7 +322,7 @@ where
         let dir = self
             .cache
             .create_dir(fs_name)
-            .map(Dir::new)
+            .map(|dir| Dir::new(dir, self.txn_id))
             .map_err(io_err)?;
 
         self.contents.insert(name, DirEntry::Dir(dir.clone()));
@@ -343,7 +345,7 @@ where
 impl<C, L, K, B> fs::DirCreateFile<File<K, B>> for DirGuard<C, L>
 where
     C: DerefMut<Target = freqfs::Dir<CacheBlock>> + Send + Sync,
-    L: TxnMapWrite<PathSegment, DirEntry> + Send + Sync,
+    L: DerefMut<Target = BTreeMap<PathSegment, DirEntry>> + Send + Sync,
     B: BlockData,
     K: FromStr + fmt::Display + Ord + Clone + Send + Sync + 'static,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
@@ -359,7 +361,8 @@ where
             .cache
             .create_dir(format!("{}.{}", name, B::ext()))
             .map_err(io_err)?;
-        let file = File::<K, B>::new(canon)?;
+
+        let file = File::<K, B>::new(canon, self.txn_id)?;
 
         self.contents
             .insert(name, DirEntry::File(file.clone().into()));
@@ -390,9 +393,9 @@ where
 }
 
 pub type DirReadGuard =
-    DirGuard<freqfs::DirReadGuard<CacheBlock>, TxnMapLockReadGuard<PathSegment, DirEntry>>;
+    DirGuard<freqfs::DirReadGuard<CacheBlock>, TxnLockReadGuard<BTreeMap<PathSegment, DirEntry>>>;
 pub type DirWriteGuard =
-    DirGuard<freqfs::DirWriteGuard<CacheBlock>, TxnMapLockWriteGuard<PathSegment, DirEntry>>;
+    DirGuard<freqfs::DirWriteGuard<CacheBlock>, TxnLockWriteGuard<BTreeMap<PathSegment, DirEntry>>>;
 
 impl DirReadGuard {
     /// Get an entry in this directory without resolving it to a [`Dir`] or [`File`].
@@ -433,23 +436,27 @@ impl DirWriteGuard {
 #[derive(Clone)]
 pub struct Dir {
     cache: freqfs::DirLock<CacheBlock>,
-    listing: TxnMapLock<PathSegment, DirEntry>,
+    listing: TxnLock<BTreeMap<PathSegment, DirEntry>>,
 }
 
 impl Dir {
-    pub(crate) fn new(cache: freqfs::DirLock<CacheBlock>) -> Self {
+    pub(crate) fn new(cache: freqfs::DirLock<CacheBlock>, txn_id: TxnId) -> Self {
         #[cfg(debug_assertions)]
         let lock_name = {
-            let lock = cache.try_read().expect("filesystem cache dir lock");
-            format!("contents of {:?}", lock.path())
+            cache
+                .try_read()
+                .expect("dir lock")
+                .path()
+                .to_string_lossy()
+                .to_string()
         };
 
         #[cfg(not(debug_assertions))]
-        let lock_name = "contents of a transactional filesystem directory";
+        let lock_name = "filesystem dir";
 
         Self {
             cache,
-            listing: TxnMapLock::new(lock_name),
+            listing: TxnLock::new(lock_name, txn_id, BTreeMap::new()),
         }
     }
 
@@ -460,7 +467,7 @@ impl Dir {
 
             debug!("Dir::load {:?}", &*fs_dir);
 
-            let mut listing = Map::new();
+            let mut listing = BTreeMap::new();
             for (name, fs_cache) in fs_dir.iter() {
                 if name.starts_with('.') {
                     debug!("Dir::load skipping hidden filesystem entry {}", name);
@@ -498,14 +505,9 @@ impl Dir {
                 listing.insert(name, entry);
             }
 
-            #[cfg(debug_assertions)]
-            let lock_name = format!("contents of {:?}", &*fs_dir);
-            #[cfg(not(debug_assertions))]
-            let lock_name = "contents of transactional filesystem directory";
-
             Ok(Self {
                 cache,
-                listing: TxnMapLock::with_contents(lock_name, listing),
+                listing: TxnLock::new("filesystem dir", txn_id, listing),
             })
         })
     }
@@ -542,13 +544,31 @@ impl fs::Dir for Dir {
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
         let contents = self.listing.read(txn_id).await?;
         let cache = self.cache.read().await;
-        Ok(DirGuard { cache, contents })
+        Ok(DirGuard {
+            cache,
+            contents,
+            txn_id,
+        })
+    }
+
+    fn try_read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
+        let contents = self.listing.try_read(txn_id)?;
+        let cache = self.cache.try_read().map_err(io_err)?;
+        Ok(DirGuard {
+            cache,
+            contents,
+            txn_id,
+        })
     }
 
     async fn write(&self, txn_id: TxnId) -> TCResult<Self::Write> {
         let contents = self.listing.write(txn_id).await?;
         let cache = self.cache.write().await;
-        Ok(DirGuard { cache, contents })
+        Ok(DirGuard {
+            cache,
+            contents,
+            txn_id,
+        })
     }
 
     fn into_inner(self) -> freqfs::DirLock<CacheBlock> {
@@ -567,7 +587,7 @@ impl fs::Store for Dir {
 
 #[async_trait]
 impl Transact for Dir {
-    type Commit = TxnMapLockCommitGuard<PathSegment, DirEntry>;
+    type Commit = ();
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         let listing = self.listing.commit(txn_id).await;
@@ -598,31 +618,27 @@ impl Transact for Dir {
             }
         }))
         .await;
-
-        listing
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         {
             let listing = self.listing.read(*txn_id).await.expect("dir listing");
 
-            join_all(listing.iter().map(|(_, entry)| async move {
-                match entry {
-                    DirEntry::Dir(dir) => dir.finalize(txn_id).await,
-                    DirEntry::File(file) => match file {
-                        FileEntry::BTree(file) => file.finalize(txn_id).await,
-                        FileEntry::Chain(file) => file.finalize(txn_id).await,
-                        FileEntry::Class(file) => file.finalize(txn_id).await,
-                        FileEntry::Library(file) => file.finalize(txn_id).await,
-                        #[cfg(feature = "tensor")]
-                        FileEntry::Tensor(file) => file.finalize(txn_id).await,
-                    },
-                }
+            join_all(listing.values().map(|entry| match entry {
+                DirEntry::Dir(dir) => dir.finalize(txn_id),
+                DirEntry::File(file) => match file {
+                    FileEntry::BTree(file) => file.finalize(txn_id),
+                    FileEntry::Chain(file) => file.finalize(txn_id),
+                    FileEntry::Class(file) => file.finalize(txn_id),
+                    FileEntry::Library(file) => file.finalize(txn_id),
+                    #[cfg(feature = "tensor")]
+                    FileEntry::Tensor(file) => file.finalize(txn_id),
+                },
             }))
             .await;
         }
 
-        self.listing.finalize(txn_id).await;
+        self.listing.finalize(txn_id);
     }
 }
 

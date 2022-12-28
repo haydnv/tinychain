@@ -112,7 +112,7 @@ impl Library {
     pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
         self.file
             .read(txn_id)
-            .map_ok(|file| file.block_ids().last().cloned())
+            .map_ok(|file| file.block_ids().iter().last().cloned())
             .await
     }
 

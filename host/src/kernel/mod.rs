@@ -10,9 +10,9 @@ use tcgeneric::*;
 use crate::cluster::{Cluster, Legacy};
 use crate::object::InstanceExt;
 use crate::state::State;
-use crate::txn::{hypothetical, Txn};
+use crate::txn::hypothetical::{self, Hypothetical};
+use crate::txn::Txn;
 
-use crate::txn::hypothetical::Hypothetical;
 use hosted::Hosted;
 use system::System;
 use userspace::UserSpace;
