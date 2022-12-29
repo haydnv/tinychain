@@ -90,6 +90,7 @@ where
             }
         };
 
+        let txn_id = *txn.id();
         if let Some(item) = item {
             let cluster = self.dir.create_item(txn, name, link).await?;
 
@@ -98,23 +99,25 @@ where
 
                 cluster
                     .put(&txn, &[], VersionNumber::default().into(), item.into())
-                    .await
+                    .await?;
             } else {
                 cluster
-                    .add_replica(txn, txn.link(cluster.link().path().clone()))
-                    .await
+                    .add_replica(txn_id, txn.link(cluster.link().path().clone()))
+                    .await?;
             }
         } else {
             let cluster = self.dir.create_dir(txn, name, link).await?;
 
             if replicate_from_this_host {
-                Ok(())
+                return Ok(());
             } else {
                 cluster
-                    .add_replica(txn, txn.link(cluster.link().path().clone()))
-                    .await
+                    .add_replica(txn_id, txn.link(cluster.link().path().clone()))
+                    .await?;
             }
         }
+
+        Ok(())
     }
 }
 

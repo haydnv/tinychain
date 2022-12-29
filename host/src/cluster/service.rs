@@ -3,8 +3,9 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
-use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
-use futures::try_join;
+use futures::future::{self, join_all, FutureExt, TryFutureExt};
+use futures::stream::FuturesUnordered;
+use futures::{try_join, TryStreamExt};
 use safecast::{as_type, AsType};
 
 use tc_error::*;
@@ -54,17 +55,17 @@ impl Replica for Version {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        try_join_all(self.attrs.iter().filter_map(|(name, attr)| {
+        let requests = FuturesUnordered::new();
+
+        for (name, attr) in self.attrs.iter() {
             if let Attr::Chain(chain) = attr {
                 let source = source.clone().append(name.clone());
-                Some(chain.replicate(txn, source))
-            } else {
-                None
+                let txn = txn.subcontext(name.clone()).await?;
+                requests.push(async move { chain.replicate(&txn, source).await });
             }
-        }))
-        .await?;
+        }
 
-        Ok(())
+        requests.try_fold((), |(), ()| future::ready(Ok(()))).await
     }
 }
 

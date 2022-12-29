@@ -243,7 +243,7 @@ impl Gateway {
                 let txn = cluster.claim(&txn).await?;
 
                 let self_link = txn.link(cluster.link().path().clone());
-                cluster.add_replica(&txn, self_link).await?;
+                cluster.add_replica_old(&txn, self_link).await?;
 
                 // send a commit message
                 cluster.distribute_commit(&txn).await?;

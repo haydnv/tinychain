@@ -256,6 +256,8 @@ impl State {
         }
     }
 
+    /// Return this `State` as a [`Map`] of [`State`]s, or an error if this is not possible.
+    // TODO: allow specifying an output type other than `State`
     pub fn try_into_tuple<Err: Fn(State) -> TCError>(self, err: Err) -> TCResult<Tuple<State>> {
         match self {
             State::Tuple(tuple) => Ok(tuple),

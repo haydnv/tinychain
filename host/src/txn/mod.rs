@@ -227,6 +227,7 @@ impl Txn {
     }
 
     /// Return a link to the given path on this host.
+    // TODO: accept P where P: ToOwned<TCPathBuf>
     pub fn link(&self, path: TCPathBuf) -> Link {
         self.gateway.link(path)
     }
@@ -237,25 +238,25 @@ impl Txn {
     }
 
     /// Resolve a GET op within this transaction context.
-    // TODO: accept a Borrow<Link>
+    // TODO: accept a Borrow<Link> and an Into<Value>
     pub async fn get(&self, link: Link, key: Value) -> TCResult<State> {
         self.gateway.get(self, link, key).await
     }
 
     /// Resolve a PUT op within this transaction context.
-    // TODO: accept a Borrow<Link>
+    // TODO: accept a Borrow<Link>, an Into<Value>, and an Into<State>
     pub async fn put(&self, link: Link, key: Value, value: State) -> TCResult<()> {
         self.gateway.put(self, link, key, value).await
     }
 
     /// Resolve a POST op within this transaction context.
-    // TODO: accept a Borrow<Link>
+    // TODO: accept a Borrow<Link> and an Into<State>
     pub async fn post(&self, link: Link, params: State) -> TCResult<State> {
         self.gateway.post(self, link, params).await
     }
 
     /// Resolve a DELETE op within this transaction context.
-    // TODO: accept a Borrow<Link>
+    // TODO: accept a Borrow<Link> and an Into<Value>
     pub async fn delete(&self, link: Link, key: Value) -> TCResult<()> {
         self.gateway.delete(self, link, key).await
     }
@@ -272,6 +273,7 @@ impl Transaction<fs::Dir> for Txn {
         &self.dir
     }
 
+    // TODO: accept a ToOwned<Id>
     async fn subcontext(&self, id: Id) -> TCResult<Self> {
         let dir = {
             let mut dir = self.dir.write(*self.request.txn_id()).await?;

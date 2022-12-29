@@ -41,6 +41,7 @@ pub trait IntoView<'en, D: fs::Dir> {
 }
 
 /// Transaction lifecycle callbacks
+// TODO: add a `rollback` method separate from `finalize`
 #[async_trait]
 pub trait Transact {
     /// A guard which blocks concurrent commits

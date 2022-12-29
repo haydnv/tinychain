@@ -1,13 +1,12 @@
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::Arc;
 
 use bytes::Bytes;
 use clap::Parser;
 use destream::de::FromStream;
-use futures::future::{self, TryFutureExt};
-use futures::{join, stream, try_join};
+use futures::future::{join_all, TryFutureExt};
+use futures::{future, join, stream};
 use tokio::time::Duration;
 
 use tc_error::*;
@@ -16,8 +15,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, LinkHost, LinkProtocol};
 use tcgeneric::PathLabel;
 
-use crate::future::join_all;
-use tinychain::cluster::{Cluster, Replica};
+use tinychain::cluster::Cluster;
 use tinychain::fs::Dir;
 use tinychain::gateway::Gateway;
 use tinychain::object::InstanceClass;
@@ -217,14 +215,29 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     let token = gateway.new_token(&txn_id)?;
     let txn = txn_server.new_txn(gateway, txn_id, token).await?;
 
-    let class: kernel::Class = load(&config, &data_dir, &txn, kernel::CLASS).await?;
-    let library: kernel::Library = load(&config, &data_dir, &txn, kernel::LIB).await?;
-    let service: kernel::Service = load(&config, &data_dir, &txn, kernel::SERVICE).await?;
+    // no need to claim ownership of this txn since there's no way to make outbound requests
+    // because they would be impossible to authorize since userspace is not yet loaded
+    // i.e. there is no way for other hosts to check any of these Clusters' public key
+
+    let class: kernel::Class = {
+        let txn = txn.subcontext(kernel::CLASS.into()).await?;
+        load_or_create(&config.replicate, &data_dir, txn, kernel::CLASS).await?
+    };
+
+    let library: kernel::Library = {
+        let txn = txn.subcontext(kernel::LIB.into()).await?;
+        load_or_create(&config.replicate, &data_dir, txn, kernel::LIB).await?
+    };
+
+    let service: kernel::Service = {
+        let txn = txn.subcontext(kernel::SERVICE.into()).await?;
+        load_or_create(&config.replicate, &data_dir, txn, kernel::SERVICE).await?
+    };
 
     join!(
         class.commit(&txn_id),
         library.commit(&txn_id),
-        service.commit(&txn_id)
+        service.commit(&txn_id),
     );
 
     let kernel = tinychain::Kernel::with_userspace(
@@ -242,59 +255,29 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         config.cache_size
     );
 
-    try_join!(
-        gateway.clone().listen().map_err(TokioError::from),
-        replicate(gateway, class, library, service).map_err(TokioError::from)
-    )?;
-
-    Ok(())
+    gateway.clone().listen().map_err(TokioError::from).await
 }
 
-async fn load<T>(config: &Config, data_dir: &Dir, txn: &Txn, path: PathLabel) -> TCResult<T>
+async fn load_or_create<T>(
+    lead: &Option<LinkHost>,
+    data_dir: &Dir,
+    txn: Txn,
+    path: PathLabel,
+) -> TCResult<Cluster<T>>
 where
-    T: Persist<Dir, Txn = Txn, Schema = Link>,
+    Cluster<T>: Persist<fs::Dir, Schema = Link, Txn = Txn> + Send + Sync,
 {
     let store = data_dir
         .get_or_create_store(*txn.id(), tcgeneric::label(path[0]).into())
         .await?;
 
-    let link: Link = if let Some(host) = &config.replicate {
+    let link: Link = if let Some(host) = lead {
         (host.clone(), path.into()).into()
     } else {
         path.into()
     };
 
-    tc_transact::fs::Persist::load(txn, link, store).await
-}
-
-async fn replicate(
-    gateway: Arc<Gateway>,
-    class: Class,
-    library: Library,
-    service: Service,
-) -> TCResult<()> {
-    let txn = gateway.new_txn(TxnId::new(Gateway::time()), None).await?;
-
-    async fn replicate_cluster<T>(txn: &Txn, cluster: Cluster<T>) -> TCResult<()>
-    where
-        T: Replica + Transact + Send + Sync,
-    {
-        let txn = cluster.claim(&txn).await?;
-
-        cluster
-            .add_replica(&txn, txn.link(cluster.link().path().clone()))
-            .await?;
-
-        cluster.distribute_commit(&txn).await
-    }
-
-    try_join!(
-        replicate_cluster(&txn, class),
-        replicate_cluster(&txn, library),
-        replicate_cluster(&txn, service),
-    )?;
-
-    Ok(())
+    Cluster::<T>::load_or_create(&txn, link, store).await
 }
 
 fn main() {

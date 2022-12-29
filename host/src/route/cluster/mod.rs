@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use futures::future::try_join_all;
 use futures::{future, TryFutureExt};
 use log::{debug, info};
 use safecast::{TryCastFrom, TryCastInto};
@@ -6,7 +7,7 @@ use safecast::{TryCastFrom, TryCastInto};
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
-use tcgeneric::{PathSegment, Tuple};
+use tcgeneric::{label, PathSegment, Tuple};
 
 use crate::chain::BlockChain;
 use crate::cluster::dir::Dir;
@@ -179,11 +180,16 @@ where
             Box::pin(async move {
                 key.expect_none()?;
 
-                self.cluster
+                let replicas = self
+                    .cluster
                     .replicas(*txn.id())
                     .map_ok(|replicas| Value::Tuple(replicas.iter().cloned().collect()))
                     .map_ok(State::from)
-                    .await
+                    .await?;
+
+                Ok(State::Tuple(
+                    (self.cluster.link().clone().into(), replicas).into(),
+                ))
             })
         }))
     }
@@ -200,7 +206,44 @@ where
                     TCError::bad_request("expected a Link to a Cluster, not", v)
                 })?;
 
-                self.cluster.add_replica(txn, link).await
+                self.cluster.add_replica_old(txn, link).await
+            })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let new_replica = params.require::<Link>(&label("add").into())?;
+                params.expect_empty()?;
+
+                let txn_id = *txn.id();
+                let self_link = txn.link(self.cluster.link().path().clone());
+                if self
+                    .cluster
+                    .add_replica(txn_id, new_replica.clone())
+                    .await?
+                {
+                    let replicas = self.cluster.replicas(txn_id).await?;
+                    let requests = replicas
+                        .iter()
+                        .cloned()
+                        .filter(|replica| replica != &self_link && replica != &new_replica)
+                        .map(|replica| {
+                            txn.put(
+                                replica.append(REPLICAS),
+                                Value::default(),
+                                new_replica.clone().into(),
+                            )
+                        });
+
+                    try_join_all(requests).await?;
+                }
+
+                self.cluster.state().state(txn_id).await
             })
         }))
     }
