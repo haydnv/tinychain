@@ -12,11 +12,11 @@ use tc_error::*;
 use tc_transact::fs::{DirRead, Persist};
 use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Link, Value, Version as VersionNumber};
+use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{label, Label, Map, PathSegment};
 
 use crate::chain::BlockChain;
-use crate::cluster::Service;
+use crate::cluster::{Service, REPLICAS};
 use crate::fs;
 use crate::route::Route;
 use crate::state::State;
@@ -252,8 +252,10 @@ where
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        let mut params = Map::new();
+        params.insert(label("add").into(), txn.link(source.path().clone()).into());
         let entries = txn
-            .get(source.clone().append(ENTRIES), Value::default())
+            .post(source.clone().append(REPLICAS), State::Map(params))
             .await?;
 
         let entries = entries.try_into_map(|s| {

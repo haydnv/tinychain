@@ -194,6 +194,7 @@ where
         }))
     }
 
+    // TODO: delete
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
     where
         'b: 'a,
@@ -206,7 +207,9 @@ where
                     TCError::bad_request("expected a Link to a Cluster, not", v)
                 })?;
 
-                self.cluster.add_replica_old(txn, link).await
+                self.cluster.add_replica(txn, link, true).await?;
+
+                Ok(())
             })
         }))
     }
@@ -224,7 +227,7 @@ where
                 let self_link = txn.link(self.cluster.link().path().clone());
                 if self
                     .cluster
-                    .add_replica(txn_id, new_replica.clone())
+                    .add_replica(txn, new_replica.clone(), false)
                     .await?
                 {
                     let replicas = self.cluster.replicas(txn_id).await?;

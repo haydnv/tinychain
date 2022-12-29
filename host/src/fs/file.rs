@@ -533,6 +533,16 @@ where
     K: FromStr + fmt::Display + Ord + Clone,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
 {
+    #[cfg(debug_assertions)]
+    fn lock_name(fs_dir: &freqfs::Dir<CacheBlock>) -> String {
+        format!("block list of file {:?}", &*fs_dir)
+    }
+
+    #[cfg(not(debug_assertions))]
+    fn lock_name(_fs_dir: &freqfs::Dir<CacheBlock>) -> String {
+        "block list of transactional file".to_string()
+    }
+
     pub fn new(canon: freqfs::DirLock<CacheBlock>, txn_id: TxnId) -> TCResult<Self> {
         let mut fs_dir = canon
             .try_write()
@@ -545,7 +555,7 @@ where
         Ok(Self {
             canon,
             versions: fs_dir.create_dir(VERSION.to_string()).map_err(io_err)?,
-            blocks: TxnLock::new("file block list", txn_id, BTreeMap::new()),
+            blocks: TxnLock::new(Self::lock_name(&fs_dir), txn_id, BTreeMap::new()),
             phantom: PhantomData,
         })
     }
@@ -618,7 +628,7 @@ where
         Ok(Self {
             canon,
             versions,
-            blocks: TxnLock::new("file block list", txn_id, blocks),
+            blocks: TxnLock::new(Self::lock_name(&fs_dir), txn_id, blocks),
             phantom: Default::default(),
         })
     }

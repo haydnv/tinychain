@@ -20,7 +20,7 @@ use tc_transact::{AsyncHash, IntoView, Transact};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{label, Label, Map};
 
-use crate::cluster::Replica;
+use crate::cluster::{Replica, REPLICAS};
 use crate::collection::CollectionBase;
 use crate::fs;
 use crate::object::InstanceClass;
@@ -73,7 +73,10 @@ impl Replica for BlockChain<crate::cluster::Class> {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        let state = txn.get(source.append(CHAIN), Value::default()).await?;
+        let mut params = Map::new();
+        params.insert(label("add").into(), txn.link(source.path().clone()).into());
+        let state = txn.post(source.append(REPLICAS), State::Map(params)).await?;
+
         let classes: Map<Map<InstanceClass>> =
             state.try_cast_into(|s| TCError::bad_request("invalid class version history", s))?;
 
@@ -101,8 +104,10 @@ impl Replica for BlockChain<crate::cluster::Library> {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        let mut params = Map::new();
+        params.insert(label("add").into(), txn.link(source.path().clone()).into());
         let state = txn
-            .get(source.clone().append(CHAIN), Value::default())
+            .post(source.clone().append(REPLICAS), State::Map(params))
             .await?;
 
         let library: Map<Map<Scalar>> =
@@ -139,8 +144,10 @@ impl Replica for BlockChain<crate::cluster::Service> {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        let mut params = Map::new();
+        params.insert(label("add").into(), txn.link(source.path().clone()).into());
         let state = txn
-            .get(source.clone().append(CHAIN), Value::default())
+            .post(source.clone().append(REPLICAS), State::Map(params))
             .await?;
 
         let library: Map<Map<Scalar>> =

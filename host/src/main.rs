@@ -1,12 +1,13 @@
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use clap::Parser;
 use destream::de::FromStream;
 use futures::future::{join_all, TryFutureExt};
-use futures::{future, join, stream};
+use futures::{future, join, stream, try_join};
 use tokio::time::Duration;
 
 use tc_error::*;
@@ -15,7 +16,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, LinkHost, LinkProtocol};
 use tcgeneric::PathLabel;
 
-use tinychain::cluster::Cluster;
+use tinychain::cluster::{Cluster, Replica};
 use tinychain::fs::Dir;
 use tinychain::gateway::Gateway;
 use tinychain::object::InstanceClass;
@@ -255,7 +256,12 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         config.cache_size
     );
 
-    gateway.clone().listen().map_err(TokioError::from).await
+    try_join!(
+        gateway.clone().listen().map_err(TokioError::from),
+        replicate(gateway, class, library, service).map_err(TokioError::from)
+    )?;
+
+    Ok(())
 }
 
 async fn load_or_create<T>(
@@ -278,6 +284,36 @@ where
     };
 
     Cluster::<T>::load_or_create(&txn, link, store).await
+}
+
+async fn replicate(
+    gateway: Arc<Gateway>,
+    class: Class,
+    library: Library,
+    service: Service,
+) -> TCResult<()> {
+    let txn = gateway.new_txn(TxnId::new(Gateway::time()), None).await?;
+
+    async fn replicate_cluster<T>(txn: &Txn, cluster: Cluster<T>) -> TCResult<()>
+    where
+        T: Replica + Transact + Send + Sync,
+    {
+        let txn = cluster.claim(&txn).await?;
+
+        cluster
+            .add_replica(&txn, txn.link(cluster.link().path().clone()), false)
+            .await?;
+
+        cluster.distribute_commit(&txn).await
+    }
+
+    try_join!(
+        replicate_cluster(&txn, class),
+        replicate_cluster(&txn, library),
+        replicate_cluster(&txn, service),
+    )?;
+
+    Ok(())
 }
 
 fn main() {

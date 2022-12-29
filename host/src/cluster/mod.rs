@@ -64,7 +64,7 @@ impl ReplicaSet {
         }
     }
 
-    pub(super) fn try_from_state(txn_id: TxnId, state: State) -> TCResult<Self> {
+    pub fn try_from_state(state: State) -> TCResult<(Link, BTreeSet<Link>)> {
         let (lead, replicas): (State, State) =
             state.try_cast_into(|s| TCError::bad_request("invalid replica set", s))?;
 
@@ -80,10 +80,7 @@ impl ReplicaSet {
             })
             .collect::<TCResult<_>>()?;
 
-        Ok(ReplicaSet {
-            lead: Arc::new(lead),
-            replicas: TxnLock::new("replica set", txn_id, replicas),
-        })
+        Ok((lead, replicas))
     }
 
     pub fn lead(&self) -> &Link {
@@ -220,12 +217,6 @@ impl<T> Cluster<T> {
     // TODO: set visibility to private
     pub fn with_state(self_link: Link, cluster: Link, txn_id: TxnId, state: T) -> Self {
         assert!(self_link.host().is_some());
-
-        let cluster = if self_link == cluster {
-            cluster.path().clone().into()
-        } else {
-            cluster
-        };
 
         let replicas = ReplicaSet::new(txn_id, cluster, [self_link]);
 
@@ -495,8 +486,10 @@ where
     }
 
     /// Add a replica to this `Cluster`.
-    // TODO: delete
-    pub async fn add_replica_old(&self, txn: &Txn, replica: Link) -> TCResult<()> {
+    ///
+    /// Returns `true` if a new replica was added.
+    // TODO: remove `notify`
+    pub async fn add_replica(&self, txn: &Txn, replica: Link, notify: bool) -> TCResult<bool> {
         if replica.path() != self.path() {
             return Err(TCError::unsupported(format!(
                 "tried to replicate {} from {}",
@@ -514,11 +507,11 @@ where
             if self.link() == &self_link {
                 if let Some(host) = self.link().host() {
                     debug!("{} at {} cannot replicate itself", self, host);
-                    return Ok(());
+                    return Ok(false);
                 }
             } else if self.link().host().is_none() {
                 debug!("{} cannot replicate itself", self);
-                return Ok(());
+                return Ok(false);
             }
 
             assert_ne!(self.link().clone(), self_link);
@@ -530,21 +523,25 @@ where
                 self, replica, self_link
             );
 
-            let replica_set = txn
+            let (lead, replicas) = txn
                 .get(self.link().clone().append(REPLICAS), Value::default())
-                .map(|r| r.and_then(|state| ReplicaSet::try_from_state(txn_id, state)))
+                .map(|r| r.and_then(ReplicaSet::try_from_state))
                 .await?;
 
-            if replica_set.lead() != self.link() {
-                return Err(TCError::unsupported("replication lead cannot be altered"));
+            if self.link() != &lead {
+                return Err(TCError::unsupported(format!(
+                    "replication lead {} cannot be altered (got {})",
+                    self.link(),
+                    lead
+                )));
             }
-
-            debug!("{} has replicas: {}", self, replica_set);
 
             self.state.replicate(txn, self.link().clone()).await?;
 
-            let replicas = replica_set.read(txn_id).await?;
-            if !replicas.contains(&self_link) {
+            let is_new = !replicas.contains(&self_link);
+
+            // TODO: delete
+            if notify && is_new {
                 try_join_all(replicas.iter().map(|replica| {
                     txn.put(
                         replica.clone().append(REPLICAS),
@@ -555,19 +552,16 @@ where
                 .await?;
             }
 
-            self.replicas
-                .extend(txn_id, replicas.iter().cloned())
-                .await?;
-        } else {
-            self.replicas.add(txn_id, replica).await?;
-        }
+            self.replicas.extend(txn_id, replicas).await?;
 
-        Ok(())
+            Ok(is_new)
+        } else {
+            self.replicas.add(txn_id, replica).await
+        }
     }
 
-    // TODO: delete
     /// Claim leadership of the given [`Txn`] and add a replica to this `Cluster`.
-    pub async fn lead_and_add_replica(&self, txn: Txn) -> TCResult<()> {
+    pub async fn lead_and_add_replica(&self, txn: Txn) -> TCResult<bool> {
         let owner = txn
             .owner()
             .cloned()
@@ -576,9 +570,9 @@ where
         let self_link = txn.link(self.link().path().clone());
 
         if owner.path() == self_link.path() {
-            return self.add_replica_old(&txn, self_link).await;
+            return self.add_replica(&txn, self_link, false).await;
         } else if txn.leader(self.path()).is_some() {
-            return self.add_replica_old(&txn, self_link).await;
+            return self.add_replica(&txn, self_link, false).await;
         }
 
         let txn = txn.lead(&self.actor, self.link().path().clone()).await?;
@@ -590,12 +584,7 @@ where
             owner
         );
 
-        self.add_replica_old(&txn, self_link).await
-    }
-
-    /// Add a replica to this `Cluster`.
-    pub async fn add_replica(&self, txn_id: TxnId, replica: Link) -> TCResult<bool> {
-        self.replicas.add(txn_id, replica).await
+        self.add_replica(&txn, self_link, false).await
     }
 
     /// Remove one or more replicas from this `Cluster`.

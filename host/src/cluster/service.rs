@@ -5,7 +5,7 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::future::{self, join_all, FutureExt, TryFutureExt};
 use futures::stream::FuturesUnordered;
-use futures::{try_join, TryStreamExt};
+use futures::{join, try_join, TryStreamExt};
 use safecast::{as_type, AsType};
 
 use tc_error::*;
@@ -251,7 +251,7 @@ impl Transact for Service {
     type Commit = ();
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
-        let versions = self.versions.commit(txn_id).await;
+        let (_schema, versions) = join!(self.schema.commit(txn_id), self.versions.commit(txn_id));
 
         join_all(
             versions
@@ -273,7 +273,8 @@ impl Transact for Service {
             .await
         };
 
-        self.versions.finalize(txn_id)
+        self.versions.finalize(txn_id);
+        self.schema.finalize(txn_id).await;
     }
 }
 
