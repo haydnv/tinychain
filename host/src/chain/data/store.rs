@@ -131,7 +131,7 @@ impl Store {
         }
     }
 
-    pub async fn resolve(&self, txn: &Txn, scalar: Scalar) -> TCResult<State> {
+    pub async fn resolve(&self, txn_id: TxnId, scalar: Scalar) -> TCResult<State> {
         debug!("History::resolve {}", scalar);
 
         type OpSubject = crate::scalar::Subject;
@@ -142,9 +142,8 @@ impl Store {
                     TCError::internal(format!("invalid Collection type: {}", classpath))
                 })?;
 
-                self.resolve_inner(txn, hash.into(), schema, class)
-                    .map_ok(State::from)
-                    .await
+                let dir = self.dir.read(txn_id).await?;
+                Self::resolve_inner(dir, txn_id, hash.into(), schema, class).map(State::from)
             } else {
                 Err(TCError::internal(format!(
                     "invalid subject for historical Chain state {}",
@@ -156,16 +155,14 @@ impl Store {
         }
     }
 
-    async fn resolve_inner(
-        &self,
-        txn: &Txn,
+    fn resolve_inner(
+        dir: fs::DirReadGuard,
+        txn_id: TxnId,
         hash: Id,
         schema: Scalar,
         class: CollectionType,
     ) -> TCResult<Collection> {
         debug!("resolve historical collection value of type {}", class);
-
-        let dir = self.dir.read(*txn.id()).await?;
 
         match class {
             CollectionType::BTree(_) => {
@@ -183,9 +180,7 @@ impl Store {
                     .get_store(hash)
                     .ok_or_else(|| TCError::internal("missing historical state"))?;
 
-                BTreeFile::load(txn, schema, store)
-                    .map_ok(|btree| Collection::BTree(btree.into()))
-                    .await
+                BTreeFile::load(txn_id, schema, store).map(|btree| Collection::BTree(btree.into()))
             }
 
             CollectionType::Table(_) => {
@@ -203,9 +198,7 @@ impl Store {
                     .get_store(hash)
                     .ok_or_else(|| TCError::internal("missing historical state"))?;
 
-                TableIndex::load(txn, schema, store)
-                    .map_ok(|table| Collection::Table(table.into()))
-                    .await
+                TableIndex::load(txn_id, schema, store).map(|table| Collection::Table(table.into()))
             }
 
             #[cfg(feature = "tensor")]
@@ -224,18 +217,16 @@ impl Store {
                             .get_store(hash)
                             .ok_or_else(|| TCError::internal("missing historical state"))?;
 
-                        DenseTensor::load(txn, schema, store)
-                            .map_ok(|tensor| Collection::Tensor(tensor.into()))
-                            .await
+                        DenseTensor::load(txn_id, schema, store)
+                            .map(|tensor| Collection::Tensor(tensor.into()))
                     }
                     TensorType::Sparse => {
                         let store = dir
                             .get_store(hash)
                             .ok_or_else(|| TCError::internal("missing historical state"))?;
 
-                        SparseTensor::load(txn, schema, store)
-                            .map_ok(|tensor| Collection::Tensor(tensor.into()))
-                            .await
+                        SparseTensor::load(txn_id, schema, store)
+                            .map(|tensor| Collection::Tensor(tensor.into()))
                     }
                 }
             }

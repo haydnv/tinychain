@@ -725,7 +725,6 @@ where
     }
 }
 
-#[async_trait]
 impl<F, D, T> Persist<D> for BTreeFile<F, D, T>
 where
     F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
@@ -736,13 +735,13 @@ where
     type Txn = T;
     type Schema = RowSchema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
         debug!("BTreeFile::create");
 
         let order = validate_schema(&schema)?;
 
         let store = F::try_from(store)?;
-        let mut file = store.write(*txn.id()).await?;
+        let mut file = store.try_write(txn_id)?;
         trace!("BTreeFile::create got file write lock");
 
         if !file.is_empty() {
@@ -753,28 +752,26 @@ where
 
         let root: NodeId = Uuid::new_v4();
         let node = Node::new(true, None);
-        file.create_block(root.clone(), node, DEFAULT_BLOCK_SIZE)
-            .await?;
+        file.try_create_block(root.clone(), node, DEFAULT_BLOCK_SIZE)?;
 
         assert!(file.contains(&root));
 
-        Ok(BTreeFile::new(store, *txn.id(), schema, order, root))
+        Ok(BTreeFile::new(store, txn_id, schema, order, root))
     }
 
-    async fn load(txn: &T, schema: RowSchema, store: D::Store) -> TCResult<Self> {
+    fn load(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
         debug!("BTreeFile::load {:?}", schema);
 
         let order = validate_schema(&schema)?;
 
-        let txn_id = *txn.id();
         let file = F::try_from(store)?;
-        let blocks = file.read(txn_id).await?;
+        let blocks = file.try_read(txn_id)?;
 
         let mut root = None;
         for block_id in blocks.block_ids() {
             debug!("BTreeFile::load block {}", block_id);
 
-            let block = blocks.read_block(block_id).await?;
+            let block = blocks.try_read_block(block_id)?;
 
             debug!("BTreeFile::loaded block {}", block_id);
 
@@ -842,7 +839,7 @@ where
     async fn copy_from(txn: &T, store: D::Store, source: I) -> TCResult<Self> {
         let txn_id = *txn.id();
         let schema = source.schema().clone();
-        let dest = Self::create(txn, schema, store).await?;
+        let dest = Self::create(*txn.id(), schema, store)?;
         let keys = source.keys(txn_id).await?;
         dest.try_insert_from(txn_id, keys).await?;
         Ok(dest)

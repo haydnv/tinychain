@@ -64,9 +64,22 @@ pub trait FileRead: Sized + Send + Sync {
     where
         Q: Borrow<<Self::File as File>::Key> + Send + Sync;
 
+    /// Lock the block at `name` for reading synchronously, if possible.
+    fn try_read_block<Q>(&self, name: Q) -> TCResult<<Self::File as File>::BlockRead>
+    where
+        Q: Borrow<<Self::File as File>::Key> + Send + Sync;
+
     /// Lock the block at `name` for reading exclusively,
     /// i.e. prevent any more read locks being acquired while this one is active.
     async fn read_block_exclusive<Q>(
+        &self,
+        name: Q,
+    ) -> TCResult<<Self::File as File>::BlockReadExclusive>
+    where
+        Q: Borrow<<Self::File as File>::Key> + Send + Sync;
+
+    /// Lock the block at `name` for reading exclusively, synchronously if possible,
+    fn try_read_block_exclusive<Q>(
         &self,
         name: Q,
     ) -> TCResult<<Self::File as File>::BlockReadExclusive>
@@ -81,8 +94,21 @@ pub trait FileRead: Sized + Send + Sync {
         self.read_block(name).await
     }
 
-    /// Convenience method to lock the block at `name` for writing.
+    /// Lock the block at `name` for reading, without borrowing, synchronously if possible.
+    fn try_read_block_owned<Q>(self, name: Q) -> TCResult<<Self::File as File>::BlockRead>
+    where
+        Q: Borrow<<Self::File as File>::Key> + Send + Sync,
+    {
+        self.try_read_block(name)
+    }
+
+    /// Lock the block at `name` for writing.
     async fn write_block<Q>(&self, name: Q) -> TCResult<<Self::File as File>::BlockWrite>
+    where
+        Q: Borrow<<Self::File as File>::Key> + Send + Sync;
+
+    /// Lock the block at `name` for writing synchronously, if possible.
+    fn try_write_block<Q>(&self, name: Q) -> TCResult<<Self::File as File>::BlockWrite>
     where
         Q: Borrow<<Self::File as File>::Key> + Send + Sync;
 }
@@ -107,8 +133,23 @@ pub trait FileWrite: FileRead {
         size_hint: usize,
     ) -> TCResult<<Self::File as File>::BlockWrite>;
 
-    /// Create a new block.
+    /// Create a new block synchronously, if possible.
+    fn try_create_block(
+        &mut self,
+        name: <Self::File as File>::Key,
+        initial_value: <Self::File as File>::Block,
+        size_hint: usize,
+    ) -> TCResult<<Self::File as File>::BlockWrite>;
+
+    /// Create a new block with a unique random name.
     async fn create_block_unique(
+        &mut self,
+        initial_value: <Self::File as File>::Block,
+        size_hint: usize,
+    ) -> TCResult<(<Self::File as File>::Key, <Self::File as File>::BlockWrite)>;
+
+    /// Create a new block with a unique random name, synchronously if possible.
+    fn try_create_block_unique(
         &mut self,
         initial_value: <Self::File as File>::Block,
         size_hint: usize,
@@ -119,14 +160,32 @@ pub trait FileWrite: FileRead {
     where
         Q: Borrow<<Self::File as File>::Key> + Send + Sync;
 
-    /// Delete all of this `File`'s blocks.
+    /// Delete the block with the given `name` synchronously, if possible.
+    fn try_delete_block<Q>(&mut self, name: Q) -> TCResult<()>
+    where
+        Q: Borrow<<Self::File as File>::Key> + Send + Sync;
+
+    /// Copy blocks from the `other` file into this [`File`].
+    ///
+    /// If `truncate` is `true`, the destination file will first be truncated.
     async fn copy_from<O>(&mut self, other: &O, truncate: bool) -> TCResult<()>
+    where
+        O: FileRead,
+        O::File: File<Key = <Self::File as File>::Key, Block = <Self::File as File>::Block>;
+
+    /// Copy blocks from the `other` file into this [`File`] synchronously, if possible.
+    ///
+    /// If `truncate` is `true`, the destination file will first be truncated.
+    fn try_copy_from<O>(&mut self, other: &O, truncate: bool) -> TCResult<()>
     where
         O: FileRead,
         O::File: File<Key = <Self::File as File>::Key, Block = <Self::File as File>::Block>;
 
     /// Delete all of this `File`'s blocks.
     async fn truncate(&mut self) -> TCResult<()>;
+
+    /// Delete all of this `File`'s blocks synchronously, if possible.
+    fn try_truncate(&mut self) -> TCResult<()>;
 }
 
 /// A transactional file
@@ -162,12 +221,22 @@ pub trait File: Store + Clone + 'static {
     /// Lock the contents of this file for reading at the given `txn_id`.
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read>;
 
+    /// Lock the contents of this file for reading at the given `txn_id` synchronously, if possible.
+    fn try_read(&self, txn_id: TxnId) -> TCResult<Self::Read>;
+
     /// Lock the contents of this file for reading at the given `txn_id`, exclusively,
     /// i.e. don't allow any more read locks while this one is active.
     async fn read_exclusive(&self, txn_id: TxnId) -> TCResult<Self::ReadExclusive>;
 
+    /// Lock the contents of this file for reading at the given `txn_id`, exclusively, synchronously
+    /// if possible.
+    async fn try_read_exclusive(&self, txn_id: TxnId) -> TCResult<Self::ReadExclusive>;
+
     /// Lock the contents of this file for writing.
     async fn write(&self, txn_id: TxnId) -> TCResult<Self::Write>;
+
+    /// Lock the contents of this file for writing, synchronously if possible.
+    fn try_write(&self, txn_id: TxnId) -> TCResult<Self::Write>;
 
     /// Convenience method to lock the block at `name` for reading.
     async fn read_block<Q>(&self, txn_id: TxnId, name: Q) -> TCResult<Self::BlockRead>
@@ -178,6 +247,15 @@ pub trait File: Store + Clone + 'static {
         file.read_block(name).await
     }
 
+    /// Convenience method to lock the block at `name` for reading synchronously if possible.
+    async fn try_read_block<Q>(&self, txn_id: TxnId, name: Q) -> TCResult<Self::BlockRead>
+    where
+        Q: Borrow<Self::Key> + Send + Sync,
+    {
+        self.try_read(txn_id)
+            .and_then(|file| file.try_read_block(name))
+    }
+
     /// Convenience method to lock the block at `name` for writing.
     async fn write_block<I>(&self, txn_id: TxnId, name: I) -> TCResult<Self::BlockWrite>
     where
@@ -185,6 +263,15 @@ pub trait File: Store + Clone + 'static {
     {
         let file = self.read(txn_id).await?;
         file.write_block(name).await
+    }
+
+    /// Convenience method to lock the block at `name` for writing synchronously, if possible.
+    fn try_write_block<I>(&self, txn_id: TxnId, name: I) -> TCResult<Self::BlockWrite>
+    where
+        I: Borrow<Self::Key> + Send + Sync,
+    {
+        self.try_read(txn_id)
+            .and_then(|file| file.try_write_block(name))
     }
 
     fn into_inner(self) -> Self::Inner;
@@ -269,6 +356,9 @@ pub trait Dir: Store + Clone + Send + Sized + 'static {
     /// Lock this [`Dir`] for writing.
     async fn write(&self, txn_id: TxnId) -> TCResult<Self::Write>;
 
+    /// Lock this [`Dir`] for writing synchronously, if possible.
+    fn try_write(&self, txn_id: TxnId) -> TCResult<Self::Write>;
+
     /// Convenience method to create a temporary working directory
     async fn create_dir_unique(&self, txn_id: TxnId) -> TCResult<Self> {
         let mut dir = self.write(txn_id).await?;
@@ -289,33 +379,28 @@ pub trait Dir: Store + Clone + Send + Sized + 'static {
 }
 
 /// A transactional persistent data store, i.e. a [`File`] or [`Dir`].
-#[async_trait]
 pub trait Store: Send + Sync + 'static {
-    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool>;
+    fn is_empty(&self, txn_id: TxnId) -> TCResult<bool>;
 }
 
 /// Defines how to load a persistent data structure from the filesystem.
-#[async_trait]
 pub trait Persist<D: Dir>: Sized {
     type Txn: Transaction<D>;
     type Schema: Clone + Send + Sync;
 
     /// Create a new instance of [`Self`] from an empty [`Self::Store`].
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self>;
+    fn create(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self>;
 
     /// Load a saved instance of [`Self`] from persistent storage.
-    async fn load(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self>;
+    /// Should only be invoked at startup time.
+    fn load(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self>;
 
     /// Load a saved instance of [`Self`] from persistent storage if present, or create a new one.
-    async fn load_or_create(
-        txn: &Self::Txn,
-        schema: Self::Schema,
-        store: D::Store,
-    ) -> TCResult<Self> {
-        if store.is_empty(*txn.id()).await? {
-            Self::create(txn, schema, store).await
+    fn load_or_create(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+        if store.is_empty(txn_id)? {
+            Self::create(txn_id, schema, store)
         } else {
-            Self::load(txn, schema, store).await
+            Self::load(txn_id, schema, store)
         }
     }
 

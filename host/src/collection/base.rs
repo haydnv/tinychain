@@ -74,61 +74,44 @@ impl AsyncHash<fs::Dir> for CollectionBase {
     }
 }
 
-#[async_trait]
 impl Persist<fs::Dir> for CollectionBase {
     type Txn = Txn;
     type Schema = Schema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         match schema {
             Schema::BTree(btree_schema) => {
-                BTreeFile::create(txn, btree_schema, store)
-                    .map_ok(Self::BTree)
-                    .await
+                BTreeFile::create(txn_id, btree_schema, store).map(Self::BTree)
             }
             Schema::Table(table_schema) => {
-                TableIndex::create(txn, table_schema, store)
-                    .map_ok(Self::Table)
-                    .await
+                TableIndex::create(txn_id, table_schema, store).map(Self::Table)
             }
             #[cfg(feature = "tensor")]
             Schema::Dense(tensor_schema) => {
-                DenseTensor::create(txn, tensor_schema, store)
-                    .map_ok(Self::Dense)
-                    .await
+                DenseTensor::create(txn_id, tensor_schema, store).map(Self::Dense)
             }
             #[cfg(feature = "tensor")]
             Schema::Sparse(tensor_schema) => {
-                SparseTensor::create(txn, tensor_schema, store)
-                    .map_ok(Self::Sparse)
-                    .await
+                SparseTensor::create(txn_id, tensor_schema, store).map(Self::Sparse)
             }
         }
     }
 
-    async fn load(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         match schema {
             Schema::BTree(btree_schema) => {
-                BTreeFile::load(txn, btree_schema, store)
-                    .map_ok(Self::BTree)
-                    .await
+                BTreeFile::load(txn_id, btree_schema, store).map(Self::BTree)
             }
             Schema::Table(table_schema) => {
-                TableIndex::load(txn, table_schema, store)
-                    .map_ok(Self::Table)
-                    .await
+                TableIndex::load(txn_id, table_schema, store).map(Self::Table)
             }
             #[cfg(feature = "tensor")]
             Schema::Dense(tensor_schema) => {
-                DenseTensor::load(txn, tensor_schema, store)
-                    .map_ok(Self::Dense)
-                    .await
+                DenseTensor::load(txn_id, tensor_schema, store).map(Self::Dense)
             }
             #[cfg(feature = "tensor")]
             Schema::Sparse(tensor_schema) => {
-                SparseTensor::load(txn, tensor_schema, store)
-                    .map_ok(Self::Sparse)
-                    .await
+                SparseTensor::load(txn_id, tensor_schema, store).map(Self::Sparse)
             }
         }
     }

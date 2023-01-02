@@ -11,13 +11,12 @@ use futures::{future, join, stream, try_join};
 use tokio::time::Duration;
 
 use tc_error::*;
-use tc_transact::fs::Persist;
+use tc_transact::fs::{Dir, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, LinkHost, LinkProtocol};
 use tcgeneric::PathLabel;
 
 use tinychain::cluster::{Cluster, Replica};
-use tinychain::fs::Dir;
 use tinychain::gateway::Gateway;
 use tinychain::object::InstanceClass;
 use tinychain::txn::Txn;
@@ -220,20 +219,12 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     // because they would be impossible to authorize since userspace is not yet loaded
     // i.e. there is no way for other hosts to check any of these Clusters' public key
 
-    let class: kernel::Class = {
-        let txn = txn.subcontext(kernel::CLASS.into()).await?;
-        load_or_create(&config.replicate, &data_dir, txn, kernel::CLASS).await?
-    };
+    let class: kernel::Class = load_or_create(&config.replicate, &data_dir, &txn, kernel::CLASS)?;
 
-    let library: kernel::Library = {
-        let txn = txn.subcontext(kernel::LIB.into()).await?;
-        load_or_create(&config.replicate, &data_dir, txn, kernel::LIB).await?
-    };
+    let library: kernel::Library = load_or_create(&config.replicate, &data_dir, &txn, kernel::LIB)?;
 
-    let service: kernel::Service = {
-        let txn = txn.subcontext(kernel::SERVICE.into()).await?;
-        load_or_create(&config.replicate, &data_dir, txn, kernel::SERVICE).await?
-    };
+    let service: kernel::Service =
+        load_or_create(&config.replicate, &data_dir, &txn, kernel::SERVICE)?;
 
     join!(
         class.commit(&txn_id),
@@ -264,26 +255,29 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     Ok(())
 }
 
-async fn load_or_create<T>(
+fn load_or_create<T>(
     lead: &Option<LinkHost>,
-    data_dir: &Dir,
-    txn: Txn,
+    data_dir: &fs::Dir,
+    txn: &Txn,
     path: PathLabel,
 ) -> TCResult<Cluster<T>>
 where
-    Cluster<T>: Persist<fs::Dir, Schema = Link, Txn = Txn> + Send + Sync,
+    Cluster<T>: Persist<fs::Dir, Schema = (Link, Link), Txn = Txn> + Send + Sync,
 {
+    let txn_id = *txn.id();
     let store = data_dir
-        .get_or_create_store(*txn.id(), tcgeneric::label(path[0]).into())
-        .await?;
+        .try_write(txn_id)
+        .map(|dir| dir.get_or_create_store(tcgeneric::label(path[0]).into()))?;
 
-    let link: Link = if let Some(host) = lead {
+    let cluster_link: Link = if let Some(host) = lead {
         (host.clone(), path.into()).into()
     } else {
         path.into()
     };
 
-    Cluster::<T>::load_or_create(&txn, link, store).await
+    let self_link = txn.link(cluster_link.path().clone());
+
+    Cluster::<T>::load_or_create(txn_id, (self_link, cluster_link), store)
 }
 
 async fn replicate(

@@ -45,8 +45,8 @@ impl<'a> Handler<'a> for CopyHandler {
 
                 let txn_id = *txn.id();
 
-                let store = txn.context().create_store_unique(*txn.id()).await?;
-                let btree = BTreeFile::create(txn, schema, store).await?;
+                let store = txn.context().create_store_unique(txn_id).await?;
+                let btree = BTreeFile::create(txn_id, schema, store)?;
 
                 let keys = source.into_stream(txn.clone()).await?;
                 keys.map(|r| {
@@ -86,10 +86,9 @@ impl<'a> Handler<'a> for CreateHandler {
                 })?;
 
                 let store = txn.context().create_store_unique(*txn.id()).await?;
-                BTreeFile::create(txn, schema, store)
-                    .map_ok(Collection::from)
-                    .map_ok(State::from)
-                    .await
+                BTreeFile::create(*txn.id(), schema, store)
+                    .map(Collection::from)
+                    .map(State::from)
             })
         }))
     }

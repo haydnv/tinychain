@@ -189,7 +189,6 @@ where
     }
 }
 
-#[async_trait]
 impl<T> Persist<fs::Dir> for SyncChain<T>
 where
     T: Persist<fs::Dir, Txn = Txn> + Send + Sync,
@@ -197,26 +196,25 @@ where
     type Txn = Txn;
     type Schema = T::Schema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         debug!("SyncChain::create");
 
-        let subject = T::create(txn, schema, store).await?;
+        let subject = T::create(txn_id, schema, store)?;
 
-        let mut dir = subject.dir().write().await;
+        let mut dir = subject.dir().try_write().map_err(fs::io_err)?;
 
         let store = dir
             .create_dir(STORE.to_string())
             .map_err(fs::io_err)
-            .map(|dir| fs::Dir::new(dir, *txn.id()))
+            .map(|dir| fs::Dir::new(dir, txn_id))
             .map(super::data::Store::new)?;
 
         let mut blocks_dir = dir
             .create_dir(BLOCKS.to_string())
-            .map_err(fs::io_err)?
-            .write()
-            .await;
+            .and_then(|dir| dir.try_write())
+            .map_err(fs::io_err)?;
 
-        let block = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
+        let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
         let pending = blocks_dir
             .create_file(PENDING.to_string(), block, Some(0))
             .map_err(fs::io_err)?;
@@ -234,29 +232,29 @@ where
         })
     }
 
-    async fn load(txn: &Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         debug!("SyncChain::load");
 
-        let subject = T::load_or_create(txn, schema, store).await?;
+        let subject = T::load_or_create(txn_id, schema, store)?;
 
-        let mut dir = subject.dir().write().await;
+        let mut dir = subject.dir().try_write().map_err(fs::io_err)?;
 
         let store = dir
             .get_or_create_dir(STORE.to_string())
             .map_err(fs::io_err)
-            .map(|dir| fs::Dir::new(dir, *txn.id()))
+            .map(|dir| fs::Dir::new(dir, txn_id))
             .map(super::data::Store::new)?;
 
         let mut blocks_dir = dir
             .get_or_create_dir(BLOCKS.to_string())
-            .map_err(fs::io_err)?
-            .write()
-            .await;
+            .and_then(|dir| dir.try_write())
+            .map_err(fs::io_err)?;
 
         let pending = if let Some(file) = blocks_dir.get_file(&PENDING.to_string()) {
             file
         } else {
-            let block = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
+            let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
+
             blocks_dir
                 .create_file(PENDING.to_string(), block, Some(0))
                 .map_err(fs::io_err)?

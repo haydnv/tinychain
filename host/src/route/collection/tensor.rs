@@ -170,8 +170,7 @@ impl ConcatenateHandler {
     ) -> TCResult<DenseTensor<DenseTensorFile>> {
         let txn_id = *txn.id();
         let file = txn.context().create_file_unique(txn_id).await?;
-
-        DenseTensor::constant(file, txn_id, shape, dtype.zero()).await
+        DenseTensor::constant(file, txn_id, shape, dtype.zero())
     }
 
     async fn concatenate_axis(
@@ -801,9 +800,8 @@ impl<'a> Handler<'a> for RandomUniformHandler {
                 let file = create_file(&txn).await?;
 
                 let tensor = BlockListFile::random_uniform(file, *txn.id(), shape, FloatType::F64)
-                    .map_ok(DenseTensor::from)
-                    .map_ok(Tensor::from)
-                    .await?;
+                    .map(DenseTensor::from)
+                    .map(Tensor::from)?;
 
                 Ok(State::Collection(tensor.into()))
             })
@@ -1885,12 +1883,12 @@ async fn constant(
     value: Number,
 ) -> TCResult<DenseTensor<DenseTensorFile>> {
     let file = create_file(txn).await?;
-    DenseTensor::constant(file, *txn.id(), shape, value).await
+    DenseTensor::constant(file, *txn.id(), shape, value)
 }
 
 async fn create_sparse(txn: &Txn, schema: Schema) -> TCResult<SparseTensor<SparseTable>> {
     let store = txn.context().create_store_unique(*txn.id()).await?;
-    SparseTensor::create(txn, schema, store).await
+    SparseTensor::create(*txn.id(), schema, store)
 }
 
 async fn write<T>(tensor: T, txn: &Txn, key: Value, value: State) -> TCResult<()>

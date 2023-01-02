@@ -75,7 +75,9 @@ impl Replica for BlockChain<crate::cluster::Class> {
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         let mut params = Map::new();
         params.insert(label("add").into(), txn.link(source.path().clone()).into());
-        let state = txn.post(source.append(REPLICAS), State::Map(params)).await?;
+        let state = txn
+            .post(source.append(REPLICAS), State::Map(params))
+            .await?;
 
         let classes: Map<Map<InstanceClass>> =
             state.try_cast_into(|s| TCError::bad_request("invalid class version history", s))?;
@@ -192,7 +194,6 @@ impl Replica for BlockChain<CollectionBase> {
     }
 }
 
-#[async_trait]
 impl<T> Persist<fs::Dir> for BlockChain<T>
 where
     T: Route + Public + Persist<fs::Dir, Txn = Txn>,
@@ -200,36 +201,37 @@ where
     type Txn = Txn;
     type Schema = T::Schema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let subject = T::create(txn, schema.clone(), store).await?;
-        let mut dir = subject.dir().write().await;
+    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let subject = T::create(txn_id, schema.clone(), store)?;
+        let mut dir = subject.dir().try_write().map_err(fs::io_err)?;
 
         let history = dir
             .create_dir(HISTORY.to_string())
-            .map(|dir| fs::Dir::new(dir, *txn.id()))
+            .map(|dir| fs::Dir::new(dir, txn_id))
             .map_err(fs::io_err)?;
 
-        let history = History::create(txn, (), history.into()).await?;
+        let history = History::create(txn_id, (), history.into())?;
 
         Ok(BlockChain::new(subject, history))
     }
 
-    async fn load(txn: &Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let subject = T::load(txn, schema.clone(), store).await?;
+    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let subject = T::load(txn_id, schema.clone(), store)?;
 
-        let mut dir = subject.dir().write().await;
+        let mut dir = subject.dir().try_write().map_err(fs::io_err)?;
 
         let history = dir
             .get_or_create_dir(HISTORY.to_string())
-            .map(|dir| fs::Dir::new(dir, *txn.id()))
+            .map(|dir| fs::Dir::new(dir, txn_id))
             .map_err(fs::io_err)?;
 
-        let history = History::load(txn, (), history.into()).await?;
+        let history = History::load(txn_id, (), history.into())?;
 
-        let write_ahead_log = history.read_log().await?;
-        for (past_txn_id, mutations) in &write_ahead_log.mutations {
-            super::data::replay_all(&subject, past_txn_id, mutations, txn, history.store()).await?;
-        }
+        // TODO: do this check somewhere else
+        // let write_ahead_log = history.try_read_log().await?;
+        // for (past_txn_id, mutations) in &write_ahead_log.mutations {
+        //     super::data::replay_all(&subject, past_txn_id, mutations, txn, history.store()).await?;
+        // }
 
         Ok(BlockChain::new(subject, history))
     }

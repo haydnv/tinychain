@@ -143,15 +143,14 @@ impl Transact for Class {
     }
 }
 
-#[async_trait]
 impl Persist<fs::Dir> for Class {
     type Txn = Txn;
     type Schema = ();
 
-    async fn create(txn: &Self::Txn, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
 
-        let contents = dir.read(*txn.id()).await?;
+        let contents = dir.try_read(txn_id)?;
         if contents.is_empty() {
             Ok(Self { dir })
         } else {
@@ -161,7 +160,7 @@ impl Persist<fs::Dir> for Class {
         }
     }
 
-    async fn load(_txn: &Self::Txn, _schema: Self::Schema, _store: fs::Store) -> TCResult<Self> {
+    fn load(_txn_id: TxnId, _schema: Self::Schema, _store: fs::Store) -> TCResult<Self> {
         Err(TCError::not_implemented("cluster::Class::load"))
     }
 

@@ -516,9 +516,8 @@ where
             .await?
             .ok_or_else(|| de::Error::custom("expected BTree schema"))?;
 
-        let btree = BTreeFile::create(&self.txn, schema, self.file.into())
-            .map_err(de::Error::custom)
-            .await?;
+        let btree = BTreeFile::create(*self.txn.id(), schema, self.file.into())
+            .map_err(de::Error::custom)?;
 
         if let Some(visitor) = seq
             .next_element::<KeyListVisitor<F, D, T>>((*self.txn.id(), btree.clone()))

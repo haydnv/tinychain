@@ -124,7 +124,7 @@ pub async fn instantiate(
         debug!("load chain {} of type {} with schema {}", id, class, schema);
 
         let store = dir.get_or_create_store(txn_id, id.clone()).await?;
-        let chain = Chain::load_or_create(txn, (class, schema), store).await?;
+        let chain = Chain::load_or_create(txn_id, (class, schema), store)?;
         trace!("loaded chain {} at {}", id, txn_id);
 
         chains.insert(id, chain);

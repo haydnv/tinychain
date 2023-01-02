@@ -300,7 +300,6 @@ where
     }
 }
 
-#[async_trait]
 impl<F, D, Txn> Persist<D> for Index<F, D, Txn>
 where
     F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
@@ -311,16 +310,12 @@ where
     type Txn = Txn;
     type Schema = IndexSchema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
-        BTreeFile::create(txn, schema.clone().into(), store)
-            .map_ok(|btree| Self { schema, btree })
-            .await
+    fn create(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+        BTreeFile::create(txn_id, schema.clone().into(), store).map(|btree| Self { schema, btree })
     }
 
-    async fn load(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
-        BTreeFile::load(txn, schema.clone().into(), store)
-            .map_ok(|btree| Self { schema, btree })
-            .await
+    fn load(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+        BTreeFile::load(txn_id, schema.clone().into(), store).map(|btree| Self { schema, btree })
     }
 
     fn dir(&self) -> F::Inner {
@@ -368,14 +363,14 @@ where
     D::Write: DirCreateFile<F>,
     D::Store: From<F>,
 {
-    async fn create_index(
-        txn: &Txn,
+    fn create_index(
+        txn_id: TxnId,
         primary: &IndexSchema,
         file: F,
         key: Vec<Id>,
     ) -> TCResult<Index<F, D, Txn>> {
         let schema = primary.auxiliary(&key)?;
-        Index::create(txn, schema, file.into()).await
+        Index::create(txn_id, schema, file.into())
     }
 }
 
@@ -900,7 +895,6 @@ where
     }
 }
 
-#[async_trait]
 impl<F, D, Txn> Persist<D> for TableIndex<F, D, Txn>
 where
     F: File<Key = NodeId, Block = Node, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
@@ -913,13 +907,12 @@ where
     type Txn = Txn;
     type Schema = TableSchema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
         let dir = D::try_from(store)?;
-        let txn_id = *txn.id();
-        let mut dir_lock = dir.write(txn_id).await?;
+        let mut dir_lock = dir.try_write(txn_id)?;
 
         let primary_file = dir_lock.create_file(PRIMARY_INDEX.into())?;
-        let primary = Index::create(txn, schema.primary().clone(), primary_file.into()).await?;
+        let primary = Index::create(txn_id, schema.primary().clone(), primary_file.into())?;
 
         let primary_schema = schema.primary();
         let mut auxiliary = Vec::with_capacity(schema.indices().len());
@@ -932,9 +925,8 @@ where
             }
 
             let file = dir_lock.create_file(name.clone())?;
-            let index = Self::create_index(txn, primary_schema, file, column_names.to_vec())
-                .map_ok(move |index| (name.clone(), index))
-                .await?;
+            let index = Self::create_index(txn_id, primary_schema, file, column_names.to_vec())
+                .map(move |index| (name.clone(), index))?;
 
             auxiliary.push(index);
         }
@@ -949,15 +941,15 @@ where
         })
     }
 
-    async fn load(txn: &Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+    fn load(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
         let dir = D::try_from(store)?;
-        let dir_lock = dir.read(*txn.id()).await?;
+        let dir_lock = dir.try_read(txn_id)?;
 
         let file = dir_lock
             .get_file(&PRIMARY_INDEX.into())?
             .ok_or_else(|| TCError::internal("cannot load Table: primary index is missing"))?;
 
-        let primary = Index::load(txn, schema.primary().clone(), file.into()).await?;
+        let primary = Index::load(txn_id, schema.primary().clone(), file.into())?;
 
         let mut auxiliary = Vec::with_capacity(schema.indices().len());
         for (name, columns) in schema.indices() {
@@ -967,7 +959,7 @@ where
 
             let index_schema = schema.primary().auxiliary(columns)?;
 
-            let index = Index::load(txn, index_schema, file.into()).await?;
+            let index = Index::load(txn_id, index_schema, file.into())?;
             auxiliary.push((name.clone(), index));
         }
 
@@ -1039,7 +1031,7 @@ where
         let txn_id = *txn.id();
         let schema = source.schema();
         let key_len = schema.primary().key().len();
-        let table = Self::create(txn, schema, store).await?;
+        let table = Self::create(txn_id, schema, store)?;
 
         let rows = source.rows(txn_id).await?;
 
@@ -1082,9 +1074,8 @@ where
             .await?
             .ok_or_else(|| de::Error::invalid_length(0, "a Table schema"))?;
 
-        let table = TableIndex::create(&self.txn, schema, self.txn.context().clone().into())
-            .map_err(de::Error::custom)
-            .await?;
+        let table = TableIndex::create(txn_id, schema, self.txn.context().clone().into())
+            .map_err(de::Error::custom)?;
 
         if let Some(visitor) = seq
             .next_element::<RowVisitor<F, D, Txn>>((txn_id, table.clone()))

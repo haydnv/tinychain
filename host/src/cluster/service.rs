@@ -69,13 +69,11 @@ impl Replica for Version {
     }
 }
 
-#[async_trait]
 impl Persist<fs::Dir> for Version {
     type Txn = Txn;
     type Schema = Map<Scalar>;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let txn_id = *txn.id();
+    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
 
         let mut attrs = Map::new();
@@ -89,8 +87,11 @@ impl Persist<fs::Dir> for Version {
                         let schema = TCRef::try_from(collection)?;
                         let schema = CollectionSchema::from_scalar(schema)?;
 
-                        let store = dir.create_store(txn_id, name.clone()).await?;
-                        let chain = Chain::create(txn, (chain_type, schema), store).await?;
+                        let store = dir
+                            .try_write(txn_id)
+                            .map(|lock| lock.create_store(name.clone()))?;
+
+                        let chain = Chain::create(txn_id, (chain_type, schema), store)?;
 
                         Ok(Attr::Chain(chain))
                     }
@@ -108,8 +109,7 @@ impl Persist<fs::Dir> for Version {
         Ok(Self { attrs })
     }
 
-    async fn load(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let txn_id = *txn.id();
+    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
 
         let mut attrs = Map::new();
@@ -123,8 +123,11 @@ impl Persist<fs::Dir> for Version {
                         let schema = TCRef::try_from(collection)?;
                         let schema = CollectionSchema::from_scalar(schema)?;
 
-                        let store = dir.get_or_create_store(txn_id, name.clone()).await?;
-                        let chain = Chain::load(txn, (chain_type, schema), store).await?;
+                        let store = dir
+                            .try_write(txn_id)
+                            .map(|lock| lock.get_or_create_store(name.clone()))?;
+
+                        let chain = Chain::load(txn_id, (chain_type, schema), store)?;
 
                         Ok(Attr::Chain(chain))
                     }
@@ -238,7 +241,7 @@ impl DirItem for Service {
             .await?;
 
         let store = dir.create_store(number.clone().into());
-        let version = Version::create(txn, schema, store).await?;
+        let version = Version::create(txn_id, schema, store)?;
 
         versions.insert(number, version.clone());
 
@@ -278,15 +281,13 @@ impl Transact for Service {
     }
 }
 
-#[async_trait]
 impl Persist<fs::Dir> for Service {
     type Txn = Txn;
     type Schema = ();
 
-    async fn create(txn: &Self::Txn, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
-        let txn_id = *txn.id();
-        let mut contents = dir.write(txn_id).await?;
+        let mut contents = dir.try_write(txn_id)?;
         if contents.is_empty() {
             let schema = contents.create_file(SCHEMA.into())?;
 
@@ -302,12 +303,10 @@ impl Persist<fs::Dir> for Service {
         }
     }
 
-    async fn load(txn: &Self::Txn, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let txn_id = *txn.id();
-
+    fn load(txn_id: TxnId, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
         let (schema, mut versions) = {
-            let dir = dir.read(txn_id).await?;
+            let dir = dir.try_read(txn_id)?;
             let schema: fs::File<VersionNumber, super::library::Version> = dir
                 .get_file(&SCHEMA.into())?
                 .ok_or_else(|| TCError::internal("service missing schema file"))?;
@@ -315,14 +314,13 @@ impl Persist<fs::Dir> for Service {
             (schema, BTreeMap::new())
         };
 
-        let version_schema = schema.read(txn_id).await?;
+        let version_schema = schema.try_read(txn_id)?;
         for number in version_schema.block_ids() {
             let schema = version_schema
-                .read_block(number)
-                .map_err(TCError::internal)
-                .await?;
+                .try_read_block(number)
+                .map_err(|cause| TCError::internal("a Service schema is not present in the cache--consider increasing the cache size").consume(cause))?;
 
-            let dir = dir.read(txn_id).await?;
+            let dir = dir.try_read(txn_id)?;
             let store = dir.get_store(number.clone().into()).ok_or_else(|| {
                 TCError::internal(format!(
                     "missing filesystem entry for service version {}",
@@ -331,7 +329,7 @@ impl Persist<fs::Dir> for Service {
             })?;
 
             let schema = super::library::Version::clone(&*schema);
-            let version = Version::load(txn, schema.into(), store).await?;
+            let version = Version::load(txn_id, schema.into(), store)?;
             versions.insert(number.clone(), version);
         }
 

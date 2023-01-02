@@ -3,7 +3,6 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
-use futures::executor::block_on;
 use futures::future::{join_all, TryFutureExt};
 use log::debug;
 use safecast::CastInto;
@@ -141,7 +140,7 @@ impl<T: Send + Sync> DirCreate for Dir<T>
 where
     DirEntry<T>: Clone,
     Cluster<Self>: Clone,
-    Self: Persist<fs::Dir, Txn = Txn, Schema = Link> + Route + fmt::Display,
+    Self: Persist<fs::Dir, Txn = Txn, Schema = (Link, Link)> + Route + fmt::Display,
 {
     async fn create_dir(
         &self,
@@ -173,7 +172,11 @@ where
 
         let self_link = txn.link(link.path().clone());
 
-        let dir = Self::create(txn, link.clone(), fs::Store::from(dir)).await?;
+        let dir = Self::create(
+            txn_id,
+            (self_link.clone(), link.clone()),
+            fs::Store::from(dir),
+        )?;
         let dir = Cluster::with_state(self_link, link, txn_id, dir);
 
         contents.insert(name.clone(), DirEntry::Dir(dir.clone()));
@@ -218,7 +221,7 @@ where
             dir.create_store(name.clone())
         };
 
-        let item = BlockChain::create(txn, (), store).await?;
+        let item = BlockChain::create(txn_id, (), store)?;
         let item = Cluster::with_state(self_link, cluster, txn_id, item);
         contents.insert(name.clone(), DirEntry::Item(item.clone()));
 
@@ -232,7 +235,7 @@ where
     BlockChain<T>: Replica,
     DirEntry<T>: Clone,
     Cluster<Self>: Clone,
-    Self: Persist<fs::Dir, Txn = Txn, Schema = Link> + Route + fmt::Display,
+    Self: Persist<fs::Dir, Txn = Txn, Schema = (Link, Link)> + Route + fmt::Display,
 {
     async fn state(&self, txn_id: TxnId) -> TCResult<State> {
         let contents = self.contents.read(txn_id).await?;
@@ -328,25 +331,23 @@ where
     }
 }
 
-#[async_trait]
 impl Persist<fs::Dir> for Dir<Class> {
     type Txn = Txn;
-    type Schema = Link;
+    type Schema = (Link, Link);
 
-    async fn create(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
 
         Ok(Self {
             cache: tc_transact::fs::Dir::into_inner(dir),
-            contents: TxnLock::new(format!("dir at {}", link), *txn.id(), BTreeMap::new()),
+            contents: TxnLock::new(format!("dir at {}", schema.0), txn_id, BTreeMap::new()),
         })
     }
 
-    async fn load(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
+    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
 
-        let txn_id = *txn.id();
-        let lock = tc_transact::fs::Dir::read(&dir, txn_id).await?;
+        let lock = tc_transact::fs::Dir::try_read(&dir, txn_id)?;
         let contents = BTreeMap::new();
 
         for _entry in lock.iter() {
@@ -357,7 +358,7 @@ impl Persist<fs::Dir> for Dir<Class> {
 
         Ok(Self {
             cache: tc_transact::fs::Dir::into_inner(dir),
-            contents: TxnLock::new(format!("dir at {}", link), txn_id, contents),
+            contents: TxnLock::new(format!("dir at {}", schema.0), txn_id, contents),
         })
     }
 
@@ -366,37 +367,38 @@ impl Persist<fs::Dir> for Dir<Class> {
     }
 }
 
-#[async_trait]
 impl Persist<fs::Dir> for Dir<Library> {
     type Txn = Txn;
-    type Schema = Link;
+    type Schema = (Link, Link);
 
-    async fn create(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
 
         Ok(Self {
             cache: tc_transact::fs::Dir::into_inner(dir),
-            contents: TxnLock::new(format!("dir at {}", link), *txn.id(), BTreeMap::new()),
+            contents: TxnLock::new(format!("dir at {}", schema.0), txn_id, BTreeMap::new()),
         })
     }
 
-    async fn load(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
-        let txn_id = *txn.id();
+    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let (self_link, cluster_link) = schema;
         let dir = fs::Dir::try_from(store)?;
-        let lock = tc_transact::fs::Dir::read(&dir, txn_id).await?;
+        let lock = tc_transact::fs::Dir::try_read(&dir, txn_id)?;
         let mut contents = BTreeMap::new();
 
         for (name, entry) in lock.iter() {
-            let entry_link = link.clone().append(name.clone());
+            let entry_link = cluster_link.clone().append(name.clone());
+            let self_link = self_link.clone().append(name.clone());
+            let schema = (self_link, entry_link);
 
             match entry {
                 fs::DirEntry::Dir(dir) => {
-                    let dir = Cluster::load(txn, entry_link, dir.clone().into()).await?;
+                    let dir = Cluster::load(txn_id, schema, dir.clone().into())?;
                     contents.insert(name.clone(), DirEntry::Dir(dir));
                 }
                 fs::DirEntry::File(file) => match file {
                     fs::FileEntry::Library(file) => {
-                        let lib = Cluster::load(txn, entry_link, file.clone().into()).await?;
+                        let lib = Cluster::load(txn_id, schema, file.clone().into())?;
                         contents.insert(name.clone(), DirEntry::Item(lib));
                     }
                     file => {
@@ -411,7 +413,7 @@ impl Persist<fs::Dir> for Dir<Library> {
 
         Ok(Self {
             cache: tc_transact::fs::Dir::into_inner(dir),
-            contents: TxnLock::new(format!("dir at {}", link), txn_id, contents),
+            contents: TxnLock::new(format!("dir at {}", self_link), txn_id, contents),
         })
     }
 
@@ -420,21 +422,18 @@ impl Persist<fs::Dir> for Dir<Library> {
     }
 }
 
-#[async_trait]
 impl Persist<fs::Dir> for Dir<Service> {
     type Txn = Txn;
-    type Schema = Link;
+    type Schema = (Link, Link);
 
-    async fn create(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
-
-        let txn_id = *txn.id();
-        let lock = tc_transact::fs::Dir::read(&dir, txn_id).await?;
+        let lock = tc_transact::fs::Dir::try_read(&dir, txn_id)?;
 
         if lock.is_empty() {
             Ok(Self {
                 cache: tc_transact::fs::Dir::into_inner(dir),
-                contents: TxnLock::new(format!("dir at {}", link), txn_id, BTreeMap::new()),
+                contents: TxnLock::new(format!("dir at {}", schema.0), txn_id, BTreeMap::new()),
             })
         } else {
             Err(TCError::unsupported(
@@ -443,15 +442,17 @@ impl Persist<fs::Dir> for Dir<Service> {
         }
     }
 
-    async fn load(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
-        let txn_id = *txn.id();
+    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let (self_link, cluster_link) = schema;
         let dir = fs::Dir::try_from(store)?;
 
         let lock = tc_transact::fs::Dir::try_read(&dir, txn_id)?;
         let mut contents = BTreeMap::new();
 
         for (name, entry) in lock.iter() {
-            let entry_link = link.clone().append(name.clone());
+            let entry_link = cluster_link.clone().append(name.clone());
+            let self_link = self_link.clone().append(name.clone());
+            let schema = (self_link, entry_link);
 
             let entry = match entry {
                 fs::DirEntry::File(file) => Err(TCError::internal(format!(
@@ -464,15 +465,11 @@ impl Persist<fs::Dir> for Dir<Service> {
                         lock.contains(&super::service::SCHEMA.into())
                     };
 
-                    // the Rust compiler (as of v1.66) is not able to validate
-                    // the Send trait boundary for this Cluster::load operation
-                    // so it has to be done synchronously
-
                     let store = dir.clone().into();
                     if is_service {
-                        block_on(Cluster::load(txn, entry_link, store).map_ok(DirEntry::Item))
+                        Cluster::load(txn_id, schema, store).map(DirEntry::Item)
                     } else {
-                        block_on(Cluster::load(txn, entry_link, store).map_ok(DirEntry::Dir))
+                        Cluster::load(txn_id, schema, store).map(DirEntry::Dir)
                     }
                 }
             }?;
@@ -482,7 +479,7 @@ impl Persist<fs::Dir> for Dir<Service> {
 
         Ok(Self {
             cache: tc_transact::fs::Dir::into_inner(dir),
-            contents: TxnLock::new(format!("dir at {}", link), txn_id, contents),
+            contents: TxnLock::new(format!("dir at {}", self_link), txn_id, contents),
         })
     }
 

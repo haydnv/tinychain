@@ -183,7 +183,7 @@ where
 
 #[async_trait]
 impl fs::Store for Store {
-    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
+    fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
         let entry = match self {
             Self::Create(parent, name) => match parent.contents.get(name) {
                 None => return Ok(true),
@@ -202,14 +202,14 @@ impl fs::Store for Store {
         };
 
         match entry {
-            DirEntry::Dir(dir) => dir.is_empty(txn_id).await,
+            DirEntry::Dir(dir) => dir.is_empty(txn_id),
             DirEntry::File(file) => match file {
-                FileEntry::BTree(file) => file.is_empty(txn_id).await,
-                FileEntry::Chain(file) => file.is_empty(txn_id).await,
-                FileEntry::Class(file) => file.is_empty(txn_id).await,
-                FileEntry::Library(file) => file.is_empty(txn_id).await,
+                FileEntry::BTree(file) => file.is_empty(txn_id),
+                FileEntry::Chain(file) => file.is_empty(txn_id),
+                FileEntry::Class(file) => file.is_empty(txn_id),
+                FileEntry::Library(file) => file.is_empty(txn_id),
                 #[cfg(feature = "tensor")]
-                FileEntry::Tensor(file) => file.is_empty(txn_id).await,
+                FileEntry::Tensor(file) => file.is_empty(txn_id),
             },
         }
     }
@@ -544,6 +544,7 @@ impl fs::Dir for Dir {
     async fn read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
         let contents = self.listing.read(txn_id).await?;
         let cache = self.cache.read().await;
+
         Ok(DirGuard {
             cache,
             contents,
@@ -554,6 +555,7 @@ impl fs::Dir for Dir {
     fn try_read(&self, txn_id: TxnId) -> TCResult<Self::Read> {
         let contents = self.listing.try_read(txn_id)?;
         let cache = self.cache.try_read().map_err(io_err)?;
+
         Ok(DirGuard {
             cache,
             contents,
@@ -564,6 +566,18 @@ impl fs::Dir for Dir {
     async fn write(&self, txn_id: TxnId) -> TCResult<Self::Write> {
         let contents = self.listing.write(txn_id).await?;
         let cache = self.cache.write().await;
+
+        Ok(DirGuard {
+            cache,
+            contents,
+            txn_id,
+        })
+    }
+
+    fn try_write(&self, txn_id: TxnId) -> TCResult<Self::Write> {
+        let contents = self.listing.try_write(txn_id)?;
+        let cache = self.cache.try_write().map_err(io_err)?;
+
         Ok(DirGuard {
             cache,
             contents,
@@ -576,12 +590,9 @@ impl fs::Dir for Dir {
     }
 }
 
-#[async_trait]
 impl fs::Store for Dir {
-    async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
-        tc_transact::fs::Dir::read(self, txn_id)
-            .map_ok(|guard| fs::DirRead::is_empty(&guard))
-            .await
+    fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
+        tc_transact::fs::Dir::try_read(self, txn_id).map(|guard| fs::DirRead::is_empty(&guard))
     }
 }
 

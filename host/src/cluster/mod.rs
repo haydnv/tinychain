@@ -666,26 +666,23 @@ where
     }
 }
 
-#[async_trait]
 impl<T: Persist<fs::Dir, Txn = Txn>> Persist<fs::Dir> for Cluster<BlockChain<T>>
 where
     BlockChain<T>: Persist<fs::Dir, Schema = (), Txn = Txn>,
 {
     type Txn = Txn;
-    type Schema = Link;
+    type Schema = (Link, Link);
 
-    async fn create(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
-        let self_link = txn.link(link.path().clone());
-        BlockChain::create(txn, (), store)
-            .map_ok(|state| Self::with_state(self_link, link, *txn.id(), state))
-            .await
+    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let (self_link, cluster_link) = schema;
+        BlockChain::create(txn_id, (), store)
+            .map(|state| Self::with_state(self_link, cluster_link, txn_id, state))
     }
 
-    async fn load(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
-        let self_link = txn.link(link.path().clone());
-        BlockChain::load(txn, (), store)
-            .map_ok(|state| Self::with_state(self_link, link, *txn.id(), state))
-            .await
+    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let (self_link, cluster_link) = schema;
+        BlockChain::load(txn_id, (), store)
+            .map(|state| Self::with_state(self_link, cluster_link, txn_id, state))
     }
 
     fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
@@ -693,26 +690,23 @@ where
     }
 }
 
-#[async_trait]
 impl<T: Persist<fs::Dir, Txn = Txn>> Persist<fs::Dir> for Cluster<Dir<T>>
 where
-    Dir<T>: Persist<fs::Dir, Schema = Link, Txn = Txn>,
+    Dir<T>: Persist<fs::Dir, Schema = (Link, Link), Txn = Txn>,
 {
     type Txn = Txn;
-    type Schema = Link;
+    type Schema = (Link, Link);
 
-    async fn create(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
-        let self_link = txn.link(link.path().clone());
-        Dir::create(txn, link.clone(), store)
-            .map_ok(|state| Self::with_state(self_link, link, *txn.id(), state))
-            .await
+    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let (self_link, cluster_link) = schema.clone();
+        Dir::create(txn_id, schema, store)
+            .map(|state| Self::with_state(self_link, cluster_link, txn_id, state))
     }
 
-    async fn load(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
-        let self_link = txn.link(link.path().clone());
-        Dir::load(txn, link.clone(), store)
-            .map_ok(|state| Self::with_state(self_link, link, *txn.id(), state))
-            .await
+    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let (self_link, cluster_link) = schema.clone();
+        Dir::load(txn_id, schema, store)
+            .map(|state| Self::with_state(self_link, cluster_link, txn_id, state))
     }
 
     fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {

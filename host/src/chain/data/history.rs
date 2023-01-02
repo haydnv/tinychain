@@ -281,77 +281,80 @@ impl History {
     }
 }
 
-#[async_trait]
 impl Persist<fs::Dir> for History {
     type Txn = Txn;
     type Schema = ();
 
-    async fn create(txn: &Self::Txn, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let txn_id = *txn.id();
+    fn create(txn_id: TxnId, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
 
-        let store = {
-            let mut dir = dir.write(txn_id).await?;
-            dir.create_dir(STORE.into()).map(Store::new)?
-        };
+        let store = dir
+            .try_write(txn_id)
+            .and_then(|mut dir| dir.create_dir(STORE.into()).map(Store::new))?;
 
-        let file = {
-            let mut dir = dir.into_inner().write().await;
-            dir.create_dir(block_name(CHAIN)).map_err(fs::io_err)?
-        };
+        let file = dir
+            .into_inner()
+            .try_write()
+            .and_then(|mut dir| dir.create_dir(block_name(CHAIN)))
+            .map_err(fs::io_err)?;
 
-        let mut file_lock = file.write().await;
+        let mut file_lock = file.try_write().map_err(fs::io_err)?;
 
         let cutoff = txn_id;
         let latest = 0;
 
-        create_block(&mut file_lock, PENDING).await?;
-        create_block(&mut file_lock, WRITE_AHEAD).await?;
-        create_block(&mut file_lock, latest).await?;
+        create_block(&mut file_lock, PENDING)?;
+        create_block(&mut file_lock, WRITE_AHEAD)?;
+        create_block(&mut file_lock, latest)?;
 
         Ok(Self::new(txn_id, file.clone(), store, latest, cutoff))
     }
 
-    async fn load(txn: &Txn, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let txn_id = *txn.id();
+    fn load(txn_id: TxnId, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
 
         let store = {
-            let mut dir = dir.write(txn_id).await?;
+            let mut dir = dir.try_write(txn_id)?;
             dir.get_or_create_dir(STORE.into()).map(Store::new)?
         };
 
-        let file = {
-            let mut dir = dir.into_inner().write().await;
-            dir.get_or_create_dir(block_name(CHAIN))
-                .map_err(fs::io_err)?
-        };
+        let file = dir
+            .into_inner()
+            .try_write()
+            .and_then(|mut dir| dir.get_or_create_dir(block_name(CHAIN)))
+            .map_err(fs::io_err)?;
 
-        let mut file_lock = file.write().await;
+        let mut file_lock = file.try_write().map_err(fs::io_err)?;
 
-        let mut cutoff = txn_id;
+        let cutoff = txn_id;
         let mut latest = 0;
-        let mut last_hash = Bytes::from(null_hash().to_vec());
 
-        get_or_create_block(&mut file_lock, PENDING).await?;
-        get_or_create_block(&mut file_lock, WRITE_AHEAD).await?;
-        get_or_create_block(&mut file_lock, latest).await?;
+        get_or_create_block(&mut file_lock, PENDING)?;
+        get_or_create_block(&mut file_lock, WRITE_AHEAD)?;
+        get_or_create_block(&mut file_lock, latest)?;
 
-        while let Some(block) = file_lock.get_file(&block_name(latest)) {
-            let block: FileReadGuard<_, ChainBlock> = block.read().map_err(fs::io_err).await?;
-
-            if block.last_hash() == &last_hash {
-                last_hash = block.last_hash().clone();
-            } else {
-                return Err(TCError::internal(format!(
-                    "block {} hash does not match previous block",
-                    latest
-                )));
-            }
-
-            cutoff = block.mutations.keys().last().copied().unwrap_or(cutoff);
+        while let Some(_block) = file_lock.get_file(&block_name(latest)) {
             latest += 1;
         }
+
+        // TODO: do this validation somewhere else
+        // let mut latest = 0;
+        // let mut last_hash = Bytes::from(null_hash().to_vec());
+        // while let Some(block) = file_lock.get_file(&block_name(latest)) {
+        //     let block: FileReadGuard<_, ChainBlock> = block.read().await;
+        //
+        //     if block.last_hash() == &last_hash {
+        //         last_hash = block.last_hash().clone();
+        //     } else {
+        //         return Err(TCError::internal(format!(
+        //             "block {} hash does not match previous block",
+        //             latest
+        //         )));
+        //     }
+        //
+        //     cutoff = block.mutations.keys().last().copied().unwrap_or(cutoff);
+        //     latest += 1;
+        // }
 
         let latest = if latest == 0 { 0 } else { latest - 1 };
         Ok(Self::new(txn_id, file.clone(), store, latest, cutoff))
@@ -413,18 +416,18 @@ impl AsyncHash<fs::Dir> for History {
     }
 }
 
-async fn get_or_create_block<I: fmt::Display>(
+fn get_or_create_block<I: fmt::Display>(
     cache: &mut DirWriteGuard<CacheBlock>,
     name: I,
 ) -> TCResult<FileLock<CacheBlock>> {
     if let Some(file) = cache.get_file(&block_name(&name)) {
         Ok(file)
     } else {
-        create_block(cache, name).await
+        create_block(cache, name)
     }
 }
 
-async fn create_block<I: fmt::Display>(
+fn create_block<I: fmt::Display>(
     cache: &mut DirWriteGuard<CacheBlock>,
     name: I,
 ) -> TCResult<FileLock<CacheBlock>> {
@@ -701,7 +704,7 @@ where
                 block.append_delete(txn_id, key.clone())
             }
             Mutation::Put(key, original_hash) => {
-                let state = source.resolve(txn, original_hash.clone()).await?;
+                let state = source.resolve(*txn.id(), original_hash.clone()).await?;
                 subject.put(txn, &[], key.clone(), state.clone()).await?;
 
                 let computed_hash = dest.save_state(txn, state).await?;
@@ -775,7 +778,7 @@ async fn load_history<'a>(history: History, op: Mutation, txn: Txn) -> TCResult<
 
             let value = history
                 .store
-                .resolve(&txn, value)
+                .resolve(*txn.id(), value)
                 .map_err(|err| {
                     error!("unable to load historical Chain data: {}", err);
                     err
