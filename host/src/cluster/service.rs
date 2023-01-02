@@ -320,13 +320,10 @@ impl Persist<fs::Dir> for Service {
                 .try_read_block(number)
                 .map_err(|cause| TCError::internal("a Service schema is not present in the cache--consider increasing the cache size").consume(cause))?;
 
-            let dir = dir.try_read(txn_id)?;
-            let store = dir.get_store(number.clone().into()).ok_or_else(|| {
-                TCError::internal(format!(
-                    "missing filesystem entry for service version {}",
-                    number
-                ))
-            })?;
+            // `get_or_create_store` here in case of a service with no persistent data
+            let store = dir
+                .try_write(txn_id)
+                .map(|dir| dir.get_or_create_store(number.clone().into()))?;
 
             let schema = super::library::Version::clone(&*schema);
             let version = Version::load(txn_id, schema.into(), store)?;
