@@ -1,7 +1,7 @@
 use futures::TryFutureExt;
 
 use tc_error::*;
-use tc_transact::TxnId;
+use tc_transact::{Transaction, TxnId};
 
 use crate::route::{Public, Route};
 use crate::txn::Txn;
@@ -40,7 +40,7 @@ where
     match mutation {
         Mutation::Delete(key) => subject.delete(txn, &[], key.clone()).await,
         Mutation::Put(key, value) => {
-            let value = store.resolve(txn, value.clone()).await?;
+            let value = store.resolve(*txn.id(), value.clone()).await?;
             subject.put(txn, &[], key.clone(), value.clone()).await
         }
     }

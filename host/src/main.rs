@@ -6,18 +6,17 @@ use std::sync::Arc;
 use bytes::Bytes;
 use clap::Parser;
 use destream::de::FromStream;
-use futures::future::{self, TryFutureExt};
-use futures::{stream, try_join};
+use futures::future::{join_all, TryFutureExt};
+use futures::{future, join, stream, try_join};
 use tokio::time::Duration;
 
 use tc_error::*;
-use tc_transact::fs::Persist;
+use tc_transact::fs::{Dir, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, LinkHost, LinkProtocol};
 use tcgeneric::PathLabel;
 
 use tinychain::cluster::{Cluster, Replica};
-use tinychain::fs::Dir;
 use tinychain::gateway::Gateway;
 use tinychain::object::InstanceClass;
 use tinychain::txn::Txn;
@@ -178,7 +177,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
     let kernel = tinychain::Kernel::bootstrap();
     let gateway = Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
     let token = gateway.new_token(&txn_id)?;
-    let txn = txn_server.new_txn(gateway, txn_id, token).await?;
+    let txn = txn_server.new_txn(gateway.clone(), txn_id, token).await?;
 
     // TODO: delete
     let mut clusters = Vec::with_capacity(config.clusters.len());
@@ -209,12 +208,37 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         }
     }
 
-    let library: kernel::Library = load(&config, &data_dir, &txn, kernel::LIB).await?;
-    let class: kernel::Class = load(&config, &data_dir, &txn, kernel::CLASS).await?;
-
+    join_all(clusters.iter().map(|cluster| cluster.commit(&txn_id))).await;
     data_dir.commit(&txn_id).await;
 
-    let kernel = tinychain::Kernel::with_userspace(class.clone(), library.clone(), clusters);
+    let txn_id = TxnId::new(Gateway::time());
+    let token = gateway.new_token(&txn_id)?;
+    let txn = txn_server.new_txn(gateway, txn_id, token).await?;
+
+    // no need to claim ownership of this txn since there's no way to make outbound requests
+    // because they would be impossible to authorize since userspace is not yet loaded
+    // i.e. there is no way for other hosts to check any of these Clusters' public key
+
+    let class: kernel::Class = load_or_create(&config.replicate, &data_dir, &txn, kernel::CLASS)?;
+
+    let library: kernel::Library = load_or_create(&config.replicate, &data_dir, &txn, kernel::LIB)?;
+
+    let service: kernel::Service =
+        load_or_create(&config.replicate, &data_dir, &txn, kernel::SERVICE)?;
+
+    join!(
+        class.commit(&txn_id),
+        library.commit(&txn_id),
+        service.commit(&txn_id),
+    );
+
+    let kernel = tinychain::Kernel::with_userspace(
+        class.clone(),
+        library.clone(),
+        service.clone(),
+        clusters,
+    );
+
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
 
     log::info!(
@@ -225,30 +249,43 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
 
     try_join!(
         gateway.clone().listen().map_err(TokioError::from),
-        replicate(gateway, class, library).map_err(TokioError::from)
+        replicate(gateway, class, library, service).map_err(TokioError::from)
     )?;
 
     Ok(())
 }
 
-async fn load<T>(config: &Config, data_dir: &Dir, txn: &Txn, path: PathLabel) -> TCResult<T>
+fn load_or_create<T>(
+    lead: &Option<LinkHost>,
+    data_dir: &fs::Dir,
+    txn: &Txn,
+    path: PathLabel,
+) -> TCResult<Cluster<T>>
 where
-    T: Persist<Dir, Txn = Txn, Schema = Link>,
+    Cluster<T>: Persist<fs::Dir, Schema = (Link, Link), Txn = Txn> + Send + Sync,
 {
+    let txn_id = *txn.id();
     let store = data_dir
-        .get_or_create_store(*txn.id(), tcgeneric::label(path[0]).into())
-        .await?;
+        .try_write(txn_id)
+        .map(|dir| dir.get_or_create_store(tcgeneric::label(path[0]).into()))?;
 
-    let link: Link = if let Some(host) = &config.replicate {
+    let cluster_link: Link = if let Some(host) = lead {
         (host.clone(), path.into()).into()
     } else {
         path.into()
     };
 
-    tc_transact::fs::Persist::load(txn, link, store).await
+    let self_link = txn.link(cluster_link.path().clone());
+
+    Cluster::<T>::load_or_create(txn_id, (self_link, cluster_link), store)
 }
 
-async fn replicate(gateway: Arc<Gateway>, class: Class, library: Library) -> TCResult<()> {
+async fn replicate(
+    gateway: Arc<Gateway>,
+    class: Class,
+    library: Library,
+    service: Service,
+) -> TCResult<()> {
     let txn = gateway.new_txn(TxnId::new(Gateway::time()), None).await?;
 
     async fn replicate_cluster<T>(txn: &Txn, cluster: Cluster<T>) -> TCResult<()>
@@ -258,7 +295,7 @@ async fn replicate(gateway: Arc<Gateway>, class: Class, library: Library) -> TCR
         let txn = cluster.claim(&txn).await?;
 
         cluster
-            .add_replica(&txn, txn.link(cluster.link().path().clone()))
+            .add_replica(&txn, txn.link(cluster.link().path().clone()), false)
             .await?;
 
         cluster.distribute_commit(&txn).await
@@ -266,7 +303,8 @@ async fn replicate(gateway: Arc<Gateway>, class: Class, library: Library) -> TCR
 
     try_join!(
         replicate_cluster(&txn, class),
-        replicate_cluster(&txn, library)
+        replicate_cluster(&txn, library),
+        replicate_cluster(&txn, service),
     )?;
 
     Ok(())

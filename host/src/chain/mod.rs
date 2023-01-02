@@ -11,8 +11,8 @@ use sha2::digest::Output;
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, Persist};
-use tc_transact::{IntoView, Transact, TxnId};
+use tc_transact::fs::{CopyFrom, Dir, Persist};
+use tc_transact::{AsyncHash, IntoView, Transact, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
 
@@ -171,6 +171,18 @@ where
 }
 
 #[async_trait]
+impl<T: AsyncHash<fs::Dir, Txn = Txn> + Send + Sync> AsyncHash<fs::Dir> for Chain<T> {
+    type Txn = Txn;
+
+    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+        match self {
+            Self::Block(chain) => chain.hash(txn).await,
+            Self::Sync(chain) => chain.hash(txn).await,
+        }
+    }
+}
+
+#[async_trait]
 impl<T: Transact + Send + Sync> Transact for Chain<T>
 where
     BlockChain<T>: ChainInstance<T>,
@@ -193,7 +205,6 @@ where
     }
 }
 
-#[async_trait]
 impl<T> Persist<fs::Dir> for Chain<T>
 where
     T: Persist<fs::Dir, Txn = Txn> + Route + Public,
@@ -201,31 +212,19 @@ where
     type Txn = Txn;
     type Schema = (ChainType, T::Schema);
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let (class, schema) = schema;
         match class {
-            ChainType::Block => {
-                BlockChain::create(txn, schema, store)
-                    .map_ok(Self::Block)
-                    .await
-            }
-            ChainType::Sync => {
-                SyncChain::create(txn, schema, store)
-                    .map_ok(Self::Sync)
-                    .await
-            }
+            ChainType::Block => BlockChain::create(txn_id, schema, store).map(Self::Block),
+            ChainType::Sync => SyncChain::create(txn_id, schema, store).map(Self::Sync),
         }
     }
 
-    async fn load(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let (class, schema) = schema;
         match class {
-            ChainType::Block => {
-                BlockChain::load(txn, schema, store)
-                    .map_ok(Self::Block)
-                    .await
-            }
-            ChainType::Sync => SyncChain::load(txn, schema, store).map_ok(Self::Sync).await,
+            ChainType::Block => BlockChain::load(txn_id, schema, store).map(Self::Block),
+            ChainType::Sync => SyncChain::load(txn_id, schema, store).map(Self::Sync),
         }
     }
 
@@ -233,6 +232,31 @@ where
         match self {
             Self::Block(chain) => chain.dir(),
             Self::Sync(chain) => chain.dir(),
+        }
+    }
+}
+
+#[async_trait]
+impl<T> CopyFrom<fs::Dir, Chain<T>> for Chain<T>
+where
+    T: Persist<fs::Dir, Txn = Txn> + Route + Public,
+{
+    async fn copy_from(
+        txn: &<Self as Persist<fs::Dir>>::Txn,
+        store: fs::Store,
+        instance: Chain<T>,
+    ) -> TCResult<Self> {
+        match instance {
+            Chain::Block(chain) => {
+                BlockChain::copy_from(txn, store, chain)
+                    .map_ok(Chain::Block)
+                    .await
+            }
+            Chain::Sync(chain) => {
+                SyncChain::copy_from(txn, store, chain)
+                    .map_ok(Chain::Sync)
+                    .await
+            }
         }
     }
 }

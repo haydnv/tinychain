@@ -4,15 +4,12 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::Deref;
 
-use async_hash::Hash;
 use async_trait::async_trait;
 use destream::{en, EncodeMap};
 use futures::future::TryFutureExt;
 use futures::stream::{FuturesUnordered, TryStreamExt};
 use log::debug;
 use safecast::TryCastFrom;
-use sha2::digest::{Digest, Output};
-use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::IntoView;
@@ -96,17 +93,6 @@ impl<T: tcgeneric::Instance> Deref for InstanceExt<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.parent
-    }
-}
-
-impl InstanceExt<State> {
-    pub async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
-        let parent = self.parent.hash(txn).await?;
-
-        let mut hasher = Sha256::default();
-        hasher.update(Hash::<Sha256>::hash(self.class));
-        hasher.update(&parent);
-        Ok(hasher.finalize())
     }
 }
 

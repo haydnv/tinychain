@@ -103,10 +103,10 @@ class URI(object):
         return len(str(self))
 
     def __lt__(self, other):
-        return other > self
+        return other.startswith(self) and len(self) < len(other)
 
     def __le__(self, other):
-        return other >= self
+        return other.startswith(self)
 
     def __hash__(self):
         return hash(str(self))
@@ -237,7 +237,7 @@ class URI(object):
         uri = str(self)
 
         if "://" not in uri:
-            return uri[uri.index('/'):]
+            return URI(uri[uri.index('/'):])
 
         start = uri.index("://")
 

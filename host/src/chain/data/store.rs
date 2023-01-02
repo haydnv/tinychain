@@ -12,9 +12,9 @@ use tc_table::TableInstance;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorAccess;
 use tc_transact::fs::*;
-use tc_transact::{Transact, Transaction};
+use tc_transact::{AsyncHash, Transact, Transaction};
 use tc_value::Value;
-use tcgeneric::{Id, Instance, NativeClass};
+use tcgeneric::{Id, NativeClass};
 
 use crate::collection::{BTreeFile, BTreeType, Collection, CollectionType, TableIndex, TableType};
 #[cfg(feature = "tensor")]
@@ -38,18 +38,7 @@ impl Store {
     pub async fn save_state(&self, txn: &Txn, state: State) -> TCResult<Scalar> {
         debug!("chain data store saving state {}...", state);
 
-        if state.is_ref() {
-            return Err(TCError::bad_request(
-                "cannot update Chain with reference",
-                state,
-            ));
-        }
-
-        let hash = state
-            .clone()
-            .hash(txn.clone())
-            .map_ok(Id::from_hash)
-            .await?;
+        let hash = state.clone().hash(txn).map_ok(Id::from_hash).await?;
 
         debug!("computed hash of {}: {}", state, hash);
 
@@ -105,7 +94,7 @@ impl Store {
                     let shape = tensor.shape().clone();
                     let dtype = tensor.dtype();
                     let schema = tc_tensor::Schema { shape, dtype };
-                    let classpath = tensor.class().path();
+                    let classpath = tcgeneric::Instance::class(&tensor).path();
 
                     if dir.contains(&hash) {
                         debug!("Tensor with hash {} is already saved", tensor);
@@ -136,15 +125,13 @@ impl Store {
                 }
             },
             State::Scalar(value) => Ok(value),
-            other if Scalar::can_cast_from(&other) => Ok(other.opt_cast_into().unwrap()),
-            other => Err(TCError::bad_request(
-                "Chain does not support value",
-                other.class(),
-            )),
+            other => {
+                other.try_cast_into(|s| TCError::bad_request("Chain does not support value", s))
+            }
         }
     }
 
-    pub async fn resolve(&self, txn: &Txn, scalar: Scalar) -> TCResult<State> {
+    pub async fn resolve(&self, txn_id: TxnId, scalar: Scalar) -> TCResult<State> {
         debug!("History::resolve {}", scalar);
 
         type OpSubject = crate::scalar::Subject;
@@ -155,9 +142,8 @@ impl Store {
                     TCError::internal(format!("invalid Collection type: {}", classpath))
                 })?;
 
-                self.resolve_inner(txn, hash.into(), schema, class)
-                    .map_ok(State::from)
-                    .await
+                let dir = self.dir.read(txn_id).await?;
+                Self::resolve_inner(dir, txn_id, hash.into(), schema, class).map(State::from)
             } else {
                 Err(TCError::internal(format!(
                     "invalid subject for historical Chain state {}",
@@ -169,16 +155,14 @@ impl Store {
         }
     }
 
-    async fn resolve_inner(
-        &self,
-        txn: &Txn,
+    fn resolve_inner(
+        dir: fs::DirReadGuard,
+        txn_id: TxnId,
         hash: Id,
         schema: Scalar,
         class: CollectionType,
     ) -> TCResult<Collection> {
         debug!("resolve historical collection value of type {}", class);
-
-        let dir = self.dir.read(*txn.id()).await?;
 
         match class {
             CollectionType::BTree(_) => {
@@ -196,9 +180,7 @@ impl Store {
                     .get_store(hash)
                     .ok_or_else(|| TCError::internal("missing historical state"))?;
 
-                BTreeFile::load(txn, schema, store)
-                    .map_ok(|btree| Collection::BTree(btree.into()))
-                    .await
+                BTreeFile::load(txn_id, schema, store).map(|btree| Collection::BTree(btree.into()))
             }
 
             CollectionType::Table(_) => {
@@ -216,9 +198,7 @@ impl Store {
                     .get_store(hash)
                     .ok_or_else(|| TCError::internal("missing historical state"))?;
 
-                TableIndex::load(txn, schema, store)
-                    .map_ok(|table| Collection::Table(table.into()))
-                    .await
+                TableIndex::load(txn_id, schema, store).map(|table| Collection::Table(table.into()))
             }
 
             #[cfg(feature = "tensor")]
@@ -237,18 +217,16 @@ impl Store {
                             .get_store(hash)
                             .ok_or_else(|| TCError::internal("missing historical state"))?;
 
-                        DenseTensor::load(txn, schema, store)
-                            .map_ok(|tensor| Collection::Tensor(tensor.into()))
-                            .await
+                        DenseTensor::load(txn_id, schema, store)
+                            .map(|tensor| Collection::Tensor(tensor.into()))
                     }
                     TensorType::Sparse => {
                         let store = dir
                             .get_store(hash)
                             .ok_or_else(|| TCError::internal("missing historical state"))?;
 
-                        SparseTensor::load(txn, schema, store)
-                            .map_ok(|tensor| Collection::Tensor(tensor.into()))
-                            .await
+                        SparseTensor::load(txn_id, schema, store)
+                            .map(|tensor| Collection::Tensor(tensor.into()))
                     }
                 }
             }
@@ -261,6 +239,8 @@ impl Transact for Store {
     type Commit = <fs::Dir as Transact>::Commit;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+        debug!("commit chain data store at {}", txn_id);
+
         self.dir.commit(txn_id).await
     }
 

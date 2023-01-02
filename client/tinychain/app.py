@@ -1,4 +1,5 @@
-"""A hosted :class:`App` or :class:`Library`."""
+"""A hosted :class:`Service` or :class:`Library`."""
+# TODO: rename this module to "service"
 
 import inspect
 import logging
@@ -288,6 +289,7 @@ class Library(object):
             return {str(URI(self)): form}
 
 
+# TODO: delete
 class App(Library):
     def __init__(self):
         Library.__init__(self)
@@ -353,6 +355,73 @@ class App(Library):
         return {str(self.__uri__): form}
 
 
+class Service(Library):
+    __uri__ = URI("/service")
+
+    def __init__(self):
+        Library.__init__(self)
+
+        for name, attr in inspect.getmembers(self, _is_mutable):
+            if isinstance(attr, Chain):
+                attr.__uri__ = self.__uri__.append(name)
+            else:
+                raise RuntimeError(f"{attr} must be managed by a Chain")
+
+    def __json__(self):
+        if not hasattr(self, "_methods"):
+            name = self.__class__.__name__
+            raise RuntimeError(f"{name} has not reflected over its methods--did you forget to call App.__init__?")
+
+        header = _Header()
+        for name, attr in inspect.getmembers(self):
+            if name.startswith('_'):
+                continue
+            elif hasattr(attr, "__ref__"):
+                setattr(header, name, get_ref(attr, f"self/{name}"))
+            else:
+                setattr(header, name, attr)
+
+        # TODO: deduplicate with Library.__json__ and Meta.__json__
+        form = {}
+        for name, attr in inspect.getmembers(self):
+            if name.startswith('_'):
+                continue
+
+            if inspect.isclass(attr):
+                if issubclass(attr, Library) or issubclass(attr, Dynamic):
+                    continue
+            elif isinstance(attr, Library):
+                continue
+
+            if hasattr(attr, "hidden") and attr.hidden:
+                continue
+            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
+                # it's a @classmethod
+                continue
+
+            elif name in self._methods:
+                for method_name, method in self._methods[name].expand(header, name):
+                    form[method_name] = to_json(method)
+
+            elif _is_mutable(attr):
+                assert isinstance(attr, Chain)
+                chain_type = type(attr)
+                collection = form_of(attr)
+
+                if isinstance(collection, Collection):
+                    schema = form_of(collection)
+                    form[name] = {str(URI(chain_type)): [{str(URI(type(collection))): [to_json(schema)]}]}
+                elif isinstance(collection, (dict, list, tuple, Map, Tuple)):
+                    form[name] = {str(URI(chain_type)): [to_json(collection)]}
+                else:
+                    raise TypeError(f"invalid subject for Chain: {collection}")
+
+            else:
+                form[name] = to_json(attr)
+
+        return {str(URI(self)[:-1]): form}
+
+
 def dependencies(lib_or_model):
     deps = []
     for name, attr in inspect.getmembers(lib_or_model):
@@ -370,6 +439,7 @@ def dependencies(lib_or_model):
     return deps
 
 
+# TODO: delete
 def write_config(lib, config_path, overwrite=False):
     """Write the configuration of the given :class:`tc.App` or :class:`Library` to the given path."""
 

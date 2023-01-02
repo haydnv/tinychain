@@ -221,7 +221,6 @@ where
     }
 }
 
-#[async_trait]
 impl<FD, FS, D, T> Persist<D> for SparseTable<FD, FS, D, T>
 where
     FD: File<Key = u64, Block = Array>,
@@ -235,11 +234,12 @@ where
     type Txn = T;
     type Schema = Schema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
         schema.validate("create sparse tensor")?;
 
         let table_schema = Self::table_schema(&schema);
-        let table = TableIndex::create(txn, table_schema, store).await?;
+        let table = TableIndex::create(txn_id, table_schema, store)?;
+
         Ok(Self {
             table,
             schema,
@@ -247,11 +247,12 @@ where
         })
     }
 
-    async fn load(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+    fn load(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
         schema.validate("create sparse tensor")?;
 
         let table_schema = Self::table_schema(&schema);
-        let table = TableIndex::load(txn, table_schema, store).await?;
+        let table = TableIndex::load(txn_id, table_schema, store)?;
+
         Ok(Self {
             table,
             schema,
@@ -287,7 +288,7 @@ where
         let shape = instance.shape().clone();
         let dtype = instance.dtype();
         let schema = Schema { shape, dtype };
-        let accessor = SparseTable::create(txn, schema, store).await?;
+        let accessor = SparseTable::create(txn_id, schema, store)?;
 
         let filled = instance.accessor.filled(txn.clone()).await?;
 

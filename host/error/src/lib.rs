@@ -257,6 +257,25 @@ impl TCError {
 
 impl std::error::Error for TCError {}
 
+impl From<txn_lock::Error> for TCError {
+    fn from(err: txn_lock::Error) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("{}", err);
+
+        #[cfg(not(debug_assertions))]
+        Self {
+            code: ErrorType::Conflict,
+            data: ErrorData::from(err),
+        }
+    }
+}
+
+impl From<Infallible> for TCError {
+    fn from(_: Infallible) -> Self {
+        Self::internal("an unanticipated error occurred--please file a bug report")
+    }
+}
+
 impl<'en> en::ToStream<'en> for TCError {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         use en::EncodeMap;
@@ -272,12 +291,6 @@ impl<'en> en::IntoStream<'en> for TCError {
         let mut map = encoder.encode_map(Some(1))?;
         map.encode_entry(self.code, self.data)?;
         map.end()
-    }
-}
-
-impl From<Infallible> for TCError {
-    fn from(_: Infallible) -> Self {
-        Self::internal("an unanticipated error occurred--please file a bug report")
     }
 }
 

@@ -143,6 +143,7 @@ impl Gateway {
     }
 
     /// Read a simple value.
+    // TODO: accept a Borrow<Link>
     pub async fn fetch<T: destream::FromStream<Context = ()>>(
         &self,
         txn_id: &TxnId,
@@ -152,7 +153,8 @@ impl Gateway {
         self.client.fetch(txn_id, link, key).await
     }
 
-    /// Read the [`State`] with the given `key` at `link`.
+    /// Read the [`State`] at `link` with the given `key`.
+    // TODO: accept a Borrow<Link>
     pub async fn get(&self, txn: &Txn, link: Link, key: Value) -> TCResult<State> {
         debug!("GET {}: {}", link, key);
         match link.host() {
@@ -167,6 +169,7 @@ impl Gateway {
     }
 
     /// Update the [`State`] with the given `key` at `link` to `value`.
+    // TODO: accept a Borrow<Link>
     pub fn put<'a>(
         &'a self,
         txn: &'a Txn,
@@ -187,7 +190,8 @@ impl Gateway {
         })
     }
 
-    /// Execute the POST op at `subject` with the `params`
+    /// Execute the POST op at `link` with the `params`
+    // TODO: accept a Borrow<Link>
     pub async fn post(&self, txn: &Txn, link: Link, params: State) -> TCResult<State> {
         debug!("POST to {} with params {}", link, params);
 
@@ -198,7 +202,8 @@ impl Gateway {
         }
     }
 
-    /// Delete the [`State`] with the given `key` at `link`.
+    /// Delete the [`State`] at `link` with the given `key`.
+    // TODO: accept a Borrow<Link>
     pub fn delete<'a>(&'a self, txn: &'a Txn, link: Link, key: Value) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             debug!("DELETE {}: {}", link, key);
@@ -238,7 +243,7 @@ impl Gateway {
                 let txn = cluster.claim(&txn).await?;
 
                 let self_link = txn.link(cluster.link().path().clone());
-                cluster.add_replica(&txn, self_link).await?;
+                cluster.add_replica(&txn, self_link, true).await?;
 
                 // send a commit message
                 cluster.distribute_commit(&txn).await?;

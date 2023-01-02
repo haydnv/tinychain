@@ -198,7 +198,7 @@ where
             }
         };
 
-        let output = Self::create(&txn, Schema { shape, dtype }, dir.into()).await?;
+        let output = Self::create(txn_id, Schema { shape, dtype }, dir.into())?;
         tile(txn, input, output, multiples).await
     }
 }
@@ -549,7 +549,7 @@ where
         let shape = vec![size].into();
         let dtype = self.dtype();
         let schema = Schema { shape, dtype };
-        let table = SparseTable::create(&txn, schema, dir.into()).await?;
+        let table = SparseTable::create(txn_id, schema, dir.into())?;
 
         let filled = self.accessor.filled(txn).await?;
         filled
@@ -703,7 +703,7 @@ where
         let txn_id = *txn.id();
         let dir = txn.context().create_dir_unique(txn_id).await?;
 
-        let table = SparseTable::create(&txn, schema, dir.into()).await?;
+        let table = SparseTable::create(txn_id, schema, dir.into())?;
 
         let dim = self.shape()[axis];
         let zero = self.dtype().zero();
@@ -1277,7 +1277,6 @@ where
     }
 }
 
-#[async_trait]
 impl<FD, FS, D, T> Persist<D> for SparseTensor<FD, FS, D, T, SparseTable<FD, FS, D, T>>
 where
     FD: File<Key = u64, Block = Array>,
@@ -1291,16 +1290,12 @@ where
     type Txn = T;
     type Schema = Schema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
-        SparseTable::create(txn, schema, store)
-            .map_ok(Self::from)
-            .await
+    fn create(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+        SparseTable::create(txn_id, schema, store).map(Self::from)
     }
 
-    async fn load(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
-        SparseTable::load(txn, schema, store)
-            .map_ok(Self::from)
-            .await
+    fn load(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+        SparseTable::load(txn_id, schema, store).map(Self::from)
     }
 
     fn dir(&self) -> D::Inner {
@@ -1470,9 +1465,8 @@ where
         schema.validate("load Sparse").map_err(de::Error::custom)?;
 
         let txn_id = *self.txn.id();
-        let table = SparseTable::create(&self.txn, schema, self.txn.context().clone().into())
-            .map_err(de::Error::custom)
-            .await?;
+        let table = SparseTable::create(txn_id, schema, self.txn.context().clone().into())
+            .map_err(de::Error::custom)?;
 
         if let Some(table) = seq
             .next_element::<SparseTable<FD, FS, D, T>>((table.clone(), txn_id))

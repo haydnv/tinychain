@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
@@ -8,12 +8,12 @@ use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_transact::fs::{Dir, DirCreate, Persist};
-use tc_transact::lock::TxnLock;
 use tc_transact::Transaction;
 use tc_value::{Link, LinkHost, Value};
 use tcgeneric::*;
 
 use crate::chain::{Chain, ChainType};
+use crate::cluster::ReplicaSet;
 use crate::collection::{CollectionBase, CollectionSchema};
 use crate::fs;
 use crate::object::{InstanceClass, InstanceExt};
@@ -116,16 +116,16 @@ pub async fn instantiate(
 
     trace!("Cluster::load got write lock on data directory");
 
-    let mut replicas = HashSet::new();
-    replicas.insert((host, link.path().clone()).into());
+    let lead = Link::from((host, link.path().clone()));
+    let replica_set = ReplicaSet::new(txn_id, link.clone(), [lead]);
 
     let mut chains = Map::<Chain<CollectionBase>>::new();
     for (id, (class, schema)) in chain_schema.into_iter() {
         debug!("load chain {} of type {} with schema {}", id, class, schema);
 
         let store = dir.get_or_create_store(txn_id, id.clone()).await?;
-        let chain = Chain::load_or_create(txn, (class, schema), store).await?;
-        trace!("loaded chain {}", id);
+        let chain = Chain::load_or_create(txn_id, (class, schema), store)?;
+        trace!("loaded chain {} at {}", id, txn_id);
 
         chains.insert(id, chain);
     }
@@ -133,10 +133,9 @@ pub async fn instantiate(
     let actor_id = Value::from(Link::default());
 
     let cluster = Cluster {
-        link: Arc::new(link.clone()),
         actor: Arc::new(Actor::new(actor_id)),
-        led: Arc::new(RwLock::new(HashMap::new())),
-        replicas: TxnLock::new(format!("Cluster {} replicas", link), replicas),
+        led: Arc::new(RwLock::new(BTreeMap::new())),
+        replicas: replica_set,
         state: Legacy { chains, classes },
     };
 

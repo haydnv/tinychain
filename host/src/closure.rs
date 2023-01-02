@@ -15,10 +15,11 @@ use sha2::digest::{Digest, Output};
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::IntoView;
+use tc_transact::{AsyncHash, IntoView};
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf, Tuple};
 
 use crate::fs;
+use crate::fs::Dir;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler};
 use crate::scalar::{Executor, OpDef, OpDefType, OpRef, Scalar, SELF};
 use crate::state::{State, StateView};
@@ -35,16 +36,6 @@ impl Closure {
     /// Construct a new `Closure`.
     pub fn new(context: Map<State>, op: OpDef) -> Self {
         Self { context, op }
-    }
-
-    /// Compute the SHA256 hash of this `Closure`.
-    pub async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
-        let context = State::Map(self.context).hash(txn).await?;
-
-        let mut hasher = Sha256::default();
-        hasher.update(&context);
-        hasher.update(&Hash::<Sha256>::hash(self.op));
-        Ok(hasher.finalize())
     }
 
     /// Return the context and [`OpDef`] which define this `Closure`.
@@ -191,6 +182,20 @@ impl<'a> Handler<'a> for Closure {
         } else {
             None
         }
+    }
+}
+
+#[async_trait]
+impl AsyncHash<Dir> for Closure {
+    type Txn = Txn;
+
+    async fn hash(self, txn: &Txn) -> TCResult<Output<Sha256>> {
+        let context = State::Map(self.context).hash(txn).await?;
+
+        let mut hasher = Sha256::default();
+        hasher.update(&context);
+        hasher.update(&Hash::<Sha256>::hash(self.op));
+        Ok(hasher.finalize())
     }
 }
 

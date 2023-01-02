@@ -47,15 +47,21 @@ impl TryCastFrom<Scalar> for Version {
     }
 }
 
+impl From<Version> for Map<Scalar> {
+    fn from(version: Version) -> Self {
+        version.lib
+    }
+}
+
 impl From<Version> for Scalar {
-    fn from(version: Version) -> Scalar {
-        Scalar::Map(version.lib)
+    fn from(version: Version) -> Self {
+        Self::Map(version.into())
     }
 }
 
 impl From<Version> for State {
-    fn from(version: Version) -> State {
-        State::Scalar(version.into())
+    fn from(version: Version) -> Self {
+        Self::Scalar(version.into())
     }
 }
 
@@ -106,7 +112,7 @@ impl Library {
     pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
         self.file
             .read(txn_id)
-            .map_ok(|file| file.block_ids().last().cloned())
+            .map_ok(|file| file.block_ids().iter().last().cloned())
             .await
     }
 
@@ -134,15 +140,16 @@ impl Library {
 
 #[async_trait]
 impl DirItem for Library {
-    type Version = Map<Scalar>;
+    type Schema = Map<Scalar>;
+    type Version = Version;
 
     async fn create_version(
         &self,
-        txn_id: TxnId,
+        txn: &Txn,
         number: VersionNumber,
-        version: Self::Version,
-    ) -> TCResult<()> {
-        let mut file = self.file.write(txn_id).await?;
+        schema: Map<Scalar>,
+    ) -> TCResult<Version> {
+        let mut file = self.file.write(*txn.id()).await?;
         if file.contains(&number) {
             error!("duplicate library version {}", number);
 
@@ -152,9 +159,12 @@ impl DirItem for Library {
             )))
         } else {
             info!("create new library version {}", number);
-            file.create_block(number, version.into(), 0)
+            let version = Version::from(schema);
+            file.create_block(number, version.clone(), 0)
                 .map_ok(|_| ())
-                .await
+                .await?;
+
+            Ok(version)
         }
     }
 }
@@ -172,14 +182,13 @@ impl Transact for Library {
     }
 }
 
-#[async_trait]
 impl Persist<fs::Dir> for Library {
     type Txn = Txn;
     type Schema = ();
 
-    async fn create(txn: &Self::Txn, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let file = super::dir::File::try_from(store)?;
-        let versions = file.read(*txn.id()).await?;
+        let versions = file.try_read(txn_id)?;
         if versions.is_empty() {
             Ok(Self { file })
         } else {
@@ -189,7 +198,7 @@ impl Persist<fs::Dir> for Library {
         }
     }
 
-    async fn load(_txn: &Self::Txn, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    fn load(_txn_id: TxnId, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         store.try_into().map(|file| Self { file })
     }
 

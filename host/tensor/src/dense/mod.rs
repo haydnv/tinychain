@@ -123,7 +123,7 @@ where
     T: Transaction<D>,
 {
     /// Create a new `DenseTensor` filled with the given `value`.
-    pub async fn constant<S>(file: FD, txn_id: TxnId, shape: S, value: Number) -> TCResult<Self>
+    pub fn constant<S>(file: FD, txn_id: TxnId, shape: S, value: Number) -> TCResult<Self>
     where
         Shape: From<S>,
     {
@@ -134,9 +134,7 @@ where
 
         schema.validate("create Dense constant")?;
 
-        BlockListFile::constant(file, txn_id, schema.shape, value)
-            .map_ok(Self::from)
-            .await
+        BlockListFile::constant(file, txn_id, schema.shape, value).map(Self::from)
     }
 
     /// Create a new `DenseTensor` filled with a range evenly distributed between `start` and `stop`.
@@ -204,7 +202,7 @@ where
             }
         };
 
-        let output = Self::constant(output_file, txn_id, shape, dtype.zero()).await?;
+        let output = Self::constant(output_file, txn_id, shape, dtype.zero())?;
 
         tile(txn, input, output, multiples).await
     }
@@ -617,7 +615,7 @@ where
         }
 
         let dest_shape = self.shape()[0..self.ndim() - 1].to_vec().into();
-        let diagonal = BlockListFile::constant(file, *txn.id(), dest_shape, dtype.zero()).await?;
+        let diagonal = BlockListFile::constant(file, *txn.id(), dest_shape, dtype.zero())?;
         let dest = diagonal.clone();
 
         let source_shape = self.shape().clone();
@@ -1371,16 +1369,12 @@ where
     type Txn = T;
     type Schema = Schema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
-        BlockListFile::create(txn, schema, store)
-            .map_ok(Self::from)
-            .await
+    fn create(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+        BlockListFile::create(txn_id, schema, store).map(Self::from)
     }
 
-    async fn load(txn: &T, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
-        BlockListFile::load(txn, schema, store)
-            .map_ok(Self::from)
-            .await
+    fn load(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+        BlockListFile::load(txn_id, schema, store).map(Self::from)
     }
 
     fn dir(&self) -> FD::Inner {

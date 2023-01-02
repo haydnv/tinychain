@@ -162,10 +162,16 @@ impl HTTPServer {
             &hyper::Method::PUT => {
                 let key = get_param(&mut params, "key")?.unwrap_or_default();
                 let value = destream_body(http_request.into_body(), encoding, txn.clone()).await?;
-                self.gateway
+                let result = self
+                    .gateway
                     .put(txn, path.into(), key, value)
                     .map_ok(State::from)
-                    .await
+                    .await;
+
+                #[cfg(debug_assertions)]
+                log::trace!("PUT request completed with result {:?}", result);
+
+                result
             }
 
             &hyper::Method::POST => {

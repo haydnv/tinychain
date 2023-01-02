@@ -1,17 +1,18 @@
 //! A server to keep track of active transactions.
 
 use std::collections::hash_map::{Entry, HashMap};
-use std::convert::TryInto;
+use std::convert::TryFrom;
 use std::sync::Arc;
 use std::time::Duration;
 
 use freqfs::DirLock;
 use futures::future::TryFutureExt;
-use log::debug;
+use log::{debug, trace};
 use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_transact::fs::Dir;
+use tcgeneric::NetworkTime;
 
 use crate::fs;
 use crate::gateway::Gateway;
@@ -46,17 +47,19 @@ impl TxnServer {
     ) -> TCResult<Txn> {
         debug!("TxnServer::new_txn");
 
-        let expires = token.1.expires().try_into()?;
+        let expires = NetworkTime::try_from(token.1.expires())?;
         let request = Request::new(txn_id, token.0, token.1);
         let mut active = self.active.write().await;
 
         match active.entry(txn_id) {
             Entry::Occupied(entry) => {
+                trace!("txn {} is already known", txn_id);
                 let active = entry.get();
                 let dir = active.workspace.create_dir_unique(txn_id).await?;
                 Ok(Txn::new(active.clone(), gateway, dir, request))
             }
             Entry::Vacant(entry) => {
+                trace!("creating new workspace for txn {}...", txn_id);
                 let workspace = self.txn_dir(txn_id).await?;
                 let dir = workspace.create_dir_unique(txn_id).await?;
                 let active = Arc::new(Active::new(&txn_id, workspace, expires));
@@ -93,7 +96,7 @@ impl TxnServer {
             .create_dir(txn_id.to_string())
             .map_err(fs::io_err)?;
 
-        Ok(fs::Dir::new(cache))
+        Ok(fs::Dir::new(cache, txn_id))
     }
 }
 

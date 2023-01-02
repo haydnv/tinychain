@@ -10,14 +10,14 @@ use tcgeneric::*;
 use crate::cluster::{Cluster, Legacy};
 use crate::object::InstanceExt;
 use crate::state::State;
-use crate::txn::{hypothetical, Txn};
+use crate::txn::hypothetical::{self, Hypothetical};
+use crate::txn::Txn;
 
-use crate::txn::hypothetical::Hypothetical;
 use hosted::Hosted;
 use system::System;
 use userspace::UserSpace;
 
-pub use userspace::{Class, Library, CLASS, LIB};
+pub use userspace::{Class, Library, Service, CLASS, LIB, SERVICE};
 
 mod hosted; // TODO: delete
 mod system;
@@ -55,13 +55,13 @@ impl Kernel {
     }
 
     /// Initialize a new [`Kernel`] with no [`UserSpace`].
-    pub fn with_userspace<I>(class: Class, library: Library, clusters: I) -> Self
+    pub fn with_userspace<I>(class: Class, library: Library, service: Service, clusters: I) -> Self
     where
         I: IntoIterator<Item = InstanceExt<Cluster<Legacy>>>,
     {
         Self {
             system: System,
-            userspace: Some(UserSpace::new(class, library, clusters)),
+            userspace: Some(UserSpace::new(class, library, service, clusters)),
         }
     }
 

@@ -1,22 +1,22 @@
 //! Maintains the consistency of the network by coordinating transaction commits.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::iter::FromIterator;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{join_all, try_join_all, Future, FutureExt, TryFutureExt};
-use futures::join;
-use futures::stream::{FuturesUnordered, StreamExt};
-use log::{debug, info};
-use safecast::TryCastFrom;
+use futures::future::{self, join_all, try_join_all, Future, FutureExt, TryFutureExt};
+use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
+use log::{debug, info, trace};
+use safecast::TryCastInto;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_transact::fs::Persist;
-use tc_transact::lock::{TxnLock, TxnLockCommitGuard, TxnLockReadGuard};
+use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, Transaction};
 use tc_value::{Link, LinkHost, Value};
 use tcgeneric::*;
@@ -33,15 +33,152 @@ pub use class::Class;
 pub use dir::{Dir, DirEntry, DirItem};
 pub use library::Library;
 pub use load::instantiate;
+pub use service::Service;
 
 pub mod class;
 pub mod dir;
-mod leader;
 pub mod library;
+pub mod service;
+
+mod leader;
 mod load; // TODO: delete
 
 /// The name of the endpoint which serves a [`Link`] to each of this [`Cluster`]'s replicas.
 pub const REPLICAS: Label = label("replicas");
+
+#[derive(Clone)]
+pub struct ReplicaSet {
+    lead: Arc<Link>, // this may be a load balancer, or one of the `replicas`
+    replicas: TxnLock<BTreeSet<Link>>,
+}
+
+impl ReplicaSet {
+    pub(super) fn new<R: IntoIterator<Item = Link>>(
+        txn_id: TxnId,
+        lead: Link,
+        replicas: R,
+    ) -> Self {
+        Self {
+            lead: Arc::new(lead),
+            replicas: TxnLock::new("replica set", txn_id, replicas.into_iter().collect()),
+        }
+    }
+
+    pub fn try_from_state(state: State) -> TCResult<(Link, BTreeSet<Link>)> {
+        let (lead, replicas): (State, State) =
+            state.try_cast_into(|s| TCError::bad_request("invalid replica set", s))?;
+
+        let lead = lead.try_cast_into(|s| TCError::bad_request("invalid lead replica link", s))?;
+
+        let replicas =
+            replicas.try_into_tuple(|s| TCError::bad_request("invalid replica set", s))?;
+
+        let replicas = replicas
+            .into_iter()
+            .map(|replica| {
+                replica.try_cast_into(|s| TCError::bad_request("invalid replica link", s))
+            })
+            .collect::<TCResult<_>>()?;
+
+        Ok((lead, replicas))
+    }
+
+    pub fn lead(&self) -> &Link {
+        &self.lead
+    }
+
+    pub async fn add(&self, txn_id: TxnId, replica: Link) -> TCResult<bool> {
+        debug!("add replica {}", replica);
+        let mut replicas = self.replicas.write(txn_id).await?;
+        Ok(replicas.insert(replica))
+    }
+
+    pub async fn extend<R: IntoIterator<Item = Link>>(
+        &self,
+        txn_id: TxnId,
+        new_replicas: R,
+    ) -> TCResult<()> {
+        debug!("extend replica set");
+
+        let mut replicas = self.replicas.write(txn_id).await?;
+        for replica in new_replicas {
+            debug!("add replica {}", replica);
+            replicas.insert(replica);
+        }
+
+        Ok(())
+    }
+
+    pub async fn remove(&self, txn_id: TxnId, replica: &Link) -> TCResult<bool> {
+        debug!("remove replica {}", replica);
+
+        if replica == &*self.lead {
+            Err(TCError::bad_request(
+                "cannot remove the lead replica",
+                replica,
+            ))
+        } else {
+            let mut replicas = self.replicas.write(txn_id).await?;
+            Ok(replicas.remove(replica))
+        }
+    }
+
+    pub async fn remove_all<'a, R: IntoIterator<Item = &'a Link>>(
+        &'a self,
+        txn_id: TxnId,
+        replicas: R,
+    ) -> TCResult<()> {
+        let mut all_replicas = self.replicas.write(txn_id).await?;
+
+        for replica in replicas {
+            debug!("remove replica {}", replica);
+            if replica == &*self.lead {
+                return Err(TCError::bad_request(
+                    "cannot remove the lead replica",
+                    replica,
+                ));
+            } else {
+                all_replicas.remove(replica);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn read(&self, txn_id: TxnId) -> TCResult<impl Deref<Target = BTreeSet<Link>>> {
+        self.replicas.read(txn_id).map_err(TCError::from).await
+    }
+
+    pub async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
+        let lead = State::from(Link::clone(&*self.lead));
+
+        self.read(txn_id)
+            .map_ok(|replicas| {
+                let replicas = State::Tuple(replicas.iter().cloned().collect());
+                State::Tuple((lead, replicas).into())
+            })
+            .await
+    }
+}
+
+#[async_trait]
+impl Transact for ReplicaSet {
+    type Commit = Arc<BTreeSet<Link>>;
+
+    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+        self.replicas.commit(txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.replicas.finalize(txn_id)
+    }
+}
+
+impl fmt::Display for ReplicaSet {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "replica set with lead {}", self.lead)
+    }
+}
 
 /// A state which supports replication in a [`Cluster`]
 #[async_trait]
@@ -69,50 +206,42 @@ impl fmt::Display for ClusterType {
 /// The data structure responsible for maintaining consensus per-transaction across the network.
 #[derive(Clone)]
 pub struct Cluster<T> {
-    link: Arc<Link>,
     actor: Arc<Actor>,
-    led: Arc<RwLock<HashMap<TxnId, leader::Leader>>>,
-    replicas: TxnLock<HashSet<Link>>,
+    led: Arc<RwLock<BTreeMap<TxnId, leader::Leader>>>,
+    replicas: ReplicaSet,
     state: T,
 }
 
 impl<T> Cluster<T> {
     /// Create a new [`Cluster`] to manage replication of the given `state`.
     // TODO: set visibility to private
-    pub fn with_state(self_link: Link, cluster: Link, state: T) -> Self {
+    pub fn with_state(self_link: Link, cluster: Link, txn_id: TxnId, state: T) -> Self {
         assert!(self_link.host().is_some());
 
-        let cluster = if self_link == cluster {
-            cluster.path().clone().into()
-        } else {
-            cluster
-        };
-
-        let mut replicas = HashSet::new();
-        replicas.insert(self_link);
+        let replicas = ReplicaSet::new(txn_id, cluster, [self_link]);
 
         Self {
-            replicas: TxnLock::new(format!("replicas of {}", cluster), replicas),
+            replicas,
             actor: Arc::new(Actor::new(Value::None)),
-            led: Arc::new(RwLock::new(HashMap::new())),
-            link: Arc::new(cluster),
+            led: Arc::new(RwLock::new(BTreeMap::new())),
             state,
         }
     }
 
     /// Borrow the canonical [`Link`] to this `Cluster` (probably not on this host).
     pub fn link(&self) -> &Link {
-        &self.link
+        self.replicas.lead()
     }
 
     /// Borrow the state managed by this `Cluster`
+    // TODO: can this be deleted?
     pub fn state(&self) -> &T {
         &self.state
     }
 
     /// Borrow the path of this `Cluster`, relative to this host.
-    pub fn path(&'_ self) -> &'_ [PathSegment] {
-        self.link.path()
+    pub fn path(&self) -> &[PathSegment] {
+        self.replicas.lead().path()
     }
 
     /// Borrow the public key of this `Cluster`.
@@ -143,7 +272,7 @@ impl<T> Cluster<T> {
         } else {
             let mut led = self.led.write().await;
 
-            let txn = txn.lead(&self.actor, self.link.path().clone()).await?;
+            let txn = txn.lead(&self.actor, self.link().path().clone()).await?;
 
             led.insert(*txn.id(), leader::Leader::new());
             Ok(txn)
@@ -201,25 +330,18 @@ where
         self.distribute_commit(&txn).await
     }
 
-    /// Commit the given [`Txn`] for all members of this `Cluster`.
-    pub async fn distribute_commit(&self, txn: &Txn) -> TCResult<()> {
-        let self_link = txn.link(self.link.path().clone());
-        debug!("{} will distribute commit {}", self_link, txn.id());
+    #[cfg(not(debug_assertions))]
+    async fn distribute_commit_concurrent(&self, txn: &Txn) -> TCResult<Vec<TCResult<State>>> {
+        let self_link = txn.link(self.link().path().clone());
+        let replicas = self.replicas.read(*txn.id()).await?;
 
-        let replicas = {
-            // just drop this commit guard immediately
-            // so a remote dependency can't pause commits to this Cluster
-            let guard = self.commit(txn.id()).await;
-            HashSet::clone(&*guard)
-        };
-
-        let dep_commits: TCBoxTryFuture<()> = {
+        let dep_commits: TCBoxFuture<()> = {
             let led = self.led.read().await;
             let leader: Option<leader::Leader> = led.get(txn.id()).cloned();
             if let Some(leader) = leader {
                 Box::pin(async move { leader.commit(txn).await })
             } else {
-                Box::pin(futures::future::ready(Ok(())))
+                Box::pin(futures::future::ready(()))
             }
         };
 
@@ -232,31 +354,102 @@ where
         );
 
         let replica_commits = replicas
-            .into_iter()
-            .filter(|replica| replica != &self_link)
+            .iter()
+            .filter(|replica| *replica != &self_link)
+            .cloned()
             .map(|replica| {
                 debug!("commit replica {}...", replica);
                 txn.post(replica, State::Map(Map::default()))
             })
             .collect::<Vec<_>>();
 
-        let (_deps, replicas) = join!(dep_commits, join_all(replica_commits));
+        let (_deps, results) = futures::join!(dep_commits, join_all(replica_commits));
 
-        for result in replicas {
+        Ok(results)
+    }
+
+    #[cfg(debug_assertions)]
+    async fn distribute_commit_debug(&self, txn: &Txn) -> TCResult<Vec<TCResult<State>>> {
+        let self_link = txn.link(self.link().path().clone());
+        let replicas = self.replicas.read(*txn.id()).await?;
+
+        {
+            let leader = {
+                let led = self.led.read().await;
+                led.get(txn.id()).cloned()
+            };
+
+            if let Some(leader) = leader {
+                leader.commit(txn).await;
+            }
+        }
+
+        info!(
+            "{} will distribute commit {} of {} to replica set {}...",
+            self_link,
+            txn.id(),
+            self,
+            replicas.iter().collect::<Tuple<&Link>>(),
+        );
+
+        let mut results = Vec::with_capacity(replicas.len());
+        for replica in &*replicas {
+            if replica == &self_link {
+                continue;
+            }
+
+            let result = txn.post(replica.clone(), State::Map(Map::default())).await;
+            results.push(result);
+        }
+
+        Ok(results)
+    }
+
+    /// Commit the given [`Txn`] for all members of this `Cluster`.
+    pub async fn distribute_commit(&self, txn: &Txn) -> TCResult<()> {
+        debug!("{} will distribute commit {}", self, txn.id());
+
+        #[cfg(debug_assertions)]
+        let results = self.distribute_commit_debug(txn).await?;
+
+        #[cfg(not(debug_assertions))]
+        let results = self.distribute_commit_concurrent(txn).await?;
+
+        let num_replicas = results.len() + 1; // +1 for this replica, which is committed below
+
+        let mut succeeded = 0;
+        for result in results {
             match result {
-                Ok(_) => {}
+                Ok(_) => succeeded += 1,
                 Err(cause) => log::error!("commit failure: {}", cause),
             }
         }
 
-        info!("{} distributed commit {} of {}", self_link, txn.id(), self);
+        // note: this first condition will always pass when num_replicas == 1
+        if succeeded >= num_replicas / 2 {
+            self.commit(txn.id()).await;
+            info!("{} distributed commit {} of {}", self, txn.id(), self);
+            Ok(())
+        } else if succeeded == 0 {
+            Err(TCError::bad_gateway(format!(
+                "{} failed to replicate commit {}",
+                self,
+                txn.id()
+            )))
+        } else {
+            // in this case, the transaction failed to replicate
+            // but as a result it's not possible to remove the bad replicas
 
-        Ok(())
+            panic!(
+                "commit failed--only {} out of {} were committed",
+                succeeded, num_replicas,
+            );
+        }
     }
 
     /// Roll back the given [`Txn`] for all members of this `Cluster`.
     pub async fn distribute_rollback(&self, txn: &Txn) {
-        let self_link = txn.link(self.link.path().clone());
+        let self_link = txn.link(self.link().path().clone());
         debug!("{} will distribute rollback of {}", self_link, txn.id());
 
         {
@@ -288,12 +481,15 @@ where
     T: Replica + Send + Sync,
 {
     /// Get the set of current replicas of this `Cluster`.
-    pub async fn replicas(&self, txn_id: TxnId) -> TCResult<TxnLockReadGuard<HashSet<Link>>> {
-        self.replicas.read(txn_id).await
+    pub async fn replicas(&self, txn_id: TxnId) -> TCResult<impl Deref<Target = BTreeSet<Link>>> {
+        self.replicas.read(txn_id).map_err(TCError::from).await
     }
 
     /// Add a replica to this `Cluster`.
-    pub async fn add_replica(&self, txn: &Txn, replica: Link) -> TCResult<()> {
+    ///
+    /// Returns `true` if a new replica was added.
+    // TODO: remove `notify`
+    pub async fn add_replica(&self, txn: &Txn, replica: Link, notify: bool) -> TCResult<bool> {
         if replica.path() != self.path() {
             return Err(TCError::unsupported(format!(
                 "tried to replicate {} from {}",
@@ -301,6 +497,7 @@ where
             )));
         }
 
+        let txn_id = *txn.id();
         let self_link = txn.link(self.link().path().clone());
 
         debug!("cluster at {} adding replica {}...", self_link, replica);
@@ -310,12 +507,14 @@ where
             if self.link() == &self_link {
                 if let Some(host) = self.link().host() {
                     debug!("{} at {} cannot replicate itself", self, host);
-                    return Ok(());
+                    return Ok(false);
                 }
             } else if self.link().host().is_none() {
                 debug!("{} cannot replicate itself", self);
-                return Ok(());
+                return Ok(false);
             }
+
+            assert_ne!(self.link().clone(), self_link);
 
             // handle the case that this is a new replica and its state needs to be sync'd
 
@@ -324,51 +523,45 @@ where
                 self, replica, self_link
             );
 
-            let replicas = txn
+            let (lead, replicas) = txn
                 .get(self.link().clone().append(REPLICAS), Value::default())
+                .map(|r| r.and_then(ReplicaSet::try_from_state))
                 .await?;
 
-            if replicas.is_some() {
-                let replicas = Tuple::<Link>::try_cast_from(replicas, |s| {
-                    TCError::bad_request("invalid replica set", s)
-                })?;
-
-                debug!("{} has replicas: {}", self, replicas);
-
-                let replicas: HashSet<Link> = HashSet::from_iter(replicas);
-                if !replicas.contains(&self_link) {
-                    try_join_all(replicas.iter().map(|replica| {
-                        txn.put(
-                            replica.clone().append(REPLICAS),
-                            Value::default(),
-                            self_link.clone().into(),
-                        )
-                    }))
-                    .await?;
-                }
-
-                (*self.replicas.write(*txn.id()).await?).extend(replicas);
-            } else {
-                // this case is most likely adding the first replica to a load balancer
-                txn.put(
-                    self.link().clone().append(REPLICAS),
-                    Value::default(),
-                    self_link.into(),
-                )
-                .await?;
+            if self.link() != &lead {
+                return Err(TCError::unsupported(format!(
+                    "replication lead {} cannot be altered (got {})",
+                    self.link(),
+                    lead
+                )));
             }
 
             self.state.replicate(txn, self.link().clone()).await?;
-        } else {
-            debug!("add replica {}", replica);
-            (*self.replicas.write(*txn.id()).await?).insert(replica);
-        }
 
-        Ok(())
+            let is_new = !replicas.contains(&self_link);
+
+            // TODO: delete
+            if notify && is_new {
+                try_join_all(replicas.iter().map(|replica| {
+                    txn.put(
+                        replica.clone().append(REPLICAS),
+                        Value::default(),
+                        self_link.clone().into(),
+                    )
+                }))
+                .await?;
+            }
+
+            self.replicas.extend(txn_id, replicas).await?;
+
+            Ok(is_new)
+        } else {
+            self.replicas.add(txn_id, replica).await
+        }
     }
 
     /// Claim leadership of the given [`Txn`] and add a replica to this `Cluster`.
-    pub async fn lead_and_add_replica(&self, txn: Txn) -> TCResult<()> {
+    pub async fn lead_and_add_replica(&self, txn: Txn) -> TCResult<bool> {
         let owner = txn
             .owner()
             .cloned()
@@ -377,9 +570,9 @@ where
         let self_link = txn.link(self.link().path().clone());
 
         if owner.path() == self_link.path() {
-            return self.add_replica(&txn, self_link).await;
+            return self.add_replica(&txn, self_link, false).await;
         } else if txn.leader(self.path()).is_some() {
-            return self.add_replica(&txn, self_link).await;
+            return self.add_replica(&txn, self_link, false).await;
         }
 
         let txn = txn.lead(&self.actor, self.link().path().clone()).await?;
@@ -391,36 +584,33 @@ where
             owner
         );
 
-        txn.put(owner.clone(), Value::None, self_link.clone().into())
-            .await?;
-
-        self.add_replica(&txn, self_link).await
+        self.add_replica(&txn, self_link, false).await
     }
 
     /// Remove one or more replicas from this `Cluster`.
     pub async fn remove_replicas(&self, txn: &Txn, to_remove: &[Link]) -> TCResult<()> {
         let self_link = txn.link(self.link().path().clone());
-        let mut replicas = self.replicas.write(*txn.id()).await?;
 
         for replica in to_remove {
             if replica == &self_link {
-                panic!("{} received remove replica request for itself", self);
+                return Err(TCError::unsupported(format!(
+                    "{} received a remove request for itself",
+                    self
+                )));
             }
-
-            replicas.remove(replica);
         }
 
-        Ok(())
+        self.replicas.remove_all(*txn.id(), to_remove).await
     }
 
-    /// Replicate the given `write` operation across all replicas of this `Cluster`.
+    /// Replicate the given `write` operation across all other replicas of this `Cluster`.
     pub async fn replicate_write<F, W>(&self, txn: Txn, write: W) -> TCResult<()>
     where
         F: Future<Output = TCResult<()>> + Send,
-        W: Fn(Link) -> F + Send,
+        W: Fn(Link) -> F + Send, // TODO: this should accept a &Link
     {
         // this lock needs to be held for the duration of the write
-        // to make sure that any future write to this Cluster is replicated to the new replica
+        // to make sure that any future write to this Cluster is replicated to any new replicas
         let replicas = self.replicas.read(*txn.id()).await?;
         assert!(!replicas.is_empty());
         if replicas.len() == 1 {
@@ -476,107 +666,51 @@ where
     }
 }
 
-// TODO: only impl Persist for Cluster once
-#[async_trait]
-impl Persist<fs::Dir> for Cluster<BlockChain<Class>> {
+impl<T: Persist<fs::Dir, Txn = Txn>> Persist<fs::Dir> for Cluster<BlockChain<T>>
+where
+    BlockChain<T>: Persist<fs::Dir, Schema = (), Txn = Txn>,
+{
     type Txn = Txn;
-    type Schema = Link;
+    type Schema = (Link, Link);
 
-    async fn create(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
-        let self_link = txn.link(link.path().clone());
-
-        BlockChain::create(txn, (), store)
-            .map_ok(|state| Self::with_state(self_link, link, state))
-            .await
+    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let (self_link, cluster_link) = schema;
+        BlockChain::create(txn_id, (), store)
+            .map(|state| Self::with_state(self_link, cluster_link, txn_id, state))
     }
 
-    async fn load(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
-        let self_link = txn.link(link.path().clone());
-
-        BlockChain::load(txn, (), store)
-            .map_ok(|state| Self::with_state(self_link, link, state))
-            .await
+    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let (self_link, cluster_link) = schema;
+        BlockChain::load(txn_id, (), store)
+            .map(|state| Self::with_state(self_link, cluster_link, txn_id, state))
     }
 
     fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
-        BlockChain::dir(&self.state)
+        Persist::dir(&self.state)
     }
 }
 
-// TODO: only impl Persist for Cluster once
-#[async_trait]
-impl Persist<fs::Dir> for Cluster<Dir<Class>> {
+impl<T: Persist<fs::Dir, Txn = Txn>> Persist<fs::Dir> for Cluster<Dir<T>>
+where
+    Dir<T>: Persist<fs::Dir, Schema = (Link, Link), Txn = Txn>,
+{
     type Txn = Txn;
-    type Schema = Link;
+    type Schema = (Link, Link);
 
-    async fn create(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
-        let self_link = txn.link(link.path().clone());
-        Dir::create(txn, link.clone(), store)
-            .map_ok(|state| Self::with_state(self_link, link, state))
-            .await
+    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let (self_link, cluster_link) = schema.clone();
+        Dir::create(txn_id, schema, store)
+            .map(|state| Self::with_state(self_link, cluster_link, txn_id, state))
     }
 
-    async fn load(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
-        let self_link = txn.link(link.path().clone());
-        Dir::load(txn, link.clone(), store)
-            .map_ok(|state| Self::with_state(self_link, link, state))
-            .await
+    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let (self_link, cluster_link) = schema.clone();
+        Dir::load(txn_id, schema, store)
+            .map(|state| Self::with_state(self_link, cluster_link, txn_id, state))
     }
 
     fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
-        Dir::dir(&self.state)
-    }
-}
-
-// TODO: only impl Persist for Cluster once
-#[async_trait]
-impl Persist<fs::Dir> for Cluster<Dir<Library>> {
-    type Txn = Txn;
-    type Schema = Link;
-
-    async fn create(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
-        let self_link = txn.link(link.path().clone());
-        Dir::create(txn, link.clone(), store)
-            .map_ok(|state| Self::with_state(self_link, link, state))
-            .await
-    }
-
-    async fn load(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
-        let self_link = txn.link(link.path().clone());
-        Dir::load(txn, link.clone(), store)
-            .map_ok(|state| Self::with_state(self_link, link, state))
-            .await
-    }
-
-    fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
-        Dir::dir(&self.state)
-    }
-}
-
-// TODO: only impl Persist for Cluster once
-#[async_trait]
-impl Persist<fs::Dir> for Cluster<BlockChain<Library>> {
-    type Txn = Txn;
-    type Schema = Link;
-
-    async fn create(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
-        let self_link = txn.link(link.path().clone());
-
-        BlockChain::create(txn, (), store)
-            .map_ok(|state| Self::with_state(self_link, link, state))
-            .await
-    }
-
-    async fn load(txn: &Txn, link: Link, store: fs::Store) -> TCResult<Self> {
-        let self_link = txn.link(link.path().clone());
-
-        BlockChain::load(txn, (), store)
-            .map_ok(|state| Self::with_state(self_link, link, state))
-            .await
-    }
-
-    fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
-        BlockChain::dir(&self.state)
+        Persist::dir(&self.state)
     }
 }
 
@@ -620,14 +754,18 @@ impl<T> Transact for Cluster<T>
 where
     T: Transact + Send + Sync,
 {
-    type Commit = TxnLockCommitGuard<HashSet<Link>>;
+    type Commit = Arc<BTreeSet<Link>>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("commit {}", self);
 
-        let guard = self.replicas.commit(txn_id).await;
+        let replicas = self.replicas.commit(txn_id).await;
+        trace!("committed replica set");
+
         self.state.commit(txn_id).await;
-        guard
+        trace!("committed cluster state");
+
+        replicas
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -687,14 +825,15 @@ impl Replica for Legacy {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        let replication = self
-            .chains
-            .iter()
-            .map(|(name, chain)| chain.replicate(txn, source.clone().append(name.clone())));
+        let requests = FuturesUnordered::new();
 
-        try_join_all(replication).await?;
+        for (name, chain) in &self.chains {
+            let source = source.clone().append(name.clone());
+            let txn = txn.subcontext(name.clone()).await?;
+            requests.push(async move { chain.replicate(&txn, source).await });
+        }
 
-        Ok(())
+        requests.try_fold((), |(), ()| future::ready(Ok(()))).await
     }
 }
 

@@ -2,36 +2,34 @@
 
 use std::fmt;
 
-use async_hash::hash_try_stream;
+use async_hash::{hash_try_stream, Hash};
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
-use sha2::digest::Output;
+use sha2::digest::{Digest, Output};
 use sha2::Sha256;
 
 use tc_btree::{BTreeInstance, BTreeView, Node, NodeId};
 use tc_error::*;
-use tc_table::{TableStream, TableView};
+use tc_table::{TableInstance, TableStream, TableView};
 #[cfg(feature = "tensor")]
 use tc_tensor::{Array, TensorView};
-use tc_transact::fs::CopyFrom;
-use tc_transact::{IntoView, Transaction};
-use tcgeneric::{path_label, Id, Instance, NativeClass, PathLabel};
+use tc_transact::{AsyncHash, IntoView, Transaction};
+use tcgeneric::{path_label, Instance, NativeClass, PathLabel};
 
 use crate::fs;
 use crate::txn::Txn;
 
 pub use tc_btree::BTreeType;
 pub use tc_table::TableType;
+#[cfg(feature = "tensor")]
+pub use tc_tensor::{DenseAccess, SparseAccess, TensorType};
 
-pub use base::{CollectionBase, CollectionBaseCommitGuard, CollectionVisitor};
+pub use base::{CollectionBase, CollectionVisitor};
 pub use schema::{CollectionSchema, CollectionType};
 
 mod base;
 mod schema;
-
-#[cfg(feature = "tensor")]
-pub use tc_tensor::{DenseAccess, SparseAccess, TensorType};
 
 pub type BTree = tc_btree::BTree<fs::File<NodeId, Node>, fs::Dir, Txn>;
 pub type BTreeFile = tc_btree::BTreeFile<fs::File<NodeId, Node>, fs::Dir, Txn>;
@@ -85,47 +83,27 @@ impl Instance for Collection {
 }
 
 impl Collection {
-    pub async fn copy_from(
-        txn: &Txn,
-        container: &fs::Dir,
-        name: Id,
-        source: Collection,
-    ) -> TCResult<Collection> {
-        let store = container.create_store(*txn.id(), name).await?;
-
-        match source {
-            Collection::BTree(source) => {
-                BTreeFile::copy_from(txn, store, source)
-                    .map_ok(BTree::from)
-                    .map_ok(Collection::BTree)
-                    .await
-            }
-            Collection::Table(source) => {
-                TableIndex::copy_from(txn, store, source)
-                    .map_ok(Table::from)
-                    .map_ok(Collection::Table)
-                    .await
-            }
+    fn schema(&self) -> CollectionSchema {
+        match self {
+            Self::BTree(btree) => CollectionSchema::BTree(btree.schema().clone()),
+            Self::Table(table) => CollectionSchema::Table(table.schema()),
             #[cfg(feature = "tensor")]
-            Collection::Tensor(tensor) => match tensor {
-                Tensor::Dense(dense) => {
-                    DenseTensor::copy_from(txn, store, dense)
-                        .map_ok(Tensor::from)
-                        .map_ok(Collection::Tensor)
-                        .await
-                }
-                Tensor::Sparse(sparse) => {
-                    SparseTensor::copy_from(txn, store, sparse)
-                        .map_ok(Tensor::from)
-                        .map_ok(Collection::Tensor)
-                        .await
-                }
+            Self::Tensor(tensor) => match tensor {
+                Tensor::Dense(dense) => CollectionSchema::Dense(dense.schema()),
+                Tensor::Sparse(sparse) => CollectionSchema::Sparse(sparse.schema()),
             },
         }
     }
+}
 
-    pub async fn hash(self, txn: Txn) -> TCResult<Output<Sha256>> {
-        match self {
+#[async_trait]
+impl AsyncHash<fs::Dir> for Collection {
+    type Txn = Txn;
+
+    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+        let schema_hash = self.schema().hash();
+
+        let contents_hash = match self {
             Self::BTree(btree) => {
                 let keys = btree.keys(*txn.id()).await?;
                 hash_try_stream::<Sha256, _, _, _>(keys).await
@@ -137,15 +115,20 @@ impl Collection {
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => match tensor {
                 tc_tensor::Tensor::Dense(dense) => {
-                    let elements = dense.into_inner().value_stream(txn).await?;
+                    let elements = dense.into_inner().value_stream(txn.clone()).await?;
                     hash_try_stream::<Sha256, _, _, _>(elements).await
                 }
                 tc_tensor::Tensor::Sparse(sparse) => {
-                    let filled = sparse.into_inner().filled(txn).await?;
+                    let filled = sparse.into_inner().filled(txn.clone()).await?;
                     hash_try_stream::<Sha256, _, _, _>(filled).await
                 }
             },
-        }
+        }?;
+
+        let mut hasher = Sha256::new();
+        hasher.update(schema_hash);
+        hasher.update(contents_hash);
+        Ok(hasher.finalize())
     }
 }
 

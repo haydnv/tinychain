@@ -3,13 +3,13 @@ import tinychain as tc
 
 from ..process import start_host
 
-NAME = "test_versioning"
+NAME = "test_library"
 LEAD = "http://127.0.0.1:8702"
 DIR = tc.URI(LEAD + "/lib/test")
 
 
 class TestLibV0(tc.app.Library):
-    HOST = tc.URI("http://127.0.0.1:8702")
+    HOST = tc.URI(LEAD)
     NS = tc.URI("/test")
     NAME = "libhello"
     VERSION = tc.Version("0.0.0")
@@ -34,15 +34,18 @@ class TestLibV1(tc.app.Library):
 
 class LibraryVersionTests(unittest.TestCase):
     def testCreateLib(self):
-        hosts = [
-            start_host(NAME, [], http_port=8702, replicate=LEAD),
-            start_host(NAME, [], http_port=8703, replicate=LEAD),
-        ]
+        hosts = []
+
+        hosts.append(start_host(NAME, [], http_port=8702, replicate=LEAD))
+
+        hosts.append(start_host(NAME, [], http_port=8703, replicate=LEAD))
+
+        for i in range(len(hosts)):
+            print()
+            print(f"host {i} replicas", hosts[i].get("/lib/replicas"))
+            print()
 
         hosts[0].put("/lib", "test", DIR)
-
-        print()
-        print()
 
         for i in range(len(hosts)):
             print()
@@ -72,6 +75,8 @@ class LibraryVersionTests(unittest.TestCase):
         print("host stopped")
         print()
 
+        hosts[1].update(TestLibV1())
+
         hosts[2].start()
 
         print()
@@ -81,9 +86,12 @@ class LibraryVersionTests(unittest.TestCase):
         for host in hosts:
             self.assertEqual(host.get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
 
-        hosts[1].update(TestLibV1())
-
         hosts.append(start_host(NAME, [], http_port=8706, replicate=LEAD))
 
         for host in hosts:
             self.assertEqual(host.get("/lib/test/libhello/0.0.1/hello", "Again"), "Hello, Again!")
+
+
+def printlines(n):
+    for _ in range(n):
+        print()

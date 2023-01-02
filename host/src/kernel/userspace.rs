@@ -4,14 +4,14 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures::future::Future;
-use log::debug;
+use log::{debug, info, trace};
 
-use crate::chain::BlockChain;
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath};
 
+use crate::chain::BlockChain;
 use crate::cluster::{Cluster, Dir, DirEntry, Legacy, Replica};
 use crate::object::InstanceExt;
 use crate::route::{Public, Route};
@@ -26,11 +26,17 @@ pub type Class = Cluster<Dir<crate::cluster::Class>>;
 /// The type of the library directory
 pub type Library = Cluster<Dir<crate::cluster::Library>>;
 
+/// The type of the service directory
+pub type Service = Cluster<Dir<crate::cluster::Service>>;
+
 /// The class directory path
 pub const CLASS: PathLabel = path_label(&["class"]);
 
 /// The library directory path
 pub const LIB: PathLabel = path_label(&["lib"]);
+
+/// The service directory path
+pub const SERVICE: PathLabel = path_label(&["service"]);
 
 /// The host userspace, responsible for dispatching requests to stateful services
 pub struct UserSpace {
@@ -38,11 +44,12 @@ pub struct UserSpace {
     hypothetical: Hypothetical,
     class: Class,
     library: Library,
+    service: Service,
 }
 
 impl UserSpace {
     /// Construct a new `Kernel` to host the given [`Cluster`]s.
-    pub fn new<I>(class: Class, library: Library, clusters: I) -> Self
+    pub fn new<I>(class: Class, library: Library, service: Service, clusters: I) -> Self
     where
         I: IntoIterator<Item = InstanceExt<Cluster<Legacy>>>,
     {
@@ -51,6 +58,7 @@ impl UserSpace {
             hypothetical: Hypothetical::new(),
             class,
             library,
+            service,
         }
     }
 
@@ -59,7 +67,8 @@ impl UserSpace {
             return false;
         }
 
-        &path[..1] == &CLASS[..]
+        &path[..1] == &SERVICE[..]
+            || &path[..1] == &CLASS[..]
             || &path[..1] == &LIB[..]
             || &path[..] == &hypothetical::PATH[..]
             || self.hosted.contains(&path[0])
@@ -73,7 +82,7 @@ impl UserSpace {
 }
 
 #[async_trait]
-impl<T: Transact + Clone + Send + Sync> Dispatch for Cluster<Dir<T>>
+impl<T: Transact + Clone + Send + Sync + 'static> Dispatch for Cluster<Dir<T>>
 where
     Cluster<BlockChain<T>>: Route,
     BlockChain<T>: Replica,
@@ -89,6 +98,11 @@ where
     async fn put(&self, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
         debug!("PUT {}: {} <- {}", TCPath::from(path), key, value);
         let (suffix, cluster) = self.lookup(*txn.id(), path)?;
+        debug!(
+            "cluster is {}, endpoint is {}",
+            cluster,
+            TCPath::from(suffix)
+        );
 
         if suffix.is_empty() && key.is_none() {
             // it's a synchronization message
@@ -148,6 +162,8 @@ impl Dispatch for UserSpace {
             Dispatch::get(&self.library, txn, &path[1..], key).await
         } else if &path[..1] == &CLASS[..] {
             Dispatch::get(&self.class, txn, &path[1..], key).await
+        } else if &path[..1] == &SERVICE[..] {
+            Dispatch::get(&self.service, txn, &path[1..], key).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -209,6 +225,8 @@ impl Dispatch for UserSpace {
             Dispatch::put(&self.library, txn, &path[1..], key, value).await
         } else if &path[..1] == &CLASS[..] {
             Dispatch::put(&self.class, txn, &path[1..], key, value).await
+        } else if &path[..1] == &SERVICE[..] {
+            Dispatch::put(&self.service, txn, &path[1..], key, value).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -242,6 +260,8 @@ impl Dispatch for UserSpace {
             Dispatch::post(&self.library, txn, &path[1..], data).await
         } else if &path[..1] == &CLASS[..] {
             Dispatch::post(&self.class, txn, &path[1..], data).await
+        } else if &path[..1] == &SERVICE[..] {
+            Dispatch::post(&self.service, txn, &path[1..], data).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -309,6 +329,8 @@ impl Dispatch for UserSpace {
             Dispatch::delete(&self.library, txn, &path[1..], key).await
         } else if &path[..1] == &CLASS[..] {
             Dispatch::delete(&self.library, txn, &path[1..], key).await
+        } else if &path[..1] == &SERVICE[..] {
+            Dispatch::delete(&self.service, txn, &path[1..], key).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -490,21 +512,29 @@ fn execute_legacy<
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> {
     Box::pin(async move {
         if let Some(owner) = txn.owner() {
+            let self_link = txn.link(cluster.link().path().clone());
             if owner.path() == cluster.path() {
                 debug!("{} owns this transaction, no need to notify", cluster);
             } else if txn.is_leader(cluster.path()) {
-                let self_link = txn.link(cluster.link().path().clone());
-                txn.put(owner.clone(), Value::default(), self_link.into())
+                txn.put(owner.clone(), Value::default(), self_link.clone().into())
                     .await?;
             } else {
-                let self_link = txn.link(cluster.link().path().clone());
                 debug!(
                     "{} is not leading this transaction, no need to notify owner",
                     self_link
                 );
             }
 
-            handler(txn.clone(), cluster).await
+            trace!("execute write for owner {}", owner);
+            let result = handler(txn.clone(), cluster).await;
+
+            if result.is_ok() {
+                info!("replica at {} succeeded", self_link);
+            } else {
+                info!("replica at {} failed", self_link);
+            }
+
+            result
         } else {
             // Claim and execute the transaction
             let txn = cluster.claim(&txn).await?;
@@ -514,6 +544,7 @@ fn execute_legacy<
                 Ok(_) => {
                     debug!("commit {}", cluster);
                     cluster.distribute_commit(&txn).await?;
+                    debug!("committed {}", cluster);
                 }
                 Err(cause) => {
                     debug!("rollback {} due to {}", cluster, cause);

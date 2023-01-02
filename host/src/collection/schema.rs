@@ -1,9 +1,12 @@
 use std::convert::TryFrom;
 use std::fmt;
 
+use async_hash::Hash;
 use destream::en;
 use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
+use sha2::digest::Output;
+use sha2::Sha256;
 
 use tc_btree::BTreeType;
 use tc_error::*;
@@ -149,6 +152,12 @@ impl CollectionSchema {
             },
             other => Err(TCError::bad_request("invalid Collection schema", other)),
         }
+    }
+}
+
+impl Hash<Sha256> for CollectionSchema {
+    fn hash(self) -> Output<Sha256> {
+        async_hash::Hash::<Sha256>::hash(Scalar::cast_from(self))
     }
 }
 

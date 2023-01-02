@@ -17,7 +17,7 @@ use sha2::digest::{Digest, Output};
 use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::Transaction;
+use tc_transact::{AsyncHash, Transaction};
 use tc_value::{Float, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
@@ -200,52 +200,6 @@ pub enum State {
 }
 
 impl State {
-    /// Compute the SHA256 hash of this `State`.
-    pub fn hash<'a>(self, txn: Txn) -> TCBoxTryFuture<'a, Output<Sha256>> {
-        Box::pin(async move {
-            match self {
-                Self::Collection(collection) => collection.hash(txn).await,
-                Self::Chain(_chain) => Err(TCError::not_implemented("Chain hash")),
-                Self::Closure(closure) => closure.hash(txn).await,
-                Self::Map(map) => {
-                    let mut hashes = stream::iter(map)
-                        .map(|(id, state)| {
-                            state
-                                .hash(txn.clone())
-                                .map_ok(|hash| (Hash::<Sha256>::hash(id), hash))
-                        })
-                        .buffered(num_cpus::get())
-                        .map_ok(|(id, state)| {
-                            let mut inner_hasher = Sha256::default();
-                            inner_hasher.update(&id);
-                            inner_hasher.update(&state);
-                            inner_hasher.finalize()
-                        });
-
-                    let mut hasher = Sha256::default();
-                    while let Some(hash) = hashes.try_next().await? {
-                        hasher.update(&hash);
-                    }
-                    Ok(hasher.finalize())
-                }
-                Self::Object(object) => object.hash(txn).await,
-                Self::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),
-                Self::Stream(stream) => stream.hash(txn).await,
-                Self::Tuple(tuple) => {
-                    let mut hashes = stream::iter(tuple)
-                        .map(|state| state.hash(txn.clone()))
-                        .buffered(num_cpus::get());
-
-                    let mut hasher = Sha256::default();
-                    while let Some(hash) = hashes.try_next().await? {
-                        hasher.update(&hash);
-                    }
-                    Ok(hasher.finalize())
-                }
-            }
-        })
-    }
-
     /// Return true if this `State` is an empty [`Tuple`] or [`Map`], default [`Link`], or `Value::None`
     pub fn is_none(&self) -> bool {
         match self {
@@ -302,6 +256,8 @@ impl State {
         }
     }
 
+    /// Return this `State` as a [`Map`] of [`State`]s, or an error if this is not possible.
+    // TODO: allow specifying an output type other than `State`
     pub fn try_into_tuple<Err: Fn(State) -> TCError>(self, err: Err) -> TCResult<Tuple<State>> {
         match self {
             State::Tuple(tuple) => Ok(tuple),
@@ -472,6 +428,57 @@ impl Instance for State {
     }
 }
 
+#[async_trait]
+impl AsyncHash<crate::fs::Dir> for State {
+    type Txn = Txn;
+
+    async fn hash(self, txn: &Txn) -> TCResult<Output<Sha256>> {
+        match self {
+            Self::Collection(collection) => collection.hash(txn).await,
+            Self::Chain(chain) => chain.hash(txn).await,
+            Self::Closure(closure) => closure.hash(txn).await,
+            Self::Map(map) => {
+                let mut hashes = stream::iter(map)
+                    .map(|(id, state)| {
+                        state
+                            .hash(txn)
+                            .map_ok(|hash| (Hash::<Sha256>::hash(id), hash))
+                    })
+                    .buffered(num_cpus::get())
+                    .map_ok(|(id, state)| {
+                        let mut inner_hasher = Sha256::default();
+                        inner_hasher.update(&id);
+                        inner_hasher.update(&state);
+                        inner_hasher.finalize()
+                    });
+
+                let mut hasher = Sha256::default();
+                while let Some(hash) = hashes.try_next().await? {
+                    hasher.update(&hash);
+                }
+
+                Ok(hasher.finalize())
+            }
+            Self::Object(object) => object.hash(txn).await,
+            Self::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),
+            Self::Stream(_stream) => Err(TCError::unsupported(
+                "cannot hash a Stream; hash its source instead",
+            )),
+            Self::Tuple(tuple) => {
+                let mut hashes = stream::iter(tuple)
+                    .map(|state| state.hash(txn))
+                    .buffered(num_cpus::get());
+
+                let mut hasher = Sha256::default();
+                while let Some(hash) = hashes.try_next().await? {
+                    hasher.update(&hash);
+                }
+                Ok(hasher.finalize())
+            }
+        }
+    }
+}
+
 impl From<()> for State {
     fn from(_: ()) -> State {
         State::Scalar(Scalar::Value(Value::None))
@@ -505,6 +512,12 @@ impl From<Collection> for State {
 impl From<CollectionBase> for State {
     fn from(collection: CollectionBase) -> Self {
         Self::Collection(collection.into())
+    }
+}
+
+impl From<Id> for State {
+    fn from(id: Id) -> Self {
+        Self::Scalar(id.into())
     }
 }
 
@@ -766,6 +779,23 @@ impl TryFrom<State> for Scalar {
                 .map(Scalar::Tuple),
 
             other => Err(TCError::bad_request("expected a Scalar, not", other)),
+        }
+    }
+}
+
+impl TryFrom<State> for Map<Scalar> {
+    type Error = TCError;
+
+    fn try_from(state: State) -> TCResult<Map<Scalar>> {
+        match state {
+            State::Map(map) => map
+                .into_iter()
+                .map(|(id, state)| Scalar::try_from(state).map(|scalar| (id, scalar)))
+                .collect(),
+
+            State::Scalar(Scalar::Map(map)) => Ok(map),
+
+            other => Err(TCError::bad_request("expected a Map but found", other)),
         }
     }
 }
@@ -1306,9 +1336,9 @@ impl<'a> de::Visitor for StateVisitor {
                 }
             }
 
-            debug!("deserialize Op with subject {}", key);
             if let Ok(subject) = reference::Subject::from_str(&key) {
                 let params = access.next_value(()).await?;
+                debug!("deserialize Scalar from key {} and value {}", key, params);
                 return ScalarVisitor::visit_subject(subject, params).map(State::Scalar);
             }
 

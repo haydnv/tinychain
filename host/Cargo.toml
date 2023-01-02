@@ -2,7 +2,7 @@
 name = "tinychain"
 version = "0.12.0"
 authors = ["haydn@tinychain.net"]
-edition = "2018"
+edition = "2021"
 description = "A next-gen database + application server"
 license = "Apache-2.0"
 readme = "../README.md"
@@ -30,7 +30,7 @@ clap = { version = "4.0", features = ["derive"] }
 destream = "0.5"
 destream_json = { version = "0.9", features = ["tokio-io"] }
 env_logger = "0.9"
-freqfs = "~0.5.2"
+freqfs = "~0.5.5"
 futures = "0.3"
 hex = "0.4"
 http = "0.2"
@@ -52,7 +52,7 @@ tc-transact = { path = "transact", features = ["tensor"] }
 tc-value = { path = "value" }
 tc-table = { path = "table" }
 tcgeneric = { path = "generic" }
-tokio = { version = "1.21", features = ["rt-multi-thread", "signal"] }
+tokio = { version = "1.23", features = ["rt-multi-thread", "signal"] }
 tokio-util = { version = "0.7", features = ["io"] }
 uuid = "1.1"
 url = { version = "2.2" }

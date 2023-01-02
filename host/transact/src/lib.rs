@@ -4,6 +4,8 @@
 
 use async_trait::async_trait;
 use destream::en;
+use sha2::digest::Output;
+use sha2::Sha256;
 
 use tc_error::*;
 use tcgeneric::Id;
@@ -15,10 +17,23 @@ pub mod lock;
 
 pub use id::{TxnId, MIN_ID};
 
-/// Trait to define a view which can be encoded with [`en::IntoStream`].
+/// Defines a method to compute the hash of this state as of a given [`TxnId`]
+#[async_trait]
+pub trait AsyncHash<D: fs::Dir> {
+    /// The type of [`Transaction`] which this state supports
+    type Txn: Transaction<D>;
+
+    /// Compute the hash of this state as of a given [`TxnId`]
+    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>>;
+}
+
+/// Access a view which can be encoded with [`en::IntoStream`].
 #[async_trait]
 pub trait IntoView<'en, D: fs::Dir> {
+    /// The type of [`Transaction`] which this state supports
     type Txn: Transaction<D>;
+
+    /// The type of encodable view returned by `into_view`
     type View: en::IntoStream<'en> + Sized + 'en;
 
     /// Return a `View` which can be encoded with [`en::IntoStream`].
@@ -26,6 +41,7 @@ pub trait IntoView<'en, D: fs::Dir> {
 }
 
 /// Transaction lifecycle callbacks
+// TODO: add a `rollback` method separate from `finalize`
 #[async_trait]
 pub trait Transact {
     /// A guard which blocks concurrent commits

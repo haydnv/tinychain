@@ -2,22 +2,26 @@ use std::fmt;
 
 use async_trait::async_trait;
 use destream::de;
-use futures::future::{FutureExt, TryFutureExt};
+use futures::future::TryFutureExt;
 use log::debug;
 use safecast::TryCastFrom;
+use sha2::digest::Output;
+use sha2::Sha256;
 
+use tc_btree::BTreeInstance;
 use tc_error::*;
+use tc_table::TableInstance;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorPersist;
 use tc_transact::fs::{CopyFrom, Dir, Persist, Restore};
-use tc_transact::{IntoView, Transact, Transaction};
+use tc_transact::{AsyncHash, IntoView, Transact, Transaction};
 use tcgeneric::{Instance, NativeClass, TCPathBuf};
 
 use crate::fs;
 use crate::transact::TxnId;
 use crate::txn::Txn;
 
-use super::schema::{CollectionSchema, CollectionType};
+use super::schema::{CollectionSchema as Schema, CollectionType};
 use super::{BTree, BTreeFile, Collection, CollectionView, Table, TableIndex};
 #[cfg(feature = "tensor")]
 use super::{DenseTensor, DenseTensorFile, SparseTable, SparseTensor, Tensor, TensorType};
@@ -31,6 +35,19 @@ pub enum CollectionBase {
     Dense(DenseTensor<DenseTensorFile>),
     #[cfg(feature = "tensor")]
     Sparse(SparseTensor<SparseTable>),
+}
+
+impl CollectionBase {
+    pub fn schema(&self) -> Schema {
+        match self {
+            Self::BTree(btree) => Schema::BTree(btree.schema().clone()),
+            Self::Table(table) => Schema::Table(table.schema()),
+            #[cfg(feature = "tensor")]
+            Self::Dense(dense) => Schema::Dense(dense.schema()),
+            #[cfg(feature = "tensor")]
+            Self::Sparse(sparse) => Schema::Sparse(sparse.schema()),
+        }
+    }
 }
 
 impl Instance for CollectionBase {
@@ -49,60 +66,52 @@ impl Instance for CollectionBase {
 }
 
 #[async_trait]
+impl AsyncHash<fs::Dir> for CollectionBase {
+    type Txn = Txn;
+
+    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+        Collection::from(self).hash(txn).await
+    }
+}
+
 impl Persist<fs::Dir> for CollectionBase {
     type Txn = Txn;
-    type Schema = CollectionSchema;
+    type Schema = Schema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         match schema {
-            CollectionSchema::BTree(btree_schema) => {
-                BTreeFile::create(txn, btree_schema, store)
-                    .map_ok(Self::BTree)
-                    .await
+            Schema::BTree(btree_schema) => {
+                BTreeFile::create(txn_id, btree_schema, store).map(Self::BTree)
             }
-            CollectionSchema::Table(table_schema) => {
-                TableIndex::create(txn, table_schema, store)
-                    .map_ok(Self::Table)
-                    .await
+            Schema::Table(table_schema) => {
+                TableIndex::create(txn_id, table_schema, store).map(Self::Table)
             }
             #[cfg(feature = "tensor")]
-            CollectionSchema::Dense(tensor_schema) => {
-                DenseTensor::create(txn, tensor_schema, store)
-                    .map_ok(Self::Dense)
-                    .await
+            Schema::Dense(tensor_schema) => {
+                DenseTensor::create(txn_id, tensor_schema, store).map(Self::Dense)
             }
             #[cfg(feature = "tensor")]
-            CollectionSchema::Sparse(tensor_schema) => {
-                SparseTensor::create(txn, tensor_schema, store)
-                    .map_ok(Self::Sparse)
-                    .await
+            Schema::Sparse(tensor_schema) => {
+                SparseTensor::create(txn_id, tensor_schema, store).map(Self::Sparse)
             }
         }
     }
 
-    async fn load(txn: &Self::Txn, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         match schema {
-            CollectionSchema::BTree(btree_schema) => {
-                BTreeFile::load(txn, btree_schema, store)
-                    .map_ok(Self::BTree)
-                    .await
+            Schema::BTree(btree_schema) => {
+                BTreeFile::load(txn_id, btree_schema, store).map(Self::BTree)
             }
-            CollectionSchema::Table(table_schema) => {
-                TableIndex::load(txn, table_schema, store)
-                    .map_ok(Self::Table)
-                    .await
+            Schema::Table(table_schema) => {
+                TableIndex::load(txn_id, table_schema, store).map(Self::Table)
             }
             #[cfg(feature = "tensor")]
-            CollectionSchema::Dense(tensor_schema) => {
-                DenseTensor::load(txn, tensor_schema, store)
-                    .map_ok(Self::Dense)
-                    .await
+            Schema::Dense(tensor_schema) => {
+                DenseTensor::load(txn_id, tensor_schema, store).map(Self::Dense)
             }
             #[cfg(feature = "tensor")]
-            CollectionSchema::Sparse(tensor_schema) => {
-                SparseTensor::load(txn, tensor_schema, store)
-                    .map_ok(Self::Sparse)
-                    .await
+            Schema::Sparse(tensor_schema) => {
+                SparseTensor::load(txn_id, tensor_schema, store).map(Self::Sparse)
             }
         }
     }
@@ -168,47 +177,18 @@ impl Restore<fs::Dir> for CollectionBase {
     }
 }
 
-pub enum CollectionBaseCommitGuard {
-    BTree(<BTreeFile as Transact>::Commit),
-    Table(<TableIndex as Transact>::Commit),
-    #[cfg(feature = "tensor")]
-    Dense(<DenseTensorFile as Transact>::Commit),
-    #[cfg(feature = "tensor")]
-    Sparse(<SparseTable as Transact>::Commit),
-}
-
 #[async_trait]
 impl Transact for CollectionBase {
-    type Commit = CollectionBaseCommitGuard;
+    type Commit = ();
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         match self {
-            Self::BTree(btree) => {
-                btree
-                    .commit(txn_id)
-                    .map(CollectionBaseCommitGuard::BTree)
-                    .await
-            }
-            Self::Table(table) => {
-                table
-                    .commit(txn_id)
-                    .map(CollectionBaseCommitGuard::Table)
-                    .await
-            }
+            Self::BTree(btree) => btree.commit(txn_id).await,
+            Self::Table(table) => table.commit(txn_id).await,
             #[cfg(feature = "tensor")]
-            Self::Dense(dense) => {
-                dense
-                    .commit(txn_id)
-                    .map(CollectionBaseCommitGuard::Dense)
-                    .await
-            }
+            Self::Dense(dense) => dense.commit(txn_id).await,
             #[cfg(feature = "tensor")]
-            Self::Sparse(sparse) => {
-                sparse
-                    .commit(txn_id)
-                    .map(CollectionBaseCommitGuard::Sparse)
-                    .await
-            }
+            Self::Sparse(sparse) => sparse.commit(txn_id).await,
         }
     }
 

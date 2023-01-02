@@ -1,7 +1,9 @@
 use futures::TryFutureExt;
 use log::debug;
 use safecast::TryCastInto;
+
 use tc_error::*;
+use tc_transact::AsyncHash;
 use tc_value::{Link, Number};
 use tcgeneric::{label, Id, Instance, Label, NativeClass, PathSegment};
 
@@ -62,7 +64,7 @@ impl<'a> Handler<'a> for HashHandler {
                 key.expect_none()?;
 
                 self.state
-                    .hash(txn.clone())
+                    .hash(txn)
                     .map_ok(Id::from_hash)
                     .map_ok(Value::from)
                     .map_ok(State::from)

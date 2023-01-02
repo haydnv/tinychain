@@ -40,6 +40,21 @@ pub const fn path_label(segments: &'static [&'static str]) -> PathLabel {
     PathLabel { segments }
 }
 
+impl From<PathLabel> for Id {
+    fn from(path: PathLabel) -> Self {
+        Label::from(path).into()
+    }
+}
+
+impl From<PathLabel> for Label {
+    fn from(path: PathLabel) -> Self {
+        match path.segments {
+            [id] => label(id),
+            _ => panic!("not an Id: {}", TCPathBuf::from(path)),
+        }
+    }
+}
+
 impl From<PathLabel> for TCPathBuf {
     fn from(path: PathLabel) -> Self {
         let segments = path

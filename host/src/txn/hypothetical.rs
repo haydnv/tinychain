@@ -1,14 +1,16 @@
+use std::collections::btree_map::{self, BTreeMap};
 use std::collections::HashSet;
 use std::fmt;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::error;
 use safecast::{TryCastFrom, TryCastInto};
+use tokio::sync::RwLock;
 
 use tc_error::*;
-use tc_transact::lock::TxnLock;
-use tc_transact::{Transact, Transaction};
+use tc_transact::{Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Id, Map, PathLabel};
 
@@ -24,14 +26,14 @@ pub const PATH: PathLabel = path_label(&["transact", "hypothetical"]);
 #[derive(Clone)]
 pub struct Hypothetical {
     actor: Actor,
-    participants: TxnLock<HashSet<Link>>,
+    participants: Arc<RwLock<BTreeMap<TxnId, HashSet<Link>>>>,
 }
 
 impl Hypothetical {
     pub fn new() -> Self {
         Self {
             actor: Actor::new(Link::default().into()),
-            participants: TxnLock::new("hypothetical transaction participants", HashSet::new()),
+            participants: Arc::new(RwLock::new(BTreeMap::new())),
         }
     }
 
@@ -55,21 +57,22 @@ impl Hypothetical {
         };
 
         {
-            let mut participants = self.participants.write(*txn.id()).await?;
-            let mut rollbacks: FuturesUnordered<_> = participants
-                .drain()
-                .map(|link| txn.delete(link, Value::default()))
-                .collect();
+            let mut participants = self.participants.write().await;
+            if let Some(participants) = participants.remove(txn.id()) {
+                let mut rollbacks: FuturesUnordered<_> = participants
+                    .iter()
+                    .cloned()
+                    .map(|link| txn.delete(link, Value::default()))
+                    .collect();
 
-            while let Some(result) = rollbacks.next().await {
-                if let Err(cause) = result {
-                    error!("error finalizing hypothetical transaction: {}", cause);
+                while let Some(result) = rollbacks.next().await {
+                    if let Err(cause) = result {
+                        error!("error finalizing hypothetical transaction: {}", cause);
+                    }
                 }
             }
         }
 
-        // always bump the last commit ID in order to provide correct conflict error behavior
-        self.participants.commit(txn.id()).await;
         result
     }
 }
@@ -107,8 +110,16 @@ impl<'a> Handler<'a> for &'a Hypothetical {
                     TCError::bad_request("invalid transaction participant link", v)
                 })?;
 
-                let mut participants = self.participants.write(*txn.id()).await?;
-                participants.insert(participant);
+                let mut participants = self.participants.write().await;
+                match participants.entry(*txn.id()) {
+                    btree_map::Entry::Vacant(entry) => {
+                        entry.insert(HashSet::new()).insert(participant);
+                    }
+                    btree_map::Entry::Occupied(mut entry) => {
+                        entry.get_mut().insert(participant);
+                    }
+                }
+
                 Ok(())
             })
         }))
@@ -118,10 +129,12 @@ impl<'a> Handler<'a> for &'a Hypothetical {
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, key| {
+        Some(Box::new(move |txn, key| {
             Box::pin(async move {
                 if key.is_none() {
-                    Ok(self.participants.finalize(txn.id()).await)
+                    let mut participants = self.participants.write().await;
+                    participants.remove(txn.id());
+                    Ok(())
                 } else {
                     Err(TCError::not_found(key))
                 }

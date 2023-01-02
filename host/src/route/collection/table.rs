@@ -48,7 +48,7 @@ impl<'a> Handler<'a> for CopyHandler {
                 let txn_id = *txn.id();
 
                 let store = txn.context().create_store_unique(*txn.id()).await?;
-                let table = TableIndex::create(txn, schema, store).await?;
+                let table = TableIndex::create(txn_id, schema, store)?;
 
                 let rows = source.into_stream(txn.clone()).await?;
                 rows.map(|r| {
@@ -95,10 +95,9 @@ impl<'a> Handler<'a> for CreateHandler {
                 })?;
 
                 let store = txn.context().create_store_unique(*txn.id()).await?;
-                TableIndex::create(txn, schema, store)
-                    .map_ok(Collection::from)
-                    .map_ok(State::from)
-                    .await
+                TableIndex::create(*txn.id(), schema, store)
+                    .map(Collection::from)
+                    .map(State::from)
             })
         }))
     }

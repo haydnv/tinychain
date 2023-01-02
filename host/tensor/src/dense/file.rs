@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 use std::fmt;
-use std::iter::{self, FromIterator};
+use std::iter::FromIterator;
 use std::marker::PhantomData;
 use std::ops::{Add, Deref, Mul};
 
@@ -59,12 +59,12 @@ where
     T: Transaction<D>,
 {
     /// Construct a new `BlockListFile` with the given [`Shape`], filled with the given `value`.
-    pub async fn constant(file: FD, txn_id: TxnId, shape: Shape, value: Number) -> TCResult<Self> {
+    pub fn constant(file: FD, txn_id: TxnId, shape: Shape, value: Number) -> TCResult<Self> {
         debug!("BlockListFile::constant {} {}", shape, value);
 
         let value_clone = value.clone();
         let generator = |length| Array::constant(value_clone.clone(), length);
-        Self::from_blocks_generator(file, txn_id, shape, value.class(), generator).await
+        Self::from_blocks_generator(file, txn_id, shape, value.class(), generator)
     }
 
     /// Construct a new `BlockListFile` with the given [`Shape`], with a random normal distribution.
@@ -84,11 +84,11 @@ where
             Array::random_normal(dtype, length).mul(&std).add(&mean)
         };
 
-        Self::from_blocks_generator(file, txn_id, shape, dtype.into(), generator).await
+        Self::from_blocks_generator(file, txn_id, shape, dtype.into(), generator)
     }
 
     /// Construct a new `BlockListFile` with the given [`Shape`], with a random normal distribution.
-    pub async fn random_uniform(
+    pub fn random_uniform(
         file: FD,
         txn_id: TxnId,
         shape: Shape,
@@ -96,10 +96,10 @@ where
     ) -> TCResult<Self> {
         debug!("BlockListFile::random_normal {}", shape);
         let generator = |length| Array::random_uniform(dtype, length);
-        Self::from_blocks_generator(file, txn_id, shape, dtype.into(), generator).await
+        Self::from_blocks_generator(file, txn_id, shape, dtype.into(), generator)
     }
 
-    async fn from_blocks_generator<G>(
+    fn from_blocks_generator<G>(
         file: FD,
         txn_id: TxnId,
         shape: Shape,
@@ -109,17 +109,26 @@ where
     where
         G: Fn(usize) -> Array + Send + Copy,
     {
+        let mut contents = file.try_write(txn_id)?;
+
         let size = shape.size();
-
-        let blocks = (0..(size / PER_BLOCK as u64)).map(move |_| Ok(generator(PER_BLOCK)));
-
+        let num_blocks = size / PER_BLOCK as u64;
         let trailing_len = (size % PER_BLOCK as u64) as usize;
-        if trailing_len > 0 {
-            let blocks = blocks.chain(iter::once(Ok(generator(trailing_len))));
-            Self::from_blocks(file, txn_id, Some(shape), dtype, stream::iter(blocks)).await
-        } else {
-            Self::from_blocks(file, txn_id, Some(shape), dtype, stream::iter(blocks)).await
+        let mut blocks = (0..num_blocks).map(move |id| (id, generator(PER_BLOCK)));
+
+        while let Some((id, block)) = blocks.next() {
+            contents.try_create_block(id, block, PER_BLOCK * dtype.size())?;
         }
+
+        if trailing_len > 0 {
+            contents.try_create_block(
+                num_blocks,
+                generator(trailing_len),
+                trailing_len * dtype.size(),
+            )?;
+        }
+
+        Ok(Self::new(file, (shape, dtype).into()))
     }
 
     /// Construct a new `BlockListFile` from the given `Stream` of [`Array`] blocks.
@@ -592,7 +601,6 @@ where
     }
 }
 
-#[async_trait]
 impl<FD, FS, D, T> Persist<D> for BlockListFile<FD, FS, D, T>
 where
     FD: File<Key = u64, Block = Array, Inner = D::Inner> + TryFrom<D::Store, Error = TCError>,
@@ -604,19 +612,18 @@ where
     type Txn = T;
     type Schema = Schema;
 
-    async fn create(txn: &Self::Txn, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
         schema.validate("create dense tensor")?;
         let file = FD::try_from(store)?;
-        Self::constant(file, *txn.id(), schema.shape, schema.dtype.zero()).await
+        Self::constant(file, txn_id, schema.shape, schema.dtype.zero())
     }
 
-    async fn load(txn: &T, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
+    fn load(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self> {
         schema.validate("load dense tensor")?;
 
         let file = FD::try_from(store)?;
 
-        let txn_id = *txn.id();
-        let blocks = file.read(txn_id).await?;
+        let blocks = file.try_read(txn_id)?;
 
         for i in 0..div_ceil(schema.shape.size(), PER_BLOCK as u64) {
             if !blocks.contains(i) {

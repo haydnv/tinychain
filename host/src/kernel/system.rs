@@ -1,4 +1,4 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -70,15 +70,16 @@ impl Dispatch for System {
 
     async fn post(&self, txn: &Txn, path: &[PathSegment], data: State) -> TCResult<State> {
         if path.is_empty() {
-            if Map::try_from(data)?.is_empty() {
-                // it's a "commit" instruction for a hypothetical transaction
-                Ok(State::default())
-            } else {
-                Err(TCError::method_not_allowed(
+            match data {
+                State::Map(map) if map.is_empty() => {
+                    // it's a "commit" instruction for a hypothetical transaction
+                    Ok(State::default())
+                }
+                _ => Err(TCError::method_not_allowed(
                     OpRefType::Post,
                     self,
                     TCPath::from(path),
-                ))
+                )),
             }
         } else if StateType::from_path(path).is_some() {
             let extends = Link::from(TCPathBuf::from(path.to_vec()));
