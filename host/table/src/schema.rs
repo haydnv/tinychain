@@ -400,6 +400,12 @@ impl<'en> en::IntoStream<'en> for IndexSchema {
     }
 }
 
+impl<'en> en::ToStream<'en> for IndexSchema {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        en::IntoStream::into_stream((&self.key, &self.values), encoder)
+    }
+}
+
 impl fmt::Display for IndexSchema {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
@@ -455,6 +461,12 @@ impl de::FromStream for TableSchema {
 impl<'en> en::IntoStream<'en> for TableSchema {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         (self.primary, self.indices).into_stream(encoder)
+    }
+}
+
+impl<'en> en::ToStream<'en> for TableSchema {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        en::IntoStream::into_stream((&self.primary, &self.indices), encoder)
     }
 }
 

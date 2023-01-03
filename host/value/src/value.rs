@@ -365,6 +365,15 @@ impl<'en> en::IntoStream<'en> for ValueType {
     }
 }
 
+impl<'en> en::ToStream<'en> for ValueType {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        use en::EncodeMap;
+        let mut map = encoder.encode_map(Some(1))?;
+        map.encode_entry(self.path(), Map::<Value>::default())?;
+        map.end()
+    }
+}
+
 impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
