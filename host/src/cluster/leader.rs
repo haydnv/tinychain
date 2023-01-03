@@ -44,7 +44,7 @@ impl Leader {
         }
 
         let mut commits = FuturesUnordered::from_iter(mutated.drain().map(|dep| {
-            debug!("sending rollback message to dependency at {}", dep);
+            debug!("sending commit message to dependency at {}", dep);
             txn.post(dep.clone(), State::Map(Map::default()))
                 .map(|result| (dep, result))
         }));

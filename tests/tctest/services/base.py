@@ -22,6 +22,10 @@ class PersistenceTest(object):
     def _execute(self, chain_type):
         service = self.service(chain_type)
 
+        if not tc.URI(service).host():
+            print(f"cannot test replication of a service with no host", service)
+            return
+
         hosts = []
         for i in range(self.NUM_HOSTS):
             name = f"test_{service.NAME}_{i}"
@@ -30,8 +34,11 @@ class PersistenceTest(object):
             host = start_host(name, [], host_uri=host_uri, cache_size=self.CACHE_SIZE, replicate=tc.URI(service)[0])
             hosts.append(host)
 
+        print()
         hosts[0].put(tc.URI(tc.app.Service), str(service.NS)[1:], tc.URI(service)[:-2])
+        print()
         hosts[0].put(tc.URI(service).path()[:-2], tc.URI(service)[-2], service)
+        print()
 
         self.execute(hosts)
 

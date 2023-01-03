@@ -163,7 +163,7 @@ impl Replica for BlockChain<crate::cluster::Service> {
             }
         }
 
-        Ok(())
+        self.subject.replicate(txn, source).await
     }
 }
 

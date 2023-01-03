@@ -269,6 +269,7 @@ impl Replica for Service {
         let versions = self.versions.read(*txn.id()).await?;
         for (number, version) in versions.iter() {
             // TODO: parallelize
+            let txn = txn.subcontext(number.clone().into()).await?;
             version
                 .replicate(&txn, source.clone().append(number.clone()))
                 .await?;

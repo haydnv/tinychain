@@ -393,9 +393,7 @@ class Service(Library):
             elif isinstance(attr, Library):
                 continue
 
-            if hasattr(attr, "hidden") and attr.hidden:
-                continue
-            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
+            if inspect.ismethod(attr) and attr.__self__ is self.__class__:
                 # it's a @classmethod
                 continue
 
@@ -411,8 +409,6 @@ class Service(Library):
                 if isinstance(collection, Collection):
                     schema = form_of(collection)
                     form[name] = {str(URI(chain_type)): [{str(URI(type(collection))): [to_json(schema)]}]}
-                elif isinstance(collection, (dict, list, tuple, Map, Tuple)):
-                    form[name] = {str(URI(chain_type)): [to_json(collection)]}
                 else:
                     raise TypeError(f"invalid subject for Chain: {collection}")
 
