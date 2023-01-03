@@ -3,9 +3,8 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
-use futures::future::{self, join_all, FutureExt, TryFutureExt};
-use futures::stream::FuturesUnordered;
-use futures::{join, try_join, TryStreamExt};
+use futures::future::{join_all, FutureExt, TryFutureExt};
+use futures::{join, try_join};
 use safecast::{as_type, AsType};
 
 use tc_error::*;
@@ -37,12 +36,25 @@ pub enum Attr {
 as_type!(Attr, Chain, Chain<CollectionBase>);
 as_type!(Attr, Scalar, Scalar);
 
+impl fmt::Display for Attr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Chain(chain) => fmt::Display::fmt(chain, f),
+            Self::Scalar(scalar) => fmt::Display::fmt(scalar, f),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Version {
     attrs: Map<Attr>,
 }
 
 impl Version {
+    pub(crate) fn attrs(&self) -> impl Iterator<Item = &Id> {
+        self.attrs.keys()
+    }
+
     pub fn get_attribute(&self, name: &Id) -> Option<&Attr> {
         self.attrs.get(name)
     }
@@ -55,17 +67,16 @@ impl Replica for Version {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        let requests = FuturesUnordered::new();
-
         for (name, attr) in self.attrs.iter() {
             if let Attr::Chain(chain) = attr {
                 let source = source.clone().append(name.clone());
                 let txn = txn.subcontext(name.clone()).await?;
-                requests.push(async move { chain.replicate(&txn, source).await });
+                // TODO: parallelize
+                chain.replicate(&txn, source).await?;
             }
         }
 
-        requests.try_fold((), |(), ()| future::ready(Ok(()))).await
+        Ok(())
     }
 }
 

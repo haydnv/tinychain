@@ -246,7 +246,9 @@ where
                     try_join_all(requests).await?;
                 }
 
-                self.cluster.state().state(txn_id).await
+                let state = self.cluster.state().state(txn_id).await?;
+                debug!("state of source replica {} is {}", self_link, state);
+                Ok(state)
             })
         }))
     }

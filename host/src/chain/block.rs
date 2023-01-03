@@ -148,6 +148,7 @@ impl Replica for BlockChain<crate::cluster::Service> {
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         let mut params = Map::new();
         params.insert(label("add").into(), txn.link(source.path().clone()).into());
+
         let state = txn
             .post(source.clone().append(REPLICAS), State::Map(params))
             .await?;

@@ -1,10 +1,10 @@
-use log::debug;
+use log::{debug, trace};
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::Transaction;
 use tc_value::{Value, Version as VersionNumber};
-use tcgeneric::{Map, PathSegment, TCPath, TCPathBuf};
+use tcgeneric::{Id, Map, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::cluster::{service, DirItem, Replica, Service};
 use crate::object::InstanceClass;
@@ -27,10 +27,26 @@ impl Route for service::Attr {
 
 impl Route for service::Version {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        debug!("service::Version::route {}", TCPath::from(path));
+
         assert!(!path.is_empty());
 
-        let attr = self.get_attribute(&path[0])?;
-        attr.route(&path[1..])
+        match self.get_attribute(&path[0]) {
+            Some(attr) => {
+                trace!("found attr {} at {}", attr, &path[0]);
+                attr.route(&path[1..])
+            }
+            None => {
+                trace!(
+                    "{} has no attr {} (attrs are {})",
+                    self,
+                    &path[0],
+                    self.attrs().collect::<Tuple<&Id>>()
+                );
+
+                None
+            }
+        }
     }
 }
 
@@ -94,8 +110,16 @@ impl<'a> ServiceHandler<'a> {
                         .await?;
                 }
 
-                let version = self.service.create_version(txn, number, schema).await?;
-                version.replicate(txn, link).await
+                let version = self
+                    .service
+                    .create_version(txn, number.clone(), schema)
+                    .await?;
+
+                if link != txn.link(link.path().clone()) {
+                    version.replicate(txn, link.append(number)).await?;
+                }
+
+                Ok(())
             })
         })
     }

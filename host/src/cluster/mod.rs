@@ -185,6 +185,7 @@ impl fmt::Display for ReplicaSet {
 pub trait Replica {
     async fn state(&self, txn_id: TxnId) -> TCResult<State>;
 
+    // TODO: change &Txn to Txn
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
 }
 
@@ -399,6 +400,11 @@ where
             }
 
             let result = txn.post(replica.clone(), State::Map(Map::default())).await;
+
+            if let Err(cause) = &result {
+                panic!("replica at {} failed: {}", replica, cause);
+            }
+
             results.push(result);
         }
 
