@@ -821,8 +821,9 @@ where
 
             if name.len() < B::ext().len() + 1 || !name.ends_with(B::ext()) {
                 return Err(TCError::internal(format!(
-                    "block has invalid extension: {}",
-                    name
+                    "block has invalid extension: {} (expected {})",
+                    name,
+                    B::ext()
                 )));
             }
 

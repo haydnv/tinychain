@@ -1045,7 +1045,9 @@ impl ScalarVisitor {
     ) -> Result<Scalar, A::Error> {
         let scalar = access.next_value::<Scalar>(()).await?;
 
-        if let Some(scalar) = scalar.clone().into_type(class) {
+        if scalar.is_none() {
+            // this is a classpath, no need to cast
+        } else if let Some(scalar) = scalar.clone().into_type(class) {
             return Ok(scalar);
         } else {
             debug!("cannot cast into {} from {}", class, scalar);

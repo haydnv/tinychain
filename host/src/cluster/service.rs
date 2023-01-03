@@ -18,6 +18,7 @@ use crate::chain::{Chain, ChainType};
 use crate::cluster::{DirItem, Replica};
 use crate::collection::{CollectionBase, CollectionSchema};
 use crate::fs;
+use crate::object::InstanceClass;
 use crate::scalar::value::Link;
 use crate::scalar::{OpRef, Scalar, Subject, TCRef};
 use crate::state::State;
@@ -195,7 +196,7 @@ impl fmt::Display for Version {
 #[derive(Clone)]
 pub struct Service {
     dir: fs::Dir,
-    schema: fs::File<VersionNumber, super::library::Version>,
+    schema: fs::File<VersionNumber, InstanceClass>,
     versions: TxnLock<BTreeMap<VersionNumber, Version>>,
 }
 
@@ -215,30 +216,18 @@ impl Service {
             .map_ok(|file| file.block_ids().iter().last().cloned())
             .await
     }
-
-    pub async fn schemata(&self, txn_id: TxnId) -> TCResult<Map<Map<Scalar>>> {
-        let file = self.schema.read(txn_id).await?;
-        let mut schemata = Map::new();
-
-        for number in file.block_ids() {
-            let version = file.read_block(number).await?;
-            schemata.insert(number.clone().into(), (&*version).clone().into());
-        }
-
-        Ok(schemata)
-    }
 }
 
 #[async_trait]
 impl DirItem for Service {
-    type Schema = Map<Scalar>;
+    type Schema = InstanceClass;
     type Version = Version;
 
     async fn create_version(
         &self,
         txn: &Txn,
         number: VersionNumber,
-        schema: Map<Scalar>,
+        schema: InstanceClass,
     ) -> TCResult<Version> {
         let txn_id = *txn.id();
         let (dir, mut schemata, mut versions) = try_join!(
@@ -251,12 +240,41 @@ impl DirItem for Service {
             .create_block(number.clone(), schema.clone().into(), 0)
             .await?;
 
+        let (_link, proto) = schema.into_inner();
+
         let store = dir.create_store(number.clone().into());
-        let version = Version::create(txn_id, schema, store)?;
+        let version = Version::create(txn_id, proto, store)?;
 
         versions.insert(number, version.clone());
 
         Ok(version)
+    }
+}
+
+#[async_trait]
+impl Replica for Service {
+    async fn state(&self, txn_id: TxnId) -> TCResult<State> {
+        let mut map = Map::new();
+
+        let schema = self.schema.read(txn_id).await?;
+        for number in schema.block_ids() {
+            let version = schema.read_block(&number).await?;
+            map.insert(number.into(), InstanceClass::clone(&*version).into());
+        }
+
+        Ok(State::Map(map))
+    }
+
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        let versions = self.versions.read(*txn.id()).await?;
+        for (number, version) in versions.iter() {
+            // TODO: parallelize
+            version
+                .replicate(&txn, source.clone().append(number.clone()))
+                .await?;
+        }
+
+        Ok(())
     }
 }
 
@@ -318,7 +336,7 @@ impl Persist<fs::Dir> for Service {
         let dir = fs::Dir::try_from(store)?;
         let (schema, mut versions) = {
             let dir = dir.try_read(txn_id)?;
-            let schema: fs::File<VersionNumber, super::library::Version> = dir
+            let schema: fs::File<VersionNumber, InstanceClass> = dir
                 .get_file(&SCHEMA.into())?
                 .ok_or_else(|| TCError::internal("service missing schema file"))?;
 
@@ -336,8 +354,7 @@ impl Persist<fs::Dir> for Service {
                 .try_write(txn_id)
                 .map(|dir| dir.get_or_create_store(number.clone().into()))?;
 
-            let schema = super::library::Version::clone(&*schema);
-            let version = Version::load(txn_id, schema.into(), store)?;
+            let version = Version::load(txn_id, schema.proto().clone(), store)?;
             versions.insert(number.clone(), version);
         }
 

@@ -136,13 +136,7 @@ impl Replica for BlockChain<crate::cluster::Library> {
 #[async_trait]
 impl Replica for BlockChain<crate::cluster::Service> {
     async fn state(&self, txn_id: TxnId) -> TCResult<State> {
-        let schema = self.subject.schemata(txn_id).await?;
-        let schema = schema
-            .into_iter()
-            .map(|(number, version)| (number, State::from(version)))
-            .collect();
-
-        Ok(State::Map(schema))
+        self.subject.state(txn_id).await
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
@@ -153,20 +147,19 @@ impl Replica for BlockChain<crate::cluster::Service> {
             .post(source.clone().append(REPLICAS), State::Map(params))
             .await?;
 
-        let library: Map<Map<Scalar>> =
+        let library: Map<InstanceClass> =
             state.try_cast_into(|s| TCError::bad_request("invalid Service version history", s))?;
 
         // TODO: verify equality of existing versions
         let latest_version = self.subject.latest(*txn.id()).await?;
         for (number, version) in library {
             let number: VersionNumber = number.as_str().parse()?;
-            let class = InstanceClass::anonymous(Some(source.clone()), version);
             if let Some(latest) = latest_version {
                 if number > latest {
-                    self.put(txn, &[], number.into(), class.into()).await?;
+                    self.put(txn, &[], number.into(), version.into()).await?;
                 }
             } else {
-                self.put(txn, &[], number.into(), class.into()).await?;
+                self.put(txn, &[], number.into(), version.into()).await?;
             }
         }
 

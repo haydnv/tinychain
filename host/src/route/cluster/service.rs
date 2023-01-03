@@ -110,6 +110,7 @@ impl<'a> ServiceHandler<'a> {
                         .await?;
                 }
 
+                let schema = InstanceClass::anonymous(Some(link.clone()), schema);
                 let version = self
                     .service
                     .create_version(txn, number.clone(), schema)
