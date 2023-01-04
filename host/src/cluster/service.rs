@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
-use futures::future::{join_all, FutureExt, TryFutureExt};
+use futures::future::{join_all, TryFutureExt};
 use futures::{join, try_join};
 use safecast::{as_type, AsType};
 
@@ -169,9 +169,9 @@ impl Transact for Version {
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         join_all(
             self.attrs
-                .iter()
-                .filter_map(|(name, attr)| attr.as_type().map(|chain: &Chain<_>| (name, chain)))
-                .map(|(name, attr)| attr.commit(txn_id).map(move |guard| (name.clone(), guard))),
+                .values()
+                .filter_map(|attr| attr.as_type())
+                .map(|attr: &Chain<_>| attr.commit(txn_id)),
         )
         .await;
     }

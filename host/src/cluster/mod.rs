@@ -9,7 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::future::{self, join_all, try_join_all, Future, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
-use log::{debug, info, trace};
+use log::{debug, info, trace, warn};
 use safecast::TryCastInto;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -529,6 +529,8 @@ where
                 self, replica, self_link
             );
 
+            self.state.replicate(txn, self.link().clone()).await?;
+
             let (lead, replicas) = txn
                 .get(self.link().clone().append(REPLICAS), Value::default())
                 .map(|r| r.and_then(ReplicaSet::try_from_state))
@@ -541,8 +543,6 @@ where
                     lead
                 )));
             }
-
-            self.state.replicate(txn, self.link().clone()).await?;
 
             let is_new = !replicas.contains(&self_link);
 
@@ -633,7 +633,7 @@ where
                 .iter()
                 .filter(|replica| *replica != &self_link)
                 .map(|link| {
-                    debug!("replicate write to {}", link);
+                    info!("replicate write to {}", link);
                     write(link.clone()).map(move |result| (link, result))
                 })
                 .collect();
@@ -642,11 +642,11 @@ where
                 match result {
                     Err(cause) if cause.code() == ErrorType::Conflict => return Err(cause),
                     Err(ref cause) => {
-                        debug!("replica at {} failed: {}", replica, cause);
+                        warn!("replica at {} failed: {}", replica, cause);
                         failed.insert(replica.clone());
                     }
                     Ok(()) => {
-                        debug!("replica at {} succeeded", replica);
+                        info!("replica at {} succeeded", replica);
                         succeeded.insert(replica);
                     }
                 };

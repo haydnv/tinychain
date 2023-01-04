@@ -23,6 +23,10 @@ impl<'a, T> DirHandler<'a, T> {
     }
 }
 
+type ErrorHandler<'a, 'b, A, R> = Box<
+    dyn FnOnce(&'b Txn, A) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> + Send + 'a,
+>;
+
 impl<'a, T> DirHandler<'a, T>
 where
     T: DirItem,
@@ -30,11 +34,7 @@ where
     pub(super) fn method_not_allowed<'b, A: Send + 'b, R: Send + 'a>(
         self: Box<Self>,
         method: OpRefType,
-    ) -> Box<
-        dyn FnOnce(&'b Txn, A) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>>
-            + Send
-            + 'a,
-    >
+    ) -> ErrorHandler<'a, 'b, A, R>
     where
         'b: 'a,
     {

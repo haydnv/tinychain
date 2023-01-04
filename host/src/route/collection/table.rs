@@ -330,8 +330,8 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let row = primary_key(key, self.table)?;
-                self.table.delete(*txn.id(), row).await
+                let key = primary_key(key, self.table)?;
+                self.table.delete(*txn.id(), key).await
             })
         }))
     }
@@ -535,7 +535,7 @@ fn cast_into_bounds(scalar: Scalar) -> TCResult<Bounds> {
 
 #[inline]
 fn primary_key<T: TableInstance>(key: Value, table: &T) -> TCResult<Key> {
-    let key: Vec<Value> = key.try_cast_into(|v| TCError::bad_request("invalid Table key", v))?;
+    let key = key.try_cast_into(|v| TCError::bad_request("invalid Table key", v))?;
     table.schema().primary().validate_key(key)
 }
 

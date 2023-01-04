@@ -96,7 +96,7 @@ where
     }
 
     async fn put(&self, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
-        debug!("PUT {}: {} <- {}", TCPath::from(path), key, value);
+        info!("PUT {}: {} <- {}", TCPath::from(path), key, value);
         let (suffix, cluster) = self.lookup(*txn.id(), path)?;
         debug!(
             "cluster is {}, endpoint is {}",
@@ -132,7 +132,7 @@ where
     }
 
     async fn delete(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<()> {
-        debug!("DELETE {}: {}", TCPath::from(path), key);
+        info!("DELETE {}: {}", TCPath::from(path), key);
 
         let (suffix, cluster) = self.lookup(*txn.id(), path)?;
 
@@ -380,7 +380,7 @@ where
         cluster.put(&txn, path, key.clone(), value.clone()).await?;
 
         if !txn.is_leader(cluster.path()) {
-            debug!(
+            info!(
                 "{} successfully replicated PUT {}",
                 cluster,
                 TCPath::from(path)
@@ -389,7 +389,7 @@ where
             return Ok(());
         }
 
-        debug!(
+        info!(
             "{} is leading replication of PUT {}",
             cluster,
             TCPath::from(path)
@@ -398,8 +398,6 @@ where
         let write = |replica_link: Link| {
             let mut target = replica_link.clone();
             target.extend(path.to_vec());
-
-            debug!("replicate PUT to {}", target);
             txn.put(target, key.clone(), value.clone())
         };
 

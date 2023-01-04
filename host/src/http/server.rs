@@ -197,11 +197,14 @@ impl crate::gateway::Server for HTTPServer {
     type Error = hyper::Error;
 
     async fn listen(self, addr: SocketAddr) -> Result<(), Self::Error> {
-        println!("HTTP server listening on {}", &addr);
+        println!("HTTP server listening on {}...", &addr);
+        println!();
+
         let server = Arc::new(self);
 
         let new_service = make_service_fn(move |_| {
             let server = server.clone();
+
             async {
                 Ok::<_, hyper::Error>(service_fn(move |req| {
                     let server = server.clone();
