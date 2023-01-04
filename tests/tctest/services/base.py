@@ -36,6 +36,7 @@ class PersistenceTest(object):
 
         print()
         hosts[0].put(tc.URI(tc.app.Service), str(service.NS)[1:], tc.URI(service)[:-2])
+
         print()
         hosts[0].put(tc.URI(service).path()[:-2], tc.URI(service)[-2], service)
         print()
