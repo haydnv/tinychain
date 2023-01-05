@@ -8,7 +8,7 @@ use tc_error::*;
 use tc_transact::fs::*;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
-use tcgeneric::{Id, Map};
+use tcgeneric::{label, Id, Label, Map};
 
 use crate::fs;
 use crate::object::InstanceClass;
@@ -16,6 +16,8 @@ use crate::state::State;
 use crate::txn::Txn;
 
 use super::DirItem;
+
+pub(super) const SCHEMA: Label = label("schema");
 
 #[derive(Clone)]
 pub struct Version {
@@ -68,6 +70,7 @@ impl Class {
         } else {
             let zero = VersionNumber::default().into();
             dir.file_names()
+                .filter(|name| *name != &SCHEMA)
                 .fold(&zero, Ord::max)
                 .as_str()
                 .parse()
@@ -89,6 +92,10 @@ impl Class {
 
         let mut versions = Map::new();
         for (number, file) in dir.iter() {
+            if number == &SCHEMA {
+                continue;
+            }
+
             let file = match file {
                 fs::DirEntry::File(fs::FileEntry::Class(file)) => Ok(file.clone()),
                 other => Err(TCError::internal(format!(
@@ -149,9 +156,11 @@ impl Persist<fs::Dir> for Class {
 
     fn create(txn_id: TxnId, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
+        let mut contents = dir.try_write(txn_id)?;
 
-        let contents = dir.try_read(txn_id)?;
         if contents.is_empty() {
+            let _file: fs::File<Id, InstanceClass> = contents.create_file(SCHEMA.into())?;
+
             Ok(Self { dir })
         } else {
             Err(TCError::unsupported(
@@ -160,8 +169,16 @@ impl Persist<fs::Dir> for Class {
         }
     }
 
-    fn load(_txn_id: TxnId, _schema: Self::Schema, _store: fs::Store) -> TCResult<Self> {
-        Err(TCError::not_implemented("cluster::Class::load"))
+    fn load(txn_id: TxnId, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let dir = fs::Dir::try_from(store)?;
+        let contents = dir.try_write(txn_id)?;
+        if contents.contains(&SCHEMA.into()) {
+            Ok(Self { dir })
+        } else {
+            Err(TCError::internal(format!(
+                "Class set is missing its schema file"
+            )))
+        }
     }
 
     fn dir(&self) -> <fs::Dir as Dir>::Inner {

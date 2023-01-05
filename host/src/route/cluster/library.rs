@@ -1,13 +1,14 @@
 use log::debug;
-use safecast::{CastInto, TryCastFrom, TryCastInto};
+use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_transact::Transaction;
 use tc_value::{Link, Value, Version as VersionNumber};
-use tcgeneric::{Id, Map, PathSegment, TCPath, TCPathBuf};
+use tcgeneric::{Map, PathSegment, TCPath, TCPathBuf};
 
 use crate::cluster::{library, DirItem, Library};
 use crate::object::InstanceClass;
+use crate::route::cluster::dir::{expect_version, extract_classes};
 use crate::route::object::method::route_attr;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
 use crate::scalar::{OpRefType, Scalar};
@@ -33,38 +34,6 @@ struct LibraryHandler<'a> {
 impl<'a> LibraryHandler<'a> {
     fn new(lib: &'a Library, path: &'a [PathSegment]) -> Self {
         Self { lib, path }
-    }
-
-    fn lib_classes(mut lib: Map<Scalar>) -> TCResult<(Map<Scalar>, Map<InstanceClass>)> {
-        let deps = lib
-            .iter()
-            .filter(|(_, scalar)| scalar.is_ref())
-            .map(|(name, _)| name.clone())
-            .collect::<Vec<Id>>();
-
-        let classes = deps
-            .into_iter()
-            .filter_map(|name| lib.remove(&name).map(|dep| (name, dep)))
-            .map(|(name, dep)| {
-                InstanceClass::try_cast_from(dep, |s| {
-                    TCError::bad_request("unable to resolve Library dependency", s)
-                })
-                .map(|class| (name, class))
-            })
-            .collect::<TCResult<Map<InstanceClass>>>()?;
-
-        Ok((lib, classes))
-    }
-
-    fn lib_version(version: State) -> TCResult<(Link, Map<Scalar>)> {
-        let class =
-            InstanceClass::try_cast_from(version, |v| TCError::bad_request("invalid Class", v))?;
-
-        let (link, version) = class.into_inner();
-        let link =
-            link.ok_or_else(|| TCError::bad_request("missing cluster link for", &version))?;
-
-        Ok((link, version))
     }
 }
 
@@ -97,14 +66,14 @@ impl<'a> Handler<'a> for LibraryHandler<'a> {
         Some(Box::new(|txn, key, value| {
             if self.path.is_empty() {
                 Box::pin(async move {
-                    debug!("{} <- {}: {}", self.lib, key, value);
+                    debug!("create new Library version {}", key);
 
                     let number = VersionNumber::try_cast_from(key, |v| {
                         TCError::bad_request("invalid version number", v)
                     })?;
 
-                    let (link, version) = Self::lib_version(value)?;
-                    let (version, classes) = Self::lib_classes(version)?;
+                    let (link, version) = expect_version(value)?;
+                    let (version, classes) = extract_classes(version)?;
 
                     if !classes.is_empty() && txn.is_leader(link.path()) {
                         let mut class_path = TCPathBuf::from(CLASS);
@@ -166,22 +135,18 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
     where
         'b: 'a,
     {
+        assert!(self.path.is_empty());
+
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                debug!("{} <- {}: {}", self.dir, key, value);
+                debug!("create new Library {} in {}", key, self.dir);
 
-                let name = key.try_cast_into(|v| {
-                    TCError::bad_request("invalid path segment for cluster directory entry", v)
+                let name = PathSegment::try_cast_from(key, |v| {
+                    TCError::bad_request("invalid path segment for Library directory entry", v)
                 })?;
 
-                if let Some(_) = self.dir.entry(*txn.id(), &name).await? {
-                    return Err(TCError::bad_request(
-                        "there is already a directory entry at",
-                        name,
-                    ))?;
-                }
-
-                let (link, lib) = LibraryHandler::lib_version(value)?;
+                let (link, lib) = expect_version(value)?;
+                let (version, classes) = extract_classes(lib)?;
 
                 if link.path().len() <= 1 {
                     return Err(TCError::bad_request(
@@ -203,7 +168,7 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
 
                 let parent_dir_path = &link.path()[..link.path().len() - 1];
 
-                if lib.is_empty() {
+                if version.is_empty() && classes.is_empty() {
                     if txn.is_leader(parent_dir_path) {
                         txn.put(
                             class_dir_path.into(),
@@ -213,26 +178,23 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
                         .await?;
                     }
 
-                    return self
-                        .create_item_or_dir::<Map<Scalar>>(txn, link, name, None)
-                        .await;
+                    self.create_item_or_dir::<Map<Scalar>>(txn, link, name, None)
+                        .await
+                } else {
+                    if txn.is_leader(parent_dir_path) {
+                        txn.put(
+                            class_dir_path.into(),
+                            name.clone().into(),
+                            State::Tuple((class_link.into(), classes.into()).into()),
+                        )
+                        .await?;
+                    }
+
+                    let version = InstanceClass::anonymous(Some(link.clone()), version);
+
+                    self.create_item_or_dir(txn, link, name, Some(version))
+                        .await
                 }
-
-                let (lib, classes) = LibraryHandler::lib_classes(lib)?;
-
-                if !classes.is_empty() && txn.is_leader(parent_dir_path) {
-                    txn.put(
-                        class_dir_path.into(),
-                        name.clone().into(),
-                        (class_link, classes).cast_into(),
-                    )
-                    .await?;
-                }
-
-                let version = InstanceClass::anonymous(Some(link.clone()), lib);
-
-                self.create_item_or_dir(txn, link, name, Some(version))
-                    .await
             })
         }))
     }

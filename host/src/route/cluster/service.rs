@@ -1,13 +1,14 @@
 use log::{debug, trace};
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_transact::Transaction;
-use tc_value::{Value, Version as VersionNumber};
+use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{Id, Map, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::cluster::{service, DirItem, Replica, Service};
 use crate::object::InstanceClass;
+use crate::route::cluster::dir::{expect_version, extract_classes};
 use crate::route::object::method::route_attr;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
 use crate::scalar::{OpRef, OpRefType, Scalar, Subject, TCRef};
@@ -56,9 +57,11 @@ impl<'a> ServiceHandler<'a> {
     where
         'b: 'a,
     {
+        assert!(self.path.is_empty());
+
         Box::new(|txn, key, value| {
             Box::pin(async move {
-                debug!("{} <- {}: {}", self.service, key, value);
+                debug!("create new Service version {}", key);
 
                 let number = VersionNumber::try_cast_from(key, |v| {
                     TCError::bad_request("invalid version number", v)
@@ -97,6 +100,11 @@ impl<'a> ServiceHandler<'a> {
                 if !classes.is_empty() && txn.is_leader(link.path()) {
                     let mut class_path = TCPathBuf::from(CLASS);
                     class_path.extend(link.path()[1..].iter().cloned());
+
+                    debug!(
+                        "creating new Class set version {} at {}...",
+                        number, class_path
+                    );
 
                     txn.put(class_path.into(), number.clone().into(), classes.into())
                         .await?;
@@ -210,24 +218,57 @@ impl<'a> Handler<'a> for DirHandler<'a, Service> {
     {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                debug!("{} <- {}: {}", self.dir, key, value);
+                debug!("create new Service {} in {}", key, self.dir);
 
-                let name = key.try_cast_into(|v| {
-                    TCError::bad_request("invalid path segment for cluster directory entry", v)
+                let name = PathSegment::try_cast_from(key, |v| {
+                    TCError::bad_request("invalid path segment for Service directory entry", v)
                 })?;
 
-                let class = InstanceClass::try_cast_from(value, |v| {
-                    TCError::bad_request("invalid Class", v)
-                })?;
+                let (link, service) = expect_version(value)?;
+                let (version, classes) = extract_classes(service)?;
 
-                let (link, version) = class.into_inner();
-                let link =
-                    link.ok_or_else(|| TCError::bad_request("missing cluster link for", &version))?;
+                if link.path().len() <= 1 {
+                    return Err(TCError::bad_request(
+                        "cannot create a new cluster at",
+                        link.path(),
+                    ));
+                }
 
-                if version.is_empty() {
+                let mut class_path = TCPathBuf::from(CLASS);
+                class_path.extend(link.path()[1..].iter().cloned());
+
+                let class_link: Link = if let Some(host) = link.host() {
+                    (host.clone(), class_path.clone()).into()
+                } else {
+                    class_path.clone().into()
+                };
+
+                let class_dir_path = TCPathBuf::from(class_path[..class_path.len() - 1].to_vec());
+
+                let parent_dir_path = &link.path()[..link.path().len() - 1];
+
+                if version.is_empty() && classes.is_empty() {
+                    if txn.is_leader(parent_dir_path) {
+                        txn.put(
+                            class_dir_path.into(),
+                            name.clone().into(),
+                            class_link.into(),
+                        )
+                        .await?;
+                    }
+
                     self.create_item_or_dir::<Map<State>>(txn, link, name, None)
                         .await
                 } else {
+                    if txn.is_leader(parent_dir_path) {
+                        txn.put(
+                            class_dir_path.into(),
+                            name.clone().into(),
+                            State::Tuple((class_link.into(), classes.into()).into()),
+                        )
+                        .await?;
+                    }
+
                     let version = InstanceClass::anonymous(Some(link.clone()), version);
 
                     self.create_item_or_dir(txn, link, name, Some(version))

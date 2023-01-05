@@ -64,7 +64,15 @@ class LibraryVersionTests(unittest.TestCase):
         hosts[0].install(TestLibV0())
         print()
 
-        hosts.append(start_host(NAME, [], http_port=8705, replicate=LEAD))
+        for host in hosts:
+            print(host)
+            self.assertEqual(host.get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
+
+        print()
+
+        hosts.append(start_host(NAME, [], http_port=8705, replicate=LEAD, wait_time=2))
+
+        self.assertEqual(hosts[-1].get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
 
         for i in range(len(hosts)):
             self.assertEqual(hosts[i].get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
@@ -77,7 +85,7 @@ class LibraryVersionTests(unittest.TestCase):
 
         hosts[1].update(TestLibV1())
 
-        hosts[2].start()
+        hosts[2].start(wait_time=2)
 
         print()
         print("host started")
@@ -90,7 +98,7 @@ class LibraryVersionTests(unittest.TestCase):
 
         for host in hosts:
             self.assertEqual(host.get("/lib/test/libhello/0.0.1/hello", "Again"), "Hello, Again!")
-
+#
 
 def printlines(n):
     for _ in range(n):

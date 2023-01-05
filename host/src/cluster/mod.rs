@@ -402,7 +402,7 @@ where
             let result = txn.post(replica.clone(), State::Map(Map::default())).await;
 
             if let Err(cause) = &result {
-                panic!("replica at {} failed: {}", replica, cause);
+                warn!("replica at {} failed: {}", replica, cause);
             }
 
             results.push(result);

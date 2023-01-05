@@ -8,8 +8,9 @@ use tc_value::{Link, Version as VersionNumber};
 use crate::chain::BlockChain;
 use crate::cluster::dir::{Dir, DirCreate, DirCreateItem, DirEntry, ENTRIES};
 use crate::cluster::{Class, Cluster, DirItem, Library, Replica, Service};
+use crate::object::InstanceClass;
 use crate::route::*;
-use crate::scalar::OpRefType;
+use crate::scalar::{OpRef, OpRefType, Scalar, TCRef};
 use crate::state::State;
 
 pub(super) struct DirHandler<'a, T> {
@@ -176,4 +177,43 @@ where
             Self::Item(item) => item.route(path),
         }
     }
+}
+
+pub(super) fn expect_version(version: State) -> TCResult<(Link, Map<Scalar>)> {
+    let class =
+        InstanceClass::try_cast_from(version, |v| TCError::bad_request("invalid Class", v))?;
+
+    let (link, version) = class.into_inner();
+    let link = link.ok_or_else(|| TCError::bad_request("missing cluster link for", &version))?;
+
+    Ok((link, version))
+}
+
+pub(super) fn extract_classes(mut lib: Map<Scalar>) -> TCResult<(Map<Scalar>, Map<InstanceClass>)> {
+    let deps = lib
+        .iter()
+        .filter_map(|(name, scalar)| {
+            if let Scalar::Ref(tc_ref) = scalar {
+                if let TCRef::Op(OpRef::Post(_)) = &**tc_ref {
+                    return Some(name);
+                }
+            }
+
+            None
+        })
+        .cloned()
+        .collect::<Vec<Id>>();
+
+    let classes = deps
+        .into_iter()
+        .filter_map(|name| lib.remove(&name).map(|dep| (name, dep)))
+        .map(|(name, dep)| {
+            InstanceClass::try_cast_from(dep, |s| {
+                TCError::bad_request("unable to resolve dependency", s)
+            })
+            .map(|class| (name, class))
+        })
+        .collect::<TCResult<Map<InstanceClass>>>()?;
+
+    Ok((lib, classes))
 }

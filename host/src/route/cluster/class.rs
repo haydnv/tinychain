@@ -68,8 +68,6 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
     where
         'b: 'a,
     {
-        assert!(!self.path.is_empty());
-
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 let number = self.path[0].as_str().parse()?;
@@ -83,6 +81,8 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
     where
         'b: 'a,
     {
+        assert!(self.path.is_empty());
+
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
                 if self.path.is_empty() {
@@ -136,6 +136,19 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
             })
         }))
     }
+
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let number = self.path[0].as_str().parse()?;
+                let version = self.class.get_version(*txn.id(), &number).await?;
+                version.delete(txn, &self.path[1..], key).await
+            })
+        }))
+    }
 }
 
 impl Route for Class {
@@ -145,16 +158,39 @@ impl Route for Class {
 }
 
 impl<'a> Handler<'a> for DirHandler<'a, Class> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(self.method_not_allowed::<Value, State>(OpRefType::Get))
+    }
+
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
     where
         'b: 'a,
     {
+        if !self.path.is_empty() {
+            return Some(Box::new(move |txn, _key, _value| {
+                Box::pin(async move {
+                    if let Some(_version) = self.dir.entry(*txn.id(), &self.path[0]).await? {
+                        Err(TCError::internal(format!(
+                            "bad routing for {} in {}",
+                            TCPath::from(self.path),
+                            self.dir
+                        )))
+                    } else {
+                        Err(TCError::not_found(&self.path[0]))
+                    }
+                })
+            }));
+        }
+
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                debug!("create new cluster {} at {}", value, key);
+                debug!("create new Class directory entry at {}", key);
 
                 let name = PathSegment::try_cast_from(key, |v| {
-                    TCError::bad_request("invalid path segment for class directory entry", v)
+                    TCError::bad_request("invalid path segment for Class directory entry", v)
                 })?;
 
                 let (link, classes): (Link, Option<Map<InstanceClass>>) =

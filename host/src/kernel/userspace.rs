@@ -328,7 +328,7 @@ impl Dispatch for UserSpace {
         } else if &path[..1] == &LIB[..] {
             Dispatch::delete(&self.library, txn, &path[1..], key).await
         } else if &path[..1] == &CLASS[..] {
-            Dispatch::delete(&self.library, txn, &path[1..], key).await
+            Dispatch::delete(&self.class, txn, &path[1..], key).await
         } else if &path[..1] == &SERVICE[..] {
             Dispatch::delete(&self.service, txn, &path[1..], key).await
         } else {

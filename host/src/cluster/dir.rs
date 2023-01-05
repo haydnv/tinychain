@@ -4,7 +4,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use futures::future::{join_all, TryFutureExt};
-use log::debug;
+use log::{debug, info};
 use safecast::CastInto;
 
 use tc_error::*;
@@ -255,8 +255,11 @@ where
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        info!("replicate {} from {}", self, source);
+
         let mut params = Map::new();
         params.insert(label("add").into(), txn.link(source.path().clone()).into());
+
         let entries = txn
             .post(source.clone().append(REPLICAS), State::Map(params))
             .await?;
@@ -345,20 +348,42 @@ impl Persist<fs::Dir> for Dir<Class> {
     }
 
     fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        let (self_link, cluster_link) = schema;
         let dir = fs::Dir::try_from(store)?;
 
         let lock = tc_transact::fs::Dir::try_read(&dir, txn_id)?;
-        let contents = BTreeMap::new();
+        let mut contents = BTreeMap::new();
 
-        for _entry in lock.iter() {
-            return Err(TCError::not_implemented(
-                "load a cluster::Dir of class sets",
-            ));
+        for (name, entry) in lock.iter() {
+            let entry_link = cluster_link.clone().append(name.clone());
+            let self_link = self_link.clone().append(name.clone());
+            let schema = (self_link, entry_link);
+
+            let entry = match entry {
+                fs::DirEntry::Dir(dir) => {
+                    let is_class_set = {
+                        let lock = tc_transact::fs::Dir::try_read(dir, txn_id)?;
+                        lock.contains(&super::class::SCHEMA.into())
+                    };
+
+                    if is_class_set {
+                        Cluster::load(txn_id, schema, dir.clone().into()).map(DirEntry::Item)
+                    } else {
+                        Cluster::load(txn_id, schema, dir.clone().into()).map(DirEntry::Dir)
+                    }
+                }
+                file => Err(TCError::internal(format!(
+                    "invalid Class dir entry: {}",
+                    file
+                ))),
+            }?;
+
+            contents.insert(name.clone(), entry);
         }
 
         Ok(Self {
             cache: tc_transact::fs::Dir::into_inner(dir),
-            contents: TxnLock::new(format!("dir at {}", schema.0), txn_id, contents),
+            contents: TxnLock::new(format!("dir at {}", self_link), txn_id, contents),
         })
     }
 
