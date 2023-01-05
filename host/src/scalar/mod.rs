@@ -161,7 +161,7 @@ impl fmt::Display for ClusterRef {
     }
 }
 
-/// A scalar value, i.e. one which is always held in main memory and never split into blocks.
+/// A scalar value, i.e. an immutable state always held in main memory and never split into blocks.
 #[derive(Clone, Eq, PartialEq)]
 pub enum Scalar {
     Cluster(ClusterRef),

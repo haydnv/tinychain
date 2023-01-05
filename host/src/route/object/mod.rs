@@ -6,6 +6,7 @@ use crate::state::State;
 use super::{AttributeHandler, GetHandler, Handler, PostHandler, Route, COPY};
 
 mod instance;
+pub(super) mod method;
 
 impl Route for ObjectType {
     fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {

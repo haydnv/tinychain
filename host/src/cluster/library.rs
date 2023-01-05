@@ -11,9 +11,10 @@ use tc_error::*;
 use tc_transact::fs::{BlockData, Dir, File, FileRead, FileWrite, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
-use tcgeneric::{Map, PathSegment};
+use tcgeneric::{Instance, Map, PathSegment};
 
 use crate::fs;
+use crate::object::ObjectType;
 use crate::scalar::Scalar;
 use crate::state::State;
 use crate::txn::Txn;
@@ -28,6 +29,14 @@ pub struct Version {
 impl Version {
     pub fn get_attribute(&self, name: &PathSegment) -> Option<&Scalar> {
         self.lib.get(name)
+    }
+}
+
+impl Instance for Version {
+    type Class = ObjectType;
+
+    fn class(&self) -> Self::Class {
+        ObjectType::Class
     }
 }
 

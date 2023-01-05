@@ -8,6 +8,7 @@ use tcgeneric::{Id, Map, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::cluster::{service, DirItem, Replica, Service};
 use crate::object::InstanceClass;
+use crate::route::object::method::route_attr;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
 use crate::scalar::{OpRef, OpRefType, Scalar, Subject, TCRef};
 use crate::state::State;
@@ -16,15 +17,6 @@ use crate::CLASS;
 
 use super::dir::DirHandler;
 
-impl Route for service::Attr {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        match self {
-            Self::Chain(chain) => chain.route(path),
-            Self::Scalar(scalar) => scalar.route(path),
-        }
-    }
-}
-
 impl Route for service::Version {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("service::Version::route {}", TCPath::from(path));
@@ -32,10 +24,10 @@ impl Route for service::Version {
         assert!(!path.is_empty());
 
         match self.get_attribute(&path[0]) {
-            Some(attr) => {
-                trace!("found attr {} at {}", attr, &path[0]);
-                attr.route(&path[1..])
-            }
+            Some(attr) => match attr {
+                service::Attr::Chain(chain) => chain.route(&path[1..]),
+                service::Attr::Scalar(scalar) => route_attr(self, &path[0], scalar, &path[1..]),
+            },
             None => {
                 trace!(
                     "{} has no attr {} (attrs are {})",

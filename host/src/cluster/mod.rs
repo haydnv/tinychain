@@ -783,6 +783,7 @@ where
     }
 }
 
+// TODO: delete
 impl<T> ToState for Cluster<T> {
     fn to_state(&self) -> State {
         State::Scalar(Scalar::Cluster(self.link().path().clone().into()))

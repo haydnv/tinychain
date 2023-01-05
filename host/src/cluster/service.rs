@@ -12,16 +12,16 @@ use tc_transact::fs::*;
 use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, Transaction};
 use tc_value::Version as VersionNumber;
-use tcgeneric::{label, Id, Label, Map, NativeClass};
+use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, TCPathBuf};
 
 use crate::chain::{Chain, ChainType};
 use crate::cluster::{DirItem, Replica};
 use crate::collection::{CollectionBase, CollectionSchema};
 use crate::fs;
-use crate::object::InstanceClass;
+use crate::object::{InstanceClass, ObjectType};
 use crate::scalar::value::Link;
 use crate::scalar::{OpRef, Scalar, Subject, TCRef};
-use crate::state::State;
+use crate::state::{State, ToState};
 use crate::transact::TxnId;
 use crate::txn::Txn;
 
@@ -48,6 +48,7 @@ impl fmt::Display for Attr {
 
 #[derive(Clone)]
 pub struct Version {
+    path: TCPathBuf,
     attrs: Map<Attr>,
 }
 
@@ -58,6 +59,20 @@ impl Version {
 
     pub fn get_attribute(&self, name: &Id) -> Option<&Attr> {
         self.attrs.get(name)
+    }
+}
+
+impl Instance for Version {
+    type Class = ObjectType;
+
+    fn class(&self) -> Self::Class {
+        ObjectType::Class
+    }
+}
+
+impl ToState for Version {
+    fn to_state(&self) -> State {
+        State::Scalar(Scalar::Cluster(self.path.clone().into()))
     }
 }
 
@@ -83,14 +98,18 @@ impl Replica for Version {
 
 impl Persist<fs::Dir> for Version {
     type Txn = Txn;
-    type Schema = Map<Scalar>;
+    type Schema = InstanceClass;
 
     fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
 
+        let (link, proto) = schema.into_inner();
+        let link =
+            link.ok_or_else(|| TCError::bad_request("missing Link for Service version", &proto))?;
+
         let mut attrs = Map::new();
 
-        for (name, attr) in schema {
+        for (name, attr) in proto {
             let attr = match attr {
                 Scalar::Ref(tc_ref) => match *tc_ref {
                     TCRef::Op(OpRef::Get((chain_type, collection))) => {
@@ -118,15 +137,22 @@ impl Persist<fs::Dir> for Version {
             attrs.insert(name, attr);
         }
 
-        Ok(Self { attrs })
+        Ok(Self {
+            attrs,
+            path: link.into_path(),
+        })
     }
 
     fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
 
+        let (link, proto) = schema.into_inner();
+        let link =
+            link.ok_or_else(|| TCError::bad_request("missing Link for Service version", &proto))?;
+
         let mut attrs = Map::new();
 
-        for (name, attr) in schema {
+        for (name, attr) in proto {
             let attr = match attr {
                 Scalar::Ref(tc_ref) => match *tc_ref {
                     TCRef::Op(OpRef::Get((chain_type, collection))) => {
@@ -154,7 +180,10 @@ impl Persist<fs::Dir> for Version {
             attrs.insert(name, attr);
         }
 
-        Ok(Self { attrs })
+        Ok(Self {
+            attrs,
+            path: link.into_path(),
+        })
     }
 
     fn dir(&self) -> <fs::Dir as Dir>::Inner {
@@ -240,10 +269,8 @@ impl DirItem for Service {
             .create_block(number.clone(), schema.clone().into(), 0)
             .await?;
 
-        let (_link, proto) = schema.into_inner();
-
         let store = dir.create_store(number.clone().into());
-        let version = Version::create(txn_id, proto, store)?;
+        let version = Version::create(txn_id, schema, store)?;
 
         versions.insert(number, version.clone());
 
@@ -355,7 +382,7 @@ impl Persist<fs::Dir> for Service {
                 .try_write(txn_id)
                 .map(|dir| dir.get_or_create_store(number.clone().into()))?;
 
-            let version = Version::load(txn_id, schema.proto().clone(), store)?;
+            let version = Version::load(txn_id, schema.clone(), store)?;
             versions.insert(number.clone(), version);
         }
 

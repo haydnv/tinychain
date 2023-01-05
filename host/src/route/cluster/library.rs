@@ -8,6 +8,7 @@ use tcgeneric::{Id, Map, PathSegment, TCPath, TCPathBuf};
 
 use crate::cluster::{library, DirItem, Library};
 use crate::object::InstanceClass;
+use crate::route::object::method::route_attr;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
 use crate::scalar::{OpRefType, Scalar};
 use crate::state::State;
@@ -20,7 +21,7 @@ impl Route for library::Version {
         assert!(!path.is_empty());
 
         let attr = self.get_attribute(&path[0])?;
-        attr.route(&path[1..])
+        route_attr(self, &path[0], attr, &path[1..])
     }
 }
 
