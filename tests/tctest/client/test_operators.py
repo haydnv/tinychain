@@ -11,7 +11,7 @@ from tinychain.math.operator import gradients as grad_tc
 from .base import ClientTest
 
 TENSOR_URI = str(tc.URI(Dense))
-ENDPOINT = '/transact/hypothetical'
+ENDPOINT = "/transact/hypothetical"
 
 
 ones_like_torch = torch.ones_like
