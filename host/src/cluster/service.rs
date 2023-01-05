@@ -20,13 +20,15 @@ use crate::collection::{CollectionBase, CollectionSchema};
 use crate::fs;
 use crate::object::{InstanceClass, ObjectType};
 use crate::scalar::value::Link;
-use crate::scalar::{OpRef, Scalar, Subject, TCRef};
+use crate::scalar::{OpRef, Refer, Scalar, Subject, TCRef};
 use crate::state::{State, ToState};
 use crate::transact::TxnId;
 use crate::txn::Txn;
 
 pub const CHAINS: Label = label("chains");
 pub(super) const SCHEMA: Label = label("schemata");
+
+const ERR_MISSING_LINK: &str = "missing Link for Service version";
 
 #[derive(Clone)]
 pub enum Attr {
@@ -104,8 +106,7 @@ impl Persist<fs::Dir> for Version {
         let dir = fs::Dir::try_from(store)?;
 
         let (link, proto) = schema.into_inner();
-        let link =
-            link.ok_or_else(|| TCError::bad_request("missing Link for Service version", &proto))?;
+        let link = link.ok_or_else(|| TCError::bad_request(ERR_MISSING_LINK, &proto))?;
 
         let mut attrs = Map::new();
 
@@ -147,8 +148,7 @@ impl Persist<fs::Dir> for Version {
         let dir = fs::Dir::try_from(store)?;
 
         let (link, proto) = schema.into_inner();
-        let link =
-            link.ok_or_else(|| TCError::bad_request("missing Link for Service version", &proto))?;
+        let link = link.ok_or_else(|| TCError::bad_request(ERR_MISSING_LINK, &proto))?;
 
         let mut attrs = Map::new();
 
@@ -256,8 +256,14 @@ impl DirItem for Service {
         &self,
         txn: &Txn,
         number: VersionNumber,
-        schema: InstanceClass,
+        class: InstanceClass,
     ) -> TCResult<Version> {
+        let (link, proto) = class.into_inner();
+        let link = link.ok_or_else(|| TCError::bad_request(ERR_MISSING_LINK, &proto))?;
+
+        let proto = validate(&link, &number, proto)?;
+        let schema = InstanceClass::anonymous(Some(link), proto);
+
         let txn_id = *txn.id();
         let (dir, mut schemata, mut versions) = try_join!(
             self.dir.write(txn_id),
@@ -425,4 +431,47 @@ fn resolve_type<T: NativeClass>(subject: Subject) -> TCResult<T> {
             subject,
         )),
     }
+}
+
+fn validate(
+    cluster_link: &Link,
+    number: &VersionNumber,
+    proto: Map<Scalar>,
+) -> TCResult<Map<Scalar>> {
+    let version_link = cluster_link.clone().append(number.clone());
+
+    let mut validated = Map::new();
+
+    for (id, scalar) in proto.into_iter() {
+        if let Scalar::Op(op_def) = scalar {
+            let op_def = if op_def.is_write() {
+                // make sure not to replicate ops internal to this OpDef
+                let op_def = op_def.reference_self(version_link.path());
+
+                for (id, provider) in op_def.form() {
+                    // make sure not to duplicate requests to other clusters
+                    if provider.is_inter_service_write(version_link.path()) {
+                        return Err(TCError::unsupported(format!(
+                            "replicated op {} may not perform inter-service writes: {}",
+                            id, provider
+                        )));
+                    }
+                }
+
+                op_def
+            } else {
+                // make sure to replicate all write ops internal to this OpDef
+                // by routing them through the kernel
+                op_def.dereference_self(version_link.path())
+            };
+
+            // TODO: check that the Version does not reference any other Version of the same service
+
+            validated.insert(id, Scalar::Op(op_def));
+        } else {
+            validated.insert(id, scalar);
+        }
+    }
+
+    Ok(validated)
 }

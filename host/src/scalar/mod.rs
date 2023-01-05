@@ -13,7 +13,7 @@ use destream::{de, en};
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use log::{debug, warn};
-use safecast::{Match, TryCastFrom, TryCastInto};
+use safecast::{as_type, AsType, Match, TryCastFrom, TryCastInto};
 use sha2::digest::Output;
 use sha2::Digest;
 
@@ -172,6 +172,14 @@ pub enum Scalar {
     Tuple(Tuple<Self>),
     Value(Value),
 }
+
+as_type!(Scalar, Cluster, ClusterRef);
+as_type!(Scalar, Map, Map<Scalar>);
+as_type!(Scalar, Op, OpDef);
+as_type!(Scalar, Range, Range);
+as_type!(Scalar, Ref, Box<TCRef>);
+as_type!(Scalar, Tuple, Tuple<Scalar>);
+as_type!(Scalar, Value, Value);
 
 impl Scalar {
     /// Return `true` if this `Scalar` variant is a [`Map`].
@@ -570,12 +578,6 @@ impl From<Link> for Scalar {
     }
 }
 
-impl From<Map<Scalar>> for Scalar {
-    fn from(map: Map<Scalar>) -> Self {
-        Self::Map(map)
-    }
-}
-
 impl From<Number> for Scalar {
     fn from(n: Number) -> Self {
         Self::Value(n.into())
@@ -585,12 +587,6 @@ impl From<Number> for Scalar {
 impl From<OpRef> for Scalar {
     fn from(op_ref: OpRef) -> Self {
         Self::Ref(Box::new(TCRef::Op(op_ref)))
-    }
-}
-
-impl From<Range> for Scalar {
-    fn from(range: Range) -> Self {
-        Self::Range(range)
     }
 }
 
@@ -606,21 +602,9 @@ impl From<TCRef> for Scalar {
     }
 }
 
-impl From<Tuple<Scalar>> for Scalar {
-    fn from(tuple: Tuple<Scalar>) -> Self {
-        Self::Tuple(tuple)
-    }
-}
-
 impl From<Tuple<Value>> for Scalar {
     fn from(tuple: Tuple<Value>) -> Self {
         Self::Value(tuple.into())
-    }
-}
-
-impl From<Value> for Scalar {
-    fn from(value: Value) -> Self {
-        Self::Value(value)
     }
 }
 
