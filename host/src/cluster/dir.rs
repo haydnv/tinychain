@@ -77,6 +77,13 @@ impl<T: Transact + Clone + Send + Sync + 'static> Transact for DirEntry<T> {
         };
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        match self {
+            Self::Dir(dir) => dir.rollback(txn_id).await,
+            Self::Item(item) => item.rollback(txn_id).await,
+        };
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
         match self {
             Self::Dir(dir) => dir.finalize(txn_id).await,
@@ -306,21 +313,32 @@ where
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("commit {}", self);
-        let entries = self.contents.commit(txn_id).await;
 
-        join_all(entries.iter().map(|(_name, entry)| async move {
-            match entry {
-                DirEntry::Dir(dir) => dir.commit(txn_id).await,
-                DirEntry::Item(item) => item.commit(txn_id).await,
-            }
-        }))
-        .await;
+        if let Some(entries) = self.contents.commit(txn_id).await {
+            join_all(entries.iter().map(|(_name, entry)| async move {
+                match entry {
+                    DirEntry::Dir(dir) => dir.commit(txn_id).await,
+                    DirEntry::Item(item) => item.commit(txn_id).await,
+                }
+            }))
+            .await;
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        if let Some(contents) = self.contents.rollback(txn_id).await {
+            join_all(contents.iter().map(|(_name, entry)| async move {
+                match entry {
+                    DirEntry::Dir(dir) => dir.rollback(txn_id).await,
+                    DirEntry::Item(item) => item.rollback(txn_id).await,
+                }
+            }))
+            .await;
+        }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        {
-            let contents = self.contents.read(*txn_id).await.expect("dir contents");
-
+        if let Some(contents) = self.contents.finalize(txn_id) {
             join_all(contents.iter().map(|(_name, entry)| async move {
                 match entry {
                     DirEntry::Dir(dir) => dir.finalize(txn_id).await,
@@ -329,8 +347,6 @@ where
             }))
             .await;
         }
-
-        self.contents.finalize(txn_id)
     }
 }
 

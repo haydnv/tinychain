@@ -273,6 +273,10 @@ impl<T: Transact + Send + Sync> Transact for BlockChain<T> {
         guard
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        join!(self.subject.rollback(txn_id), self.history.rollback(txn_id));
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
         join!(self.subject.finalize(txn_id), self.history.finalize(txn_id));
     }

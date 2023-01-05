@@ -8,7 +8,7 @@ use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use futures::future::{FutureExt, TryFutureExt};
+use futures::future::{join_all, FutureExt, TryFutureExt};
 use log::{debug, trace};
 use safecast::AsType;
 use uuid::Uuid;
@@ -1077,7 +1077,13 @@ where
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("commit {}", self);
 
-        let blocks = self.blocks.commit(txn_id).await;
+        let blocks = if let Some(blocks) = self.blocks.commit(txn_id).await {
+            blocks
+        } else {
+            // this file was not read at this commit, so there's nothing to do here
+            return;
+        };
+
         trace!("committed block listing");
 
         {
@@ -1095,7 +1101,17 @@ where
 
             for (block_id, last_modified) in blocks.iter() {
                 trace!("commit last modified ID of block {}...", block_id);
-                let last_modified = last_modified.commit(txn_id).await;
+                let last_modified = if let Some(last_modified) = last_modified.commit(txn_id).await
+                {
+                    last_modified
+                } else {
+                    trace!(
+                        "File::commit skipping block {} since it was not accessed",
+                        block_id
+                    );
+
+                    continue;
+                };
 
                 if &*last_modified == txn_id {
                     let name = file_name::<_, K, B>(block_id);
@@ -1143,22 +1159,37 @@ where
         trace!("sync'd canonical file contents to disk");
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        debug!("roll back {}", self);
+
+        if let Some(blocks) = self.blocks.rollback(txn_id).await {
+            join_all(
+                blocks
+                    .values()
+                    .map(|last_commit_id| last_commit_id.rollback(txn_id)),
+            )
+            .await;
+
+            self.versions
+                .write()
+                .map(|mut version| version.delete(txn_id.to_string()))
+                .await;
+        }
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
         debug!("File::finalize");
 
-        {
-            let blocks = self.blocks.read(*txn_id).await.expect("file block listing");
+        if let Some(blocks) = self.blocks.finalize(txn_id) {
             for last_commit_id in blocks.values() {
                 last_commit_id.finalize(txn_id);
             }
+
+            self.versions
+                .write()
+                .map(|mut version| version.delete(txn_id.to_string()))
+                .await;
         }
-
-        self.blocks.finalize(txn_id);
-
-        self.versions
-            .write()
-            .map(|mut version| version.delete(txn_id.to_string()))
-            .await;
     }
 }
 

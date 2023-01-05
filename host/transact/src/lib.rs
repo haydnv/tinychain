@@ -50,6 +50,9 @@ pub trait Transact {
     /// Commit this transaction.
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit;
 
+    /// Roll back this transaction.
+    async fn rollback(&self, txn_id: &TxnId);
+
     /// Delete any version data specific to this transaction.
     async fn finalize(&self, txn_id: &TxnId);
 }

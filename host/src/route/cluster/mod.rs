@@ -149,7 +149,7 @@ where
                 if txn.is_leader(self.cluster.path()) {
                     self.cluster.distribute_rollback(txn).await;
                 } else {
-                    self.cluster.finalize(txn.id()).await;
+                    self.cluster.rollback(txn.id()).await;
                 }
 
                 Ok(())

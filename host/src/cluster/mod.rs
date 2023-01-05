@@ -163,14 +163,18 @@ impl ReplicaSet {
 
 #[async_trait]
 impl Transact for ReplicaSet {
-    type Commit = Arc<BTreeSet<Link>>;
+    type Commit = Option<Arc<BTreeSet<Link>>>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         self.replicas.commit(txn_id).await
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.replicas.rollback(txn_id).await;
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
-        self.replicas.finalize(txn_id)
+        self.replicas.finalize(txn_id);
     }
 }
 
@@ -478,7 +482,7 @@ where
             }
         }
 
-        self.finalize(txn.id()).await;
+        self.rollback(txn.id()).await;
     }
 }
 
@@ -760,7 +764,7 @@ impl<T> Transact for Cluster<T>
 where
     T: Transact + Send + Sync,
 {
-    type Commit = Arc<BTreeSet<Link>>;
+    type Commit = Option<Arc<BTreeSet<Link>>>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("commit {}", self);
@@ -772,6 +776,12 @@ where
         trace!("committed cluster state");
 
         replicas
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.state.rollback(txn_id).await;
+        self.led.write().await.remove(txn_id);
+        self.replicas.rollback(txn_id).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -850,6 +860,10 @@ impl Transact for Legacy {
 
     async fn commit(&self, txn_id: &TxnId) {
         join_all(self.chains.values().map(|chain| chain.commit(txn_id))).await;
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        join_all(self.chains.values().map(|chain| chain.rollback(txn_id))).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {

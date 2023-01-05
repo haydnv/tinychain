@@ -145,6 +145,10 @@ impl Transact for Class {
         self.dir.commit(txn_id).await
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.dir.rollback(txn_id).await
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
         self.dir.finalize(txn_id).await
     }

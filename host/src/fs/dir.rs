@@ -8,7 +8,7 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use futures::future::{join_all, TryFutureExt};
-use log::debug;
+use log::{debug, trace};
 use safecast::{as_type, AsType};
 use uuid::Uuid;
 
@@ -660,42 +660,54 @@ impl Transact for Dir {
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         let listing = self.listing.commit(txn_id).await;
 
-        join_all(listing.iter().map(|(_, entry)| async move {
-            match entry {
-                DirEntry::Dir(dir) => {
-                    dir.commit(txn_id).await;
-                }
+        if let Some(listing) = listing {
+            let commits = listing.values().map(|entry| match entry {
+                DirEntry::Dir(dir) => dir.commit(txn_id),
                 DirEntry::File(file) => match file {
-                    FileEntry::BTree(file) => {
-                        file.commit(txn_id).await;
-                    }
-                    FileEntry::Chain(file) => {
-                        file.commit(txn_id).await;
-                    }
-                    FileEntry::Class(file) => {
-                        file.commit(txn_id).await;
-                    }
-                    FileEntry::Library(file) => {
-                        file.commit(txn_id).await;
-                    }
-                    FileEntry::Service(file) => {
-                        file.commit(txn_id).await;
-                    }
+                    FileEntry::BTree(file) => file.commit(txn_id),
+                    FileEntry::Chain(file) => file.commit(txn_id),
+                    FileEntry::Class(file) => file.commit(txn_id),
+                    FileEntry::Library(file) => file.commit(txn_id),
+                    FileEntry::Service(file) => file.commit(txn_id),
                     #[cfg(feature = "tensor")]
-                    FileEntry::Tensor(file) => {
-                        file.commit(txn_id).await;
-                    }
+                    FileEntry::Tensor(file) => file.commit(txn_id),
                 },
-            }
-        }))
-        .await;
+            });
+
+            join_all(commits).await;
+        } else {
+            trace!(
+                "skip committing {} contents since they were not accessed at {}",
+                self,
+                txn_id
+            );
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        debug!("roll back {}", self);
+
+        if let Some(listing) = self.listing.rollback(txn_id).await {
+            let rollbacks = listing.values().map(|entry| match entry {
+                DirEntry::Dir(dir) => dir.rollback(txn_id),
+                DirEntry::File(file) => match file {
+                    FileEntry::BTree(file) => file.rollback(txn_id),
+                    FileEntry::Chain(file) => file.rollback(txn_id),
+                    FileEntry::Class(file) => file.rollback(txn_id),
+                    FileEntry::Library(file) => file.rollback(txn_id),
+                    FileEntry::Service(file) => file.rollback(txn_id),
+                    #[cfg(feature = "tensor")]
+                    FileEntry::Tensor(file) => file.rollback(txn_id),
+                },
+            });
+
+            join_all(rollbacks).await;
+        }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        {
-            let listing = self.listing.read(*txn_id).await.expect("dir listing");
-
-            join_all(listing.values().map(|entry| match entry {
+        if let Some(listing) = self.listing.finalize(txn_id) {
+            let cleanups = listing.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.finalize(txn_id),
                 DirEntry::File(file) => match file {
                     FileEntry::BTree(file) => file.finalize(txn_id),
@@ -706,11 +718,10 @@ impl Transact for Dir {
                     #[cfg(feature = "tensor")]
                     FileEntry::Tensor(file) => file.finalize(txn_id),
                 },
-            }))
-            .await;
-        }
+            });
 
-        self.listing.finalize(txn_id);
+            join_all(cleanups).await;
+        }
     }
 }
 

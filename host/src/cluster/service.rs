@@ -205,6 +205,16 @@ impl Transact for Version {
         .await;
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        join_all(
+            self.attrs
+                .values()
+                .filter_map(|attr| attr.as_type())
+                .map(|attr: &Chain<_>| attr.rollback(txn_id)),
+        )
+        .await;
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
         join_all(
             self.attrs
@@ -319,27 +329,37 @@ impl Transact for Service {
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         let (_schema, versions) = join!(self.schema.commit(txn_id), self.versions.commit(txn_id));
 
-        join_all(
-            versions
-                .iter()
-                .map(|(_name, version)| async move { version.commit(txn_id).await }),
-        )
-        .await;
+        if let Some(versions) = versions {
+            join_all(versions.iter().map(|(_name, version)| async move {
+                version.commit(txn_id).await;
+            }))
+            .await;
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        if let Some(versions) = self.versions.rollback(txn_id).await {
+            join_all(
+                versions
+                    .iter()
+                    .map(|(_, version)| async move { version.rollback(txn_id).await }),
+            )
+            .await;
+        }
+
+        self.schema.rollback(txn_id).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        {
-            let versions = self.versions.read(*txn_id).await.expect("service versions");
-
+        if let Some(versions) = self.versions.finalize(txn_id) {
             join_all(
                 versions
                     .iter()
                     .map(|(_, version)| async move { version.finalize(txn_id).await }),
             )
-            .await
-        };
+            .await;
+        }
 
-        self.versions.finalize(txn_id);
         self.schema.finalize(txn_id).await;
     }
 }
