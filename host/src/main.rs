@@ -8,6 +8,7 @@ use clap::Parser;
 use destream::de::FromStream;
 use futures::future::{join_all, TryFutureExt};
 use futures::{future, join, stream, try_join};
+use log::{info, warn};
 use tokio::time::Duration;
 
 use tc_error::*;
@@ -139,7 +140,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         .init();
 
     if !config.workspace.exists() {
-        log::info!(
+        info!(
             "workspace directory {:?} does not exist, attempting to create it...",
             config.workspace
         );
@@ -153,6 +154,11 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
 
     let cache = freqfs::Cache::new(config.cache_size.into(), Duration::from_secs(1), None);
     let workspace = cache.clone().load(config.workspace.clone()).await?;
+
+    if workspace.trim().await > 0 {
+        warn!("workspace {} is not empty!", config.workspace.display());
+    }
+
     let txn_id = TxnId::new(Gateway::time());
 
     let data_dir = if let Some(data_dir) = config.data_dir.clone() {
@@ -161,6 +167,8 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         }
 
         let data_dir = cache.load(data_dir).await?;
+        data_dir.trim().await;
+
         tinychain::fs::Dir::load(data_dir, txn_id).await
     } else {
         Err(TCError::internal("the --data-dir option is required"))
@@ -241,7 +249,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
 
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
 
-    log::info!(
+    info!(
         "starting server, stack size is {}, cache size is {}",
         config.stack_size,
         config.cache_size

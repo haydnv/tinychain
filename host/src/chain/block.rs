@@ -33,7 +33,7 @@ use crate::txn::{Txn, TxnId};
 use super::data::History;
 use super::{ChainInstance, CHAIN};
 
-const HISTORY: Label = label(".history");
+pub(crate) const HISTORY: Label = label(".history");
 
 /// A [`Chain`] which stores every mutation of its [`Subject`] in a series of `ChainBlock`s
 #[derive(Clone)]

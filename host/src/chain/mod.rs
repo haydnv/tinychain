@@ -23,6 +23,7 @@ use crate::state::State;
 use crate::txn::Txn;
 
 pub use block::BlockChain;
+pub(crate) use block::HISTORY;
 pub use data::ChainBlock;
 pub use sync::SyncChain;
 

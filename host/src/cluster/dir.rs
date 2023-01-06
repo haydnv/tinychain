@@ -8,7 +8,7 @@ use log::{debug, info};
 use safecast::CastInto;
 
 use tc_error::*;
-use tc_transact::fs::{DirRead, Persist};
+use tc_transact::fs::Persist;
 use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
@@ -367,9 +367,9 @@ impl Persist<fs::Dir> for Dir<Class> {
         let (self_link, cluster_link) = schema;
         let dir = fs::Dir::try_from(store)?;
 
-        let lock = tc_transact::fs::Dir::try_read(&dir, txn_id)?;
-        let mut contents = BTreeMap::new();
+        let lock = tc_transact::fs::Dir::try_write(&dir, txn_id)?;
 
+        let mut contents = BTreeMap::new();
         for (name, entry) in lock.iter() {
             let entry_link = cluster_link.clone().append(name.clone());
             let self_link = self_link.clone().append(name.clone());
@@ -377,12 +377,21 @@ impl Persist<fs::Dir> for Dir<Class> {
 
             let entry = match entry {
                 fs::DirEntry::Dir(dir) => {
-                    let is_class_set = {
-                        let lock = tc_transact::fs::Dir::try_read(dir, txn_id)?;
-                        lock.contains(&super::class::SCHEMA.into())
+                    let is_chain = {
+                        let cache = tc_transact::fs::Dir::into_inner(dir.clone());
+                        let contents = cache.try_read().expect("cache read");
+
+                        if contents.is_empty() {
+                            return Err(TCError::internal(format!(
+                                "an empty directory at {} is ambiguous",
+                                schema.0
+                            )));
+                        }
+
+                        contents.contains(&*crate::chain::HISTORY)
                     };
 
-                    if is_class_set {
+                    if is_chain {
                         Cluster::load(txn_id, schema, dir.clone().into()).map(DirEntry::Item)
                     } else {
                         Cluster::load(txn_id, schema, dir.clone().into()).map(DirEntry::Dir)
@@ -471,7 +480,7 @@ impl Persist<fs::Dir> for Dir<Service> {
         let dir = fs::Dir::try_from(store)?;
         let lock = tc_transact::fs::Dir::try_read(&dir, txn_id)?;
 
-        if lock.is_empty() {
+        if tc_transact::fs::DirRead::is_empty(&lock) {
             Ok(Self {
                 cache: tc_transact::fs::Dir::into_inner(dir),
                 contents: TxnLock::new(format!("dir at {}", schema.0), txn_id, BTreeMap::new()),
@@ -503,7 +512,7 @@ impl Persist<fs::Dir> for Dir<Service> {
                 fs::DirEntry::Dir(dir) => {
                     let is_service = {
                         let lock = tc_transact::fs::Dir::try_read(dir, txn_id)?;
-                        lock.contains(&super::service::SCHEMA.into())
+                        tc_transact::fs::DirRead::contains(&lock, &super::service::SCHEMA.into())
                     };
 
                     let store = dir.clone().into();
