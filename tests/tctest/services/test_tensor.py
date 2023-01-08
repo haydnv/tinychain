@@ -9,6 +9,7 @@ from .base import PersistenceTest
 
 
 LEAD = f"http://127.0.0.1:{DEFAULT_PORT}"
+NS = tc.URI("/test_tensor")
 
 
 class TensorChainTests(PersistenceTest, unittest.TestCase):
@@ -16,20 +17,18 @@ class TensorChainTests(PersistenceTest, unittest.TestCase):
     NUM_HOSTS = 4
 
     def service(self, chain_type):
-        class Persistent(tc.app.Service):
-            HOST = tc.URI(LEAD)
-            NS = tc.URI("/test")
+        class Persistent(tc.service.Service):
             NAME = "tensor"
             VERSION = tc.Version("0.0.0")
 
-            __uri__ = HOST + tc.URI(tc.app.Service) + NS.extend(NAME, VERSION)
+            __uri__ = tc.service.service_uri(LEAD, NS, NAME, VERSION)
 
             def __init__(self):
                 schema = ([2, 3], tc.I32)
                 self.dense = chain_type(tc.tensor.Dense(schema))
                 self.sparse = chain_type(tc.tensor.Sparse(schema))
 
-                tc.app.App.__init__(self)
+                tc.service.Service.__init__(self)
 
             @tc.put
             def overwrite(self, txn):
@@ -47,7 +46,7 @@ class TensorChainTests(PersistenceTest, unittest.TestCase):
 
     def execute(self, hosts):
         endpoints = {
-            "tensor": tc.URI("/service/test/tensor/0.0.0")
+            "tensor": tc.URI("/service/test_tensor/tensor/0.0.0")
         }
 
         endpoints["dense"] = endpoints["tensor"].append("dense")

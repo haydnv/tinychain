@@ -1,6 +1,6 @@
 import typing
 
-from ..app import Library
+from ..service import library_uri, Library
 from ..collection.tensor import einsum, Dense, Sparse, Tensor
 from ..decorators import closure, get as get_op, post
 from ..error import BadRequest
@@ -12,6 +12,7 @@ from ..state import Stream
 from ..uri import URI
 
 from .base import product
+from .constants import NS
 
 # from "Numerical Recipes in C" p. 65
 EPS = F32(10**-6)
@@ -72,11 +73,10 @@ class PLUFactorization(Map):
 
 
 class LinearAlgebra(Library):
-    NS = URI("/")
     NAME = "linalg"
     VERSION = Version("0.0.0")
 
-    __uri__ = URI(Library) + NS.append(NAME) + VERSION
+    __uri__ = library_uri(None, NS, NAME, VERSION)
 
     # TODO: vectorize to support a `Tensor` containing a batch of matrices
     @post

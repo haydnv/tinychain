@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 
-from ..app import Model, Service
+from ..service import Model, Service
 from ..chain import Sync
 from ..collection import Column
 from ..collection.table import create_schema as cts, Table, Schema as TableSchema

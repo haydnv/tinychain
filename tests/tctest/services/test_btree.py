@@ -6,6 +6,8 @@ from .base import PersistenceTest
 from ..process import DEFAULT_PORT
 
 LEAD = f"http://127.0.0.1:{DEFAULT_PORT}"
+NS = tc.URI("/test")
+NAME = "btree"
 SCHEMA = tc.btree.Schema((tc.Column("number", tc.Int), tc.Column("word", tc.String, 100)))
 
 
@@ -14,17 +16,14 @@ class BTreeChainTests(PersistenceTest, unittest.TestCase):
     NUM_HOSTS = 3
 
     def service(self, chain_type):
-        class Persistent(tc.app.Service):
-            HOST = tc.URI(LEAD)
-            NS = tc.URI("/test")
-            NAME = "btree"
+        class Persistent(tc.service.Service):
             VERSION = tc.Version("0.0.0")
 
-            __uri__ = HOST + tc.URI(tc.app.Service) + NS.append(NAME) + VERSION
+            __uri__ = tc.service.service_uri(LEAD, NS, NAME, VERSION)
 
             def __init__(self):
                 self.tree = chain_type(tc.btree.BTree(SCHEMA))
-                tc.app.Service.__init__(self)
+                tc.service.Service.__init__(self)
 
         return Persistent()
 
@@ -32,7 +31,7 @@ class BTreeChainTests(PersistenceTest, unittest.TestCase):
         row1 = [1, "one"]
         row2 = [2, "two"]
 
-        endpoint = tc.URI("/service/test/btree/0.0.0/tree")
+        endpoint = (tc.URI(tc.service.Service) + NS).extend(NAME, "0.0.0", "tree")
 
         hosts[0].put(endpoint, None, row1)
 

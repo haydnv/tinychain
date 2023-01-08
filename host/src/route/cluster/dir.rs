@@ -12,56 +12,15 @@ use crate::object::InstanceClass;
 use crate::route::*;
 use crate::scalar::{OpRef, OpRefType, Scalar, TCRef};
 use crate::state::State;
+use crate::CLASS;
 
 pub(super) struct DirHandler<'a, T> {
     pub(super) dir: &'a Dir<T>,
-    pub(super) path: &'a [PathSegment],
 }
 
 impl<'a, T> DirHandler<'a, T> {
-    fn new(dir: &'a Dir<T>, path: &'a [PathSegment]) -> Self {
-        Self { dir, path }
-    }
-}
-
-type ErrorHandler<'a, 'b, A, R> = Box<
-    dyn FnOnce(&'b Txn, A) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> + Send + 'a,
->;
-
-impl<'a, T> DirHandler<'a, T>
-where
-    T: DirItem,
-{
-    pub(super) fn method_not_allowed<'b, A: Send + 'b, R: Send + 'a>(
-        self: Box<Self>,
-        method: OpRefType,
-    ) -> ErrorHandler<'a, 'b, A, R>
-    where
-        'b: 'a,
-    {
-        if self.path.is_empty() {
-            Box::new(move |_, _| {
-                Box::pin(future::ready(Err(TCError::method_not_allowed(
-                    method,
-                    self.dir,
-                    TCPath::from(self.path),
-                ))))
-            })
-        } else {
-            Box::new(move |txn, _: A| {
-                Box::pin(async move {
-                    if let Some(_version) = self.dir.entry(*txn.id(), &self.path[0]).await? {
-                        Err(TCError::internal(format!(
-                            "bad routing for {} in {}",
-                            TCPath::from(self.path),
-                            self.dir
-                        )))
-                    } else {
-                        Err(TCError::not_found(&self.path[0]))
-                    }
-                })
-            })
-        }
+    fn new(dir: &'a Dir<T>) -> Self {
+        Self { dir }
     }
 }
 
@@ -149,10 +108,12 @@ macro_rules! route_dir {
     ($t:ty) => {
         impl Route for Dir<$t> {
             fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-                if path.len() == 1 && &path[0] == &ENTRIES {
+                if path.is_empty() {
+                    Some(Box::new(DirHandler::new(self)))
+                } else if path.len() == 1 && &path[0] == &ENTRIES {
                     Some(Box::new(EntriesHandler { dir: self }))
                 } else {
-                    Some(Box::new(DirHandler::new(self, path)))
+                    None
                 }
             }
         }

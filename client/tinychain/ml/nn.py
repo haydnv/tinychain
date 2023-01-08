@@ -2,9 +2,7 @@
 
 import inspect
 import logging
-import typing
 
-from ..app import Dynamic, Model
 from ..collection.tensor import einsum, Dense, Tensor
 from ..context import Context
 from ..decorators import differentiable, post, reflect
@@ -15,11 +13,15 @@ from ..reflect import method
 from ..reflect.functions import parse_args
 from ..scalar.number import Float
 from ..scalar.ref import deref, form_of, get_ref, is_ref, After
+from ..service import model_uri, Dynamic, Model
 from ..uri import URI
 
-from .constants import LIB_URI
+from .constants import NS, VERSION
 from .interface import Differentiable, Gradient
 from .variable import namespace, Variable
+
+
+NAME = "nn"
 
 
 # TODO: move into the reflect.method module and rename
@@ -46,7 +48,7 @@ class ReflectedMethod(method.Post):
 class Layer(Model, Differentiable):
     """A :class:`Layer` in a :class:`NeuralNet`"""
 
-    __uri__ = LIB_URI + "/Layer"
+    __uri__ = model_uri(NS, NAME, VERSION, "Layer")
 
     @reflect
     def gradient(self, inputs: Tensor, loss: Tensor) -> Map[Gradient]:
@@ -245,7 +247,7 @@ class Linear(Layer, Dynamic):
 class NeuralNet(Model, Differentiable):
     """A neural network"""
 
-    __uri__ = LIB_URI + "/NeuralNet"
+    __uri__ = model_uri(NS, NAME, VERSION, "NeuralNet")
 
 
 class Sequential(NeuralNet, Dynamic):

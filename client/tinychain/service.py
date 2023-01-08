@@ -1,13 +1,10 @@
 """A hosted :class:`Service` or :class:`Library`."""
-# TODO: rename this module to "service"
 
 import inspect
 import logging
-import typing
 
 from .chain import Chain
 from .collection import Collection, Column
-from .generic import Map, Tuple
 from .interface import Interface
 from .json import to_json
 from .reflect.functions import parse_args
@@ -15,25 +12,21 @@ from .reflect.meta import Meta
 from .reflect.stub import MethodStub
 from .scalar import Scalar
 from .scalar.number import U32
-from .scalar.ref import Ref, form_of, get_ref
+from .scalar.ref import Ref, form_of, get_ref, is_literal
 from .scalar.value import Nil
 from .state import hash_of, Class, Instance, Object, State
 from .uri import URI
 
 
-def class_name(object_):
+def class_name(class_or_instance):
     """
-    A snake case representation of the class name.
+    Returns a snake-case representation of the class name.
 
-    Accepts a `Class` or `object` as an argument.
+    Example: `assert class_name(LargeInt) == "large_int") and class_name(LargeInt(123) == "large_int")`
     """
 
-    if isinstance(object_, type):
-        name = object_.__name__
-    else:
-        name = object_.__class__.__name__
-
-    return "".join(["_" + n.lower() if n.isupper() else n for n in name]).lstrip("_")
+    cls = class_or_instance if isinstance(class_or_instance, type) else class_or_instance.__class__
+    return "".join(["_" + n.lower() if n.isupper() else n for n in cls.__name__]).lstrip("_")
 
 
 class Model(Object, metaclass=Meta):
@@ -117,10 +110,7 @@ class Dynamic(Instance):
             if name.startswith('_'):
                 continue
 
-            if hasattr(attr, "hidden") and attr.hidden:
-                # TODO: remove this obsolete case
-                continue
-            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
+            if inspect.ismethod(attr) and attr.__self__ is self.__class__:
                 # it's a @classmethod
                 continue
 
@@ -137,8 +127,6 @@ class Dynamic(Instance):
         form = {}
         for name, attr in inspect.getmembers(self):
             if name.startswith('_'):
-                continue
-            elif hasattr(attr, "hidden") and attr.hidden:
                 continue
             elif isinstance(attr, Library):
                 # it's an external dependency
@@ -282,77 +270,7 @@ class Library(object):
             else:
                 form[name] = to_json(attr)
 
-        # TODO: delete this condition
-        if hasattr(self, "VERSION"):
-            return {str(URI(self)[:-1]): form}
-        else:
-            return {str(URI(self)): form}
-
-
-# TODO: delete
-class App(Library):
-    def __init__(self):
-        Library.__init__(self)
-
-        for name, attr in inspect.getmembers(self, _is_mutable):
-            if isinstance(attr, Chain):
-                attr.__uri__ = self.__uri__.append(name)
-            else:
-                raise RuntimeError(f"{attr} must be managed by a Chain")
-
-    def __json__(self):
-        if not hasattr(self, "_methods"):
-            name = self.__class__.__name__
-            raise RuntimeError(f"{name} has not reflected over its methods--did you forget to call App.__init__?")
-
-        header = _Header()
-        for name, attr in inspect.getmembers(self):
-            if name.startswith('_'):
-                continue
-            elif hasattr(attr, "__ref__"):
-                setattr(header, name, get_ref(attr, f"self/{name}"))
-            else:
-                setattr(header, name, attr)
-
-        # TODO: deduplicate with Library.__json__ and Meta.__json__
-        form = {}
-        for name, attr in inspect.getmembers(self):
-            if name.startswith('_'):
-                continue
-
-            if inspect.isclass(attr):
-                if issubclass(attr, Library) or issubclass(attr, Dynamic):
-                    continue
-            elif isinstance(attr, Library):
-                continue
-
-            if hasattr(attr, "hidden") and attr.hidden:
-                continue
-            elif inspect.ismethod(attr) and attr.__self__ is self.__class__:
-                # it's a @classmethod
-                continue
-
-            elif name in self._methods:
-                for method_name, method in self._methods[name].expand(header, name):
-                    form[method_name] = to_json(method)
-
-            elif _is_mutable(attr):
-                assert isinstance(attr, Chain)
-                chain_type = type(attr)
-                collection = form_of(attr)
-
-                if isinstance(collection, Collection):
-                    schema = form_of(collection)
-                    form[name] = {str(URI(chain_type)): [{str(URI(type(collection))): [to_json(schema)]}]}
-                elif isinstance(collection, (dict, list, tuple, Map, Tuple)):
-                    form[name] = {str(URI(chain_type)): [to_json(collection)]}
-                else:
-                    raise TypeError(f"invalid subject for Chain: {collection}")
-
-            else:
-                form[name] = to_json(attr)
-
-        return {str(self.__uri__): form}
+        return {str(URI(self)[:-1]): form}
 
 
 class Service(Library):
@@ -435,36 +353,20 @@ def dependencies(lib_or_model):
     return deps
 
 
-# TODO: delete
-def write_config(lib, config_path, overwrite=False):
-    """Write the configuration of the given :class:`tc.App` or :class:`Library` to the given path."""
+def model_uri(namespace, lib_name, version, model_name):
+    assert namespace.startswith('/'), f"a namespace must be a URI path (e.g. '/name'), not {namespace}"
+    assert '/' not in lib_name, f"library or service name {lib_name} must not contain a '/'"
+    assert '/' not in model_name, f"model name {lib_name} must not contain a '/'"
 
-    if inspect.isclass(lib):
-        raise ValueError(f"write_app expects an instance of Library, not a class: {lib}")
+    return (URI("/class") + namespace).extend(lib_name, version, model_name)
 
-    import json
-    import pathlib
 
-    config = to_json(lib)
-    config_path = pathlib.Path(config_path)
-    if config_path.exists() and not overwrite:
-        with open(config_path) as f:
-            try:
-                if json.load(f) == config:
-                    return
-            except json.decoder.JSONDecodeError as e:
-                logging.warning(f"invalid JSON at {config_path}: {e}")
+def library_uri(lead, namespace, name, version):
+    return _make_uri(Library, lead, namespace, name, version)
 
-        raise RuntimeError(f"there is already an entry at {config_path}")
-    else:
-        import os
 
-        if not config_path.parent.exists():
-            os.makedirs(config_path.parent)
-            assert config_path.parent.exists()
-
-        with open(config_path, 'w') as config_file:
-            config_file.write(json.dumps(config, indent=4))
+def service_uri(lead, namespace, name, version):
+    return _make_uri(Service, lead, namespace, name, version)
 
 
 def _is_mutable(state):
@@ -475,3 +377,23 @@ def _is_mutable(state):
         return False
 
     return True
+
+
+def _make_uri(parent, lead, namespace, name, version):
+    if lead is not None:
+        assert "://" in lead, f"lead replica {lead} must specify a protocol (e.g. 'http://...')"
+
+    assert namespace.startswith('/'), f"a namespace must be a URI path (e.g. '/name'), not {namespace}"
+    assert '/' not in name, f"{parent.__name__} name {name} must not contain a '/'"
+
+    namespace = URI(namespace)
+    assert namespace.host() is None, f"namespace {namespace} must not specify a host"
+    assert is_literal(version), f"version number {version} must be known at compile-time"
+
+    uri = lead if lead else URI('/')
+    uri += URI(parent)
+    uri += namespace
+    uri += name
+    uri += version
+
+    return uri

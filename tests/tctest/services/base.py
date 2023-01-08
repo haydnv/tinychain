@@ -22,20 +22,22 @@ class PersistenceTest(object):
     def _execute(self, chain_type):
         service = self.service(chain_type)
 
-        if not tc.URI(service).host():
-            print(f"cannot test replication of a service with no host", service)
+        lead = tc.URI(service)[0]
+        if "://" not in lead:
+            print(f"cannot test replication of a service with no lead replica", service)
             return
+
+        [namespace] = tc.URI(service).path()[1:-2]
 
         hosts = []
         for i in range(self.NUM_HOSTS):
-            name = f"test_{service.NAME}_{i}"
             port = DEFAULT_PORT + i
             host_uri = f"http://127.0.0.1:{port}" + tc.URI(service).path()
-            host = start_host(name, [], host_uri=host_uri, cache_size=self.CACHE_SIZE, replicate=tc.URI(service)[0])
+            host = start_host(tc.URI(f"/{namespace}"), host_uri=host_uri, cache_size=self.CACHE_SIZE, replicate=str(lead))
             hosts.append(host)
 
         print()
-        hosts[0].put(tc.URI(tc.app.Service), str(service.NS)[1:], tc.URI(service)[:-2])
+        hosts[0].put(tc.URI(tc.service.Service), namespace, tc.URI(service)[:-2])
 
         print()
         hosts[0].put(tc.URI(service).path()[:-2], tc.URI(service)[-2], service)

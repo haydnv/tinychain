@@ -251,8 +251,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
 
     info!(
         "starting server, stack size is {}, cache size is {}",
-        config.stack_size,
-        config.cache_size
+        config.stack_size, config.cache_size
     );
 
     try_join!(

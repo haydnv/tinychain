@@ -135,8 +135,6 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
     where
         'b: 'a,
     {
-        assert!(self.path.is_empty());
-
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
                 debug!("create new Library {} in {}", key, self.dir);
@@ -197,19 +195,5 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
                 }
             })
         }))
-    }
-
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(self.method_not_allowed::<Map<State>, State>(OpRefType::Post))
-    }
-
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(self.method_not_allowed::<Value, ()>(OpRefType::Delete))
     }
 }

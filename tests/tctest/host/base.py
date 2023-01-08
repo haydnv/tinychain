@@ -12,7 +12,7 @@ class HostTest(unittest.TestCase):
         elif name.endswith("tests"):
             name = name[:-5]
 
-        cls.host = start_local_host(f"test_{name}")
+        cls.host = start_local_host(f"/test_{name}")
 
     @classmethod
     def tearDownClass(cls):

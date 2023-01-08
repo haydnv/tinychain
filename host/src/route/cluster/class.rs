@@ -158,33 +158,10 @@ impl Route for Class {
 }
 
 impl<'a> Handler<'a> for DirHandler<'a, Class> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(self.method_not_allowed::<Value, State>(OpRefType::Get))
-    }
-
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
     where
         'b: 'a,
     {
-        if !self.path.is_empty() {
-            return Some(Box::new(move |txn, _key, _value| {
-                Box::pin(async move {
-                    if let Some(_version) = self.dir.entry(*txn.id(), &self.path[0]).await? {
-                        Err(TCError::internal(format!(
-                            "bad routing for {} in {}",
-                            TCPath::from(self.path),
-                            self.dir
-                        )))
-                    } else {
-                        Err(TCError::not_found(&self.path[0]))
-                    }
-                })
-            }));
-        }
-
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
                 debug!("create new Class directory entry at {}", key);
@@ -218,19 +195,5 @@ impl<'a> Handler<'a> for DirHandler<'a, Class> {
                 self.create_item_or_dir(txn, link, name, classes).await
             })
         }))
-    }
-
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(self.method_not_allowed::<Map<State>, State>(OpRefType::Post))
-    }
-
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(self.method_not_allowed::<Value, ()>(OpRefType::Delete))
     }
 }

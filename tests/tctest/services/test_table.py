@@ -7,6 +7,7 @@ from .base import PersistenceTest
 from ..process import DEFAULT_PORT, start_host
 
 LEAD = f"http://127.0.0.1:{DEFAULT_PORT}"
+NS = tc.URI("/test_table")
 SCHEMA = tc.table.Schema(
     [tc.Column("name", tc.String, 512)],
     [tc.Column("views", tc.UInt)]).create_index("views", ["views"])
@@ -14,17 +15,15 @@ SCHEMA = tc.table.Schema(
 
 class TableChainTests(PersistenceTest, unittest.TestCase):
     def service(self, chain_type):
-        class Persistent(tc.app.Service):
-            HOST = tc.URI(LEAD)
-            NS = tc.URI("/test")
+        class Persistent(tc.service.Service):
             NAME = "table"
             VERSION = tc.Version("0.0.0")
 
-            __uri__ = HOST + tc.URI(tc.app.Service) + NS.extend(NAME, VERSION)
+            __uri__ = tc.service.service_uri(LEAD, NS, NAME, VERSION)
 
             def __init__(self):
                 self.table = chain_type(tc.table.Table(SCHEMA))
-                tc.app.Service.__init__(self)
+                tc.service.Service.__init__(self)
 
         return Persistent()
 
@@ -32,7 +31,7 @@ class TableChainTests(PersistenceTest, unittest.TestCase):
         row1 = ["one", 1]
         row2 = ["two", 2]
 
-        endpoint = tc.URI("/service/test/table/0.0.0/table")
+        endpoint = (tc.URI(tc.service.Service) + NS).extend("table", "0.0.0", "table")
         self.assertIsNone(hosts[1].put(endpoint, ["one"], [1]))
 
         for host in hosts:

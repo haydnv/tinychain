@@ -1,4 +1,3 @@
-import tinychain.app
 import tinychain.error
 import tinychain.graph
 import tinychain.host
@@ -8,6 +7,7 @@ import tinychain.math.linalg
 import tinychain.ml
 import tinychain.ml.service
 import tinychain.scalar
+import tinychain.service
 
 from tinychain.collection import Column, btree, table, tensor
 from tinychain.context import Context

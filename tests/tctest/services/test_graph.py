@@ -6,15 +6,15 @@ from ..process import DEFAULT_PORT, start_host
 
 
 LEAD = f"http://127.0.0.1:{DEFAULT_PORT}"
+NS = tc.URI("/test_graph")
+SERVICE_NAME = "graph"
 
 
-class User(tc.app.Model):
-    NS = tc.URI("/test/graph")
+class User(tc.service.Model):
     NAME = "User"
     VERSION = tc.Version("0.0.0")
 
-    # TODO: replace URI("/class") with URI(tc.app.Model)
-    __uri__ = (tc.URI("/class") + NS).extend(VERSION, NAME)
+    __uri__ = tc.service.model_uri(NS, SERVICE_NAME, VERSION, NAME)
 
     first_name = tc.Column("first_name", tc.String, 100)
     last_name = tc.Column("last_name", tc.String, 100)
@@ -25,14 +25,12 @@ class User(tc.app.Model):
 
 
 class TestService(tc.graph.Graph):
-    HOST = tc.URI(LEAD)
-    NS = tc.URI("/test")
-    NAME = "graph"
+    NAME = SERVICE_NAME
     VERSION = tc.Version("0.0.0")
 
     User = User
 
-    __uri__ = HOST + tc.URI(tc.app.Service) + NS.extend(NAME, VERSION)
+    __uri__ = tc.service.service_uri(LEAD, NS, NAME, VERSION)
 
     @tc.post
     def create_user(self, first_name: tc.String, last_name: tc.String):
@@ -44,9 +42,9 @@ class TestService(tc.graph.Graph):
 class GraphTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_app", [])
+        cls.host = start_host(NS)
 
-        cls.host.put(tc.URI(tc.app.Service), str(TestService.NS)[1:], tc.URI(TestService)[:-2])
+        cls.host.put(tc.URI(tc.service.Service), str(NS)[1:], tc.URI(TestService)[:-2])
         cls.host.install(TestService())
 
     def testCreateUser(self):

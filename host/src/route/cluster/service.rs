@@ -10,7 +10,7 @@ use crate::cluster::{service, DirItem, Replica, Service};
 use crate::object::InstanceClass;
 use crate::route::cluster::dir::{expect_version, extract_classes};
 use crate::route::object::method::route_attr;
-use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
+use crate::route::{DeleteHandler, GetHandler, Handler, MethodNotAllowedHandler, PostHandler, Public, PutHandler, Route};
 use crate::scalar::{OpRef, OpRefType, Scalar, Subject, TCRef};
 use crate::state::State;
 use crate::txn::Txn;
@@ -22,7 +22,9 @@ impl Route for service::Version {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!("service::Version::route {}", TCPath::from(path));
 
-        assert!(!path.is_empty());
+        if path.is_empty() {
+            return Some(Box::new(MethodNotAllowedHandler::from(self)));
+        }
 
         match self.get_attribute(&path[0]) {
             Some(attr) => match attr {
@@ -276,19 +278,5 @@ impl<'a> Handler<'a> for DirHandler<'a, Service> {
                 }
             })
         }))
-    }
-
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(self.method_not_allowed::<Map<State>, State>(OpRefType::Post))
-    }
-
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(self.method_not_allowed::<Value, ()>(OpRefType::Delete))
     }
 }

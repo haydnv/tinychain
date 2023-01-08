@@ -3,7 +3,7 @@
 import inspect
 import operator
 
-from .app import Model
+from .service import Model
 from .chain import Chain
 from .generic import autobox
 from .json import to_json

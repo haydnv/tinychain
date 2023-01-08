@@ -4,18 +4,22 @@ import tinychain as tc
 
 from ..process import start_host
 
-URI = tc.URI("/test/ml/app")
 BATCH_SIZE = 20
+LIB_URI = tc.URI(tc.ml.NeuralNets)
+NS = tc.URI("/test_neural_net")
 
 
-class NeuralNetTester(tc.app.Library):
-    __uri__ = URI
+class NeuralNetTester(tc.service.Library):
+    NAME = "lib"
+    VERSION = tc.ml.VERSION
 
-    ml = tc.ml.service.ML()
+    __uri__ = tc.service.library_uri(None, NS, NAME, VERSION)
+
+    nn = tc.ml.service.NeuralNets()
 
     @tc.post
     def test_convolution(self, inputs: tc.tensor.Tensor) -> tc.F32:
-        layer = self.ml.ConvLayer.create([3, 5, 5], [2, 1, 1])
+        layer = self.nn.ConvLayer.create([3, 5, 5], [2, 1, 1])
         return layer.eval(inputs)
 
     @tc.post
@@ -38,25 +42,33 @@ class NeuralNetTester(tc.app.Library):
 
 
 class NeuralNetTests(unittest.TestCase):
+    URI = tc.URI(NeuralNetTester)
+
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_neural_net", NeuralNetTester(), wait_time=2, request_ttl=60)
+        cls.host = start_host(NS)
+
+        cls.host.put(tc.URI(tc.service.Library), LIB_URI[-3], LIB_URI[:-2])
+        cls.host.install(tc.ml.NeuralNets())
+
+        cls.host.put(tc.URI(tc.service.Library), cls.URI[-3], cls.URI[:-2])
+        cls.host.install(NeuralNetTester())
 
     def testConvolution(self):
         inputs = np.ones([BATCH_SIZE, 3, 5, 5])
-        self.host.post(URI.append("test_convolution"), {"inputs": load_dense(inputs)})
+        self.host.post(self.URI.append("test_convolution"), {"inputs": load_dense(inputs)})
 
     def testLinear(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
-        self.host.post(URI.append("test_linear"), {"inputs": load_dense(inputs)})
+        self.host.post(self.URI.append("test_linear"), {"inputs": load_dense(inputs)})
 
     def testGradients(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
-        response = self.host.post(URI.append("test_gradients"), {"inputs": load_dense(inputs)})
+        response = self.host.post(self.URI.append("test_gradients"), {"inputs": load_dense(inputs)})
 
     def testSequential(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
-        self.host.post(URI.append("test_sequential"), {"inputs": load_dense(inputs)})
+        self.host.post(self.URI.append("test_sequential"), {"inputs": load_dense(inputs)})
 
     @classmethod
     def tearDownClass(cls) -> None:
