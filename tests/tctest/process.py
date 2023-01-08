@@ -20,6 +20,12 @@ class Docker(tc.host.Local.Process):
     ADDRESS = "127.0.0.1"
 
     def __init__(self, **flags):
+        if "data_dir" in flags:
+            raise RuntimeError(f"the test Dockerfile does not support a custom data directory path {flags['data_dir']}")
+
+        if "log_level" not in flags:
+            flags["log_level"] = "debug"
+
         self.client = docker.from_env()
         self.container = None
         self._flags = flags

@@ -1,6 +1,6 @@
 //! [`Gateway`] handles network traffic.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,7 +59,7 @@ pub trait Server {
     type Error: std::error::Error;
 
     /// Handle incoming requests.
-    async fn listen(self, addr: SocketAddr) -> Result<(), Self::Error>;
+    async fn listen(self, port: u16) -> Result<(), Self::Error>;
 }
 
 /// Responsible for handling inbound and outbound traffic over the network.
@@ -224,9 +224,9 @@ impl Gateway {
     fn http_listen(
         self: Arc<Self>,
     ) -> std::pin::Pin<Box<impl futures::Future<Output = Result<(), Error>>>> {
-        let http_addr = (self.config.addr, self.config.http_port).into();
+        let port = self.config.http_port;
         let server = crate::http::HTTPServer::new(self);
-        let listener = server.listen(http_addr).map_err(|e| {
+        let listener = server.listen(port).map_err(|e| {
             let e: Error = Box::new(e);
             e
         });

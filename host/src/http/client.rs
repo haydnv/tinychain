@@ -102,7 +102,7 @@ impl crate::gateway::Client for Client {
 
         let uri = url(&link, txn.id(), &key)?;
         let req = req_builder("PUT", uri, Some(txn.request().token()))
-            .header(hyper::header::CONTENT_TYPE, Encoding::Tbon.to_string());
+            .header(hyper::header::CONTENT_TYPE, Encoding::Tbon.as_str());
 
         let txn = txn.subcontext_unique().await?;
         let view = value.into_view(txn).await?;
@@ -133,7 +133,7 @@ impl crate::gateway::Client for Client {
 
         let uri = url(&link, txn.id(), &Value::default())?;
         let req = req_builder("POST", uri, Some(txn.request().token()))
-            .header(hyper::header::CONTENT_TYPE, Encoding::Tbon.to_string());
+            .header(hyper::header::CONTENT_TYPE, Encoding::Tbon.as_str());
 
         let txn = txn.subcontext_unique().await?;
         let subcontext = txn.subcontext(label("_params").into()).await?;
@@ -208,7 +208,7 @@ fn url(link: &Link, txn_id: &TxnId, key: &Value) -> TCResult<Url> {
 fn req_builder(method: &str, url: Url, auth: Option<&str>) -> http::request::Builder {
     let req = hyper::Request::builder()
         .method(method)
-        .header(hyper::header::ACCEPT_ENCODING, Encoding::Tbon.to_string())
+        .header(hyper::header::ACCEPT_ENCODING, Encoding::Tbon.as_str())
         .uri(url.to_string());
 
     if let Some(token) = auth {
