@@ -30,6 +30,8 @@ def class_name(class_or_instance):
 
 
 class Model(Object, metaclass=Meta):
+    __uri__ = URI("/class")
+
     def __new__(cls, *args, **kwargs):
         if issubclass(cls, Dynamic):
             return Instance.__new__(cls)
@@ -358,7 +360,7 @@ def model_uri(namespace, lib_name, version, model_name):
     assert '/' not in lib_name, f"library or service name {lib_name} must not contain a '/'"
     assert '/' not in model_name, f"model name {lib_name} must not contain a '/'"
 
-    return (URI("/class") + namespace).extend(lib_name, version, model_name)
+    return (URI(Model) + namespace).extend(lib_name, version, model_name)
 
 
 def library_uri(lead, namespace, name, version):
