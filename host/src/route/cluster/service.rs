@@ -10,7 +10,10 @@ use crate::cluster::{service, DirItem, Replica, Service};
 use crate::object::InstanceClass;
 use crate::route::cluster::dir::{expect_version, extract_classes};
 use crate::route::object::method::route_attr;
-use crate::route::{DeleteHandler, GetHandler, Handler, MethodNotAllowedHandler, PostHandler, Public, PutHandler, Route};
+use crate::route::{
+    DeleteHandler, GetHandler, Handler, MethodNotAllowedHandler, PostHandler, Public, PutHandler,
+    Route,
+};
 use crate::scalar::{OpRef, OpRefType, Scalar, Subject, TCRef};
 use crate::state::State;
 use crate::txn::Txn;

@@ -10,9 +10,8 @@ use crate::cluster::dir::{Dir, DirCreate, DirCreateItem, DirEntry, ENTRIES};
 use crate::cluster::{Class, Cluster, DirItem, Library, Replica, Service};
 use crate::object::InstanceClass;
 use crate::route::*;
-use crate::scalar::{OpRef, OpRefType, Scalar, TCRef};
+use crate::scalar::{OpRef, Scalar, TCRef};
 use crate::state::State;
-use crate::CLASS;
 
 pub(super) struct DirHandler<'a, T> {
     pub(super) dir: &'a Dir<T>,

@@ -8,7 +8,6 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{Future, TryFutureExt};
-use futures::try_join;
 use log::debug;
 
 use tc_error::*;
@@ -219,48 +218,7 @@ impl Gateway {
 
     /// Start this `Gateway`'s server
     pub fn listen(self: Arc<Self>) -> Pin<Box<impl Future<Output = Result<(), Error>> + 'static>> {
-        Box::pin(async move {
-            match try_join!(self.clone().http_listen(), self.clone().replicate()) {
-                Ok(_) => Ok(()),
-                Err(cause) => Err(cause),
-            }
-        })
-    }
-
-    // TODO: delete
-    async fn replicate(self: Arc<Self>) -> Result<(), Error> {
-        let result = async move {
-            for cluster in self.kernel.hosted() {
-                let gateway = self.clone();
-
-                if cluster.link().host().is_none() {
-                    continue;
-                }
-
-                log::info!("replicating {}", cluster);
-
-                let txn = gateway.new_txn(TxnId::new(Self::time()), None).await?;
-                let txn = cluster.claim(&txn).await?;
-
-                let self_link = txn.link(cluster.link().path().clone());
-                cluster.add_replica(&txn, self_link, true).await?;
-
-                // send a commit message
-                cluster.distribute_commit(&txn).await?;
-
-                log::info!("{} is now online", cluster);
-            }
-
-            TCResult::Ok(())
-        };
-
-        match result.await {
-            Ok(()) => Result::<(), Error>::Ok(()),
-            Err(cause) => {
-                let e: Error = Box::new(cause);
-                Err(e)
-            }
-        }
+        Box::pin(self.http_listen())
     }
 
     fn http_listen(

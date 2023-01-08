@@ -4,7 +4,7 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures::future::Future;
-use log::{debug, info, trace};
+use log::{debug, info};
 
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
@@ -12,13 +12,12 @@ use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath};
 
 use crate::chain::BlockChain;
-use crate::cluster::{Cluster, Dir, DirEntry, Legacy, Replica};
-use crate::object::InstanceExt;
+use crate::cluster::{Cluster, Dir, DirEntry, Replica};
 use crate::route::{Public, Route};
 use crate::state::State;
 use crate::txn::Txn;
 
-use super::{hypothetical, Dispatch, Hosted, Hypothetical};
+use super::{hypothetical, Dispatch, Hypothetical};
 
 /// The type of the class directory
 pub type Class = Cluster<Dir<crate::cluster::Class>>;
@@ -40,7 +39,6 @@ pub const SERVICE: PathLabel = path_label(&["service"]);
 
 /// The host userspace, responsible for dispatching requests to stateful services
 pub struct UserSpace {
-    hosted: Hosted, // TODO: delete
     hypothetical: Hypothetical,
     class: Class,
     library: Library,
@@ -49,12 +47,8 @@ pub struct UserSpace {
 
 impl UserSpace {
     /// Construct a new `Kernel` to host the given [`Cluster`]s.
-    pub fn new<I>(class: Class, library: Library, service: Service, clusters: I) -> Self
-    where
-        I: IntoIterator<Item = InstanceExt<Cluster<Legacy>>>,
-    {
+    pub fn new(class: Class, library: Library, service: Service) -> Self {
         Self {
-            hosted: clusters.into_iter().collect(),
             hypothetical: Hypothetical::new(),
             class,
             library,
@@ -71,13 +65,6 @@ impl UserSpace {
             || &path[..1] == &CLASS[..]
             || &path[..1] == &LIB[..]
             || &path[..] == &hypothetical::PATH[..]
-            || self.hosted.contains(&path[0])
-    }
-
-    /// Return a list of hosted clusters
-    // TODO: delete
-    pub fn hosted(&self) -> impl Iterator<Item = &InstanceExt<Cluster<Legacy>>> {
-        self.hosted.clusters()
     }
 }
 
@@ -154,10 +141,6 @@ impl Dispatch for UserSpace {
     async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         if path == &hypothetical::PATH[..] {
             self.hypothetical.get(txn, &path[..], key).await
-        } else if let Some((suffix, cluster)) = self.hosted.get(path) {
-            // TODO: delete this clause
-            debug!("GET {}: {} from {}", TCPath::from(suffix), key, cluster);
-            Public::get(cluster, &txn, suffix, key).await
         } else if &path[..1] == &LIB[..] {
             Dispatch::get(&self.library, txn, &path[1..], key).await
         } else if &path[..1] == &CLASS[..] {
@@ -172,55 +155,6 @@ impl Dispatch for UserSpace {
     async fn put(&self, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
         if path == &hypothetical::PATH[..] {
             self.hypothetical.put(txn, &path[..], key, value).await
-        } else if let Some((suffix, cluster)) = self.hosted.get(path) {
-            // TODO: delete this clause
-
-            debug!(
-                "PUT {}: {} <- {} to cluster {}",
-                TCPath::from(suffix),
-                key,
-                value,
-                cluster
-            );
-
-            let txn = maybe_claim_leadership(cluster, txn).await?;
-
-            execute_legacy(txn, cluster, |txn, cluster| async move {
-                cluster
-                    .put(&txn, suffix, key.clone(), value.clone())
-                    .await?;
-
-                let self_link = txn.link(cluster.link().path().clone());
-                if suffix.is_empty() {
-                    // it's a synchronization message
-                    return Ok(());
-                } else if !txn.is_leader(cluster.path()) {
-                    debug!(
-                        "{} successfully replicated PUT {}",
-                        self_link,
-                        TCPath::from(suffix)
-                    );
-
-                    return Ok(());
-                }
-
-                debug!(
-                    "{} is leading replication of PUT {}",
-                    self_link,
-                    TCPath::from(suffix)
-                );
-
-                let write = |replica_link: Link| {
-                    let mut target = replica_link.clone();
-                    target.extend(suffix.to_vec());
-
-                    debug!("replicate PUT to {}", target);
-                    txn.put(target, key.clone(), value.clone())
-                };
-
-                cluster.replicate_write(txn.clone(), write).await
-            })
-            .await
         } else if &path[..1] == &LIB[..] {
             Dispatch::put(&self.library, txn, &path[1..], key, value).await
         } else if &path[..1] == &CLASS[..] {
@@ -235,27 +169,6 @@ impl Dispatch for UserSpace {
     async fn post(&self, txn: &Txn, path: &[PathSegment], data: State) -> TCResult<State> {
         if path == &hypothetical::PATH[..] {
             self.hypothetical.execute(txn, data).await
-        } else if let Some((suffix, cluster)) = self.hosted.get(path) {
-            // TODO: delete this clause
-            let params: Map<State> = data.try_into()?;
-
-            debug!(
-                "POST {}: {} to cluster {}",
-                TCPath::from(suffix),
-                params,
-                cluster
-            );
-
-            let txn = maybe_claim_leadership(cluster, txn).await?;
-            if suffix.is_empty() && params.is_empty() {
-                // it's a "commit" instruction
-                cluster.post(&txn, suffix, params).await
-            } else {
-                execute_legacy(txn, cluster, |txn, cluster| async move {
-                    cluster.post(&txn, suffix, params).await
-                })
-                .await
-            }
         } else if &path[..1] == &LIB[..] {
             Dispatch::post(&self.library, txn, &path[1..], data).await
         } else if &path[..1] == &CLASS[..] {
@@ -270,61 +183,6 @@ impl Dispatch for UserSpace {
     async fn delete(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<()> {
         if path == &hypothetical::PATH[..] {
             self.hypothetical.delete(txn, &path[2..], key).await
-        } else if let Some((suffix, cluster)) = self.hosted.get(path) {
-            // TODO: delete this clause
-            if suffix.is_empty() && key.is_none() {
-                // it's a rollback message
-                return cluster.delete(&txn, suffix, key).await;
-            }
-
-            debug!(
-                "DELETE {}: {} from cluster {}",
-                TCPath::from(suffix),
-                key,
-                cluster
-            );
-
-            let txn = maybe_claim_leadership(cluster, txn).await?;
-            execute_legacy(txn, cluster, |txn, cluster| async move {
-                cluster.delete(&txn, suffix, key.clone()).await?;
-
-                let txn = if !txn.has_leader(cluster.path()) {
-                    cluster.lead(txn).await?
-                } else {
-                    txn
-                };
-
-                let self_link = txn.link(cluster.link().path().clone());
-                if suffix.is_empty() {
-                    // it's a synchronization message
-                    return Ok(());
-                } else if !txn.is_leader(cluster.path()) {
-                    debug!(
-                        "{} successfully replicated DELETE {}",
-                        self_link,
-                        TCPath::from(suffix)
-                    );
-
-                    return Ok(());
-                }
-
-                debug!(
-                    "{} is leading replication of DELETE {}...",
-                    self_link,
-                    TCPath::from(suffix)
-                );
-
-                let write = |replica_link: Link| {
-                    let mut target = replica_link.clone();
-                    target.extend(suffix.to_vec());
-
-                    debug!("replicate DELETE to {}", target);
-                    txn.delete(target, key.clone())
-                };
-
-                cluster.replicate_write(txn.clone(), write).await
-            })
-            .await
         } else if &path[..1] == &LIB[..] {
             Dispatch::delete(&self.library, txn, &path[1..], key).await
         } else if &path[..1] == &CLASS[..] {
@@ -485,64 +343,6 @@ where
                 Ok(_) => {
                     debug!("commit {}", cluster);
                     cluster.distribute_commit(&txn).await?;
-                }
-                Err(cause) => {
-                    debug!("rollback {} due to {}", cluster, cause);
-                    cluster.distribute_rollback(&txn).await;
-                }
-            }
-
-            result
-        }
-    })
-}
-
-// TODO: delete
-fn execute_legacy<
-    'a,
-    R: Send + Sync,
-    Fut: Future<Output = TCResult<R>> + Send,
-    F: FnOnce(Txn, &'a InstanceExt<Cluster<Legacy>>) -> Fut + Send + 'a,
->(
-    txn: Txn,
-    cluster: &'a InstanceExt<Cluster<Legacy>>,
-    handler: F,
-) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>> {
-    Box::pin(async move {
-        if let Some(owner) = txn.owner() {
-            let self_link = txn.link(cluster.link().path().clone());
-            if owner.path() == cluster.path() {
-                debug!("{} owns this transaction, no need to notify", cluster);
-            } else if txn.is_leader(cluster.path()) {
-                txn.put(owner.clone(), Value::default(), self_link.clone().into())
-                    .await?;
-            } else {
-                debug!(
-                    "{} is not leading this transaction, no need to notify owner",
-                    self_link
-                );
-            }
-
-            trace!("execute write for owner {}", owner);
-            let result = handler(txn.clone(), cluster).await;
-
-            if result.is_ok() {
-                info!("replica at {} succeeded", self_link);
-            } else {
-                info!("replica at {} failed", self_link);
-            }
-
-            result
-        } else {
-            // Claim and execute the transaction
-            let txn = cluster.claim(&txn).await?;
-            let result = handler(txn.clone(), cluster).await;
-
-            match &result {
-                Ok(_) => {
-                    debug!("commit {}", cluster);
-                    cluster.distribute_commit(&txn).await?;
-                    debug!("committed {}", cluster);
                 }
                 Err(cause) => {
                     debug!("rollback {} due to {}", cluster, cause);

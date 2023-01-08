@@ -3,7 +3,7 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::Transaction;
-use tc_value::{Link, Value};
+use tc_value::Link;
 
 use crate::cluster::{class, Class, DirItem};
 use crate::object::InstanceClass;

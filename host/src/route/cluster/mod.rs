@@ -11,7 +11,7 @@ use tcgeneric::{label, PathSegment, Tuple};
 
 use crate::chain::BlockChain;
 use crate::cluster::dir::Dir;
-use crate::cluster::{Class, Cluster, Legacy, Library, Replica, Service, REPLICAS};
+use crate::cluster::{Class, Cluster, Library, Replica, Service, REPLICAS};
 use crate::object::{InstanceClass, Object};
 use crate::state::State;
 
@@ -296,18 +296,3 @@ route_cluster!(BlockChain<Library>);
 route_cluster!(Dir<Library>);
 route_cluster!(BlockChain<Service>);
 route_cluster!(Dir<Service>);
-route_cluster!(Legacy);
-
-impl Route for Legacy {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if let Some(chain) = self.chain(&path[0]) {
-            debug!("Legacy cluster has a Chain at {}", &path[0]);
-            chain.route(&path[1..])
-        } else if let Some(class) = self.class(&path[0]) {
-            debug!("Legacy cluster has a Class at {}", &path[0]);
-            class.route(&path[1..])
-        } else {
-            None
-        }
-    }
-}
