@@ -60,7 +60,7 @@ where
                     .await?;
             } else {
                 cluster
-                    .add_replica(txn, txn.link(cluster.link().path().clone()), false)
+                    .add_replica(txn, txn.link(cluster.link().path().clone()))
                     .await?;
             }
         } else {
@@ -70,7 +70,7 @@ where
                 return Ok(());
             } else {
                 cluster
-                    .add_replica(txn, txn.link(cluster.link().path().clone()), false)
+                    .add_replica(txn, txn.link(cluster.link().path().clone()))
                     .await?;
             }
         }

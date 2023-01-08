@@ -480,7 +480,7 @@ where
     ///
     /// Returns `true` if a new replica was added.
     // TODO: remove `notify`
-    pub async fn add_replica(&self, txn: &Txn, replica: Link, notify: bool) -> TCResult<bool> {
+    pub async fn add_replica(&self, txn: &Txn, replica: Link) -> TCResult<bool> {
         if replica.path() != self.path() {
             return Err(TCError::unsupported(format!(
                 "tried to replicate {} from {}",
@@ -521,7 +521,7 @@ where
                 .map(|r| r.and_then(ReplicaSet::try_from_state))
                 .await?;
 
-            if self.link() != &lead {
+            if lead.host().is_some() && self.link() != &lead {
                 return Err(TCError::unsupported(format!(
                     "replication lead {} cannot be altered (got {})",
                     self.link(),
@@ -530,18 +530,6 @@ where
             }
 
             let is_new = !replicas.contains(&self_link);
-
-            // TODO: delete
-            if notify && is_new {
-                try_join_all(replicas.iter().map(|replica| {
-                    txn.put(
-                        replica.clone().append(REPLICAS),
-                        Value::default(),
-                        self_link.clone().into(),
-                    )
-                }))
-                .await?;
-            }
 
             self.replicas.extend(txn_id, replicas).await?;
 
@@ -561,9 +549,9 @@ where
         let self_link = txn.link(self.link().path().clone());
 
         if owner.path() == self_link.path() {
-            return self.add_replica(&txn, self_link, false).await;
+            return self.add_replica(&txn, self_link).await;
         } else if txn.leader(self.path()).is_some() {
-            return self.add_replica(&txn, self_link, false).await;
+            return self.add_replica(&txn, self_link).await;
         }
 
         let txn = txn.lead(&self.actor, self.link().path().clone()).await?;
@@ -575,7 +563,7 @@ where
             owner
         );
 
-        self.add_replica(&txn, self_link, false).await
+        self.add_replica(&txn, self_link).await
     }
 
     /// Remove one or more replicas from this `Cluster`.

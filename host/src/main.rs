@@ -253,7 +253,7 @@ async fn replicate(
         let txn = cluster.claim(&txn).await?;
 
         cluster
-            .add_replica(&txn, txn.link(cluster.link().path().clone()), false)
+            .add_replica(&txn, txn.link(cluster.link().path().clone()))
             .await?;
 
         cluster.distribute_commit(&txn).await
