@@ -14,10 +14,18 @@ from .. import benchmark
 from ..process import start_local_host
 
 
-class DataStructures(tc.service.Service):
-    __uri__ = tc.URI("http://127.0.0.1:8702") + "/app/benchmark/data_structures"
+LEAD = "http://127.0.0.1:8702"
+NS = tc.URI("/benchmark")
+VERSION = tc.Version("0.0.0")
 
-    ml = tc.ml.service.ML
+
+class DataStructures(tc.service.Service):
+    NAME = "data_structures"
+
+    __uri__ = tc.service.service_uri(LEAD, NS, NAME, VERSION)
+
+    nn = tc.ml.NeuralNets()
+    optimizer = tc.ml.Optimizers()
 
     def __init__(self, chain_type):
         self.btree = chain_type(tc.btree.BTree([("i", tc.I32)]))
@@ -69,6 +77,49 @@ class DataStructures(tc.service.Service):
         return cxt.optimizer.train(1, cxt.inputs)
 
 
+async def start_and_install_deps(chain_type, **flags):
+    assert "replicate" not in flags
+    flags["replicate"] = LEAD
+
+    host = start_local_host(NS, **flags)
+    host = benchmark.Host(host)
+
+    uri = tc.URI(tc.ml.NeuralNets)
+
+    start = time.time()
+    response = await host.put(uri[0], uri[1], uri[:2])
+    assert response.status == 200, await response.text()
+    elapsed = time.time() - start
+    print(f"created library directory in {elapsed:.4f}")
+
+    start = time.time()
+    response = await host.put(uri[:2], uri[2], tc.ml.NeuralNets())
+    assert response.status == 200, await response.text()
+    elapsed = time.time() - start
+    print(f"installed library in {elapsed:.4f}")
+
+    uri = tc.URI(tc.ml.Optimizers)
+    start = time.time()
+    response = await host.put(uri[:2], uri[2], tc.ml.Optimizers())
+    assert response.status == 200, await response.text()
+    elapsed = time.time() - start
+    print(f"installed library in {elapsed:.4f}")
+
+    uri = tc.URI(DataStructures).path()
+    start = time.time()
+    response = await host.put(uri[0], uri[1], uri[:2])
+    assert response.status == 200, await response.text()
+    elapsed = time.time() - start
+    print(f"created service directory in {elapsed:.4f}")
+
+    await host.put(uri[:2], uri[2], DataStructures(chain_type))
+    start = time.time()
+    assert response.status == 200, await response.text()
+    print(f"installed service in {elapsed:.2f}")
+
+    return host
+
+
 class ConcurrentWriteBenchmarks(benchmark.Benchmark):
     CONCURRENCY = 10
     SCALES = [1, 5, 10, 100]
@@ -80,9 +131,8 @@ class ConcurrentWriteBenchmarks(benchmark.Benchmark):
     def __repr__(self):
         return "concurrent write benchmarks"
 
-    def start(self, **flags):
-        host = start_local_host("benchmark_writes", [tc.ml.service.ML(), DataStructures(tc.chain.Sync)], **flags)
-        self.host = benchmark.Host(host)
+    async def start(self, **flags):
+        self.host = await start_and_install_deps(tc.chain.Sync, **flags)
 
     def stop(self):
         if self.host:
@@ -142,8 +192,8 @@ class LoadBenchmarks(benchmark.Benchmark):
     def __repr__(self):
         return "load benchmarks"
 
-    def start(self, **flags):
-        host = start_local_host("benchmark_load", DataStructures(tc.chain.Sync), **flags)
+    async def start(self, **flags):
+        host = await start_and_install_deps(tc.chain.Sync, **flags)
         self.host = benchmark.Host(host)
 
     def stop(self):
@@ -183,16 +233,17 @@ class ReplicationBenchmarks(benchmark.Benchmark):
     def __repr__(self):
         return f"replication benchmarks with {self.NUM_HOSTS} hosts"
 
-    def start(self, **flags):
+    async def start(self, **flags):
         default_port = tc.URI(DataStructures).port()
         assert default_port
 
-        for i in range(self.NUM_HOSTS):
+        host = await start_and_install_deps(tc.chain.Block, **flags)
+        self.hosts.append(benchmark.Host(host))
+
+        for i in range(1, self.NUM_HOSTS):
             port = default_port + i
             host_uri = tc.URI(f"http://127.0.0.1:{port}/")
-            host = start_local_host(
-                "benchmark_load", DataStructures(tc.chain.Block),
-                overwrite=True, host_uri=host_uri, wait_time=5, **flags)
+            host = start_local_host(NS, host_uri, replicate="http://127.0.0.1:8702")
 
             self.hosts.append(benchmark.Host(host))
 
@@ -234,7 +285,7 @@ if __name__ == "__main__":
     task = benchmark.main([
         ConcurrentWriteBenchmarks(),
         LoadBenchmarks(),
-        # ReplicationBenchmarks(), TODO: re-enable after implementing support for /service
+        ReplicationBenchmarks(),
     ])
 
     asyncio.run(task)
