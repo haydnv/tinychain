@@ -6,22 +6,24 @@ import tinychain as tc
 from ..process import start_host
 
 BATCH_SIZE = 20
+NS = tc.URI("/test_neural_net")
 
 
-class OptimizerTester(tc.app.Library):
-    URI = tc.URI("/test/ml/optimizer")
+class OptimizerTester(tc.service.Library):
+    NAME = "lib"
+    VERSION = tc.ml.VERSION
 
-    __uri__ = URI
+    __uri__ = tc.service.library_uri(None, NS, NAME, VERSION)
 
-    ml = tc.ml.service.ML()
+    nn = tc.ml.NeuralNets()
+    optimizers = tc.ml.Optimizers()
 
     @tc.post
     def test_cnn_layer(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
         labels = tc.tensor.Dense.constant([2, 3, 3], 2)
-        layer = self.ml.ConvLayer.create([3, 5, 5], [2, 1, 1])
-        cxt.optimizer = self.ml.GradientDescent(layer, lambda _, o: (o - labels)**2)
+        layer = self.nn.ConvLayer.create([3, 5, 5], [2, 1, 1])
+        cxt.optimizer = self.optimizers.GradientDescent(layer, lambda _, o: (o - labels)**2)
         return cxt.optimizer.train(1, inputs)
-
 
     @tc.post
     def test_cnn(self, cxt, inputs: tc.tensor.Tensor) -> tc.F32:
@@ -62,22 +64,31 @@ class OptimizerTester(tc.app.Library):
 
 
 class OptimizerTests(unittest.TestCase):
+    URI = tc.URI(OptimizerTester)
+
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_optimizer", OptimizerTester(), wait_time=10, request_ttl=60)
+        cls.host = start_host(NS)
+
+        cls.host.put(tc.URI(tc.service.Library), str(tc.ml.NS)[1:], tc.URI(tc.service.Library) + tc.ml.NS)
+        cls.host.install(tc.ml.NeuralNets())
+        cls.host.install(tc.ml.Optimizers())
+
+        cls.host.put(tc.URI(tc.service.Library), cls.URI[-3], cls.URI[:-2])
+        cls.host.install(OptimizerTester())
 
     def testCNN(self):
         inputs = np.ones([BATCH_SIZE, 3, 5, 5])
-        self.host.post(tc.URI(OptimizerTester).append("test_cnn_layer"), {"inputs": load_dense(inputs)})
-        self.host.post(tc.URI(OptimizerTester).append("test_cnn"), {"inputs": load_dense(inputs)})
+        self.host.post(self.URI.append("test_cnn_layer"), {"inputs": load_dense(inputs)})
+        self.host.post(self.URI.append("test_cnn"), {"inputs": load_dense(inputs)})
 
     def testDNN(self):
         inputs = np.random.random(2 * BATCH_SIZE).reshape([BATCH_SIZE, 2])
 
-        self.host.post(tc.URI(OptimizerTester).append("test_linear"), {"inputs": load_dense(inputs)})
+        self.host.post(self.URI.append("test_linear"), {"inputs": load_dense(inputs)})
 
         start = time.time()
-        self.host.post(tc.URI(OptimizerTester).append("test_dnn"), {"inputs": load_dense(inputs)})
+        self.host.post(self.URI.append("test_dnn"), {"inputs": load_dense(inputs)})
         elapsed = time.time() - start
         print(f"trained a deep neural net in {elapsed:.2}s")
 

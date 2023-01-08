@@ -216,10 +216,10 @@ impl ObjectVisitor {
     ) -> Result<Object, Err> {
         match class {
             ObjectType::Class => {
-                let proto =
-                    state.try_cast_into(|s| de::Error::invalid_value(s, "a Class prototype"))?;
+                let class =
+                    state.try_cast_into(|s| de::Error::invalid_value(s, "a Class definition"))?;
 
-                Ok(Object::Class(InstanceClass::anonymous(None, proto)))
+                Ok(Object::Class(class))
             }
             ObjectType::Instance => Ok(Object::Instance(InstanceExt::new(
                 state,

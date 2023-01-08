@@ -118,7 +118,7 @@ class Benchmark(object):
         success = (len(responses) / len(requests)) * 100
         return responses, elapsed, success
 
-    def start(self, **flags):
+    async def start(self, **flags):
         pass
 
     def stop(self):
@@ -156,7 +156,7 @@ async def main(benchmarks):
         for test in benchmark:
             if patterns is None or any(pattern in test.__name__ for pattern in patterns):
                 if not started:
-                    benchmark.start(cache_size=cache_size, workspace=workspace)
+                    await benchmark.start(cache_size=cache_size, workspace=workspace)
                     started = True
                     print()
 

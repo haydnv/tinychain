@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Type
+import inspect
 
-from ..app import App
+from ..service import Model, Service
 from ..chain import Sync
 from ..collection import Column
-from ..collection.table import Table
-from ..collection.table import create_schema as cts
+from ..collection.table import create_schema as cts, Table, Schema as TableSchema
 from ..collection.tensor import Sparse
 from ..decorators import closure, get, put
 from ..error import BadRequest
@@ -16,10 +15,6 @@ from ..scalar.ref import After, If, Put
 from ..uri import URI
 from .edge import DIM, Edge, ForeignKey
 from .edge import Schema as EdgeSchema
-
-if TYPE_CHECKING:
-    from ..app import Model
-    from ..collection.table import Schema as TableSchema
 
 ERR_DELETE = "cannot delete {{column}} {{id}} because it still has edges in the Graph"
 
@@ -75,7 +70,7 @@ class Schema(object):
         return self
 
 
-class Graph(App):
+class Graph(Service):
     """
     A graph database consisting of a set of :class:`Table` s with :class:`U32` primary keys which serve as node IDs.
 
@@ -86,7 +81,10 @@ class Graph(App):
     """
 
     # TODO: remove the `chain_type` parameter.
-    def __init__(self, schema: Schema, chain_type=Sync):
+    def __init__(self, chain_type=Sync):
+        models = inspect.getmembers(self.__class__, lambda attr: inspect.isclass(attr) and issubclass(attr, Model))
+        schema = create_schema([cts(m) for _, m in models])
+
         for (label, edge) in schema.edges.items():
             if hasattr(self, label):
                 raise IndexError(f"{label} is already reserved in {self} by {getattr(self, label)}")
@@ -102,12 +100,7 @@ class Graph(App):
 
             setattr(self, name, chain_type(graph_table(self, schema, name)))
 
-        App.__init__(self)
-
-    @classmethod
-    def autogenerate(cls, models: list[Model], chain_type=Sync):
-        """Auto create the schema and initalise it using a list of models."""
-        return cls(schema=_initalise_schema(models), chain_type=chain_type)
+        Service.__init__(self)
 
 
 def graph_table(graph, schema, table_name):
@@ -167,6 +160,7 @@ def graph_table(graph, schema, table_name):
 
             return If(row.is_some(), After(deletes, Table.delete_row(self, key)))
 
+        # TODO: replace with "random_id"
         def max_id(self):
             """Return the maximum ID present in this :class:`Table`."""
 
@@ -223,11 +217,6 @@ def graph_table(graph, schema, table_name):
             return After(Table.upsert(self, key, values), updates)
 
     return GraphTable(table_schema)
-
-
-def _initalise_schema(models: list[Model]):
-    """Automatically build a Graph of all models."""
-    return create_schema([cts(m) for m in models])
 
 
 def create_schema(schemas: list[TableSchema]) -> Schema:

@@ -169,11 +169,26 @@ where
             trace!("mutations are out of the write-ahead log");
         }
 
-        trace!("sync commit block...");
         self.committed.sync(false).await.expect("sync commit block");
-        trace!("sync'd commit block");
 
         guard
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        debug!("SyncChain::rollback");
+
+        // assume the mutations for the transaction have already been moved and sync'd
+        // from `self.pending` to `self.committed` by calling the `write_ahead` method
+        {
+            let mut pending: FileWriteGuard<_, ChainBlock> =
+                self.pending.write().await.expect("pending");
+
+            pending.mutations.remove(txn_id);
+        }
+
+        self.pending.sync(false).await.expect("sync pending block");
+
+        self.subject.rollback(txn_id).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {

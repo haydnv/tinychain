@@ -216,6 +216,10 @@ where
         self.table.commit(txn_id).await
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.table.rollback(txn_id).await
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
         self.table.finalize(txn_id).await
     }

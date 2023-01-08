@@ -138,6 +138,10 @@ impl Transact for Class {
         self.dir.commit(txn_id).await
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.dir.rollback(txn_id).await
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
         self.dir.finalize(txn_id).await
     }
@@ -149,8 +153,8 @@ impl Persist<fs::Dir> for Class {
 
     fn create(txn_id: TxnId, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
+        let contents = dir.try_write(txn_id)?;
 
-        let contents = dir.try_read(txn_id)?;
         if contents.is_empty() {
             Ok(Self { dir })
         } else {
@@ -160,8 +164,8 @@ impl Persist<fs::Dir> for Class {
         }
     }
 
-    fn load(_txn_id: TxnId, _schema: Self::Schema, _store: fs::Store) -> TCResult<Self> {
-        Err(TCError::not_implemented("cluster::Class::load"))
+    fn load(_txn_id: TxnId, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+        fs::Dir::try_from(store).map(|dir| Self { dir })
     }
 
     fn dir(&self) -> <fs::Dir as Dir>::Inner {

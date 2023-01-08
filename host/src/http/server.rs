@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -82,7 +82,7 @@ impl HTTPServer {
         response.headers_mut().insert(
             hyper::header::CONTENT_TYPE,
             accept_encoding
-                .to_string()
+                .as_str()
                 .parse()
                 .expect("content type header"),
         );
@@ -196,12 +196,15 @@ impl HTTPServer {
 impl crate::gateway::Server for HTTPServer {
     type Error = hyper::Error;
 
-    async fn listen(self, addr: SocketAddr) -> Result<(), Self::Error> {
-        println!("HTTP server listening on {}", &addr);
+    async fn listen(self, port: u16) -> Result<(), Self::Error> {
+        println!("HTTP server listening on port {}...", port);
+        println!();
+
         let server = Arc::new(self);
 
         let new_service = make_service_fn(move |_| {
             let server = server.clone();
+
             async {
                 Ok::<_, hyper::Error>(service_fn(move |req| {
                     let server = server.clone();
@@ -210,6 +213,7 @@ impl crate::gateway::Server for HTTPServer {
             }
         });
 
+        let addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), port);
         hyper::Server::bind(&addr)
             .serve(new_service)
             .with_graceful_shutdown(shutdown_signal())
@@ -283,7 +287,7 @@ fn transform_error(err: TCError, encoding: Encoding) -> hyper::Response<Body> {
 
     response.headers_mut().insert(
         hyper::header::CONTENT_TYPE,
-        encoding.to_string().parse().expect("content type header"),
+        encoding.as_str().parse().expect("content encoding"),
     );
 
     use hyper::StatusCode;

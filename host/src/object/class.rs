@@ -57,7 +57,14 @@ impl InstanceClass {
         }
     }
 
+    /// Borrow the link to this class' parent.
+    // TODO: rename to `link`
+    pub fn extends(&self) -> Option<&Link> {
+        self.extends.as_ref()
+    }
+
     /// Return the link to this class, if any.
+    // TODO: delete
     pub fn link(&self) -> Link {
         if let Some(link) = &self.link {
             link.clone()

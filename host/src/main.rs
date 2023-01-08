@@ -3,22 +3,20 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use clap::Parser;
-use destream::de::FromStream;
-use futures::future::{join_all, TryFutureExt};
-use futures::{future, join, stream, try_join};
+use futures::future::TryFutureExt;
+use futures::{join, try_join};
+use log::{info, warn};
 use tokio::time::Duration;
 
 use tc_error::*;
 use tc_transact::fs::{Dir, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Link, LinkHost, LinkProtocol};
+use tc_value::{Link, LinkHost};
 use tcgeneric::PathLabel;
 
 use tinychain::cluster::{Cluster, Replica};
 use tinychain::gateway::Gateway;
-use tinychain::object::InstanceClass;
 use tinychain::txn::Txn;
 use tinychain::*;
 
@@ -55,7 +53,7 @@ fn duration(flag: &str) -> TCResult<Duration> {
 
 #[derive(Clone, Parser)]
 struct Config {
-    #[arg(long, default_value = "0.0.0.0", help = "the IP address to bind")]
+    #[arg(long, default_value = "127.0.0.1", help = "the IP address to bind")]
     pub address: IpAddr,
 
     #[arg(
@@ -65,13 +63,6 @@ struct Config {
         help = "the maximum size of the in-memory transactional filesystem cache (in bytes)",
     )]
     pub cache_size: usize,
-
-    // TODO: delete
-    #[arg(
-        long = "cluster",
-        help = "(DEPRECATED) path(s) to cluster configuration files (this flag can be repeated)"
-    )]
-    pub clusters: Vec<PathBuf>,
 
     #[arg(
         long = "data_dir",
@@ -89,7 +80,7 @@ struct Config {
     #[arg(
         long = "log_level",
         default_value = "warn",
-        value_parser = ["trace", "debug", "warn", "error"],
+        value_parser = ["trace", "debug", "info", "warn", "error"],
         help = "the log message level to write",
     )]
     pub log_level: String,
@@ -139,7 +130,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         .init();
 
     if !config.workspace.exists() {
-        log::info!(
+        info!(
             "workspace directory {:?} does not exist, attempting to create it...",
             config.workspace
         );
@@ -153,6 +144,11 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
 
     let cache = freqfs::Cache::new(config.cache_size.into(), Duration::from_secs(1), None);
     let workspace = cache.clone().load(config.workspace.clone()).await?;
+
+    if workspace.trim().await > 0 {
+        warn!("workspace {} is not empty!", config.workspace.display());
+    }
+
     let txn_id = TxnId::new(Gateway::time());
 
     let data_dir = if let Some(data_dir) = config.data_dir.clone() {
@@ -161,6 +157,8 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         }
 
         let data_dir = cache.load(data_dir).await?;
+        data_dir.trim().await;
+
         tinychain::fs::Dir::load(data_dir, txn_id).await
     } else {
         Err(TCError::internal("the --data-dir option is required"))
@@ -172,45 +170,11 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         println!();
     }
 
-    let txn_server = tinychain::txn::TxnServer::new(workspace).await;
-
-    let kernel = tinychain::Kernel::bootstrap();
-    let gateway = Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
-    let token = gateway.new_token(&txn_id)?;
-    let txn = txn_server.new_txn(gateway.clone(), txn_id, token).await?;
-
-    // TODO: delete
-    let mut clusters = Vec::with_capacity(config.clusters.len());
-    if !config.clusters.is_empty() {
-        let host = LinkHost::from((
-            LinkProtocol::HTTP,
-            config.address.clone(),
-            Some(config.http_port),
-        ));
-
-        for path in &config.clusters {
-            let config = tokio::fs::read(&path)
-                .await
-                .expect(&format!("read from {:?}", &path));
-
-            let mut decoder = destream_json::de::Decoder::from_stream(stream::once(future::ready(
-                Ok(Bytes::from(config)),
-            )));
-
-            let cluster = match InstanceClass::from_stream((), &mut decoder).await {
-                Ok(class) => {
-                    cluster::instantiate(&txn, host.clone(), class, data_dir.clone()).await?
-                }
-                Err(cause) => panic!("error parsing cluster config {:?}: {}", path, cause),
-            };
-
-            clusters.push(cluster);
-        }
-    }
-
-    join_all(clusters.iter().map(|cluster| cluster.commit(&txn_id))).await;
     data_dir.commit(&txn_id).await;
 
+    let kernel = tinychain::Kernel::bootstrap();
+    let txn_server = tinychain::txn::TxnServer::new(workspace).await;
+    let gateway = Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
     let txn_id = TxnId::new(Gateway::time());
     let token = gateway.new_token(&txn_id)?;
     let txn = txn_server.new_txn(gateway, txn_id, token).await?;
@@ -232,19 +196,13 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         service.commit(&txn_id),
     );
 
-    let kernel = tinychain::Kernel::with_userspace(
-        class.clone(),
-        library.clone(),
-        service.clone(),
-        clusters,
-    );
+    let kernel = tinychain::Kernel::with_userspace(class.clone(), library.clone(), service.clone());
 
     let gateway = tinychain::gateway::Gateway::new(gateway_config, kernel, txn_server);
 
-    log::info!(
+    info!(
         "starting server, stack size is {}, cache size is {}",
-        config.stack_size,
-        config.cache_size
+        config.stack_size, config.cache_size
     );
 
     try_join!(
@@ -295,7 +253,7 @@ async fn replicate(
         let txn = cluster.claim(&txn).await?;
 
         cluster
-            .add_replica(&txn, txn.link(cluster.link().path().clone()), false)
+            .add_replica(&txn, txn.link(cluster.link().path().clone()))
             .await?;
 
         cluster.distribute_commit(&txn).await

@@ -11,7 +11,7 @@ use tcgeneric::{label, PathSegment, Tuple};
 
 use crate::chain::BlockChain;
 use crate::cluster::dir::Dir;
-use crate::cluster::{Class, Cluster, Legacy, Library, Replica, Service, REPLICAS};
+use crate::cluster::{Class, Cluster, Library, Replica, Service, REPLICAS};
 use crate::object::{InstanceClass, Object};
 use crate::state::State;
 
@@ -149,7 +149,7 @@ where
                 if txn.is_leader(self.cluster.path()) {
                     self.cluster.distribute_rollback(txn).await;
                 } else {
-                    self.cluster.finalize(txn.id()).await;
+                    self.cluster.rollback(txn.id()).await;
                 }
 
                 Ok(())
@@ -194,7 +194,6 @@ where
         }))
     }
 
-    // TODO: delete
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
     where
         'b: 'a,
@@ -207,7 +206,7 @@ where
                     TCError::bad_request("expected a Link to a Cluster, not", v)
                 })?;
 
-                self.cluster.add_replica(txn, link, true).await?;
+                self.cluster.add_replica(txn, link).await?;
 
                 Ok(())
             })
@@ -225,11 +224,7 @@ where
 
                 let txn_id = *txn.id();
                 let self_link = txn.link(self.cluster.link().path().clone());
-                if self
-                    .cluster
-                    .add_replica(txn, new_replica.clone(), false)
-                    .await?
-                {
+                if self.cluster.add_replica(txn, new_replica.clone()).await? {
                     let replicas = self.cluster.replicas(txn_id).await?;
                     let requests = replicas
                         .iter()
@@ -246,7 +241,9 @@ where
                     try_join_all(requests).await?;
                 }
 
-                self.cluster.state().state(txn_id).await
+                let state = self.cluster.state().state(txn_id).await?;
+                debug!("state of source replica {} is {}", self_link, state);
+                Ok(state)
             })
         }))
     }
@@ -294,18 +291,3 @@ route_cluster!(BlockChain<Library>);
 route_cluster!(Dir<Library>);
 route_cluster!(BlockChain<Service>);
 route_cluster!(Dir<Service>);
-route_cluster!(Legacy);
-
-impl Route for Legacy {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if let Some(chain) = self.chain(&path[0]) {
-            debug!("Legacy cluster has a Chain at {}", &path[0]);
-            chain.route(&path[1..])
-        } else if let Some(class) = self.class(&path[0]) {
-            debug!("Legacy cluster has a Class at {}", &path[0]);
-            class.route(&path[1..])
-        } else {
-            None
-        }
-    }
-}

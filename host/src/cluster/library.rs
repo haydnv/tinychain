@@ -5,16 +5,17 @@ use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
 use log::{error, info};
-use safecast::TryCastFrom;
+use safecast::{AsType, TryCastFrom};
 
 use tc_error::*;
 use tc_transact::fs::{BlockData, Dir, File, FileRead, FileWrite, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
-use tcgeneric::{Map, PathSegment};
+use tcgeneric::{Instance, Map, PathSegment};
 
 use crate::fs;
-use crate::scalar::Scalar;
+use crate::object::ObjectType;
+use crate::scalar::{OpDef, Scalar};
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -28,6 +29,14 @@ pub struct Version {
 impl Version {
     pub fn get_attribute(&self, name: &PathSegment) -> Option<&Scalar> {
         self.lib.get(name)
+    }
+}
+
+impl Instance for Version {
+    type Class = ObjectType;
+
+    fn class(&self) -> Self::Class {
+        ObjectType::Class
     }
 }
 
@@ -159,7 +168,7 @@ impl DirItem for Library {
             )))
         } else {
             info!("create new library version {}", number);
-            let version = Version::from(schema);
+            let version = Version::from(validate(schema)?);
             file.create_block(number, version.clone(), 0)
                 .map_ok(|_| ())
                 .await?;
@@ -175,6 +184,10 @@ impl Transact for Library {
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         self.file.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.file.rollback(txn_id).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -216,5 +229,19 @@ impl From<fs::File<VersionNumber, Version>> for Library {
 impl fmt::Display for Library {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("library")
+    }
+}
+
+fn validate(proto: Map<Scalar>) -> TCResult<Map<Scalar>> {
+    if proto
+        .values()
+        .filter_map(|member| member.as_type())
+        .any(|op: &OpDef| op.is_write())
+    {
+        Err(TCError::unsupported(
+            "a Library may not define write operations",
+        ))
+    } else {
+        Ok(proto)
     }
 }

@@ -33,7 +33,7 @@ use crate::txn::{Txn, TxnId};
 use super::data::History;
 use super::{ChainInstance, CHAIN};
 
-const HISTORY: Label = label(".history");
+pub(crate) const HISTORY: Label = label(".history");
 
 /// A [`Chain`] which stores every mutation of its [`Subject`] in a series of `ChainBlock`s
 #[derive(Clone)]
@@ -136,40 +136,34 @@ impl Replica for BlockChain<crate::cluster::Library> {
 #[async_trait]
 impl Replica for BlockChain<crate::cluster::Service> {
     async fn state(&self, txn_id: TxnId) -> TCResult<State> {
-        let schema = self.subject.schemata(txn_id).await?;
-        let schema = schema
-            .into_iter()
-            .map(|(number, version)| (number, State::from(version)))
-            .collect();
-
-        Ok(State::Map(schema))
+        self.subject.state(txn_id).await
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         let mut params = Map::new();
         params.insert(label("add").into(), txn.link(source.path().clone()).into());
+
         let state = txn
             .post(source.clone().append(REPLICAS), State::Map(params))
             .await?;
 
-        let library: Map<Map<Scalar>> =
+        let library: Map<InstanceClass> =
             state.try_cast_into(|s| TCError::bad_request("invalid Service version history", s))?;
 
         // TODO: verify equality of existing versions
         let latest_version = self.subject.latest(*txn.id()).await?;
         for (number, version) in library {
             let number: VersionNumber = number.as_str().parse()?;
-            let class = InstanceClass::anonymous(Some(source.clone()), version);
             if let Some(latest) = latest_version {
                 if number > latest {
-                    self.put(txn, &[], number.into(), class.into()).await?;
+                    self.put(txn, &[], number.into(), version.into()).await?;
                 }
             } else {
-                self.put(txn, &[], number.into(), class.into()).await?;
+                self.put(txn, &[], number.into(), version.into()).await?;
             }
         }
 
-        Ok(())
+        self.subject.replicate(txn, source).await
     }
 }
 
@@ -277,6 +271,10 @@ impl<T: Transact + Send + Sync> Transact for BlockChain<T> {
         // make sure `self.subject` is committed before moving mutations out of the write-ahead log
         self.history.commit(txn_id).await;
         guard
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        join!(self.subject.rollback(txn_id), self.history.rollback(txn_id));
     }
 
     async fn finalize(&self, txn_id: &TxnId) {

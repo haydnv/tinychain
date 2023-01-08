@@ -3,7 +3,7 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::Transaction;
-use tc_value::{Link, Value};
+use tc_value::Link;
 
 use crate::cluster::{class, Class, DirItem};
 use crate::object::InstanceClass;
@@ -68,8 +68,6 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
     where
         'b: 'a,
     {
-        assert!(!self.path.is_empty());
-
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 let number = self.path[0].as_str().parse()?;
@@ -83,6 +81,8 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
     where
         'b: 'a,
     {
+        assert!(self.path.is_empty());
+
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
                 if self.path.is_empty() {
@@ -136,6 +136,19 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
             })
         }))
     }
+
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let number = self.path[0].as_str().parse()?;
+                let version = self.class.get_version(*txn.id(), &number).await?;
+                version.delete(txn, &self.path[1..], key).await
+            })
+        }))
+    }
 }
 
 impl Route for Class {
@@ -151,10 +164,10 @@ impl<'a> Handler<'a> for DirHandler<'a, Class> {
     {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                debug!("create new cluster {} at {}", value, key);
+                debug!("create new Class directory entry at {}", key);
 
                 let name = PathSegment::try_cast_from(key, |v| {
-                    TCError::bad_request("invalid path segment for class directory entry", v)
+                    TCError::bad_request("invalid path segment for Class directory entry", v)
                 })?;
 
                 let (link, classes): (Link, Option<Map<InstanceClass>>) =
@@ -182,19 +195,5 @@ impl<'a> Handler<'a> for DirHandler<'a, Class> {
                 self.create_item_or_dir(txn, link, name, classes).await
             })
         }))
-    }
-
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(self.method_not_allowed::<Map<State>, State>(OpRefType::Post))
-    }
-
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(self.method_not_allowed::<Value, ()>(OpRefType::Delete))
     }
 }

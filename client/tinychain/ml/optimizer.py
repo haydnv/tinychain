@@ -1,19 +1,22 @@
 from .. import error
-from ..app import Dynamic, Model
 from ..collection.tensor import Dense, Tensor
 from ..decorators import post
 from ..math.operator import constant, derivative_of, is_constant
 from ..ml.variable import namespace
 from ..scalar.number import Float, F32, F64, UInt
 from ..scalar.ref import form_of, After, If
+from ..service import model_uri, Dynamic, Model
 
-from . import LIB_URI
+from .constants import NS, VERSION
+
+
+NAME = "optimizer"
 
 
 class Optimizer(Model):
     """An optimizer for a :class:`Differentiable` :class:`Model`"""
 
-    __uri__ = LIB_URI.append("Optimizer")
+    __uri__ = model_uri(NS, NAME, VERSION, "Optimizer")
 
     @post
     def train(self, i, inputs):

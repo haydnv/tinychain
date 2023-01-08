@@ -12,7 +12,8 @@ TENSOR_URI = str(tc.URI(tc.tensor.Dense))
 class LinearAlgebraTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host("test_linalg", [])
+        cls.host = start_host(tc.math.NS)
+        cls.host.put(tc.URI(tc.service.Library), LIB_URI[-3], LIB_URI[:-2])
         cls.host.install(tc.math.linalg.LinearAlgebra())
 
     def testQR_1(self):

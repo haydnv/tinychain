@@ -69,6 +69,15 @@ enum Encoding {
     Tbon,
 }
 
+impl Encoding {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Json => "application/json",
+            Self::Tbon => "application/tbon",
+        }
+    }
+}
+
 impl Default for Encoding {
     fn default() -> Self {
         Self::Json
@@ -90,10 +99,7 @@ impl FromStr for Encoding {
 impl Accept for Encoding {}
 
 impl fmt::Display for Encoding {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(match self {
-            Self::Json => "application/json",
-            Self::Tbon => "application/tbon",
-        })
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
 }

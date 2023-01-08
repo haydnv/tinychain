@@ -157,7 +157,7 @@ impl CollectionSchema {
 
 impl Hash<Sha256> for CollectionSchema {
     fn hash(self) -> Output<Sha256> {
-        async_hash::Hash::<Sha256>::hash(Scalar::cast_from(self))
+        async_hash::Hash::<Sha256>::hash(&TCRef::cast_from(self))
     }
 }
 
@@ -188,8 +188,35 @@ impl<'en> en::IntoStream<'en> for CollectionSchema {
     }
 }
 
-impl CastFrom<CollectionSchema> for Scalar {
-    fn cast_from(schema: CollectionSchema) -> Scalar {
+impl<'en> en::ToStream<'en> for CollectionSchema {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        use destream::en::EncodeMap;
+
+        match self {
+            Self::BTree(schema) => {
+                let mut map = encoder.encode_map(Some(1))?;
+                map.encode_entry(BTreeType::default().path(), (schema,))?;
+                map.end()
+            }
+
+            Self::Table(schema) => {
+                let mut map = encoder.encode_map(Some(1))?;
+                map.encode_entry(TableType::default().path(), (schema,))?;
+                map.end()
+            }
+
+            #[cfg(feature = "tensor")]
+            Self::Dense(schema) | Self::Sparse(schema) => {
+                let mut map = encoder.encode_map(Some(1))?;
+                map.encode_entry(TensorType::Dense.path(), (schema,))?;
+                map.end()
+            }
+        }
+    }
+}
+
+impl CastFrom<CollectionSchema> for TCRef {
+    fn cast_from(schema: CollectionSchema) -> TCRef {
         let class: CollectionType = match schema {
             CollectionSchema::BTree(_) => BTreeType::default().into(),
             CollectionSchema::Table(_) => TableType::default().into(),
@@ -210,10 +237,7 @@ impl CastFrom<CollectionSchema> for Scalar {
             CollectionSchema::Sparse(schema) => schema.cast_into(),
         };
 
-        Scalar::Ref(Box::new(TCRef::Op(OpRef::Get((
-            class.path().into(),
-            schema.into(),
-        )))))
+        TCRef::Op(OpRef::Get((class.path().into(), schema.into())))
     }
 }
 

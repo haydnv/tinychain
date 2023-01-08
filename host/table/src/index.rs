@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt;
-use std::iter::FromIterator;
+use std::iter::{self, FromIterator};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -289,10 +289,14 @@ where
     D: Dir,
     Txn: Transaction<D>,
 {
-    type Commit = <BTreeFile<F, D, Txn> as Transact>::Commit;
+    type Commit = ();
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         self.btree.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.btree.rollback(txn_id).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -869,29 +873,36 @@ where
     D: Dir,
     Txn: Transaction<D>,
 {
-    type Commit = <BTreeFile<F, D, Txn> as Transact>::Commit;
+    type Commit = ();
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
-        let guard = self.inner.primary.commit(txn_id).await;
+        let index_commits = self
+            .inner
+            .auxiliary
+            .iter()
+            .map(|(_, index)| index.commit(txn_id));
 
-        let mut commits = Vec::with_capacity(self.inner.auxiliary.len());
-        for (_, index) in &self.inner.auxiliary {
-            commits.push(index.commit(txn_id));
-        }
+        join_all(iter::once(self.inner.primary.commit(txn_id)).chain(index_commits)).await;
+    }
 
-        join_all(commits).await;
+    async fn rollback(&self, txn_id: &TxnId) {
+        let index_rollbacks = self
+            .inner
+            .auxiliary
+            .iter()
+            .map(|(_, index)| index.rollback(txn_id));
 
-        guard
+        join_all(iter::once(self.inner.primary.rollback(txn_id)).chain(index_rollbacks)).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        let mut cleanups = Vec::with_capacity(self.inner.auxiliary.len() + 1);
-        cleanups.push(self.inner.primary.finalize(txn_id));
-        for (_, index) in &self.inner.auxiliary {
-            cleanups.push(index.finalize(txn_id));
-        }
+        let index_cleanups = self
+            .inner
+            .auxiliary
+            .iter()
+            .map(|(_, index)| index.finalize(txn_id));
 
-        join_all(cleanups).await;
+        join_all(iter::once(self.inner.primary.finalize(txn_id)).chain(index_cleanups)).await;
     }
 }
 

@@ -132,6 +132,12 @@ impl From<ChainType> for StateType {
     }
 }
 
+impl From<ObjectType> for StateType {
+    fn from(ot: ObjectType) -> Self {
+        Self::Object(ot)
+    }
+}
+
 impl From<ScalarType> for StateType {
     fn from(st: ScalarType) -> Self {
         Self::Scalar(st)

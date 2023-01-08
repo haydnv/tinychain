@@ -3,29 +3,25 @@ import tinychain as tc
 
 from ..process import start_host
 
-NAME = "test_library"
 LEAD = "http://127.0.0.1:8702"
-DIR = tc.URI(LEAD + "/lib/test")
+NS = tc.URI("/test_library")
+NAME = "libhello"
 
 
-class TestLibV0(tc.app.Library):
-    HOST = tc.URI(LEAD)
-    NS = tc.URI("/test")
-    NAME = "libhello"
+class TestLibV0(tc.service.Library):
     VERSION = tc.Version("0.0.0")
 
-    __uri__ = HOST + tc.URI(tc.app.Library) + NS.append(NAME) + VERSION
+    __uri__ = tc.service.library_uri(LEAD, NS, NAME, VERSION)
 
     @tc.get
     def hello(self) -> tc.String:
         return "Hello, World!"
 
 
-class TestLibV1(tc.app.Library):
-    URI = DIR + "libhello"
+class TestLibV1(tc.service.Library):
     VERSION = tc.Version("0.0.1")
 
-    __uri__ = URI + VERSION
+    __uri__ = tc.service.library_uri(LEAD, NS, NAME, VERSION)
 
     @tc.get
     def hello(self, name: tc.String) -> tc.String:
@@ -36,38 +32,46 @@ class LibraryVersionTests(unittest.TestCase):
     def testCreateLib(self):
         hosts = []
 
-        hosts.append(start_host(NAME, [], http_port=8702, replicate=LEAD))
+        hosts.append(start_host(NS, http_port=8702, replicate=LEAD))
 
-        hosts.append(start_host(NAME, [], http_port=8703, replicate=LEAD))
+        hosts.append(start_host(NS, http_port=8703, replicate=LEAD))
 
         for i in range(len(hosts)):
             print()
             print(f"host {i} replicas", hosts[i].get("/lib/replicas"))
             print()
 
-        hosts[0].put("/lib", "test", DIR)
+        hosts[0].put("/lib", "test_library", tc.URI(LEAD, "lib", "test_library"))
 
         for i in range(len(hosts)):
             print()
-            print(f"host {i} replicas", hosts[i].get("/lib/test/replicas"))
+            print(f"host {i} replicas", hosts[i].get("/lib/test_library/replicas"))
             print()
 
         print()
-        hosts.append(start_host(NAME, [], http_port=8704, replicate=LEAD))
+        hosts.append(start_host(NS, http_port=8704, replicate=LEAD))
         print()
 
         for i in range(len(hosts)):
             print()
-            print(f"host {i} replicas", hosts[i].get("/lib/test/replicas"))
+            print(f"host {i} replicas", hosts[i].get("/lib/test_library/replicas"))
             print()
 
         hosts[0].install(TestLibV0())
         print()
 
-        hosts.append(start_host(NAME, [], http_port=8705, replicate=LEAD))
+        for host in hosts:
+            print(host)
+            self.assertEqual(host.get(tc.URI(TestLibV0).path() + "hello"), "Hello, World!")
+
+        print()
+
+        hosts.append(start_host(NS, [], http_port=8705, replicate=LEAD, wait_time=2))
+
+        endpoint = tc.URI(TestLibV0).path() + "hello"
 
         for i in range(len(hosts)):
-            self.assertEqual(hosts[i].get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
+            self.assertEqual(hosts[i].get(endpoint), "Hello, World!")
 
         hosts[2].stop()
 
@@ -77,19 +81,19 @@ class LibraryVersionTests(unittest.TestCase):
 
         hosts[1].update(TestLibV1())
 
-        hosts[2].start()
+        hosts[2].start(wait_time=2)
 
         print()
         print("host started")
         print()
 
         for host in hosts:
-            self.assertEqual(host.get("/lib/test/libhello/0.0.0/hello"), "Hello, World!")
+            self.assertEqual(host.get(endpoint), "Hello, World!")
 
-        hosts.append(start_host(NAME, [], http_port=8706, replicate=LEAD))
+        hosts.append(start_host(NS, http_port=8706, replicate=LEAD))
 
         for host in hosts:
-            self.assertEqual(host.get("/lib/test/libhello/0.0.1/hello", "Again"), "Hello, Again!")
+            self.assertEqual(host.get(tc.URI(TestLibV1).path() + "hello", "Again"), "Hello, Again!")
 
 
 def printlines(n):

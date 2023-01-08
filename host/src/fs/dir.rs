@@ -8,29 +8,89 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use futures::future::{join_all, TryFutureExt};
-use log::debug;
+use log::{debug, trace};
 use safecast::{as_type, AsType};
 use uuid::Uuid;
 
-use tc_btree::{BTreeType, Node, NodeId};
+use tc_btree::{Node, NodeId};
 use tc_error::*;
 #[cfg(feature = "tensor")]
-use tc_tensor::{Array, TensorType};
+use tc_tensor::Array;
 use tc_transact::fs;
 use tc_transact::lock::*;
 use tc_transact::{Transact, TxnId};
 use tc_value::Version as VersionNumber;
 use tcgeneric::{Id, PathSegment, TCBoxTryFuture};
 
-use crate::chain::{ChainBlock, ChainType};
+use crate::chain::ChainBlock;
 use crate::cluster::library;
-use crate::collection::CollectionType;
 use crate::object::InstanceClass;
-use crate::scalar::ScalarType;
-use crate::state::StateType;
 use crate::transact::fs::BlockData;
 
 use super::{io_err, CacheBlock, File};
+
+pub enum EntryType {
+    BTree,
+    Chain,
+    Class,
+    Library,
+    Service,
+
+    #[cfg(feature = "tensor")]
+    Tensor,
+}
+
+impl EntryType {
+    fn from_ext(ext: &str) -> Option<Self> {
+        match ext {
+            "btree" => Some(Self::BTree),
+            "chain" => Some(Self::Chain),
+            "class" => Some(Self::Class),
+            "lib" => Some(Self::Library),
+            "service" => Some(Self::Service),
+
+            #[cfg(feature = "tensor")]
+            "tensor" => Some(Self::Tensor),
+
+            _ => None,
+        }
+    }
+
+    fn ext(&self) -> &'static str {
+        match self {
+            Self::BTree => "btree",
+            Self::Chain => "chain",
+            Self::Class => "class",
+            Self::Library => "lib",
+            Self::Service => "service",
+
+            #[cfg(feature = "tensor")]
+            Self::Tensor => "tensor",
+        }
+    }
+}
+
+pub trait FileExt {
+    fn ext() -> &'static str;
+}
+
+macro_rules! file_ext {
+    ($k:ty, $b:ty, $v:ident) => {
+        impl FileExt for File<$k, $b> {
+            fn ext() -> &'static str {
+                EntryType::$v.ext()
+            }
+        }
+    };
+}
+
+file_ext!(NodeId, Node, BTree);
+file_ext!(Id, ChainBlock, Chain);
+file_ext!(Id, InstanceClass, Class);
+file_ext!(VersionNumber, library::Version, Library);
+file_ext!(VersionNumber, InstanceClass, Service);
+#[cfg(feature = "tensor")]
+file_ext!(u64, Array, Tensor);
 
 /// A file in a directory
 #[derive(Clone)]
@@ -39,38 +99,31 @@ pub enum FileEntry {
     Chain(File<Id, ChainBlock>),
     Class(File<Id, InstanceClass>),
     Library(File<VersionNumber, library::Version>),
+    Service(File<VersionNumber, InstanceClass>),
 
     #[cfg(feature = "tensor")]
     Tensor(File<u64, Array>),
 }
 
 impl FileEntry {
-    async fn load<ST>(
+    async fn load(
         cache: freqfs::DirLock<CacheBlock>,
-        class: ST,
+        class: EntryType,
         txn_id: TxnId,
-    ) -> TCResult<Self>
-    where
-        StateType: From<ST>,
-    {
+    ) -> TCResult<Self> {
         fn err<T: fmt::Display>(class: T) -> TCError {
             TCError::bad_request("cannot load file for", class)
         }
 
-        match StateType::from(class) {
-            StateType::Collection(ct) => match ct {
-                CollectionType::BTree(_) => File::load(cache, txn_id).map_ok(Self::BTree).await,
-                CollectionType::Table(tt) => Err(err(tt)),
+        match class {
+            EntryType::BTree => File::load(cache, txn_id).map_ok(Self::BTree).await,
+            EntryType::Chain => File::load(cache, txn_id).map_ok(Self::Chain).await,
+            EntryType::Class => File::load(cache, txn_id).map_ok(Self::Class).await,
+            EntryType::Library => File::load(cache, txn_id).map_ok(Self::Library).await,
+            EntryType::Service => File::load(cache, txn_id).map_ok(Self::Service).await,
 
-                #[cfg(feature = "tensor")]
-                CollectionType::Tensor(tt) => match tt {
-                    TensorType::Dense => File::load(cache, txn_id).map_ok(Self::Tensor).await,
-                    TensorType::Sparse => Err(err(TensorType::Sparse)),
-                },
-            },
-            StateType::Chain(_) => File::load(cache, txn_id).map_ok(Self::Chain).await,
-            StateType::Scalar(_) => File::load(cache, txn_id).map_ok(Self::Library).await,
-            other => Err(err(other)),
+            #[cfg(feature = "tensor")]
+            EntryType::Tensor => File::load(cache, txn_id).map_ok(Self::Tensor).await,
         }
     }
 }
@@ -79,6 +132,7 @@ as_type!(FileEntry, BTree, File<NodeId, Node>);
 as_type!(FileEntry, Chain, File<Id, ChainBlock>);
 as_type!(FileEntry, Class, File<Id, InstanceClass>);
 as_type!(FileEntry, Library, File<VersionNumber, library::Version>);
+as_type!(FileEntry, Service, File<VersionNumber, InstanceClass>);
 #[cfg(feature = "tensor")]
 as_type!(FileEntry, Tensor, File<u64, Array>);
 
@@ -89,6 +143,7 @@ impl fmt::Display for FileEntry {
             Self::Chain(chain) => fmt::Display::fmt(chain, f),
             Self::Class(class) => fmt::Display::fmt(class, f),
             Self::Library(library) => fmt::Display::fmt(library, f),
+            Self::Service(service) => fmt::Display::fmt(service, f),
 
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => fmt::Display::fmt(tensor, f),
@@ -208,6 +263,7 @@ impl fs::Store for Store {
                 FileEntry::Chain(file) => file.is_empty(txn_id),
                 FileEntry::Class(file) => file.is_empty(txn_id),
                 FileEntry::Library(file) => file.is_empty(txn_id),
+                FileEntry::Service(file) => file.is_empty(txn_id),
                 #[cfg(feature = "tensor")]
                 FileEntry::Tensor(file) => file.is_empty(txn_id),
             },
@@ -349,6 +405,7 @@ where
     B: BlockData,
     K: FromStr + fmt::Display + Ord + Clone + Send + Sync + 'static,
     <K as FromStr>::Err: std::error::Error + fmt::Display,
+    File<K, B>: FileExt,
     FileEntry: AsType<File<K, B>>,
     CacheBlock: AsType<B>,
 {
@@ -359,7 +416,7 @@ where
 
         let canon = self
             .cache
-            .create_dir(format!("{}.{}", name, B::ext()))
+            .create_dir(format!("{}.{}", name, File::<K, B>::ext()))
             .map_err(io_err)?;
 
         let file = File::<K, B>::new(canon, self.txn_id)?;
@@ -603,53 +660,68 @@ impl Transact for Dir {
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         let listing = self.listing.commit(txn_id).await;
 
-        join_all(listing.iter().map(|(_, entry)| async move {
-            match entry {
-                DirEntry::Dir(dir) => {
-                    dir.commit(txn_id).await;
-                }
+        if let Some(listing) = listing {
+            let commits = listing.values().map(|entry| match entry {
+                DirEntry::Dir(dir) => dir.commit(txn_id),
                 DirEntry::File(file) => match file {
-                    FileEntry::BTree(file) => {
-                        file.commit(txn_id).await;
-                    }
-                    FileEntry::Chain(file) => {
-                        file.commit(txn_id).await;
-                    }
-                    FileEntry::Class(file) => {
-                        file.commit(txn_id).await;
-                    }
-                    FileEntry::Library(file) => {
-                        file.commit(txn_id).await;
-                    }
+                    FileEntry::BTree(file) => file.commit(txn_id),
+                    FileEntry::Chain(file) => file.commit(txn_id),
+                    FileEntry::Class(file) => file.commit(txn_id),
+                    FileEntry::Library(file) => file.commit(txn_id),
+                    FileEntry::Service(file) => file.commit(txn_id),
                     #[cfg(feature = "tensor")]
-                    FileEntry::Tensor(file) => {
-                        file.commit(txn_id).await;
-                    }
+                    FileEntry::Tensor(file) => file.commit(txn_id),
                 },
-            }
-        }))
-        .await;
+            });
+
+            join_all(commits).await;
+        } else {
+            trace!(
+                "skip committing {} contents since they were not accessed at {}",
+                self,
+                txn_id
+            );
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        debug!("roll back {}", self);
+
+        if let Some(listing) = self.listing.rollback(txn_id).await {
+            let rollbacks = listing.values().map(|entry| match entry {
+                DirEntry::Dir(dir) => dir.rollback(txn_id),
+                DirEntry::File(file) => match file {
+                    FileEntry::BTree(file) => file.rollback(txn_id),
+                    FileEntry::Chain(file) => file.rollback(txn_id),
+                    FileEntry::Class(file) => file.rollback(txn_id),
+                    FileEntry::Library(file) => file.rollback(txn_id),
+                    FileEntry::Service(file) => file.rollback(txn_id),
+                    #[cfg(feature = "tensor")]
+                    FileEntry::Tensor(file) => file.rollback(txn_id),
+                },
+            });
+
+            join_all(rollbacks).await;
+        }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        {
-            let listing = self.listing.read(*txn_id).await.expect("dir listing");
-
-            join_all(listing.values().map(|entry| match entry {
+        if let Some(listing) = self.listing.finalize(txn_id) {
+            let cleanups = listing.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.finalize(txn_id),
                 DirEntry::File(file) => match file {
                     FileEntry::BTree(file) => file.finalize(txn_id),
                     FileEntry::Chain(file) => file.finalize(txn_id),
                     FileEntry::Class(file) => file.finalize(txn_id),
                     FileEntry::Library(file) => file.finalize(txn_id),
+                    FileEntry::Service(file) => file.finalize(txn_id),
                     #[cfg(feature = "tensor")]
                     FileEntry::Tensor(file) => file.finalize(txn_id),
                 },
-            }))
-            .await;
-        }
+            });
 
-        self.listing.finalize(txn_id);
+            join_all(cleanups).await;
+        }
     }
 }
 
@@ -684,7 +756,7 @@ async fn is_file(name: &str) -> bool {
     ext_class(name).is_some()
 }
 
-fn file_class(name: &str) -> TCResult<(PathSegment, StateType)> {
+fn file_class(name: &str) -> TCResult<(PathSegment, EntryType)> {
     let i = name
         .rfind('.')
         .ok_or_else(|| TCError::internal(format!("invalid file name {}", name)))?;
@@ -696,19 +768,12 @@ fn file_class(name: &str) -> TCResult<(PathSegment, StateType)> {
     Ok((stem, class))
 }
 
-fn ext_class(name: &str) -> Option<StateType> {
+fn ext_class(name: &str) -> Option<EntryType> {
     if name.ends_with('.') {
         return None;
     }
 
     let i = name.rfind('.').map(|i| i + 1)?;
 
-    match &name[i..] {
-        "node" => Some(BTreeType::default().into()),
-        "chain_block" => Some(ChainType::default().into()),
-        "lib" => Some(ScalarType::default().into()),
-        #[cfg(feature = "tensor")]
-        "array" => Some(TensorType::Dense.into()),
-        _ => None,
-    }
+    EntryType::from_ext(&name[i..])
 }

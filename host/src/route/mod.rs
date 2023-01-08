@@ -2,7 +2,7 @@ use std::fmt;
 use std::pin::Pin;
 
 use async_trait::async_trait;
-use futures::Future;
+use futures::future::{self, Future};
 use safecast::TryCastFrom;
 
 use tc_error::*;
@@ -233,6 +233,70 @@ where
 impl<T> From<T> for AttributeHandler<T> {
     fn from(attribute: T) -> Self {
         Self { attribute }
+    }
+}
+
+struct MethodNotAllowedHandler<'a, T> {
+    subject: &'a T,
+}
+
+impl<'a, T: Clone + Send + Sync + fmt::Display> Handler<'a> for MethodNotAllowedHandler<'a, T> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(move |_txn, _key| {
+            Box::pin(future::ready(Err(TCError::method_not_allowed(
+                ORT::Get,
+                self.subject,
+                TCPath::default(),
+            ))))
+        }))
+    }
+
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(move |_txn, _key, _value| {
+            Box::pin(future::ready(Err(TCError::method_not_allowed(
+                ORT::Put,
+                self.subject,
+                TCPath::default(),
+            ))))
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(move |_txn, _key| {
+            Box::pin(future::ready(Err(TCError::method_not_allowed(
+                ORT::Post,
+                self.subject,
+                TCPath::default(),
+            ))))
+        }))
+    }
+
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(move |_txn, _key| {
+            Box::pin(future::ready(Err(TCError::method_not_allowed(
+                ORT::Delete,
+                self.subject,
+                TCPath::default(),
+            ))))
+        }))
+    }
+}
+
+impl<'a, T> From<&'a T> for MethodNotAllowedHandler<'a, T> {
+    fn from(subject: &'a T) -> Self {
+        Self { subject }
     }
 }
 

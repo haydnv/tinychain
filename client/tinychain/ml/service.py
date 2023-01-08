@@ -1,24 +1,30 @@
-from ..app import Library
+from ..service import library_uri, Library
 
-from .constants import LIB_URI
-from .nn import ConvLayer, DNN, Layer, Linear, NeuralNet, Sequential
-from .optimizer import Adam, GradientDescent, Optimizer
+from .constants import NS, VERSION
+from .nn import NAME as NN, ConvLayer, DNN, Layer, Linear, NeuralNet, Sequential
+from .optimizer import NAME as OPTIMIZER, Adam, GradientDescent, Optimizer
 
 
-class ML(Library):
-    URI = LIB_URI
-
-    __uri__ = URI
+class NeuralNets(Library):
+    __uri__ = library_uri(None, NS, NN, VERSION)
 
     # models (headers)
     Layer = Layer
     NeuralNet = NeuralNet
+
+    # dynamic models (implementations)
+    ConvLayer = ConvLayer
+    DNN = DNN
+    Linear = Linear
+    Sequential = Sequential
+
+
+class Optimizers(Library):
+    __uri__ = library_uri(None, NS, OPTIMIZER, VERSION)
+
+    # models (headers)
     Optimizer = Optimizer
 
     # dynamic models (implementations)
     Adam = Adam
-    ConvLayer = ConvLayer
-    DNN = DNN
     GradientDescent = GradientDescent
-    Linear = Linear
-    Sequential = Sequential

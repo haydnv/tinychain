@@ -719,9 +719,16 @@ where
         trace!("committed BTree");
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        join!(
+            self.inner.root.rollback(txn_id),
+            self.inner.file.rollback(txn_id),
+        );
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
         self.inner.file.finalize(txn_id).await;
-        self.inner.root.finalize(txn_id)
+        self.inner.root.finalize(txn_id);
     }
 }
 

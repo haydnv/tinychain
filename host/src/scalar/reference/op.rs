@@ -196,7 +196,7 @@ impl TryCastFrom<Value> for Subject {
     fn can_cast_from(value: &Value) -> bool {
         match value {
             Value::Link(_) => true,
-            Value::String(s) => IdRef::from_str(s).is_ok() || Link::from_str(s).is_ok(),
+            Value::String(s) => Self::from_str(s).is_ok(),
             Value::Tuple(tuple) => tuple.matches::<(IdRef, TCPathBuf)>(),
             _ => false,
         }
@@ -205,15 +205,7 @@ impl TryCastFrom<Value> for Subject {
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
             Value::Link(link) => Some(Self::Link(link)),
-            Value::String(s) => {
-                if let Ok(id_ref) = IdRef::from_str(&s) {
-                    Some(Self::Ref(id_ref, TCPathBuf::default()))
-                } else if let Ok(link) = Link::from_str(&s) {
-                    Some(Self::Link(link))
-                } else {
-                    None
-                }
-            }
+            Value::String(s) => Self::from_str(s.as_str()).ok(),
             Value::Tuple(tuple) => tuple
                 .opt_cast_into()
                 .map(|(id, path)| Self::from((id, path))),
@@ -583,6 +575,7 @@ impl OpRefVisitor {
                 if let Some(class) = subject.as_class() {
                     const ERR_IMMUTABLE: &str =
                         "a scalar is immutable and cannot contain a mutable type";
+
                     const HINT: &str = "(consider using a closure)";
 
                     if let StateType::Chain(ct) = class {

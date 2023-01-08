@@ -1351,6 +1351,10 @@ where
         self.blocks.commit(txn_id).await
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.blocks.rollback(txn_id).await
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
         self.blocks.finalize(txn_id).await
     }

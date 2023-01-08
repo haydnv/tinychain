@@ -192,6 +192,17 @@ impl Transact for CollectionBase {
         }
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        match self {
+            Self::BTree(btree) => btree.rollback(txn_id).await,
+            Self::Table(table) => table.rollback(txn_id).await,
+            #[cfg(feature = "tensor")]
+            Self::Dense(dense) => dense.rollback(txn_id).await,
+            #[cfg(feature = "tensor")]
+            Self::Sparse(sparse) => sparse.rollback(txn_id).await,
+        }
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
         match self {
             Self::BTree(btree) => btree.finalize(txn_id).await,

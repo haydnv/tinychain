@@ -23,6 +23,7 @@ use crate::state::State;
 use crate::txn::Txn;
 
 pub use block::BlockChain;
+pub(crate) use block::HISTORY;
 pub use data::ChainBlock;
 pub use sync::SyncChain;
 
@@ -194,6 +195,13 @@ where
         match self {
             Self::Block(chain) => chain.commit(txn_id).await,
             Self::Sync(chain) => chain.commit(txn_id).await,
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        match self {
+            Self::Block(chain) => chain.rollback(txn_id).await,
+            Self::Sync(chain) => chain.rollback(txn_id).await,
         }
     }
 

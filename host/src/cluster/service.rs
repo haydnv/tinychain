@@ -3,9 +3,8 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
-use futures::future::{self, join_all, FutureExt, TryFutureExt};
-use futures::stream::FuturesUnordered;
-use futures::{join, try_join, TryStreamExt};
+use futures::future::{join_all, TryFutureExt};
+use futures::{join, try_join};
 use safecast::{as_type, AsType};
 
 use tc_error::*;
@@ -13,20 +12,23 @@ use tc_transact::fs::*;
 use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, Transaction};
 use tc_value::Version as VersionNumber;
-use tcgeneric::{label, Id, Label, Map, NativeClass};
+use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, TCPathBuf};
 
 use crate::chain::{Chain, ChainType};
 use crate::cluster::{DirItem, Replica};
 use crate::collection::{CollectionBase, CollectionSchema};
 use crate::fs;
+use crate::object::{InstanceClass, ObjectType};
 use crate::scalar::value::Link;
-use crate::scalar::{OpRef, Scalar, Subject, TCRef};
-use crate::state::State;
+use crate::scalar::{OpRef, Refer, Scalar, Subject, TCRef};
+use crate::state::{State, ToState};
 use crate::transact::TxnId;
 use crate::txn::Txn;
 
 pub const CHAINS: Label = label("chains");
 pub(super) const SCHEMA: Label = label("schemata");
+
+const ERR_MISSING_LINK: &str = "missing Link for Service version";
 
 #[derive(Clone)]
 pub enum Attr {
@@ -37,14 +39,42 @@ pub enum Attr {
 as_type!(Attr, Chain, Chain<CollectionBase>);
 as_type!(Attr, Scalar, Scalar);
 
+impl fmt::Display for Attr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Chain(chain) => fmt::Display::fmt(chain, f),
+            Self::Scalar(scalar) => fmt::Display::fmt(scalar, f),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Version {
+    path: TCPathBuf,
     attrs: Map<Attr>,
 }
 
 impl Version {
+    pub(crate) fn attrs(&self) -> impl Iterator<Item = &Id> {
+        self.attrs.keys()
+    }
+
     pub fn get_attribute(&self, name: &Id) -> Option<&Attr> {
         self.attrs.get(name)
+    }
+}
+
+impl Instance for Version {
+    type Class = ObjectType;
+
+    fn class(&self) -> Self::Class {
+        ObjectType::Class
+    }
+}
+
+impl ToState for Version {
+    fn to_state(&self) -> State {
+        State::Scalar(Scalar::Cluster(self.path.clone().into()))
     }
 }
 
@@ -55,30 +85,32 @@ impl Replica for Version {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        let requests = FuturesUnordered::new();
-
         for (name, attr) in self.attrs.iter() {
             if let Attr::Chain(chain) = attr {
                 let source = source.clone().append(name.clone());
                 let txn = txn.subcontext(name.clone()).await?;
-                requests.push(async move { chain.replicate(&txn, source).await });
+                // TODO: parallelize
+                chain.replicate(&txn, source).await?;
             }
         }
 
-        requests.try_fold((), |(), ()| future::ready(Ok(()))).await
+        Ok(())
     }
 }
 
 impl Persist<fs::Dir> for Version {
     type Txn = Txn;
-    type Schema = Map<Scalar>;
+    type Schema = InstanceClass;
 
     fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
 
+        let (link, proto) = schema.into_inner();
+        let link = link.ok_or_else(|| TCError::bad_request(ERR_MISSING_LINK, &proto))?;
+
         let mut attrs = Map::new();
 
-        for (name, attr) in schema {
+        for (name, attr) in proto {
             let attr = match attr {
                 Scalar::Ref(tc_ref) => match *tc_ref {
                     TCRef::Op(OpRef::Get((chain_type, collection))) => {
@@ -106,15 +138,21 @@ impl Persist<fs::Dir> for Version {
             attrs.insert(name, attr);
         }
 
-        Ok(Self { attrs })
+        Ok(Self {
+            attrs,
+            path: link.into_path(),
+        })
     }
 
     fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
 
+        let (link, proto) = schema.into_inner();
+        let link = link.ok_or_else(|| TCError::bad_request(ERR_MISSING_LINK, &proto))?;
+
         let mut attrs = Map::new();
 
-        for (name, attr) in schema {
+        for (name, attr) in proto {
             let attr = match attr {
                 Scalar::Ref(tc_ref) => match *tc_ref {
                     TCRef::Op(OpRef::Get((chain_type, collection))) => {
@@ -142,7 +180,10 @@ impl Persist<fs::Dir> for Version {
             attrs.insert(name, attr);
         }
 
-        Ok(Self { attrs })
+        Ok(Self {
+            attrs,
+            path: link.into_path(),
+        })
     }
 
     fn dir(&self) -> <fs::Dir as Dir>::Inner {
@@ -157,9 +198,19 @@ impl Transact for Version {
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         join_all(
             self.attrs
-                .iter()
-                .filter_map(|(name, attr)| attr.as_type().map(|chain: &Chain<_>| (name, chain)))
-                .map(|(name, attr)| attr.commit(txn_id).map(move |guard| (name.clone(), guard))),
+                .values()
+                .filter_map(|attr| attr.as_type())
+                .map(|attr: &Chain<_>| attr.commit(txn_id)),
+        )
+        .await;
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        join_all(
+            self.attrs
+                .values()
+                .filter_map(|attr| attr.as_type())
+                .map(|attr: &Chain<_>| attr.rollback(txn_id)),
         )
         .await;
     }
@@ -184,7 +235,7 @@ impl fmt::Display for Version {
 #[derive(Clone)]
 pub struct Service {
     dir: fs::Dir,
-    schema: fs::File<VersionNumber, super::library::Version>,
+    schema: fs::File<VersionNumber, InstanceClass>,
     versions: TxnLock<BTreeMap<VersionNumber, Version>>,
 }
 
@@ -204,31 +255,25 @@ impl Service {
             .map_ok(|file| file.block_ids().iter().last().cloned())
             .await
     }
-
-    pub async fn schemata(&self, txn_id: TxnId) -> TCResult<Map<Map<Scalar>>> {
-        let file = self.schema.read(txn_id).await?;
-        let mut schemata = Map::new();
-
-        for number in file.block_ids() {
-            let version = file.read_block(number).await?;
-            schemata.insert(number.clone().into(), (&*version).clone().into());
-        }
-
-        Ok(schemata)
-    }
 }
 
 #[async_trait]
 impl DirItem for Service {
-    type Schema = Map<Scalar>;
+    type Schema = InstanceClass;
     type Version = Version;
 
     async fn create_version(
         &self,
         txn: &Txn,
         number: VersionNumber,
-        schema: Map<Scalar>,
+        class: InstanceClass,
     ) -> TCResult<Version> {
+        let (link, proto) = class.into_inner();
+        let link = link.ok_or_else(|| TCError::bad_request(ERR_MISSING_LINK, &proto))?;
+
+        let proto = validate(&link, &number, proto)?;
+        let schema = InstanceClass::anonymous(Some(link), proto);
+
         let txn_id = *txn.id();
         let (dir, mut schemata, mut versions) = try_join!(
             self.dir.write(txn_id),
@@ -250,33 +295,71 @@ impl DirItem for Service {
 }
 
 #[async_trait]
+impl Replica for Service {
+    async fn state(&self, txn_id: TxnId) -> TCResult<State> {
+        let mut map = Map::new();
+
+        let schema = self.schema.read(txn_id).await?;
+        for number in schema.block_ids() {
+            let version = schema.read_block(&number).await?;
+            map.insert(number.into(), InstanceClass::clone(&*version).into());
+        }
+
+        Ok(State::Map(map))
+    }
+
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        let versions = self.versions.read(*txn.id()).await?;
+        for (number, version) in versions.iter() {
+            // TODO: parallelize
+            let txn = txn.subcontext(number.clone().into()).await?;
+            version
+                .replicate(&txn, source.clone().append(number.clone()))
+                .await?;
+        }
+
+        Ok(())
+    }
+}
+
+#[async_trait]
 impl Transact for Service {
     type Commit = ();
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         let (_schema, versions) = join!(self.schema.commit(txn_id), self.versions.commit(txn_id));
 
-        join_all(
-            versions
-                .iter()
-                .map(|(_name, version)| async move { version.commit(txn_id).await }),
-        )
-        .await;
+        if let Some(versions) = versions {
+            join_all(versions.iter().map(|(_name, version)| async move {
+                version.commit(txn_id).await;
+            }))
+            .await;
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        if let Some(versions) = self.versions.rollback(txn_id).await {
+            join_all(
+                versions
+                    .iter()
+                    .map(|(_, version)| async move { version.rollback(txn_id).await }),
+            )
+            .await;
+        }
+
+        self.schema.rollback(txn_id).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        {
-            let versions = self.versions.read(*txn_id).await.expect("service versions");
-
+        if let Some(versions) = self.versions.finalize(txn_id) {
             join_all(
                 versions
                     .iter()
                     .map(|(_, version)| async move { version.finalize(txn_id).await }),
             )
-            .await
-        };
+            .await;
+        }
 
-        self.versions.finalize(txn_id);
         self.schema.finalize(txn_id).await;
     }
 }
@@ -307,7 +390,7 @@ impl Persist<fs::Dir> for Service {
         let dir = fs::Dir::try_from(store)?;
         let (schema, mut versions) = {
             let dir = dir.try_read(txn_id)?;
-            let schema: fs::File<VersionNumber, super::library::Version> = dir
+            let schema: fs::File<VersionNumber, InstanceClass> = dir
                 .get_file(&SCHEMA.into())?
                 .ok_or_else(|| TCError::internal("service missing schema file"))?;
 
@@ -325,8 +408,7 @@ impl Persist<fs::Dir> for Service {
                 .try_write(txn_id)
                 .map(|dir| dir.get_or_create_store(number.clone().into()))?;
 
-            let schema = super::library::Version::clone(&*schema);
-            let version = Version::load(txn_id, schema.into(), store)?;
+            let version = Version::load(txn_id, schema.clone(), store)?;
             versions.insert(number.clone(), version);
         }
 
@@ -369,4 +451,47 @@ fn resolve_type<T: NativeClass>(subject: Subject) -> TCResult<T> {
             subject,
         )),
     }
+}
+
+fn validate(
+    cluster_link: &Link,
+    number: &VersionNumber,
+    proto: Map<Scalar>,
+) -> TCResult<Map<Scalar>> {
+    let version_link = cluster_link.clone().append(number.clone());
+
+    let mut validated = Map::new();
+
+    for (id, scalar) in proto.into_iter() {
+        if let Scalar::Op(op_def) = scalar {
+            let op_def = if op_def.is_write() {
+                // make sure not to replicate ops internal to this OpDef
+                let op_def = op_def.reference_self(version_link.path());
+
+                for (id, provider) in op_def.form() {
+                    // make sure not to duplicate requests to other clusters
+                    if provider.is_inter_service_write(version_link.path()) {
+                        return Err(TCError::unsupported(format!(
+                            "replicated op {} may not perform inter-service writes: {}",
+                            id, provider
+                        )));
+                    }
+                }
+
+                op_def
+            } else {
+                // make sure to replicate all write ops internal to this OpDef
+                // by routing them through the kernel
+                op_def.dereference_self(version_link.path())
+            };
+
+            // TODO: check that the Version does not reference any other Version of the same service
+
+            validated.insert(id, Scalar::Op(op_def));
+        } else {
+            validated.insert(id, scalar);
+        }
+    }
+
+    Ok(validated)
 }

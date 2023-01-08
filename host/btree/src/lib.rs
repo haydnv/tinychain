@@ -262,6 +262,16 @@ impl<'en> en::IntoStream<'en> for Column {
     }
 }
 
+impl<'en> en::ToStream<'en> for Column {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        if let Some(max_len) = self.max_len {
+            en::IntoStream::into_stream((&self.name, &self.dtype, max_len), encoder)
+        } else {
+            en::IntoStream::into_stream((&self.name, &self.dtype), encoder)
+        }
+    }
+}
+
 impl<'a> From<&'a Column> for (&'a Id, ValueType) {
     fn from(col: &'a Column) -> (&'a Id, ValueType) {
         (&col.name, col.dtype)

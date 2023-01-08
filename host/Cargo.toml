@@ -30,7 +30,7 @@ clap = { version = "4.0", features = ["derive"] }
 destream = "0.5"
 destream_json = { version = "0.9", features = ["tokio-io"] }
 env_logger = "0.9"
-freqfs = "~0.5.5"
+freqfs = "~0.5.6"
 futures = "0.3"
 hex = "0.4"
 http = "0.2"

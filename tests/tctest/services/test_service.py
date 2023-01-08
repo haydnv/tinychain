@@ -3,18 +3,15 @@ import tinychain as tc
 
 from ..process import start_host
 
-NAME = "test_service"
 LEAD = "http://127.0.0.1:8702"
-DIR = tc.URI(LEAD + "/service/test")
+NS = tc.URI("/test_service")
 
 
-class TestServiceV0(tc.app.Service):
-    HOST = tc.URI(LEAD)
-    NS = tc.URI("/test")
+class TestServiceV0(tc.service.Service):
     NAME = "hello"
     VERSION = tc.Version("0.0.0")
 
-    __uri__ = HOST + tc.URI(tc.app.Service) + NS.append(NAME) + VERSION
+    __uri__ = tc.service.service_uri(LEAD, NS, NAME, VERSION)
 
     @tc.get
     def hello(self) -> tc.String:
@@ -24,41 +21,44 @@ class TestServiceV0(tc.app.Service):
 class ServiceVersionTests(unittest.TestCase):
     def testCreateService(self):
         hosts = [
-            start_host(NAME, [], http_port=8702, replicate=LEAD),
-            start_host(NAME, [], http_port=8703, replicate=LEAD),
+            start_host(NS, http_port=8702, replicate=LEAD),
+            start_host(NS, http_port=8703, replicate=LEAD),
         ]
 
-        hosts[0].put("/service", "test", DIR)
+        hosts[0].put(tc.URI(tc.service.Service), "test_service", tc.URI(LEAD, "service", "test_service"))
 
         print()
+        print()
+
+        endpoint = tc.URI(TestServiceV0).path()[:-2]
+
+        for i in range(len(hosts)):
+            print()
+            print(f"host {i} replicas", hosts[i].get(endpoint.append("replicas")))
+            print()
+
+        print()
+        hosts.append(start_host(NS, http_port=8704, replicate=LEAD))
         print()
 
         for i in range(len(hosts)):
             print()
-            print(f"host {i} replicas", hosts[i].get("/service/test/replicas"))
-            print()
-
-        print()
-        hosts.append(start_host(NAME, [], http_port=8704, replicate=LEAD))
-        print()
-
-        for i in range(len(hosts)):
-            print()
-            print(f"host {i} replicas", hosts[i].get("/service/test/replicas"))
+            print(f"host {i} replicas", hosts[i].get(endpoint.append("replicas")))
             print()
 
         hosts[0].install(TestServiceV0())
         print()
 
+        endpoint = tc.URI(TestServiceV0).path().append("hello")
         for host in hosts:
             print(host)
-            self.assertEqual(hosts[i].get("/service/test/hello/0.0.0/hello"), "Hello, World!")
+            self.assertEqual(hosts[i].get(endpoint), "Hello, World!")
 
-        hosts.append(start_host(NAME, [], http_port=8705, replicate=LEAD))
+        hosts.append(start_host(NS, http_port=8705, replicate=LEAD))
 
         for host in hosts:
             print(host)
-            self.assertEqual(hosts[i].get("/service/test/hello/0.0.0/hello"), "Hello, World!")
+            self.assertEqual(hosts[i].get(endpoint), "Hello, World!")
 
         hosts[2].stop()
 
@@ -73,7 +73,7 @@ class ServiceVersionTests(unittest.TestCase):
         print()
 
         for host in hosts:
-            self.assertEqual(host.get("/service/test/hello/0.0.0/hello"), "Hello, World!")
+            self.assertEqual(host.get(endpoint), "Hello, World!")
 
 
 def printlines(n):

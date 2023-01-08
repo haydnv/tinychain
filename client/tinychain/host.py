@@ -8,7 +8,7 @@ import json
 import requests
 import urllib.parse
 
-from .app import Library, Service
+from .service import Library, Service
 from .context import to_json
 from .error import *
 from .scalar.value import Nil
@@ -84,6 +84,9 @@ class Host(object):
     def get(self, path, key=None, auth=None):
         """Execute a GET request."""
 
+        if isinstance(path, URI) and path.host() is not None:
+            raise ValueError(f"Host.get expects a path, not {path}")
+
         url = self.link(path)
         headers = auth_header(auth)
         if key and not isinstance(key, Nil):
@@ -96,6 +99,9 @@ class Host(object):
 
     def put(self, path, key=None, value=None, auth=None):
         """Execute a PUT request."""
+
+        if isinstance(path, URI) and path.host() is not None:
+            raise ValueError(f"Host.put expects a path, not {path}")
 
         url = self.link(path)
         headers = auth_header(auth)
@@ -113,6 +119,9 @@ class Host(object):
     def post(self, path, data={}, auth=None):
         """Execute a POST request."""
 
+        if isinstance(path, URI) and path.host() is not None:
+            raise ValueError(f"Host.post expects a path, not {path}")
+
         url = self.link(path)
         data = json.dumps(to_json(data)).encode(ENCODING)
         headers = auth_header(auth)
@@ -122,6 +131,9 @@ class Host(object):
 
     def delete(self, path, key=None, auth=None):
         """Execute a DELETE request."""
+
+        if isinstance(path, URI) and path.host() is not None:
+            raise ValueError(f"Host.delete expects a path, not {path}")
 
         url = self.link(path)
         headers = auth_header(auth)
@@ -140,21 +152,11 @@ class Host(object):
             raise ValueError(f"not a library or service: {service}")
 
         deps = []
-        classes = {}
         for name, cls in inspect.getmembers(service, inspect.isclass):
             if issubclass(cls, Library):
                 deps.append(cls)
             elif issubclass(cls, State):
-                if cls.NS == service.NS.append(service.NAME):
-                    expected_uri = (URI("/class") + service.NS).extend(service.NAME, cls.VERSION, cls.__name__)
-
-                    if URI(cls) == expected_uri:
-                        classes[cls.__name__] = cls
-                    else:
-                        raise ValueError(f"{service} class {cls} has invalid URI {URI(cls)}, expected {expected_uri}")
-                else:
-                    raise ValueError(
-                        f"{service} may not depend on {cls} directly but must depend on its Library in {cls.NS}")
+                continue
             else:
                 logging.info(f"install {service} will skip dependency {cls} since it's not a Library or a State")
 
@@ -163,12 +165,13 @@ class Host(object):
         else:
             logging.info(f"installing {service}")
 
-        self.put(URI(service).path()[:-2], service.NAME, service)
+        name = URI(service).path()[-2]
+        self.put(URI(service).path()[:-2], name, service)
 
-    def update(self, library):
-        """Update the version of given `library` on this host"""
+    def update(self, service):
+        """Update the version of given `service` on this host"""
 
-        self.put(library.URI.path(), library.VERSION, library)
+        self.put(URI(service).path()[:-1], URI(service)[-1], service)
 
 
 class Local(Host):

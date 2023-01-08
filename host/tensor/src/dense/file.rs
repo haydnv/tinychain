@@ -596,6 +596,10 @@ where
         self.file.commit(txn_id).await
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.file.rollback(txn_id).await
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
         self.file.finalize(txn_id).await
     }

@@ -1355,6 +1355,10 @@ where
         self.accessor.commit(txn_id).await
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.accessor.rollback(txn_id).await
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
         self.accessor.finalize(txn_id).await
     }

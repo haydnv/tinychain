@@ -8,24 +8,27 @@ from ..process import DEFAULT_PORT
 from .base import PersistenceTest
 
 
-ENDPOINT = "/transact/hypothetical"
+LEAD = f"http://127.0.0.1:{DEFAULT_PORT}"
+NS = tc.URI("/test_tensor")
 
 
 class TensorChainTests(PersistenceTest, unittest.TestCase):
     CACHE_SIZE = "100M"
     NUM_HOSTS = 4
-    NAME = "tensor"
 
-    def app(self, chain_type):
-        class Persistent(tc.app.App):
-            __uri__ = tc.URI(f"http://127.0.0.1:{DEFAULT_PORT}/test/tensor")
+    def service(self, chain_type):
+        class Persistent(tc.service.Service):
+            NAME = "tensor"
+            VERSION = tc.Version("0.0.0")
+
+            __uri__ = tc.service.service_uri(LEAD, NS, NAME, VERSION)
 
             def __init__(self):
                 schema = ([2, 3], tc.I32)
                 self.dense = chain_type(tc.tensor.Dense(schema))
                 self.sparse = chain_type(tc.tensor.Sparse(schema))
 
-                tc.app.App.__init__(self)
+                tc.service.Service.__init__(self)
 
             @tc.put
             def overwrite(self, txn):
@@ -42,20 +45,27 @@ class TensorChainTests(PersistenceTest, unittest.TestCase):
         return Persistent()
 
     def execute(self, hosts):
-        hosts[0].put("/test/tensor/dense", [0, 0], 1)
-        hosts[1].put("/test/tensor/sparse", [0, 0], 1)
+        endpoints = {
+            "tensor": tc.URI("/service/test_tensor/tensor/0.0.0")
+        }
+
+        endpoints["dense"] = endpoints["tensor"].append("dense")
+        endpoints["sparse"] = endpoints["tensor"].append("sparse")
+
+        hosts[0].put(endpoints["dense"], [0, 0], 1)
+        hosts[1].put(endpoints["sparse"], [0, 0], 1)
 
         dense = expect_dense(tc.I32, [2, 3], [1, 0, 0, 0, 0, 0])
         sparse = expect_sparse(tc.I32, [2, 3], [[[0, 0], 1]])
         for host in hosts:
-            actual = host.get("/test/tensor/dense")
+            actual = host.get(endpoints["dense"])
             self.assertEqual(actual, dense)
 
-            actual = host.get("/test/tensor/sparse")
+            actual = host.get(endpoints["sparse"])
             self.assertEqual(actual, sparse)
 
         hosts[1].stop()
-        hosts[0].put("/test/tensor/overwrite")
+        hosts[0].put(endpoints["tensor"].append("overwrite"))
         hosts[1].start()
 
         dense = expect_dense(tc.I32, [2, 3], [2] * 6)
@@ -67,13 +77,13 @@ class TensorChainTests(PersistenceTest, unittest.TestCase):
         eq = expect_dense(tc.Bool, [2, 3], [True, True, True, False, False, False])
 
         for host in hosts:
-            actual = host.get("/test/tensor/dense")
+            actual = host.get(endpoints["dense"])
             self.assertEqual(actual, dense)
 
-            actual = host.get("/test/tensor/sparse")
+            actual = host.get(endpoints["sparse"])
             self.assertEqual(actual, sparse)
 
-            actual = host.get("/test/tensor/eq")
+            actual = host.get(endpoints["tensor"].append("eq"))
             self.assertEqual(actual, eq)
 
 

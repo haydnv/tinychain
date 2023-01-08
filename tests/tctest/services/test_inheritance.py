@@ -6,16 +6,14 @@ from ..process import start_host
 
 
 NS = tc.URI("/test_inheritance")
-NAME = "test_lib"
+LIB_NAME = "lib"
 VERSION = tc.Version("0.0.0")
 
 
-class Foo(tc.app.Model):
-    NS = NS.append(NAME)
+class Foo(tc.service.Model):
     NAME = "Foo"
 
-    # TODO: replace URI("/class") with URI(tc.app.Model)
-    __uri__ = (tc.URI("/class") + NS).extend(VERSION, NAME)
+    __uri__ = tc.service.model_uri(NS, LIB_NAME, VERSION, NAME)
 
     name = tc.String
 
@@ -28,34 +26,31 @@ class Foo(tc.app.Model):
 
 
 class Bar(Foo):
-    NS = NS.append(NAME)
     NAME = "Bar"
 
-    # TODO: replace URI("/class") with URI(tc.app.Model)
-    __uri__ = (tc.URI("/class") + NS).extend(VERSION, NAME)
+    __uri__ = tc.service.model_uri(NS, LIB_NAME, VERSION, NAME)
 
     @tc.get
     def greet(self):
         return tc.String("their name is {{name}}").render(name=self.name)
 
 
-class Baz(Bar, tc.app.Dynamic):
+class Baz(Bar, tc.service.Dynamic):
     def __init__(self, name: tc.String, greetings: typing.Tuple[tc.String, ...]):
         Bar.__init__(self, name)
         self.greetings = greetings
-        tc.app.Dynamic.__init__(self)
+        tc.service.Dynamic.__init__(self)
 
     @tc.get
     def greet(self):
         return tc.String("hello {{name}} x{{number}}").render(name=self.name, number=len(self.greetings))
 
 
-class TestLib(tc.app.Library):
-    NS = NS
-    NAME = NAME
+class TestLib(tc.service.Library):
+    NAME = LIB_NAME
     VERSION = VERSION
 
-    __uri__ = (tc.URI(tc.app.Library) + NS).extend(NAME, VERSION)
+    __uri__ = tc.service.library_uri(None, NS, NAME, VERSION)
 
     Foo = Foo
     Bar = Bar
@@ -80,9 +75,9 @@ class TestLib(tc.app.Library):
 class InheritanceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host(str(NS)[1:], [])
-        cls.host.put(tc.URI(tc.app.Library), "test_inheritance", tc.URI(tc.app.Library) + NS)
-        cls.host.put(tc.URI(TestLib)[:-2], NAME, TestLib())
+        cls.host = start_host(NS)
+        cls.host.put(tc.URI(tc.service.Library), str(NS)[1:], tc.URI(tc.service.Library) + NS)
+        cls.host.put(tc.URI(TestLib)[:-2], tc.URI(TestLib)[-2], TestLib())
 
     def _get(self, endpoint):
         return self.host.get(tc.URI(TestLib).append(endpoint))
@@ -103,3 +98,8 @@ class InheritanceTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.host.stop()
+
+
+def printlines(n):
+    for _ in range(n):
+        print()

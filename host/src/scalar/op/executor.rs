@@ -73,6 +73,7 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
         Self { txn, scope }
     }
 
+    /// Construct a new `Executor` with the given [`Txn`] context, subject, and initial state.
     pub fn with_context<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
         txn: &'a Txn,
         subject: Option<&'a T>,
@@ -83,6 +84,7 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
         Self { txn, scope }
     }
 
+    /// Construct a new `Executor` with the given [`Txn`] context and [`Scope`].
     pub fn from_scope(txn: &'a Txn, scope: Scope<'a, T>) -> Self {
         Self { txn, scope }
     }

@@ -7,9 +7,9 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{self, join_all, try_join_all, Future, FutureExt, TryFutureExt};
-use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
-use log::{debug, info, trace};
+use futures::future::{join_all, try_join_all, Future, FutureExt, TryFutureExt};
+use futures::stream::{FuturesUnordered, StreamExt};
+use log::{debug, info, trace, warn};
 use safecast::TryCastInto;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -21,10 +21,8 @@ use tc_transact::{Transact, Transaction};
 use tc_value::{Link, LinkHost, Value};
 use tcgeneric::*;
 
-use crate::chain::{BlockChain, Chain};
-use crate::collection::CollectionBase;
+use crate::chain::BlockChain;
 use crate::fs;
-use crate::object::InstanceClass;
 use crate::scalar::Scalar;
 use crate::state::{State, ToState};
 use crate::txn::{Actor, Txn, TxnId};
@@ -32,7 +30,6 @@ use crate::txn::{Actor, Txn, TxnId};
 pub use class::Class;
 pub use dir::{Dir, DirEntry, DirItem};
 pub use library::Library;
-pub use load::instantiate;
 pub use service::Service;
 
 pub mod class;
@@ -41,7 +38,6 @@ pub mod library;
 pub mod service;
 
 mod leader;
-mod load; // TODO: delete
 
 /// The name of the endpoint which serves a [`Link`] to each of this [`Cluster`]'s replicas.
 pub const REPLICAS: Label = label("replicas");
@@ -163,14 +159,18 @@ impl ReplicaSet {
 
 #[async_trait]
 impl Transact for ReplicaSet {
-    type Commit = Arc<BTreeSet<Link>>;
+    type Commit = Option<Arc<BTreeSet<Link>>>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         self.replicas.commit(txn_id).await
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.replicas.rollback(txn_id).await;
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
-        self.replicas.finalize(txn_id)
+        self.replicas.finalize(txn_id);
     }
 }
 
@@ -185,22 +185,8 @@ impl fmt::Display for ReplicaSet {
 pub trait Replica {
     async fn state(&self, txn_id: TxnId) -> TCResult<State>;
 
+    // TODO: change &Txn to Txn
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
-}
-
-// TODO: delete
-/// The [`Class`] of a [`Cluster`].
-pub enum ClusterType {
-    Dir,
-    Legacy,
-}
-
-impl tcgeneric::Class for ClusterType {}
-
-impl fmt::Display for ClusterType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("Cluster")
-    }
 }
 
 /// The data structure responsible for maintaining consensus per-transaction across the network.
@@ -399,6 +385,11 @@ where
             }
 
             let result = txn.post(replica.clone(), State::Map(Map::default())).await;
+
+            if let Err(cause) = &result {
+                warn!("replica at {} failed: {}", replica, cause);
+            }
+
             results.push(result);
         }
 
@@ -472,7 +463,7 @@ where
             }
         }
 
-        self.finalize(txn.id()).await;
+        self.rollback(txn.id()).await;
     }
 }
 
@@ -489,7 +480,7 @@ where
     ///
     /// Returns `true` if a new replica was added.
     // TODO: remove `notify`
-    pub async fn add_replica(&self, txn: &Txn, replica: Link, notify: bool) -> TCResult<bool> {
+    pub async fn add_replica(&self, txn: &Txn, replica: Link) -> TCResult<bool> {
         if replica.path() != self.path() {
             return Err(TCError::unsupported(format!(
                 "tried to replicate {} from {}",
@@ -523,12 +514,14 @@ where
                 self, replica, self_link
             );
 
+            self.state.replicate(txn, self.link().clone()).await?;
+
             let (lead, replicas) = txn
                 .get(self.link().clone().append(REPLICAS), Value::default())
                 .map(|r| r.and_then(ReplicaSet::try_from_state))
                 .await?;
 
-            if self.link() != &lead {
+            if lead.host().is_some() && self.link() != &lead {
                 return Err(TCError::unsupported(format!(
                     "replication lead {} cannot be altered (got {})",
                     self.link(),
@@ -536,21 +529,7 @@ where
                 )));
             }
 
-            self.state.replicate(txn, self.link().clone()).await?;
-
             let is_new = !replicas.contains(&self_link);
-
-            // TODO: delete
-            if notify && is_new {
-                try_join_all(replicas.iter().map(|replica| {
-                    txn.put(
-                        replica.clone().append(REPLICAS),
-                        Value::default(),
-                        self_link.clone().into(),
-                    )
-                }))
-                .await?;
-            }
 
             self.replicas.extend(txn_id, replicas).await?;
 
@@ -570,9 +549,9 @@ where
         let self_link = txn.link(self.link().path().clone());
 
         if owner.path() == self_link.path() {
-            return self.add_replica(&txn, self_link, false).await;
+            return self.add_replica(&txn, self_link).await;
         } else if txn.leader(self.path()).is_some() {
-            return self.add_replica(&txn, self_link, false).await;
+            return self.add_replica(&txn, self_link).await;
         }
 
         let txn = txn.lead(&self.actor, self.link().path().clone()).await?;
@@ -584,7 +563,7 @@ where
             owner
         );
 
-        self.add_replica(&txn, self_link, false).await
+        self.add_replica(&txn, self_link).await
     }
 
     /// Remove one or more replicas from this `Cluster`.
@@ -627,7 +606,7 @@ where
                 .iter()
                 .filter(|replica| *replica != &self_link)
                 .map(|link| {
-                    debug!("replicate write to {}", link);
+                    info!("replicate write to {}", link);
                     write(link.clone()).map(move |result| (link, result))
                 })
                 .collect();
@@ -636,11 +615,11 @@ where
                 match result {
                     Err(cause) if cause.code() == ErrorType::Conflict => return Err(cause),
                     Err(ref cause) => {
-                        debug!("replica at {} failed: {}", replica, cause);
+                        warn!("replica at {} failed: {}", replica, cause);
                         failed.insert(replica.clone());
                     }
                     Ok(()) => {
-                        debug!("replica at {} succeeded", replica);
+                        info!("replica at {} succeeded", replica);
                         succeeded.insert(replica);
                     }
                 };
@@ -730,31 +709,12 @@ where
     }
 }
 
-impl<T> Instance for Cluster<Dir<T>>
-where
-    T: Send + Sync,
-{
-    type Class = ClusterType;
-
-    fn class(&self) -> Self::Class {
-        ClusterType::Dir
-    }
-}
-
-impl Instance for Cluster<Legacy> {
-    type Class = ClusterType;
-
-    fn class(&self) -> Self::Class {
-        ClusterType::Legacy
-    }
-}
-
 #[async_trait]
 impl<T> Transact for Cluster<T>
 where
     T: Transact + Send + Sync,
 {
-    type Commit = Arc<BTreeSet<Link>>;
+    type Commit = Option<Arc<BTreeSet<Link>>>;
 
     async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
         debug!("commit {}", self);
@@ -768,6 +728,12 @@ where
         replicas
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.state.rollback(txn_id).await;
+        self.led.write().await.remove(txn_id);
+        self.replicas.rollback(txn_id).await
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
         debug!("finalize {}", self);
 
@@ -777,6 +743,7 @@ where
     }
 }
 
+// TODO: delete
 impl<T> ToState for Cluster<T> {
     fn to_state(&self) -> State {
         State::Scalar(Scalar::Cluster(self.link().path().clone().into()))
@@ -786,73 +753,6 @@ impl<T> ToState for Cluster<T> {
 impl<T> fmt::Display for Cluster<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "cluster at {}", self.link().path())
-    }
-}
-
-// TODO: delete and replace with `Service`
-pub struct Legacy {
-    chains: Map<Chain<CollectionBase>>,
-    classes: Map<InstanceClass>,
-}
-
-impl Legacy {
-    /// Borrow one of this cluster's [`Chain`]s.
-    pub fn chain(&self, name: &Id) -> Option<&Chain<CollectionBase>> {
-        self.chains.get(name)
-    }
-
-    /// Borrow an [`InstanceClass`], if there is one defined with the given name.
-    pub fn class(&self, name: &Id) -> Option<&InstanceClass> {
-        self.classes.get(name)
-    }
-
-    /// Return the names of the members of this cluster.
-    pub fn ns(&self) -> impl Iterator<Item = &Id> {
-        self.chains.keys().chain(self.classes.keys())
-    }
-}
-
-#[async_trait]
-impl Replica for Legacy {
-    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
-        let map = self
-            .chains
-            .iter()
-            .map(|(name, chain)| (name.clone(), State::Chain(chain.clone())))
-            .collect();
-
-        Ok(State::Map(map))
-    }
-
-    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        let requests = FuturesUnordered::new();
-
-        for (name, chain) in &self.chains {
-            let source = source.clone().append(name.clone());
-            let txn = txn.subcontext(name.clone()).await?;
-            requests.push(async move { chain.replicate(&txn, source).await });
-        }
-
-        requests.try_fold((), |(), ()| future::ready(Ok(()))).await
-    }
-}
-
-#[async_trait]
-impl Transact for Legacy {
-    type Commit = ();
-
-    async fn commit(&self, txn_id: &TxnId) {
-        join_all(self.chains.values().map(|chain| chain.commit(txn_id))).await;
-    }
-
-    async fn finalize(&self, txn_id: &TxnId) {
-        join_all(self.chains.values().map(|chain| chain.finalize(txn_id))).await;
-    }
-}
-
-impl fmt::Display for Legacy {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a legacy cluster")
     }
 }
 

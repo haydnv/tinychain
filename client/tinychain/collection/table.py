@@ -15,7 +15,7 @@ from .base import Collection, Column
 from .btree import BTree
 
 if TYPE_CHECKING:
-    from ..app import Model
+    from ..service import Model
 
 
 class Schema(object):
@@ -229,7 +229,7 @@ def create_schema(modelclass: Type[Model]) -> Schema:
             values.append(attr)
         else:
             try:
-                from ..app import Model, class_name
+                from ..service import Model, class_name
                 assert issubclass(attr, Model)
                 values.append(*attr.key())
                 indices.append((class_name(attr), [attr.key()[0].name]))

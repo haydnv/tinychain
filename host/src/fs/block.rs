@@ -35,9 +35,10 @@ pub enum CacheBlock {
 impl freqfs::FileLoad for CacheBlock {
     async fn load(path: &Path, file: fs::File, _metadata: Metadata) -> Result<Self, io::Error> {
         match file_ext(path) {
-            Some("node") => {
+            #[cfg(feature = "tensor")]
+            Some("array") => {
                 tbon::de::read_from((), file)
-                    .map_ok(Self::BTree)
+                    .map_ok(Self::Tensor)
                     .map_err(|cause| io::Error::new(io::ErrorKind::InvalidData, cause))
                     .await
             }
@@ -49,6 +50,13 @@ impl freqfs::FileLoad for CacheBlock {
                     .await
             }
 
+            Some("class") => {
+                tbon::de::read_from((), file)
+                    .map_ok(Self::Class)
+                    .map_err(|cause| io::Error::new(io::ErrorKind::InvalidData, cause))
+                    .await
+            }
+
             Some("lib") => {
                 tbon::de::read_from((), file)
                     .map_ok(Self::Library)
@@ -56,10 +64,9 @@ impl freqfs::FileLoad for CacheBlock {
                     .await
             }
 
-            #[cfg(feature = "tensor")]
-            Some("array") => {
+            Some("node") => {
                 tbon::de::read_from((), file)
-                    .map_ok(Self::Tensor)
+                    .map_ok(Self::BTree)
                     .map_err(|cause| io::Error::new(io::ErrorKind::InvalidData, cause))
                     .await
             }
@@ -68,6 +75,7 @@ impl freqfs::FileLoad for CacheBlock {
                 io::ErrorKind::InvalidInput,
                 format!("unrecognized block extension: {}", other),
             )),
+
             None => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("block name is missing an extension: {:?}", path.file_name()),

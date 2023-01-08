@@ -59,6 +59,8 @@ class URI(object):
         self._subject = subject
         self._path = path
 
+        assert not str(self).startswith("//"), f"invalid URI prefix: {self}"
+
     def __add__(self, other):
         other = str(other)
 
@@ -91,7 +93,17 @@ class URI(object):
         if isinstance(item, int):
             return segments[item]
         elif isinstance(item, slice):
-            return URI.join(segments[item])
+            if not segments[item]:
+                return URI('/')
+
+            if self.startswith('$'):
+                return URI.join(segments[item])
+            elif "://" in segments[item][0]:
+                return URI.join(segments[item])
+            elif len(segments[item]) == 1:
+                return segments[item]
+            else:
+                return URI('/').extend(*segments[item])
 
     def __gt__(self, other):
         return self.startswith(other) and len(self) > len(other)
@@ -144,7 +156,10 @@ class URI(object):
 
         path = '/'.join(self._path)
         if path:
-            return f"{root}/{path}"
+            if root == '/':
+                return f"/{path}"
+            else:
+                return f"{root}/{path}"
         else:
             return root
 

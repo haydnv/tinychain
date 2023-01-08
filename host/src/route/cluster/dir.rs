@@ -8,59 +8,18 @@ use tc_value::{Link, Version as VersionNumber};
 use crate::chain::BlockChain;
 use crate::cluster::dir::{Dir, DirCreate, DirCreateItem, DirEntry, ENTRIES};
 use crate::cluster::{Class, Cluster, DirItem, Library, Replica, Service};
+use crate::object::InstanceClass;
 use crate::route::*;
-use crate::scalar::OpRefType;
+use crate::scalar::{OpRef, Scalar, TCRef};
 use crate::state::State;
 
 pub(super) struct DirHandler<'a, T> {
     pub(super) dir: &'a Dir<T>,
-    pub(super) path: &'a [PathSegment],
 }
 
 impl<'a, T> DirHandler<'a, T> {
-    fn new(dir: &'a Dir<T>, path: &'a [PathSegment]) -> Self {
-        Self { dir, path }
-    }
-}
-
-impl<'a, T> DirHandler<'a, T>
-where
-    T: DirItem,
-{
-    pub(super) fn method_not_allowed<'b, A: Send + 'b, R: Send + 'a>(
-        self: Box<Self>,
-        method: OpRefType,
-    ) -> Box<
-        dyn FnOnce(&'b Txn, A) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>>
-            + Send
-            + 'a,
-    >
-    where
-        'b: 'a,
-    {
-        if self.path.is_empty() {
-            Box::new(move |_, _| {
-                Box::pin(future::ready(Err(TCError::method_not_allowed(
-                    method,
-                    self.dir,
-                    TCPath::from(self.path),
-                ))))
-            })
-        } else {
-            Box::new(move |txn, _: A| {
-                Box::pin(async move {
-                    if let Some(_version) = self.dir.entry(*txn.id(), &self.path[0]).await? {
-                        Err(TCError::internal(format!(
-                            "bad routing for {} in {}",
-                            TCPath::from(self.path),
-                            self.dir
-                        )))
-                    } else {
-                        Err(TCError::not_found(&self.path[0]))
-                    }
-                })
-            })
-        }
+    fn new(dir: &'a Dir<T>) -> Self {
+        Self { dir }
     }
 }
 
@@ -101,7 +60,7 @@ where
                     .await?;
             } else {
                 cluster
-                    .add_replica(txn, txn.link(cluster.link().path().clone()), false)
+                    .add_replica(txn, txn.link(cluster.link().path().clone()))
                     .await?;
             }
         } else {
@@ -111,7 +70,7 @@ where
                 return Ok(());
             } else {
                 cluster
-                    .add_replica(txn, txn.link(cluster.link().path().clone()), false)
+                    .add_replica(txn, txn.link(cluster.link().path().clone()))
                     .await?;
             }
         }
@@ -148,10 +107,12 @@ macro_rules! route_dir {
     ($t:ty) => {
         impl Route for Dir<$t> {
             fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-                if path.len() == 1 && &path[0] == &ENTRIES {
+                if path.is_empty() {
+                    Some(Box::new(DirHandler::new(self)))
+                } else if path.len() == 1 && &path[0] == &ENTRIES {
                     Some(Box::new(EntriesHandler { dir: self }))
                 } else {
-                    Some(Box::new(DirHandler::new(self, path)))
+                    None
                 }
             }
         }
@@ -176,4 +137,43 @@ where
             Self::Item(item) => item.route(path),
         }
     }
+}
+
+pub(super) fn expect_version(version: State) -> TCResult<(Link, Map<Scalar>)> {
+    let class =
+        InstanceClass::try_cast_from(version, |v| TCError::bad_request("invalid Class", v))?;
+
+    let (link, version) = class.into_inner();
+    let link = link.ok_or_else(|| TCError::bad_request("missing cluster link for", &version))?;
+
+    Ok((link, version))
+}
+
+pub(super) fn extract_classes(mut lib: Map<Scalar>) -> TCResult<(Map<Scalar>, Map<InstanceClass>)> {
+    let deps = lib
+        .iter()
+        .filter_map(|(name, scalar)| {
+            if let Scalar::Ref(tc_ref) = scalar {
+                if let TCRef::Op(OpRef::Post(_)) = &**tc_ref {
+                    return Some(name);
+                }
+            }
+
+            None
+        })
+        .cloned()
+        .collect::<Vec<Id>>();
+
+    let classes = deps
+        .into_iter()
+        .filter_map(|name| lib.remove(&name).map(|dep| (name, dep)))
+        .map(|(name, dep)| {
+            InstanceClass::try_cast_from(dep, |s| {
+                TCError::bad_request("unable to resolve dependency", s)
+            })
+            .map(|class| (name, class))
+        })
+        .collect::<TCResult<Map<InstanceClass>>>()?;
+
+    Ok((lib, classes))
 }

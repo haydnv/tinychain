@@ -7,19 +7,15 @@ use tc_error::*;
 use tc_value::Value;
 use tcgeneric::*;
 
-use crate::cluster::{Cluster, Legacy};
-use crate::object::InstanceExt;
 use crate::state::State;
 use crate::txn::hypothetical::{self, Hypothetical};
 use crate::txn::Txn;
 
-use hosted::Hosted;
 use system::System;
 use userspace::UserSpace;
 
 pub use userspace::{Class, Library, Service, CLASS, LIB, SERVICE};
 
-mod hosted; // TODO: delete
 mod system;
 mod userspace;
 
@@ -55,22 +51,10 @@ impl Kernel {
     }
 
     /// Initialize a new [`Kernel`] with no [`UserSpace`].
-    pub fn with_userspace<I>(class: Class, library: Library, service: Service, clusters: I) -> Self
-    where
-        I: IntoIterator<Item = InstanceExt<Cluster<Legacy>>>,
-    {
+    pub fn with_userspace(class: Class, library: Library, service: Service) -> Self {
         Self {
             system: System,
-            userspace: Some(UserSpace::new(class, library, service, clusters)),
-        }
-    }
-
-    // TODO: delete
-    pub fn hosted(&self) -> Box<dyn Iterator<Item = &InstanceExt<Cluster<Legacy>>> + '_> {
-        if let Some(userspace) = &self.userspace {
-            Box::new(userspace.hosted())
-        } else {
-            Box::new(std::iter::empty())
+            userspace: Some(UserSpace::new(class, library, service)),
         }
     }
 }

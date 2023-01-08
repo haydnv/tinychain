@@ -542,6 +542,24 @@ impl Transact for History {
         join!(self.latest.commit(txn_id), self.cutoff.commit(txn_id));
     }
 
+    async fn rollback(&self, txn_id: &TxnId) {
+        let file = self.file.read().await;
+        let mut pending: FileWriteGuard<_, ChainBlock> = file
+            .get_file(&block_name(PENDING))
+            .expect("pending transactions")
+            .write()
+            .await
+            .expect("pending transaction lock");
+
+        pending.mutations.remove(txn_id);
+
+        join!(
+            self.latest.rollback(txn_id),
+            self.cutoff.rollback(txn_id),
+            self.store.rollback(txn_id)
+        );
+    }
+
     async fn finalize(&self, txn_id: &TxnId) {
         self.latest.finalize(txn_id);
         self.cutoff.finalize(txn_id);
