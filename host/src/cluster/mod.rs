@@ -16,7 +16,7 @@ use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_transact::fs::Persist;
-use tc_transact::lock::TxnLock;
+use tc_transact::lock::{TxnLock, TxnLockCommit};
 use tc_transact::{Transact, Transaction};
 use tc_value::{Link, LinkHost, Value};
 use tcgeneric::*;
@@ -159,9 +159,9 @@ impl ReplicaSet {
 
 #[async_trait]
 impl Transact for ReplicaSet {
-    type Commit = Option<Arc<BTreeSet<Link>>>;
+    type Commit = Option<TxnLockCommit<BTreeSet<Link>>>;
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         self.replicas.commit(txn_id).await
     }
 
@@ -170,7 +170,7 @@ impl Transact for ReplicaSet {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.replicas.finalize(txn_id);
+        self.replicas.finalize(txn_id).await;
     }
 }
 
@@ -418,7 +418,7 @@ where
 
         // note: this first condition will always pass when num_replicas == 1
         if succeeded >= num_replicas / 2 {
-            self.commit(txn.id()).await;
+            self.commit(*txn.id()).await;
             info!("{} distributed commit {} of {}", self, txn.id(), self);
             Ok(())
         } else if succeeded == 0 {
@@ -714,9 +714,9 @@ impl<T> Transact for Cluster<T>
 where
     T: Transact + Send + Sync,
 {
-    type Commit = Option<Arc<BTreeSet<Link>>>;
+    type Commit = Option<TxnLockCommit<BTreeSet<Link>>>;
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("commit {}", self);
 
         let replicas = self.replicas.commit(txn_id).await;

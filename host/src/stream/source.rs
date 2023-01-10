@@ -203,11 +203,12 @@ impl Source for Map {
         let source = self.source.into_stream(txn.clone()).await?;
         let op = self.op;
 
-        let map = source
+        let _map = source
             .map_ok(move |state| op.clone().call_owned(txn.clone(), state))
             .try_buffered(num_cpus::get());
 
-        Ok(Box::pin(map))
+        Err(TCError::not_implemented("Stream::map"))
+        // Ok(Box::pin(map))
     }
 }
 

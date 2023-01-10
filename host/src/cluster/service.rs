@@ -195,7 +195,7 @@ impl Persist<fs::Dir> for Version {
 impl Transact for Version {
     type Commit = ();
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         join_all(
             self.attrs
                 .values()
@@ -326,7 +326,7 @@ impl Replica for Service {
 impl Transact for Service {
     type Commit = ();
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         let (_schema, versions) = join!(self.schema.commit(txn_id), self.versions.commit(txn_id));
 
         if let Some(versions) = versions {
@@ -351,7 +351,7 @@ impl Transact for Service {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        if let Some(versions) = self.versions.finalize(txn_id) {
+        if let Some(versions) = self.versions.finalize(txn_id).await {
             join_all(
                 versions
                     .iter()

@@ -191,7 +191,7 @@ where
 {
     type Commit = T::Commit;
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         match self {
             Self::Block(chain) => chain.commit(txn_id).await,
             Self::Sync(chain) => chain.commit(txn_id).await,

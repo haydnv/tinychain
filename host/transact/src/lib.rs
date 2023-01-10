@@ -13,7 +13,18 @@ use tcgeneric::Id;
 mod id;
 
 pub mod fs;
-pub mod lock;
+
+pub mod lock {
+    use super::TxnId;
+
+    pub use txn_lock::{
+        TxnLockFinalize, TxnLockReadGuard, TxnLockReadGuardExclusive, TxnLockRollback,
+        TxnLockWriteGuard,
+    };
+
+    pub type TxnLock<T> = txn_lock::TxnLock<TxnId, T>;
+    pub type TxnLockCommit<T> = txn_lock::TxnLockCommit<TxnId, T>;
+}
 
 pub use id::{TxnId, MIN_ID};
 
@@ -41,14 +52,13 @@ pub trait IntoView<'en, D: fs::Dir> {
 }
 
 /// Transaction lifecycle callbacks
-// TODO: add a `rollback` method separate from `finalize`
 #[async_trait]
 pub trait Transact {
     /// A guard which blocks concurrent commits
     type Commit: Send + Sync;
 
     /// Commit this transaction.
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit;
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit;
 
     /// Roll back this transaction.
     async fn rollback(&self, txn_id: &TxnId);

@@ -182,7 +182,7 @@ impl DirItem for Library {
 impl Transact for Library {
     type Commit = <fs::File<VersionNumber, Version> as Transact>::Commit;
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         self.file.commit(txn_id).await
     }
 

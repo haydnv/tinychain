@@ -15,4 +15,4 @@ categories = ["data-structures", "rust-patterns"]
 destream = "0.5"
 log = { version = "0.4", features = ["release_max_level_info"] }
 serde = "1.0"
-txn_lock = "0.4"
+txn_lock = "0.5"

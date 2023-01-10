@@ -79,7 +79,7 @@ struct Config {
 
     #[arg(
         long = "log_level",
-        default_value = "warn",
+        default_value = "info",
         value_parser = ["trace", "debug", "info", "warn", "error"],
         help = "the log message level to write",
     )]
@@ -170,7 +170,7 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         println!();
     }
 
-    data_dir.commit(&txn_id).await;
+    data_dir.commit(txn_id).await;
 
     let kernel = tinychain::Kernel::bootstrap();
     let txn_server = tinychain::txn::TxnServer::new(workspace).await;
@@ -191,9 +191,9 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
         load_or_create(&config.replicate, &data_dir, &txn, kernel::SERVICE)?;
 
     join!(
-        class.commit(&txn_id),
-        library.commit(&txn_id),
-        service.commit(&txn_id),
+        class.commit(txn_id),
+        library.commit(txn_id),
+        service.commit(txn_id),
     );
 
     let kernel = tinychain::Kernel::with_userspace(class.clone(), library.clone(), service.clone());

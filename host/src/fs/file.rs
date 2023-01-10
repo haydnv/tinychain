@@ -583,9 +583,11 @@ where
         let txn_id = self.txn_id;
         let lock = TxnLock::new("block last commit ID", txn_id, txn_id);
         let modified = lock.try_write(txn_id).expect("block last modified");
-        self.blocks.insert(block_id.clone(), lock);
 
+        trace!("creating new block {}...", block_id);
         let name = format!("{}.{}", block_id, B::ext());
+        self.blocks.insert(block_id, lock);
+
         let block = version
             .create_file(name, initial_value, Some(size_hint))
             .map_err(io_err)?;
@@ -1072,29 +1074,20 @@ where
     <K as FromStr>::Err: std::error::Error + fmt::Display,
     CacheBlock: AsType<B>,
 {
-    type Commit = ();
+    type Commit = Option<TxnLockCommit<BTreeMap<K, TxnLock<TxnId>>>>;
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("commit {}", self);
 
-        let blocks = if let Some(blocks) = self.blocks.commit(txn_id).await {
-            blocks
-        } else {
-            // this file was not read at this commit, so there's nothing to do here
-            return;
-        };
+        let blocks = self.blocks.commit(txn_id).await?;
 
         trace!("committed block listing");
 
         {
             let version = {
                 let fs_dir = self.versions.read().await;
-                if let Some(version) = fs_dir.get_dir(&txn_id.to_string()) {
-                    version.read().await
-                } else {
-                    // in this case no blocks have been modified, so there's nothing to commit
-                    return;
-                }
+                let version = fs_dir.get_dir(&txn_id.to_string())?;
+                version.read().await
             };
 
             let mut canon = self.canon.write().await;
@@ -1113,7 +1106,7 @@ where
                     continue;
                 };
 
-                if &*last_modified == txn_id {
+                if &*last_modified == &txn_id {
                     let name = file_name::<_, K, B>(block_id);
                     let version = version.get_file(&name).expect("block version lock");
 
@@ -1157,6 +1150,7 @@ where
             .expect("sync file content to disk");
 
         trace!("sync'd canonical file contents to disk");
+        Some(blocks)
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
@@ -1180,10 +1174,12 @@ where
     async fn finalize(&self, txn_id: &TxnId) {
         debug!("File::finalize");
 
-        if let Some(blocks) = self.blocks.finalize(txn_id) {
-            for last_commit_id in blocks.values() {
-                last_commit_id.finalize(txn_id);
-            }
+        if let Some(blocks) = self.blocks.finalize(txn_id).await {
+            let cleanups = blocks
+                .values()
+                .map(|last_commit_id| last_commit_id.finalize(txn_id));
+
+            join_all(cleanups).await;
 
             self.versions
                 .write()
@@ -1197,8 +1193,11 @@ impl<K, B: Send + Sync + 'static> fmt::Display for File<K, B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         #[cfg(debug_assertions)]
         {
-            let path = self.canon.try_read().expect("file block dir");
-            write!(f, "file at {}", path.path().to_string_lossy().to_string())
+            if let Ok(dir) = self.canon.try_read() {
+                write!(f, "file at {}", dir.path().to_string_lossy().to_string())
+            } else {
+                write!(f, "file of {} blocks", std::any::type_name::<B>())
+            }
         }
 
         #[cfg(not(debug_assertions))]

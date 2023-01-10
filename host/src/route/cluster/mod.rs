@@ -123,7 +123,7 @@ where
                     self.cluster.distribute_commit(txn).await
                 } else {
                     info!("{} will commit {}...", self.cluster, txn.id());
-                    self.cluster.commit(txn.id()).await;
+                    self.cluster.commit(*txn.id()).await;
                     Ok(())
                 };
 

@@ -70,7 +70,7 @@ pub enum DirEntry<T> {
 impl<T: Transact + Clone + Send + Sync + 'static> Transact for DirEntry<T> {
     type Commit = ();
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         match self {
             Self::Dir(dir) => dir.commit(txn_id).await,
             Self::Item(item) => item.commit(txn_id).await,
@@ -311,7 +311,7 @@ where
 {
     type Commit = ();
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("commit {}", self);
 
         if let Some(entries) = self.contents.commit(txn_id).await {
@@ -338,7 +338,7 @@ where
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        if let Some(contents) = self.contents.finalize(txn_id) {
+        if let Some(contents) = self.contents.finalize(txn_id).await {
             join_all(contents.iter().map(|(_name, entry)| async move {
                 match entry {
                     DirEntry::Dir(dir) => dir.finalize(txn_id).await,

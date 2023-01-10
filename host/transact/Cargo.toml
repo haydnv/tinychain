@@ -32,4 +32,4 @@ tcgeneric = { path = "../generic" }
 tc-error = { path = "../error" }
 tc-value = { path = "../value" }
 tokio = { version = "1.18", features = ["sync"] }
-txn_lock = { version = "0.4", features = ["logging"] }
+txn_lock = { version = "0.5", features = ["logging"] }

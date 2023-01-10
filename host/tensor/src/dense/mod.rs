@@ -1347,7 +1347,7 @@ where
 {
     type Commit = <BlockListFile<FD, FS, D, T> as Transact>::Commit;
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         self.blocks.commit(txn_id).await
     }
 

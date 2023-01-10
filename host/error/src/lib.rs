@@ -167,10 +167,10 @@ impl TCError {
     /// Error indicating that the request depends on a resource which is exclusively locked
     /// by another request.
     pub fn conflict<M: fmt::Display>(message: M) -> Self {
-        #[cfg(debug_assertions)]
-        panic!("{}", message);
-
-        #[cfg(not(debug_assertions))]
+        // #[cfg(debug_assertions)]
+        // panic!("{}", message);
+        //
+        // #[cfg(not(debug_assertions))]
         Self::new(ErrorType::Conflict, message)
     }
 
@@ -259,14 +259,7 @@ impl std::error::Error for TCError {}
 
 impl From<txn_lock::Error> for TCError {
     fn from(err: txn_lock::Error) -> Self {
-        #[cfg(debug_assertions)]
-        panic!("{}", err);
-
-        #[cfg(not(debug_assertions))]
-        Self {
-            code: ErrorType::Conflict,
-            data: ErrorData::from(err),
-        }
+        Self::conflict(err)
     }
 }
 

@@ -262,7 +262,7 @@ impl<T: Send + Sync> AsyncHash<fs::Dir> for BlockChain<T> {
 impl<T: Transact + Send + Sync> Transact for BlockChain<T> {
     type Commit = T::Commit;
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("BlockChain::commit");
 
         self.history.write_ahead(txn_id).await;

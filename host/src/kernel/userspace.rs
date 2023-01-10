@@ -345,7 +345,7 @@ where
                     cluster.distribute_commit(&txn).await?;
                 }
                 Err(cause) => {
-                    debug!("rollback {} due to {}", cluster, cause);
+                    info!("rollback {} due to {}", cluster, cause);
                     cluster.distribute_rollback(&txn).await;
                 }
             }

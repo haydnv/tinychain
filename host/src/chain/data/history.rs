@@ -251,7 +251,7 @@ impl History {
         Ok(())
     }
 
-    pub async fn write_ahead(&self, txn_id: &TxnId) {
+    pub async fn write_ahead(&self, txn_id: TxnId) {
         self.store.commit(txn_id).await;
 
         let file = self.file.read().await;
@@ -262,7 +262,7 @@ impl History {
             .await
             .expect("pending block write lock");
 
-        if let Some(mutations) = pending.mutations.remove(txn_id) {
+        if let Some(mutations) = pending.mutations.remove(&txn_id) {
             let write_ahead = file
                 .get_file(&block_name(WRITE_AHEAD))
                 .expect("write-ahead log");
@@ -273,7 +273,7 @@ impl History {
                     .await
                     .expect("write-ahead log write lock");
 
-                write_ahead.mutations.insert(*txn_id, mutations);
+                write_ahead.mutations.insert(txn_id, mutations);
             }
 
             write_ahead.sync(false).await.expect("sync write-ahead log");
@@ -446,7 +446,7 @@ fn create_block<I: fmt::Display>(
 impl Transact for History {
     type Commit = ();
 
-    async fn commit(&self, txn_id: &TxnId) {
+    async fn commit(&self, txn_id: TxnId) {
         debug!("commit chain history {}", txn_id);
 
         // assume `self.store` has already been committed by calling `write_ahead`
@@ -464,12 +464,12 @@ impl Transact for History {
 
             trace!("locked write-ahead block for writing");
 
-            if let Some(mutations) = write_ahead.mutations.remove(txn_id) {
+            if let Some(mutations) = write_ahead.mutations.remove(&txn_id) {
                 trace!("locking latest block ordinal for writing...");
 
                 let mut latest = self
                     .latest
-                    .write(*txn_id)
+                    .write(txn_id)
                     .await
                     .expect("latest block ordinal");
 
@@ -483,21 +483,21 @@ impl Transact for History {
 
                     trace!("locked latest ChainBlock for writing");
 
-                    latest_block.mutations.insert(*txn_id, mutations);
+                    latest_block.mutations.insert(txn_id, mutations);
 
                     if latest_block.size().await.expect("block size") > BLOCK_SIZE {
-                        let mut cutoff = self.cutoff.write(*txn_id).await.expect("block cutoff id");
+                        let mut cutoff = self.cutoff.write(txn_id).await.expect("block cutoff id");
 
                         trace!("locked block cutoff ID for writing");
 
                         assert!(
-                            txn_id >= &cutoff,
+                            &txn_id >= &*cutoff,
                             "cannot commit transaction {} since a block has already been committed at {}",
                             txn_id,
                             *cutoff
                         );
 
-                        *cutoff = *txn_id;
+                        *cutoff = txn_id;
 
                         let hash = latest_block.current_hash();
 
@@ -561,9 +561,11 @@ impl Transact for History {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.latest.finalize(txn_id);
-        self.cutoff.finalize(txn_id);
-        self.store.finalize(txn_id).await;
+        join!(
+            self.latest.finalize(txn_id),
+            self.cutoff.finalize(txn_id),
+            self.store.finalize(txn_id)
+        );
 
         let file = self.file.read().await;
         let mut pending: FileWriteGuard<_, ChainBlock> = file

@@ -1,3 +1,5 @@
+// TODO: make sure file and root_id locks are always in sync
+
 use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::fmt;
@@ -13,13 +15,13 @@ use collate::Collate;
 use destream::{de, en};
 use futures::future::{self, Future, TryFutureExt};
 use futures::stream::{self, FuturesOrdered, FuturesUnordered, TryStreamExt};
-use futures::{join, try_join};
+use futures::join;
 use log::{debug, trace};
 use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::fs::*;
-use tc_transact::lock::TxnLock;
+use tc_transact::lock::{TxnLock, TxnLockCommit};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
 use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream, Tuple};
@@ -495,8 +497,8 @@ where
     where
         Self: 'a,
     {
-        let file = self.inner.file.read(txn_id).await?;
         let root_id = self.inner.root.read(txn_id).await?;
+        let file = self.inner.file.read(txn_id).await?;
         assert!(file.contains(&*root_id));
 
         let root = file.read_block(&*root_id).await?;
@@ -584,8 +586,8 @@ where
     }
 
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
-        let file = self.inner.file.read(txn_id).await?;
         let root_id = self.inner.root.read(txn_id).await?;
+        let file = self.inner.file.read(txn_id).await?;
         assert!(file.contains(&*root_id));
         let root = file.read_block(&*root_id).await?;
         Ok(root.keys.is_empty())
@@ -621,21 +623,23 @@ where
 {
     async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
         if range == Range::default() {
-            let mut file = self.inner.file.write(txn_id).await?;
             let mut root_id = self.inner.root.write(txn_id).await?;
+            let mut file = self.inner.file.write(txn_id).await?;
             assert!(file.contains(&*root_id));
 
             file.truncate().await?;
 
             let node = Node::new(true, None);
             let (new_root_id, _) = file.create_block_unique(node, DEFAULT_BLOCK_SIZE).await?;
+            trace!("created new root block with ID {}", new_root_id);
+            assert!(file.contains(&new_root_id));
             *root_id = new_root_id;
 
             return Ok(());
         }
 
-        let file = self.inner.file.read(txn_id).await?;
         let root_id = self.inner.root.read(txn_id).await?;
+        let file = self.inner.file.read(txn_id).await?;
         assert!(file.contains(&*root_id));
 
         let schema = &self.inner.schema;
@@ -646,9 +650,13 @@ where
     async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
         let key = self.validate_key(key)?;
 
-        let file = self.inner.file.read_exclusive(txn_id).await?;
         let root_id = self.inner.root.read_exclusive(txn_id).await?;
-        assert!(file.contains(&*root_id));
+        let file = self.inner.file.read_exclusive(txn_id).await?;
+        assert!(
+            file.contains(&*root_id),
+            "BTreeFile is missing its root node {}",
+            root_id
+        );
 
         debug!("insert into BTree with root node ID {}", *root_id);
 
@@ -687,6 +695,9 @@ where
                 .create_block_unique(new_root, DEFAULT_BLOCK_SIZE)
                 .await?;
 
+            trace!("created new root block with ID {}", new_root_id);
+            assert!(file.contains(&new_root_id));
+
             (*root_id) = new_root_id;
 
             let (file, new_root) =
@@ -708,15 +719,18 @@ where
     D: Dir,
     T: Transaction<D>,
 {
-    type Commit = ();
+    type Commit = Option<TxnLockCommit<NodeId>>;
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
-        join!(
-            self.inner.root.commit(txn_id),
-            self.inner.file.commit(txn_id),
-        );
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
+        let guard = if let Some(root_id) = self.inner.root.commit(txn_id).await {
+            self.inner.file.commit(txn_id).await;
+            Some(root_id)
+        } else {
+            trace!("committed BTree at {}", txn_id);
+            None
+        };
 
-        trace!("committed BTree");
+        guard
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
@@ -727,8 +741,10 @@ where
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.inner.file.finalize(txn_id).await;
-        self.inner.root.finalize(txn_id);
+        join!(
+            self.inner.root.finalize(txn_id),
+            self.inner.file.finalize(txn_id),
+        );
     }
 }
 
@@ -762,6 +778,7 @@ where
         file.try_create_block(root.clone(), node, DEFAULT_BLOCK_SIZE)?;
 
         assert!(file.contains(&root));
+        trace!("created new BTreeFile with root ID {}", root);
 
         Ok(BTreeFile::new(store, txn_id, schema, order, root))
     }
@@ -817,17 +834,17 @@ where
             ));
         }
 
-        let (mut file, source) = try_join!(
-            self.inner.file.write(txn_id),
-            backup.inner.file.read(txn_id)
-        )?;
+        let mut root_id = self.inner.root.write(txn_id).await?;
+        let mut file = self.inner.file.write(txn_id).await?;
 
-        let (mut root_id, new_root_id) = try_join!(
-            self.inner.root.write(txn_id),
-            backup.inner.root.read(txn_id)
-        )?;
+        let new_root_id = backup.inner.root.read(txn_id).await?;
+        let source = backup.inner.file.read(txn_id).await?;
 
         file.copy_from(&source, true).await?;
+
+        trace!("restored BTree with root ID {}", &*new_root_id);
+        assert!(file.contains(&*new_root_id));
+
         *root_id = (*new_root_id).clone();
 
         Ok(())

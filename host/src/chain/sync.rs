@@ -43,7 +43,7 @@ pub struct SyncChain<T> {
 }
 
 impl<T> SyncChain<T> {
-    async fn write_ahead(&self, txn_id: &TxnId) {
+    async fn write_ahead(&self, txn_id: TxnId) {
         trace!("SyncChain::write_ahead {}", txn_id);
 
         self.store.commit(txn_id).await;
@@ -58,8 +58,8 @@ impl<T> SyncChain<T> {
             )
             .expect("SyncChain blocks");
 
-            if let Some(mutations) = pending.mutations.remove(txn_id) {
-                committed.mutations.insert(*txn_id, mutations);
+            if let Some(mutations) = pending.mutations.remove(&txn_id) {
+                committed.mutations.insert(txn_id, mutations);
             }
         }
 
@@ -150,7 +150,7 @@ where
 {
     type Commit = T::Commit;
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("SyncChain::commit");
 
         self.write_ahead(txn_id).await;
@@ -165,7 +165,7 @@ where
             let mut committed: FileWriteGuard<_, ChainBlock> =
                 self.committed.write().await.expect("committed");
 
-            committed.mutations.remove(txn_id);
+            committed.mutations.remove(&txn_id);
             trace!("mutations are out of the write-ahead log");
         }
 

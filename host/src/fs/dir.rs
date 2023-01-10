@@ -7,8 +7,9 @@ use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use futures::future::{join_all, TryFutureExt};
-use log::{debug, trace};
+use futures::future::{self, join_all, FutureExt, TryFutureExt};
+use futures::stream::{FuturesUnordered, StreamExt};
+use log::debug;
 use safecast::{as_type, AsType};
 use uuid::Uuid;
 
@@ -20,7 +21,7 @@ use tc_transact::fs;
 use tc_transact::lock::*;
 use tc_transact::{Transact, TxnId};
 use tc_value::Version as VersionNumber;
-use tcgeneric::{Id, PathSegment, TCBoxTryFuture};
+use tcgeneric::{Id, PathSegment, TCBoxFuture, TCBoxTryFuture};
 
 use crate::chain::ChainBlock;
 use crate::cluster::library;
@@ -655,33 +656,33 @@ impl fs::Store for Dir {
 
 #[async_trait]
 impl Transact for Dir {
-    type Commit = ();
+    type Commit = Option<TxnLockCommit<BTreeMap<PathSegment, DirEntry>>>;
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
-        let listing = self.listing.commit(txn_id).await;
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
+        let listing = self.listing.commit(txn_id).await?;
 
-        if let Some(listing) = listing {
-            let commits = listing.values().map(|entry| match entry {
-                DirEntry::Dir(dir) => dir.commit(txn_id),
+        let commits: FuturesUnordered<TCBoxFuture<()>> = FuturesUnordered::new();
+
+        for entry in listing.values() {
+            let commit: TCBoxFuture<()> = match entry {
+                DirEntry::Dir(dir) => Box::pin(dir.commit(txn_id).map(|_| ())),
                 DirEntry::File(file) => match file {
-                    FileEntry::BTree(file) => file.commit(txn_id),
-                    FileEntry::Chain(file) => file.commit(txn_id),
-                    FileEntry::Class(file) => file.commit(txn_id),
-                    FileEntry::Library(file) => file.commit(txn_id),
-                    FileEntry::Service(file) => file.commit(txn_id),
+                    FileEntry::BTree(file) => Box::pin(file.commit(txn_id).map(|_| ())),
+                    FileEntry::Chain(file) => Box::pin(file.commit(txn_id).map(|_| ())),
+                    FileEntry::Class(file) => Box::pin(file.commit(txn_id).map(|_| ())),
+                    FileEntry::Library(file) => Box::pin(file.commit(txn_id).map(|_| ())),
+                    FileEntry::Service(file) => Box::pin(file.commit(txn_id).map(|_| ())),
                     #[cfg(feature = "tensor")]
-                    FileEntry::Tensor(file) => file.commit(txn_id),
+                    FileEntry::Tensor(file) => Box::pin(file.commit(txn_id).map(|_| ())),
                 },
-            });
+            };
 
-            join_all(commits).await;
-        } else {
-            trace!(
-                "skip committing {} contents since they were not accessed at {}",
-                self,
-                txn_id
-            );
+            commits.push(commit);
         }
+
+        commits.fold((), |(), ()| future::ready(())).await;
+
+        Some(listing)
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
@@ -706,7 +707,7 @@ impl Transact for Dir {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        if let Some(listing) = self.listing.finalize(txn_id) {
+        if let Some(listing) = self.listing.finalize(txn_id).await {
             let cleanups = listing.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.finalize(txn_id),
                 DirEntry::File(file) => match file {

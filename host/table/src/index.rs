@@ -14,6 +14,7 @@ use log::debug;
 use tc_btree::{BTreeFile, BTreeInstance, BTreeWrite, Node, NodeId};
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, DirCreateFile, DirReadFile, File, Persist, Restore};
+use tc_transact::lock::{TxnLock, TxnLockCommit};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Id, Instance, Label, TCBoxTryStream, Tuple};
@@ -289,9 +290,9 @@ where
     D: Dir,
     Txn: Transaction<D>,
 {
-    type Commit = ();
+    type Commit = <tc_btree::BTreeFile<F, D, Txn> as Transact>::Commit;
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         self.btree.commit(txn_id).await
     }
 
@@ -869,20 +870,25 @@ where
 #[async_trait]
 impl<F, D, Txn> Transact for TableIndex<F, D, Txn>
 where
-    F: File<Key = NodeId, Block = Node> + Transact,
+    F: File<Key = NodeId, Block = Node>
+        + Transact<Commit = Option<TxnLockCommit<BTreeMap<NodeId, TxnLock<TxnId>>>>>,
     D: Dir,
     Txn: Transaction<D>,
 {
-    type Commit = ();
+    type Commit = <BTreeFile<F, D, Txn> as Transact>::Commit;
 
-    async fn commit(&self, txn_id: &TxnId) -> Self::Commit {
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
+        let guard = self.inner.primary.commit(txn_id).await?;
+
         let index_commits = self
             .inner
             .auxiliary
             .iter()
             .map(|(_, index)| index.commit(txn_id));
 
-        join_all(iter::once(self.inner.primary.commit(txn_id)).chain(index_commits)).await;
+        join_all(index_commits).await;
+
+        Some(guard)
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
