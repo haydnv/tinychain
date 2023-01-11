@@ -131,26 +131,6 @@ impl<'a> Handler<'a> for ForEach {
     }
 }
 
-struct Map {
-    source: TCStream,
-}
-
-impl<'a> Handler<'a> for Map {
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, mut params| {
-            Box::pin(async move {
-                let op = params.require(&label("op").into())?;
-                params.expect_empty()?;
-
-                Ok(State::Stream(self.source.map(op)))
-            })
-        }))
-    }
-}
-
 impl Route for TCStream {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         if path.len() != 1 {
@@ -165,7 +145,6 @@ impl Route for TCStream {
             "flatten" => Some(Box::new(Flatten { source })),
             "fold" => Some(Box::new(Fold { source })),
             "for_each" => Some(Box::new(ForEach { source })),
-            "map" => Some(Box::new(Map { source })),
             _ => None,
         }
     }

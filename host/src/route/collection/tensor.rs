@@ -613,6 +613,35 @@ where
     }
 }
 
+struct EyeHandler;
+
+impl<'a> Handler<'a> for EyeHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let size = u64::try_cast_from(key, |v| {
+                    TCError::bad_request("invalid size for identity tensor", v)
+                })?;
+
+                let schema = Schema::from((vec![size, size].into(), NumberType::Bool));
+                let tensor = create_sparse(txn, schema).await?;
+
+                stream::iter(0..size)
+                    .map(|i| (vec![i, i], true.into()))
+                    .map(|(coord, value)| tensor.write_value_at(*txn.id(), coord, value))
+                    .buffer_unordered(num_cpus::get())
+                    .try_fold((), |(), ()| future::ready(Ok(())))
+                    .await?;
+
+                Ok(State::Collection(tensor.into()))
+            })
+        }))
+    }
+}
+
 struct DiagonalHandler<T> {
     tensor: T,
 }
@@ -979,6 +1008,7 @@ impl Route for TensorType {
                 },
                 Self::Sparse => match path[0].as_str() {
                     "copy_from" => Some(Box::new(CopySparseHandler)),
+                    "eye" => Some(Box::new(EyeHandler)),
                     "load" => Some(Box::new(LoadHandler { class: Some(*self) })),
                     _ => None,
                 },

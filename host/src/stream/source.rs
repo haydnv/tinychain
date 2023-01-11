@@ -184,36 +184,3 @@ impl From<Flatten> for TCStream {
         TCStream::Flatten(Box::new(flatten))
     }
 }
-
-#[derive(Clone)]
-pub struct Map {
-    source: TCStream,
-    op: Closure,
-}
-
-impl Map {
-    pub fn new(source: TCStream, op: Closure) -> Self {
-        Self { source, op }
-    }
-}
-
-#[async_trait]
-impl Source for Map {
-    async fn into_stream(self, txn: Txn) -> TCResult<TCBoxTryStream<'static, State>> {
-        let source = self.source.into_stream(txn.clone()).await?;
-        let op = self.op;
-
-        let _map = source
-            .map_ok(move |state| op.clone().call_owned(txn.clone(), state))
-            .try_buffered(num_cpus::get());
-
-        Err(TCError::not_implemented("Stream::map"))
-        // Ok(Box::pin(map))
-    }
-}
-
-impl From<Map> for TCStream {
-    fn from(map: Map) -> TCStream {
-        TCStream::Map(Box::new(map))
-    }
-}

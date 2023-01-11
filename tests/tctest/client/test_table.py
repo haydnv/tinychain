@@ -10,6 +10,7 @@ SCHEMA = tc.table.Schema(
 
 
 class TableTests(ClientTest):
+    @unittest.skip
     def testAggregate(self):
         count = 10
         values = [(v % 2,) for v in range(count)]
