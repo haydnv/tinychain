@@ -1,3 +1,5 @@
+use std::fmt;
+
 use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{future, TryFutureExt};
@@ -9,9 +11,7 @@ use tc_transact::{Transact, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::{label, PathSegment, Tuple};
 
-use crate::chain::BlockChain;
-use crate::cluster::dir::Dir;
-use crate::cluster::{Class, Cluster, Library, Replica, Service, REPLICAS};
+use crate::cluster::{Cluster, Replica, REPLICAS};
 use crate::object::{InstanceClass, Object};
 use crate::state::State;
 
@@ -270,24 +270,15 @@ impl<'a, T> From<&'a Cluster<T>> for ReplicaHandler<'a, T> {
     }
 }
 
-// TODO: replace with a single impl
-macro_rules! route_cluster {
-    ($t:ty) => {
-        impl Route for Cluster<$t> {
-            fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-                match path {
-                    path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
-                    path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
-                    path => self.state().route(path),
-                }
-            }
+impl<T> Route for Cluster<T>
+where
+    T: Replica + Route + Transact + fmt::Display + Send + Sync,
+{
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        match path {
+            path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
+            path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
+            path => self.state().route(path),
         }
-    };
+    }
 }
-
-route_cluster!(BlockChain<Class>);
-route_cluster!(Dir<Class>);
-route_cluster!(BlockChain<Library>);
-route_cluster!(Dir<Library>);
-route_cluster!(BlockChain<Service>);
-route_cluster!(Dir<Service>);
