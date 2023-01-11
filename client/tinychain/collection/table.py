@@ -47,6 +47,7 @@ class Table(Collection):
 
         return self._get("", key, rtype=Map)
 
+    # TODO: re-enable this functionality after implementing Graph slicing
     def aggregate(self, columns, fn):
         """
         Apply the given callback to slices of this `Table` grouped by the given columns.
@@ -56,15 +57,7 @@ class Table(Collection):
         Example: `orders.aggregate(["customer_id", "product_id"], Table.count)`
         """
 
-        @closure(self)
-        @get
-        def group(cxt, key: Tuple) -> Tuple:
-            cxt.columns = columns
-            cxt.where = cxt.columns.zip(key).cast(Map)
-            cxt.slice = self.where(cxt.where)
-            return key, fn(cxt.slice)
-
-        return self.group_by(columns).map(group)
+        raise NotImplementedError("Table.aggregate has been temporarily disabled")
 
     def contains(self, key):
         """Return `True` if this `Table` contains the given key."""
