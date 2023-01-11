@@ -26,18 +26,10 @@ def diagonal(tensor):
     return rtype(form=op)
 
 
-def identity(size, dtype=Bool):
-    """Return an identity matrix with dimensions `[size, size]`."""
-
-    schema = ([size, size], dtype)
-    elements = Stream.range((0, size)).map(get_op(lambda i: ((i, i), 1)))
-    return Sparse.copy_from(schema, elements)
-
-
 def set_diagonal(matrix, diag):
     """Set the diagonal of the given `matrix` to `diag`."""
 
-    eye = identity(matrix.shape[0])
+    eye = Sparse.eye(matrix.shape[0])
     zero_diag = matrix - (matrix * eye)  # don't use eye.logical_not in case the matrix is sparse
     new_diag = eye * diag.expand_dims()
     return matrix.write(zero_diag + new_diag)
@@ -209,8 +201,8 @@ class LinearAlgebra(Library):
             return i < UInt(u.shape[0]) - 1
 
         txn.factorization = while_loop(factor_cond, step, {
-            'p': identity(x.shape[0], F32).as_dense().copy(),
-            'l': identity(x.shape[0], F32).as_dense().copy(),
+            'p': Sparse.eye(x.shape[0]).cast(F32).as_dense().copy(),
+            'l': Sparse.eye(x.shape[0]).cast(F32).as_dense().copy(),
             'u': x.copy(),
             'i': 0,
             "num_permutations": 0,
@@ -332,7 +324,7 @@ class LinearAlgebra(Library):
         Q, R = Tensor(result_loop['Q']), Tensor(result_loop['R'])
 
         singular_values = diagonal(R).pow(0.5)
-        cxt.eye = identity(singular_values.shape[0], F32).as_dense().copy()
+        cxt.eye = Sparse.eye(singular_values.shape[0]).as_dense().copy()
         cxt.inv_matrix = (cxt.eye * singular_values.pow(-1))
         cxt.Q_T = Q.transpose()
 

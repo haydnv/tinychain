@@ -704,6 +704,12 @@ class Dense(Tensor, typing.Generic[DType]):
 
         return self._get("sparse", rtype=Sparse)
 
+    def cast(self, dtype):
+        try:
+            return Dense[dtype](form=Cast(self, dtype))
+        except TypeError:
+            return Dense(form=Cast(self, dtype))
+
     def elements(self, bounds=None):
         """Return a :class:`Stream` of the :class:`Number` elements of this `Dense` tensor."""
 
@@ -768,9 +774,19 @@ class Sparse(Tensor, typing.Generic[DType]):
             return cls.with_shape(shape)(form=op_ref)
 
     @classmethod
+    def eye(cls, size, batch=[]):
+        """Create a boolean identity matrix of shape `[size, size]`."""
+
+        if batch:
+            raise NotImplementedError("sparse identity tensor batch shape")
+
+        op_ref = ref.Get(URI(cls).append("eye"), size)
+        return cls[Bool].with_shape([size, size])(form=op_ref)
+
+    @classmethod
     def zeros(cls, shape, dtype=F32):
         """
-        Return a `Sparse` tensor with the given shape and data type.
+        Create a `Sparse` tensor with the given shape and data type.
 
         If `dtype` is not specified, the data type will be :class:`F32`.
         """
@@ -784,7 +800,7 @@ class Sparse(Tensor, typing.Generic[DType]):
 
     @classmethod
     def zeros_like(cls, tensor):
-        """Return a `Sparse` tensor with the same shape and data type as the given `tensor`."""
+        """Create a `Sparse` tensor with the same shape and data type as the given `tensor`."""
 
         return cls[tensor.dtype].zeros(tensor.shape, tensor.dtype)
 
@@ -792,6 +808,12 @@ class Sparse(Tensor, typing.Generic[DType]):
         """Return a :class:`Dense` view of this `Sparse` tensor."""
 
         return self._get("dense", rtype=Dense)
+
+    def cast(self, dtype):
+        try:
+            return Sparse[dtype](form=Cast(self, dtype))
+        except TypeError:
+            return Sparse(form=Cast(self, dtype))
 
     def div(self, other):
         if ref.same_as(other, 1):
