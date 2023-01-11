@@ -102,6 +102,8 @@ impl fmt::Display for ChainType {
 }
 
 /// A data structure responsible for maintaining the transactional integrity of its [`Subject`].
+// TODO: remove the generic type and replace with:
+// enum Chain { Block(BlockChain<Box<dyn Public>>, Sync(SyncChain<Box<dyn Restore>>) }
 #[derive(Clone)]
 pub enum Chain<T> {
     Block(block::BlockChain<T>),
