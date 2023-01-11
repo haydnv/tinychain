@@ -4,7 +4,7 @@ use std::fmt;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use futures::future::{join_all, TryFutureExt};
+use futures::future::{join_all, try_join_all, TryFutureExt};
 use log::{debug, info};
 use safecast::CastInto;
 
@@ -15,7 +15,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{label, Label, Map, PathSegment};
 
-use crate::chain::BlockChain;
+use crate::chain::{BlockChain, Recover};
 use crate::cluster::{Service, REPLICAS};
 use crate::fs;
 use crate::route::Route;
@@ -362,6 +362,25 @@ where
             }))
             .await;
         }
+    }
+}
+
+#[async_trait]
+impl<T: Send + Sync> Recover for Dir<T>
+where
+    DirEntry<T>: Clone,
+    Cluster<BlockChain<T>>: Recover,
+{
+    async fn recover(&self, txn: &Txn) -> TCResult<()> {
+        let contents = self.contents.read(*txn.id()).await?;
+        let recovery = contents.values().map(|entry| match entry {
+            DirEntry::Dir(dir) => dir.recover(txn),
+            DirEntry::Item(item) => item.recover(txn),
+        });
+
+        try_join_all(recovery).await?;
+
+        Ok(())
     }
 }
 

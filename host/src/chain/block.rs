@@ -31,7 +31,7 @@ use crate::transact::Transaction;
 use crate::txn::{Txn, TxnId};
 
 use super::data::History;
-use super::{ChainInstance, CHAIN};
+use super::{ChainInstance, Recover, CHAIN};
 
 pub(crate) const HISTORY: Label = label(".history");
 
@@ -51,7 +51,7 @@ impl<T> BlockChain<T> {
 #[async_trait]
 impl<T> ChainInstance<T> for BlockChain<T>
 where
-    T: Route + Public,
+    T: Route + fmt::Display,
 {
     async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
         self.history.append_delete(txn_id, key).await
@@ -190,7 +190,7 @@ impl Replica for BlockChain<CollectionBase> {
 
 impl<T> Persist<fs::Dir> for BlockChain<T>
 where
-    T: Route + Public + Persist<fs::Dir, Txn = Txn>,
+    T: Route + Persist<fs::Dir, Txn = Txn> + fmt::Display,
 {
     type Txn = Txn;
     type Schema = T::Schema;
@@ -221,12 +221,6 @@ where
 
         let history = History::load(txn_id, (), history.into())?;
 
-        // TODO: do this check somewhere else
-        // let write_ahead_log = history.try_read_log().await?;
-        // for (past_txn_id, mutations) in &write_ahead_log.mutations {
-        //     super::data::replay_all(&subject, past_txn_id, mutations, txn, history.store()).await?;
-        // }
-
         Ok(BlockChain::new(subject, history))
     }
 
@@ -236,9 +230,29 @@ where
 }
 
 #[async_trait]
+impl<T: Route + fmt::Display> Recover for BlockChain<T> {
+    async fn recover(&self, txn: &Txn) -> TCResult<()> {
+        let write_ahead_log = self.history.read_log().await?;
+
+        for (past_txn_id, mutations) in &write_ahead_log.mutations {
+            super::data::replay_all(
+                &self.subject,
+                past_txn_id,
+                mutations,
+                txn,
+                self.history.store(),
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+}
+
+#[async_trait]
 impl<T> CopyFrom<fs::Dir, BlockChain<T>> for BlockChain<T>
 where
-    T: Route + Public + Persist<fs::Dir, Txn = Txn>,
+    T: Route + Persist<fs::Dir, Txn = Txn> + fmt::Display,
 {
     async fn copy_from(
         _txn: &<Self as Persist<fs::Dir>>::Txn,
@@ -299,7 +313,7 @@ impl<T> ChainVisitor<T> {
 #[async_trait]
 impl<T> de::Visitor for ChainVisitor<T>
 where
-    T: Route + Public + de::FromStream<Context = Txn>,
+    T: Route + de::FromStream<Context = Txn> + fmt::Display,
 {
     type Value = BlockChain<T>;
 
@@ -335,7 +349,7 @@ where
 #[async_trait]
 impl<T> de::FromStream for BlockChain<T>
 where
-    T: Route + Public + de::FromStream<Context = Txn>,
+    T: Route + de::FromStream<Context = Txn> + fmt::Display,
 {
     type Context = Txn;
 

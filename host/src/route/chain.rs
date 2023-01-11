@@ -12,7 +12,7 @@ use crate::cluster::Replica;
 use crate::fs;
 use crate::txn::Txn;
 
-use super::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
+use super::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 
 impl Route for ChainType {
     fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -37,7 +37,7 @@ impl<'a, C, T> AppendHandler<'a, C, T> {
 impl<'a, C, T> Handler<'a> for AppendHandler<'a, C, T>
 where
     C: ChainInstance<T> + Send + Sync + 'a,
-    T: Route + Public + 'a,
+    T: Route + fmt::Display + 'a,
     Chain<T>: ChainInstance<T>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
@@ -136,7 +136,7 @@ where
 
 impl<T> Route for Chain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Route + Clone + Send + Sync + fmt::Display,
+    T: Persist<fs::Dir, Txn = Txn> + Route + Clone + fmt::Display + Send + Sync,
     Self: ChainInstance<T> + Replica,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -154,7 +154,7 @@ where
 
 impl<T> Route for BlockChain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Route + Clone + Send + Sync + fmt::Display,
+    T: Persist<fs::Dir, Txn = Txn> + Route + Clone + fmt::Display + Send + Sync,
     Self: ChainInstance<T> + Replica,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {

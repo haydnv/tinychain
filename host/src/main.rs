@@ -15,6 +15,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, LinkHost};
 use tcgeneric::PathLabel;
 
+use tinychain::chain::Recover;
 use tinychain::cluster::{Cluster, Replica};
 use tinychain::gateway::Gateway;
 use tinychain::txn::Txn;
@@ -189,6 +190,12 @@ async fn load_and_serve(config: Config) -> Result<(), TokioError> {
 
     let service: kernel::Service =
         load_or_create(&config.replicate, &data_dir, &txn, kernel::SERVICE)?;
+
+    try_join!(
+        class.recover(&txn),
+        library.recover(&txn),
+        service.recover(&txn),
+    )?;
 
     join!(
         class.commit(txn_id),

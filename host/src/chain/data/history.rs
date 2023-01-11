@@ -136,7 +136,7 @@ impl History {
 
     pub async fn replicate<T>(&self, txn: &Txn, subject: &T, other: Self) -> TCResult<()>
     where
-        T: Route + Public,
+        T: Route + fmt::Display,
     {
         let err_divergent =
             |block_id| TCError::bad_request("chain to replicate diverges at block", block_id);
@@ -715,7 +715,7 @@ async fn replay_and_save<T>(
     block: &mut ChainBlock,
 ) -> TCResult<()>
 where
-    T: Route + Public,
+    T: Route + fmt::Display,
 {
     for op in ops {
         match op {
