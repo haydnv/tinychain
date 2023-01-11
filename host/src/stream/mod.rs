@@ -34,7 +34,6 @@ pub enum TCStream {
     Collection(Collection),
     Filter(Box<Filter>),
     Flatten(Box<Flatten>),
-    Map(Box<Map>),
     Range(Range),
 }
 
@@ -95,11 +94,6 @@ impl TCStream {
         Ok(())
     }
 
-    /// Return a `TCStream` produced by calling the given [`Closure`] on each item in this stream.
-    pub fn map(self, op: Closure) -> Self {
-        Map::new(self, op).into()
-    }
-
     /// Return a `TCStream` of numbers at the given `step` within the given range.
     pub fn range(start: Number, stop: Number, step: Number) -> Self {
         Range::new(start, stop, step).into()
@@ -114,7 +108,6 @@ impl Source for TCStream {
             Self::Collection(collection) => collection.into_stream(txn).await,
             Self::Filter(filter) => filter.into_stream(txn).await,
             Self::Flatten(source) => source.into_stream(txn).await,
-            Self::Map(map) => map.into_stream(txn).await,
             Self::Range(range) => range.into_stream(txn).await,
         }
     }
@@ -127,11 +120,11 @@ impl<'en> IntoView<'en, fs::Dir> for TCStream {
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         let stream = self.into_stream(txn.clone()).await?;
-        let view_stream: TCBoxTryStream<'en, StateView<'en>> = Box::pin(
-            stream
-                .map_ok(move |state| state.into_view(txn.clone()))
-                .try_buffered(num_cpus::get()),
-        );
+        let view_stream = stream
+            .map_ok(move |state| state.into_view(txn.clone()))
+            .try_buffered(num_cpus::get());
+
+        let view_stream: TCBoxTryStream<'en, StateView<'en>> = Box::pin(view_stream);
 
         Ok(en::SeqStream::from(view_stream))
     }
