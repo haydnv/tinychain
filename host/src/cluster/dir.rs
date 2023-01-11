@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::future::{join_all, TryFutureExt};
@@ -9,7 +10,7 @@ use safecast::CastInto;
 
 use tc_error::*;
 use tc_transact::fs::Persist;
-use tc_transact::lock::TxnLock;
+use tc_transact::lock::{TxnLock, TxnLockError};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{label, Label, Map, PathSegment};
@@ -120,7 +121,21 @@ impl<T: Clone> Dir<T> {
         // IMPORTANT! Only use synchronous lock acquisition!
         // async lock acquisition here could cause deadlocks
         // and make services in this `Dir` impossible to update
-        let contents = self.contents.try_read(txn_id)?;
+
+        const SLEEP: Duration = Duration::from_millis(100);
+        const MAX_RETRIES: usize = 3;
+
+        let mut num_retries = 0;
+        let contents = loop {
+            match self.contents.try_read(txn_id) {
+                Err(TxnLockError::WouldBlock) if num_retries < MAX_RETRIES => {
+                    futures::executor::block_on(tokio::time::sleep(SLEEP));
+                    num_retries += 1;
+                }
+                result => break result,
+            }
+        }?;
+
         match contents.get(&path[0]) {
             Some(DirEntry::Item(item)) => Ok(Some((&path[1..], DirEntry::Item(item.clone())))),
             Some(DirEntry::Dir(dir)) => dir.lookup(txn_id, &path[1..]).map(Some),
