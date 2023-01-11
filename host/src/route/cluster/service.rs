@@ -7,6 +7,7 @@ use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{Id, Map, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::cluster::{service, DirItem, Replica, Service};
+use crate::kernel::CLASS;
 use crate::object::InstanceClass;
 use crate::route::cluster::dir::{expect_version, extract_classes};
 use crate::route::object::method::route_attr;
@@ -17,7 +18,6 @@ use crate::route::{
 use crate::scalar::{OpRef, OpRefType, Scalar, Subject, TCRef};
 use crate::state::State;
 use crate::txn::Txn;
-use crate::CLASS;
 
 use super::dir::DirHandler;
 

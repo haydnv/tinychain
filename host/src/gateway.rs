@@ -79,21 +79,21 @@ impl Gateway {
     }
 
     /// Initialize a new `Gateway`
-    pub fn new(config: Config, kernel: Kernel, txn_server: TxnServer) -> Arc<Self> {
+    pub fn new(config: Config, kernel: Kernel, txn_server: TxnServer) -> Self {
         let root = LinkHost::from((
             LinkProtocol::HTTP,
             config.addr.clone(),
             Some(config.http_port),
         ));
 
-        Arc::new(Self {
+        Self {
             config,
             kernel,
             txn_server,
             root,
             client: http::Client::new(),
             actor: Actor::new(Link::default().into()),
-        })
+        }
     }
 
     /// Return the configured maximum request time-to-live (timeout duration).
