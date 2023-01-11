@@ -21,11 +21,12 @@ use tcgeneric::{label, Id, Label};
 
 use crate::cluster::Replica;
 use crate::fs;
-use crate::route::{Public, Route};
+use crate::fs::CacheBlock;
+use crate::route::Route;
 use crate::state::State;
 use crate::txn::Txn;
 
-use super::{null_hash, ChainBlock, ChainInstance};
+use super::{null_hash, ChainBlock, ChainInstance, Recover};
 
 const BLOCKS: Label = label(".blocks");
 const COMMITTED: &str = "committed.chain_block";
@@ -71,7 +72,7 @@ impl<T> SyncChain<T> {
 #[async_trait]
 impl<T> ChainInstance<T> for SyncChain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Route + Public + fmt::Display,
+    T: Persist<fs::Dir, Txn = Txn> + Route + fmt::Display,
 {
     async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
         let mut block: FileWriteGuard<_, ChainBlock> =
@@ -177,8 +178,8 @@ where
     async fn rollback(&self, txn_id: &TxnId) {
         debug!("SyncChain::rollback");
 
-        // assume the mutations for the transaction have already been moved and sync'd
-        // from `self.pending` to `self.committed` by calling the `write_ahead` method
+        self.subject.rollback(txn_id).await;
+
         {
             let mut pending: FileWriteGuard<_, ChainBlock> =
                 self.pending.write().await.expect("pending");
@@ -187,8 +188,6 @@ where
         }
 
         self.pending.sync(false).await.expect("sync pending block");
-
-        self.subject.rollback(txn_id).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -298,9 +297,27 @@ where
 }
 
 #[async_trait]
+impl<T: Route + fmt::Display + Send + Sync> Recover for SyncChain<T> {
+    async fn recover(&self, txn: &Txn) -> TCResult<()> {
+        {
+            let mut committed: freqfs::FileWriteGuard<CacheBlock, ChainBlock> =
+                self.committed.write().map_err(fs::io_err).await?;
+
+            for (txn_id, mutations) in &committed.mutations {
+                super::data::replay_all(&self.subject, txn_id, mutations, txn, &self.store).await?;
+            }
+
+            committed.mutations.clear()
+        }
+
+        self.committed.sync(false).map_err(fs::io_err).await
+    }
+}
+
+#[async_trait]
 impl<T> CopyFrom<fs::Dir, SyncChain<T>> for SyncChain<T>
 where
-    T: Route + Public + Persist<fs::Dir, Txn = Txn>,
+    T: Persist<fs::Dir, Txn = Txn> + Route,
 {
     async fn copy_from(
         _txn: &<Self as Persist<fs::Dir>>::Txn,

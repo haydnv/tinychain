@@ -21,10 +21,9 @@ use tc_transact::{Transact, Transaction};
 use tc_value::{Link, LinkHost, Value};
 use tcgeneric::*;
 
-use crate::chain::BlockChain;
+use crate::chain::{BlockChain, Recover};
 use crate::fs;
-use crate::scalar::Scalar;
-use crate::state::{State, ToState};
+use crate::state::State;
 use crate::txn::{Actor, Txn, TxnId};
 
 pub use class::Class;
@@ -743,10 +742,10 @@ where
     }
 }
 
-// TODO: delete
-impl<T> ToState for Cluster<T> {
-    fn to_state(&self) -> State {
-        State::Scalar(Scalar::Cluster(self.link().path().clone().into()))
+#[async_trait]
+impl<T: Recover + Send + Sync> Recover for Cluster<T> {
+    async fn recover(&self, txn: &Txn) -> TCResult<()> {
+        self.state.recover(txn).await
     }
 }
 

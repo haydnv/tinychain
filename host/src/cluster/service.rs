@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
-use futures::future::{join_all, TryFutureExt};
+use futures::future::{join_all, try_join_all, TryFutureExt};
 use futures::{join, try_join};
 use safecast::{as_type, AsType};
 
@@ -14,7 +14,7 @@ use tc_transact::{Transact, Transaction};
 use tc_value::Version as VersionNumber;
 use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, TCPathBuf};
 
-use crate::chain::{Chain, ChainType};
+use crate::chain::{Chain, ChainType, Recover};
 use crate::cluster::{DirItem, Replica};
 use crate::collection::{CollectionBase, CollectionSchema};
 use crate::fs;
@@ -226,6 +226,21 @@ impl Transact for Version {
     }
 }
 
+#[async_trait]
+impl Recover for Version {
+    async fn recover(&self, txn: &Txn) -> TCResult<()> {
+        let recovery = self
+            .attrs
+            .values()
+            .filter_map(|attr| attr.as_type())
+            .map(|chain: &Chain<_>| chain.recover(txn));
+
+        try_join_all(recovery).await?;
+
+        Ok(())
+    }
+}
+
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a hosted Service")
@@ -361,6 +376,16 @@ impl Transact for Service {
         }
 
         self.schema.finalize(txn_id).await;
+    }
+}
+
+#[async_trait]
+impl Recover for Service {
+    async fn recover(&self, txn: &Txn) -> TCResult<()> {
+        let versions = self.versions.read(*txn.id()).await?;
+        let recovery = versions.values().map(|version| version.recover(txn));
+        try_join_all(recovery).await?;
+        Ok(())
     }
 }
 

@@ -18,7 +18,7 @@ use tcgeneric::*;
 
 use crate::cluster::Replica;
 use crate::fs;
-use crate::route::{Public, Route};
+use crate::route::Route;
 use crate::state::State;
 use crate::txn::Txn;
 
@@ -35,7 +35,12 @@ const BLOCK_SIZE: usize = 1_000_000; // TODO: reduce to 4,096
 const CHAIN: Label = label("chain");
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
-/// Trait defining methods common to any instance of a [`Chain`], such as a [`SyncChain`].
+#[async_trait]
+pub trait Recover {
+    async fn recover(&self, txn: &Txn) -> TCResult<()>;
+}
+
+/// Methods common to any instance of a [`Chain`], such as a [`SyncChain`].
 #[async_trait]
 pub trait ChainInstance<T> {
     /// Append the given DELETE op to the latest block in this `Chain`.
@@ -102,6 +107,8 @@ impl fmt::Display for ChainType {
 }
 
 /// A data structure responsible for maintaining the transactional integrity of its [`Subject`].
+// TODO: remove the generic type and replace with:
+// enum Chain { Block(BlockChain<Box<dyn Public>>, Sync(SyncChain<Box<dyn Restore>>) }
 #[derive(Clone)]
 pub enum Chain<T> {
     Block(block::BlockChain<T>),
@@ -125,7 +132,7 @@ where
 #[async_trait]
 impl<T> ChainInstance<T> for Chain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Route + Public + fmt::Display,
+    T: Persist<fs::Dir, Txn = Txn> + Route + fmt::Display,
 {
     async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
         match self {
@@ -213,9 +220,19 @@ where
     }
 }
 
+#[async_trait]
+impl<T: Route + fmt::Display> Recover for Chain<T> {
+    async fn recover(&self, txn: &Txn) -> TCResult<()> {
+        match self {
+            Self::Block(chain) => chain.recover(txn).await,
+            Self::Sync(chain) => chain.recover(txn).await,
+        }
+    }
+}
+
 impl<T> Persist<fs::Dir> for Chain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Route + Public,
+    T: Persist<fs::Dir, Txn = Txn> + Route + fmt::Display,
 {
     type Txn = Txn;
     type Schema = (ChainType, T::Schema);
@@ -247,7 +264,7 @@ where
 #[async_trait]
 impl<T> CopyFrom<fs::Dir, Chain<T>> for Chain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Route + Public,
+    T: Persist<fs::Dir, Txn = Txn> + Route + fmt::Display,
 {
     async fn copy_from(
         txn: &<Self as Persist<fs::Dir>>::Txn,
@@ -369,7 +386,7 @@ impl<T> ChainVisitor<T> {
 
 impl<T> ChainVisitor<T>
 where
-    T: Route + Public + de::FromStream<Context = Txn>,
+    T: Route + de::FromStream<Context = Txn> + fmt::Display,
 {
     pub(crate) async fn visit_map_value<A: de::MapAccess>(
         self,
@@ -392,7 +409,7 @@ where
 #[async_trait]
 impl<T> de::Visitor for ChainVisitor<T>
 where
-    T: Route + Public + de::FromStream<Context = Txn>,
+    T: Route + de::FromStream<Context = Txn> + fmt::Display,
 {
     type Value = Chain<T>;
 
@@ -415,7 +432,7 @@ where
 #[async_trait]
 impl<T> de::FromStream for Chain<T>
 where
-    T: Route + Public + de::FromStream<Context = Txn>,
+    T: Route + de::FromStream<Context = Txn> + fmt::Display,
 {
     type Context = Txn;
 

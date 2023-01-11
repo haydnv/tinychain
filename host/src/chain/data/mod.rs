@@ -1,3 +1,5 @@
+use std::fmt;
+
 use futures::TryFutureExt;
 
 use tc_error::*;
@@ -22,7 +24,7 @@ pub(super) async fn replay_all<T>(
     store: &Store,
 ) -> TCResult<()>
 where
-    T: Route + Public,
+    T: Route + fmt::Display,
 {
     for op in mutations {
         replay(subject, txn, &store, op)
@@ -35,7 +37,7 @@ where
 
 async fn replay<T>(subject: &T, txn: &Txn, store: &Store, mutation: &Mutation) -> TCResult<()>
 where
-    T: Route + Public,
+    T: Route + fmt::Display,
 {
     match mutation {
         Mutation::Delete(key) => subject.delete(txn, &[], key.clone()).await,
