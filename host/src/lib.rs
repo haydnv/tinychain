@@ -44,7 +44,7 @@ mod route;
 pub const MIN_CACHE_SIZE: usize = 5000;
 
 type TokioError = Box<dyn std::error::Error + Send + Sync + 'static>;
-type Userspace = (kernel::Class, kernel::Library, kernel::Service);
+type UserSpace = (kernel::Class, kernel::Library, kernel::Service);
 
 pub struct Builder {
     cache_size: usize,
@@ -194,7 +194,7 @@ impl Builder {
         &mut self,
         txn_server: txn::TxnServer,
         gateway: Arc<gateway::Gateway>,
-    ) -> Userspace {
+    ) -> UserSpace {
         use chain::Recover;
         use transact::Transact;
 
@@ -229,7 +229,7 @@ impl Builder {
         (class, library, service)
     }
 
-    async fn bootstrap(mut self) -> (Arc<gateway::Gateway>, Userspace) {
+    async fn bootstrap(mut self) -> (Arc<gateway::Gateway>, UserSpace) {
         let gateway_config = self.gateway().cloned().expect("gateway config");
         let workspace = self.workspace().await;
 
@@ -253,10 +253,7 @@ impl Builder {
         (gateway, (class, library, service))
     }
 
-    async fn replicate(
-        gateway: Arc<gateway::Gateway>,
-        userspace: (kernel::Class, kernel::Library, kernel::Service),
-    ) -> TCResult<()> {
+    async fn replicate(gateway: Arc<gateway::Gateway>, userspace: UserSpace) -> TCResult<()> {
         let txn = gateway
             .new_txn(transact::TxnId::new(gateway::Gateway::time()), None)
             .await?;
