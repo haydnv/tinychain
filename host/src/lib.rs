@@ -47,16 +47,15 @@ type TokioError = Box<dyn std::error::Error + Send + Sync + 'static>;
 type UserSpace = (kernel::Class, kernel::Library, kernel::Service);
 
 pub struct Builder {
-    cache_size: usize,
-    cache: Option<Arc<freqfs::Cache<fs::CacheBlock>>>,
+    cache: Arc<freqfs::Cache<fs::CacheBlock>>,
     data_dir: PathBuf,
     gateway: Option<gateway::Config>,
     lead: Option<value::LinkHost>,
-    workspace: PathBuf,
+    workspace: freqfs::DirLock<fs::CacheBlock>,
 }
 
 impl Builder {
-    pub fn new(data_dir: PathBuf, workspace: PathBuf) -> Self {
+    pub async fn load(cache_size: usize, data_dir: PathBuf, workspace: PathBuf) -> Self {
         assert!(
             data_dir.exists(),
             "data directory not found: {}",
@@ -65,9 +64,13 @@ impl Builder {
 
         Self::maybe_create(&workspace);
 
+        let cache =
+            freqfs::Cache::<fs::CacheBlock>::new(cache_size.into(), Duration::from_secs(1), None);
+
+        let workspace = cache.clone().load(workspace).await.expect("workspace");
+
         Self {
-            cache_size: 1_000_000_000, // 1GB
-            cache: None,
+            cache,
             data_dir,
             gateway: None,
             lead: None,
@@ -75,56 +78,14 @@ impl Builder {
         }
     }
 
-    pub fn with_cache_size(mut self, cache_size: usize) -> Self {
-        if cache_size < MIN_CACHE_SIZE {
-            panic!(
-                "{} is less than the minimum cache size of {}",
-                cache_size, MIN_CACHE_SIZE
-            );
-        }
-
-        self.cache_size = cache_size;
-        self
-    }
-
-    pub fn cache_size(&self) -> usize {
-        self.cache_size
-    }
-
-    pub fn data_dir(&self) -> &PathBuf {
-        &self.data_dir
-    }
-
     pub fn with_gateway(mut self, gateway: gateway::Config) -> Self {
         self.gateway = Some(gateway);
         self
     }
 
-    pub fn gateway(&self) -> Option<&gateway::Config> {
-        self.gateway.as_ref()
-    }
-
-    pub fn with_lead(mut self, lead: value::LinkHost) -> Self {
-        self.lead = Some(lead);
+    pub fn with_lead(mut self, lead: Option<value::LinkHost>) -> Self {
+        self.lead = lead;
         self
-    }
-
-    pub fn lead(&self) -> Option<&value::LinkHost> {
-        self.lead.as_ref()
-    }
-
-    fn cache(&mut self) -> Arc<freqfs::Cache<fs::CacheBlock>> {
-        if self.cache.is_none() {
-            let cache = freqfs::Cache::<fs::CacheBlock>::new(
-                self.cache_size.into(),
-                Duration::from_secs(1),
-                None,
-            );
-
-            self.cache = Some(cache);
-        }
-
-        self.cache.as_ref().expect("cache").clone()
     }
 
     fn maybe_create(path: &PathBuf) {
@@ -138,10 +99,11 @@ impl Builder {
         }
     }
 
-    async fn load_dir(&mut self, path: PathBuf, txn_id: transact::TxnId) -> fs::Dir {
+    async fn load_dir(&self, path: PathBuf, txn_id: transact::TxnId) -> fs::Dir {
         Self::maybe_create(&path);
 
-        self.cache()
+        self.cache
+            .clone()
             .load(path)
             .map_err(fs::io_err)
             .and_then(|cache| fs::Dir::load(cache, txn_id))
@@ -149,15 +111,8 @@ impl Builder {
             .expect("store")
     }
 
-    async fn workspace(&mut self) -> freqfs::DirLock<fs::CacheBlock> {
-        self.cache()
-            .load(self.workspace.clone())
-            .await
-            .expect("workspace")
-    }
-
     async fn load_or_create<T>(
-        &mut self,
+        &self,
         txn: &txn::Txn,
         path_label: tcgeneric::PathLabel,
     ) -> cluster::Cluster<T>
@@ -191,7 +146,7 @@ impl Builder {
     }
 
     async fn load_userspace(
-        &mut self,
+        &self,
         txn_server: txn::TxnServer,
         gateway: Arc<gateway::Gateway>,
     ) -> UserSpace {
@@ -229,12 +184,11 @@ impl Builder {
         (class, library, service)
     }
 
-    async fn bootstrap(mut self) -> (Arc<gateway::Gateway>, UserSpace) {
-        let gateway_config = self.gateway().cloned().expect("gateway config");
-        let workspace = self.workspace().await;
+    async fn bootstrap(self) -> (Arc<gateway::Gateway>, UserSpace) {
+        let gateway_config = self.gateway.clone().expect("gateway config");
 
         let kernel = kernel::Kernel::bootstrap();
-        let txn_server = txn::TxnServer::new(workspace).await;
+        let txn_server = txn::TxnServer::new(self.workspace.clone()).await;
         let gateway = gateway::Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
 
         let (class, library, service) = self

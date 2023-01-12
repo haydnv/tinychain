@@ -119,13 +119,14 @@ fn main() {
         .expect("tokio runtime");
 
     let gateway_config = config.gateway();
-    let mut builder = Builder::new(config.data_dir, config.workspace)
-        .with_cache_size(config.cache_size)
-        .with_gateway(gateway_config);
-
-    if let Some(lead) = config.replicate {
-        builder = builder.with_lead(lead);
-    }
+    let builder = runtime
+        .block_on(Builder::load(
+            config.cache_size,
+            config.data_dir,
+            config.workspace,
+        ))
+        .with_gateway(gateway_config)
+        .with_lead(config.replicate);
 
     match runtime.block_on(builder.replicate_and_serve()) {
         Ok(_) => {}
