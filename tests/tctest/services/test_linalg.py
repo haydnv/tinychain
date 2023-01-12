@@ -1,5 +1,7 @@
 import numpy as np
 import time
+
+import rjwt
 import tinychain as tc
 import unittest
 
@@ -12,7 +14,8 @@ TENSOR_URI = str(tc.URI(tc.tensor.Dense))
 class LinearAlgebraTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host(tc.math.NS)
+        cls.actor = rjwt.Actor('/')
+        cls.host = start_host(tc.math.NS, public_key=cls.actor.public_key)
         cls.host.put(tc.URI(tc.service.Library), LIB_URI[-3], LIB_URI[:-2])
         cls.host.install(tc.math.linalg.LinearAlgebra())
 

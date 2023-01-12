@@ -1,4 +1,6 @@
 import time
+
+import rjwt
 import tinychain as tc
 import unittest
 
@@ -67,11 +69,12 @@ class TableDemoTests(unittest.TestCase):
         db = Database()
         web = Web()
 
+        self.actor = rjwt.Actor('/')
         self.hosts = []
         for i in range(3):
             port = DEFAULT_PORT + i
             host_uri = f"http://127.0.0.1:{port}" + tc.URI(Web).path()
-            host = start_host(NS, host_uri=host_uri, replicate=LEAD)
+            host = start_host(NS, host_uri=host_uri, public_key=self.actor.public_key, replicate=LEAD)
             self.hosts.append(host)
 
         self.hosts[0].put(tc.URI(tc.service.Service), str(NS)[1:], tc.URI(web)[:-2])

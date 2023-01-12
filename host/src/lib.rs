@@ -51,6 +51,7 @@ pub struct Builder {
     data_dir: PathBuf,
     gateway: Option<gateway::Config>,
     lead: Option<value::LinkHost>,
+    public_key: Option<pem::Pem>,
     workspace: freqfs::DirLock<fs::CacheBlock>,
 }
 
@@ -74,6 +75,7 @@ impl Builder {
             data_dir,
             gateway: None,
             lead: None,
+            public_key: None,
             workspace,
         }
     }
@@ -85,6 +87,16 @@ impl Builder {
 
     pub fn with_lead(mut self, lead: Option<value::LinkHost>) -> Self {
         self.lead = lead;
+        self
+    }
+
+    pub fn with_public_key(mut self, public_key: Option<PathBuf>) -> Self {
+        if let Some(path) = public_key {
+            let public_key = std::fs::read_to_string(path).expect("public key file");
+            let public_key = pem::parse(public_key).expect("public key");
+            self.public_key = Some(public_key)
+        }
+
         self
     }
 

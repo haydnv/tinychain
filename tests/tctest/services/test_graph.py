@@ -51,6 +51,7 @@ class GraphTests(unittest.TestCase):
         uri = tc.URI(TestService).path()
         count = self.host.get(uri.extend("user", "count"))
         user_id = self.host.post(uri.append("create_user"), {"first_name": "First", "last_name": "Last"})
+
         self.assertEqual(self.host.get(uri.extend("user", "count")), count + 1)
         self.assertEqual(self.host.get(uri.append("user"), [user_id]), [user_id, "First", "Last"])
 

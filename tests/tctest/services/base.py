@@ -1,3 +1,4 @@
+import rjwt
 import tinychain as tc
 
 from ..process import DEFAULT_PORT, start_host
@@ -10,7 +11,7 @@ class PersistenceTest(object):
     def service(self, chain_type):
         raise NotImplementedError
 
-    def execute(self, hosts):
+    def execute(self, actor, hosts):
         raise NotImplementedError
 
     def testBlockChain(self):
@@ -22,18 +23,26 @@ class PersistenceTest(object):
     def _execute(self, chain_type):
         service = self.service(chain_type)
 
-        lead = tc.URI(service)[0]
+        lead = str(tc.URI(service)[0])
         if "://" not in lead:
             print(f"cannot test replication of a service with no lead replica", service)
             return
 
         [namespace] = tc.URI(service).path()[1:-2]
 
+        actor = rjwt.Actor('/')
+
         hosts = []
         for i in range(self.NUM_HOSTS):
             port = DEFAULT_PORT + i
             host_uri = f"http://127.0.0.1:{port}" + tc.URI(service).path()
-            host = start_host(tc.URI(f"/{namespace}"), host_uri=host_uri, cache_size=self.CACHE_SIZE, replicate=str(lead))
+            host = start_host(
+                tc.URI(f"/{namespace}"),
+                host_uri=host_uri,
+                public_key=actor.public_key,
+                cache_size=self.CACHE_SIZE,
+                replicate=lead)
+
             hosts.append(host)
 
         print()
@@ -43,7 +52,7 @@ class PersistenceTest(object):
         hosts[0].put(tc.URI(service).path()[:-2], tc.URI(service)[-2], service)
         print()
 
-        self.execute(hosts)
+        self.execute(actor, hosts)
 
         for host in hosts:
             host.stop()

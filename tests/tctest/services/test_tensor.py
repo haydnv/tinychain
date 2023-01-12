@@ -44,7 +44,7 @@ class TensorChainTests(PersistenceTest, unittest.TestCase):
 
         return Persistent()
 
-    def execute(self, hosts):
+    def execute(self, _actor, hosts):
         endpoints = {
             "tensor": tc.URI("/service/test_tensor/tensor/0.0.0")
         }

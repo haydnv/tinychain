@@ -71,6 +71,9 @@ struct Config {
     )]
     pub log_level: String,
 
+    #[arg(long = "public_key", help = "path to a PEM file containing this host's public key")]
+    pub public_key: Option<PathBuf>,
+
     #[arg(long, help = "a link to the cluster to replicate from on startup")]
     pub replicate: Option<LinkHost>,
 
@@ -125,6 +128,7 @@ fn main() {
             config.data_dir,
             config.workspace,
         ))
+        .with_public_key(config.public_key)
         .with_gateway(gateway_config)
         .with_lead(config.replicate);
 

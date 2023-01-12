@@ -1,5 +1,7 @@
 import numpy as np
 import unittest
+
+import rjwt
 import tinychain as tc
 
 from ..process import start_host
@@ -46,7 +48,8 @@ class NeuralNetTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host(NS)
+        cls.actor = rjwt.Actor('/')
+        cls.host = start_host(NS, public_key=cls.actor.public_key)
 
         cls.host.put(tc.URI(tc.service.Library), LIB_URI[-3], LIB_URI[:-2])
         cls.host.install(tc.ml.NeuralNets())

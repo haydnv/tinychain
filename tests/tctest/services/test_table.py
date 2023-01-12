@@ -27,7 +27,7 @@ class TableChainTests(PersistenceTest, unittest.TestCase):
 
         return Persistent()
 
-    def execute(self, hosts):
+    def execute(self, _actor, hosts):
         row1 = ["one", 1]
         row2 = ["two", 2]
 

@@ -5,6 +5,8 @@ import pathlib
 import shutil
 import subprocess
 import time
+
+import rjwt
 import tinychain as tc
 
 
@@ -19,7 +21,7 @@ TC_PATH = os.getenv("TC_PATH", "host/target/debug/tinychain")
 class Docker(tc.host.Local.Process):
     ADDRESS = "127.0.0.1"
 
-    def __init__(self, **flags):
+    def __init__(self, config_dir, **flags):
         if "data_dir" in flags:
             raise RuntimeError(f"the test Dockerfile does not support a custom data directory path {flags['data_dir']}")
 
@@ -27,6 +29,7 @@ class Docker(tc.host.Local.Process):
             flags["log_level"] = "debug"
 
         self.client = docker.from_env()
+        self.config_dir = config_dir
         self.container = None
         self._flags = flags
 
@@ -38,7 +41,11 @@ class Docker(tc.host.Local.Process):
 
         # build the Docker image
         print("building Docker image")
-        (image, _logs) = self.client.images.build(path=".", dockerfile=DOCKERFILE)
+        try:
+            (image, _logs) = self.client.images.build(path=".", dockerfile=DOCKERFILE)
+        except Exception as e:
+            exit(f"building Docker image failed: {e}")
+
         print("built Docker image")
 
         # construct the TinyChain host arguments
@@ -48,8 +55,12 @@ class Docker(tc.host.Local.Process):
         cmd = ' '.join(cmd)
 
         # run a Docker container
-        print(f"running new Docker container with image {image.id}")
-        self.container = self.client.containers.run(image.id, cmd, network_mode=DOCKER_NETWORK_MODE, detach=True)
+        print(f"running new Docker container with image {image.id}...")
+        self.container = self.client.containers.run(
+            image.id, cmd,
+            network_mode=DOCKER_NETWORK_MODE,
+            volumes=[f"{self.config_dir}:/{CONFIG}"],
+            detach=True)
 
         time.sleep(wait_time)
         print(self.container.logs().decode("utf-8"))
@@ -71,7 +82,7 @@ class Docker(tc.host.Local.Process):
         self.stop()
 
 
-def start_docker(ns, host_uri=None, wait_time=1., **flags):
+def start_docker(ns, host_uri=None, public_key=None, wait_time=1., **flags):
     assert ns.startswith('/'), f"namespace must be a URI path, not {ns}"
 
     if not os.path.exists(DOCKERFILE):
@@ -85,7 +96,11 @@ def start_docker(ns, host_uri=None, wait_time=1., **flags):
     elif host_uri is not None and host_uri.port():
         port = host_uri.port()
 
-    process = Docker(http_port=port, **flags)
+    config_dir, public_key = _write_config(str(ns)[1:], port, public_key)
+    if public_key:
+        flags["public_key"] = public_key
+
+    process = Docker(config_dir, http_port=port, **flags)
     process.start(wait_time)
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
@@ -106,7 +121,7 @@ class Local(tc.host.Local.Process):
             raise ValueError(f"invalid port: {http_port}")
 
         if "data_dir" in flags:
-            _maybe_create_dir(flags["data_dir"], force_create)
+            _maybe_create_dir(flags["data_dir"])
 
         args = [
             path,
@@ -153,7 +168,7 @@ class Local(tc.host.Local.Process):
             self.stop()
 
 
-def start_local_host(ns, host_uri=None, overwrite=True, wait_time=1, **flags):
+def start_local_host(ns, host_uri=None, public_key=None, wait_time=1, **flags):
     assert ns.startswith('/'), f"namespace must be a URI path, not {ns}"
     name = str(ns)[1:].replace('/', '_')
 
@@ -168,8 +183,12 @@ def start_local_host(ns, host_uri=None, overwrite=True, wait_time=1, **flags):
     elif host_uri is not None and host_uri.port():
         port = host_uri.port()
 
+    config_dir, public_key = _write_config(name, port, public_key)
+    if public_key:
+        flags["public_key"] = public_key
+
     data_dir = f"/tmp/tc/data/{port}/{name}"
-    if overwrite and os.path.exists(data_dir):
+    if os.path.exists(data_dir):
         shutil.rmtree(data_dir)
 
     if "log_level" not in flags:
@@ -200,11 +219,24 @@ else:
     start_host = start_docker
 
 
-def _maybe_create_dir(path, force):
+def _maybe_create_dir(path):
     path = pathlib.Path(path)
     if path.exists() and path.is_dir():
         return
-    elif force:
-        os.makedirs(path)
     else:
-        raise RuntimeError(f"no directory at {path}")
+        os.makedirs(path)
+
+
+def _write_config(name, port, public_key=None):
+    config_dir = os.getcwd()
+    config_dir += f"/{CONFIG}/{name}"
+    _maybe_create_dir(config_dir)
+
+    if public_key:
+        path = f"{config_dir}/{port}.pub"
+        with open(path, 'w') as file:
+            file.write(rjwt.public_pem_encode(public_key))
+    else:
+        path = None
+
+    return config_dir, path
