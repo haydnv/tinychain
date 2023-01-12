@@ -366,7 +366,7 @@ where
 }
 
 #[async_trait]
-impl<T: Send + Sync> Recover for Dir<T>
+impl<T: Send + Sync + 'static> Recover for Dir<T>
 where
     DirEntry<T>: Clone,
     Cluster<BlockChain<T>>: Recover,
