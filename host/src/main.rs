@@ -77,9 +77,9 @@ struct Config {
 
     #[arg(
         long = "public_key",
-        help = "path to a PEM file containing this host's public key"
+        help = "a hexadecimal string representation of this host's clusters' public key"
     )]
-    pub public_key: Option<PathBuf>,
+    pub public_key: Option<String>,
 
     #[arg(long, help = "a link to the cluster to replicate from on startup")]
     pub replicate: Option<LinkHost>,

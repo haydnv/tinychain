@@ -51,7 +51,7 @@ pub struct Builder {
     data_dir: PathBuf,
     gateway: Option<gateway::Config>,
     lead: Option<value::LinkHost>,
-    public_key: Option<pem::Pem>,
+    public_key: Option<bytes::Bytes>,
     workspace: freqfs::DirLock<fs::CacheBlock>,
 }
 
@@ -90,24 +90,14 @@ impl Builder {
         self
     }
 
-    pub fn with_public_key(mut self, public_key: Option<PathBuf>) -> Self {
-        if let Some(path) = public_key {
-            let public_key = std::fs::read_to_string(path).expect("public key file");
-            let mut public_key = pem::parse(public_key).expect("public key");
+    pub fn with_public_key(mut self, public_key: Option<String>) -> Self {
+        if let Some(public_key) = public_key {
+            let public_key = hex::decode(public_key).expect("public key");
 
-            // TODO: why is this necessary?
-            while public_key.contents.len() > 32 {
-                public_key.contents.remove(0);
-            }
+            let len = public_key.len();
+            assert_eq!(len, 32, "an Ed25519 public key has 32 bytes, not {}", len);
 
-            assert_eq!(
-                public_key.contents.len(),
-                32,
-                "a valid Ed25519 public key has 32 bytes, not {:x?}",
-                public_key.contents
-            );
-
-            self.public_key = Some(public_key)
+            self.public_key = Some(public_key.into())
         }
 
         self
@@ -159,7 +149,7 @@ impl Builder {
         };
 
         let actor = if let Some(public_key) = &self.public_key {
-            txn::Actor::with_public_key(value::Value::None, &public_key.contents)
+            txn::Actor::with_public_key(value::Value::None, public_key)
                 .map(Arc::new)
                 .expect("actor")
         } else {

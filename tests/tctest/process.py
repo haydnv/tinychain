@@ -21,7 +21,7 @@ TC_PATH = os.getenv("TC_PATH", "host/target/debug/tinychain")
 class Docker(tc.host.Local.Process):
     ADDRESS = "127.0.0.1"
 
-    def __init__(self, config_dir, **flags):
+    def __init__(self, **flags):
         if "data_dir" in flags:
             raise RuntimeError(f"the test Dockerfile does not support a custom data directory path {flags['data_dir']}")
 
@@ -29,7 +29,6 @@ class Docker(tc.host.Local.Process):
             flags["log_level"] = "debug"
 
         self.client = docker.from_env()
-        self.config_dir = config_dir
         self.container = None
         self._flags = flags
 
@@ -59,7 +58,6 @@ class Docker(tc.host.Local.Process):
         self.container = self.client.containers.run(
             image.id, cmd,
             network_mode=DOCKER_NETWORK_MODE,
-            volumes=[f"{self.config_dir}:/{CONFIG}"],
             detach=True)
 
         time.sleep(wait_time)
@@ -96,11 +94,10 @@ def start_docker(ns, host_uri=None, public_key=None, wait_time=1., **flags):
     elif host_uri is not None and host_uri.port():
         port = host_uri.port()
 
-    config_dir, public_key = _write_config(str(ns)[1:], port, public_key)
     if public_key:
-        flags["public_key"] = public_key
+        flags["public_key"] = public_key.hex()
 
-    process = Docker(config_dir, http_port=port, **flags)
+    process = Docker(http_port=port, **flags)
     process.start(wait_time)
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
@@ -183,9 +180,8 @@ def start_local_host(ns, host_uri=None, public_key=None, wait_time=1, **flags):
     elif host_uri is not None and host_uri.port():
         port = host_uri.port()
 
-    config_dir, public_key = _write_config(name, port, public_key)
     if public_key:
-        flags["public_key"] = public_key
+        flags["public_key"] = public_key.hex()
 
     data_dir = f"/tmp/tc/data/{port}/{name}"
     if os.path.exists(data_dir):
@@ -225,18 +221,3 @@ def _maybe_create_dir(path):
         return
     else:
         os.makedirs(path)
-
-
-def _write_config(name, port, public_key=None):
-    config_dir = os.getcwd()
-    config_dir += f"/{CONFIG}/{name}"
-    _maybe_create_dir(config_dir)
-
-    if public_key:
-        path = f"{config_dir}/{port}.pub"
-        with open(path, 'w') as file:
-            file.write(rjwt.public_pem_encode(public_key))
-    else:
-        path = None
-
-    return config_dir, path
