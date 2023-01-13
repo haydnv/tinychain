@@ -1,7 +1,6 @@
 //! [`Link`] and its components
 
 use std::cmp::Ordering;
-use std::convert::TryFrom;
 use std::fmt;
 use std::iter;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -255,21 +254,32 @@ impl<A: Into<LinkAddress>> From<(LinkProtocol, A, Option<u16>)> for LinkHost {
     }
 }
 
-impl TryFrom<Link> for LinkHost {
-    type Error = TCError;
+impl PartialOrd for LinkHost {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.to_string().partial_cmp(&other.to_string())
+    }
+}
 
-    fn try_from(link: Link) -> TCResult<LinkHost> {
-        if link.path == TCPathBuf::default() {
-            if let Some(host) = link.host() {
-                Ok(host.clone())
-            } else {
-                Err(TCError::bad_request("This Link has no LinkHost", link))
-            }
-        } else {
-            Err(TCError::bad_request(
-                "Cannot convert to LinkHost without losing path information",
-                link,
-            ))
+impl Ord for LinkHost {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.to_string().cmp(&other.to_string())
+    }
+}
+
+impl TryCastFrom<Value> for LinkHost {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Link(link) => link.host.is_some() && link.path.is_empty(),
+            Value::String(s) => Self::from_str(s).is_ok(),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Link(link) if link.path.is_empty() => link.into_host(),
+            Value::String(s) => Self::from_str(&s).ok(),
+            _ => None,
         }
     }
 }
@@ -319,22 +329,32 @@ impl Link {
         }
     }
 
-    /// Consume this `Link` and return its path.
+    /// Consume this [`Link`] and return its [`LinkHost`] and [`TCPathBuf`].
+    pub fn into_inner(self) -> (Option<LinkHost>, TCPathBuf) {
+        (self.host, self.path)
+    }
+
+    /// Consume this [`Link`] and return its [`LinkHost`].
+    pub fn into_host(self) -> Option<LinkHost> {
+        self.host
+    }
+
+    /// Consume this [`Link`] and return its [`TCPathBuf`].
     pub fn into_path(self) -> TCPathBuf {
         self.path
     }
 
-    /// Borrow this `Link`'s [`LinkHost`], if it has one.
+    /// Borrow this [`Link`]'s [`LinkHost`], if it has one.
     pub fn host(&'_ self) -> &'_ Option<LinkHost> {
         &self.host
     }
 
-    /// Borrow this `Link`'s path.
+    /// Borrow this [`Link`]'s path.
     pub fn path(&'_ self) -> &'_ TCPathBuf {
         &self.path
     }
 
-    /// Append the given [`PathSegment`] to this `Link` and return it.
+    /// Append the given [`PathSegment`] to this [`Link`] and return it.
     pub fn append<S: Into<PathSegment>>(mut self, segment: S) -> Self {
         self.path = self.path.append(segment);
         self

@@ -18,7 +18,7 @@ use sha2::digest::Output;
 use sha2::Digest;
 
 use tc_error::*;
-use tc_value::{Float, Link, Number, Range, TCString, Value, ValueType};
+use tc_value::{Float, Link, LinkHost, Number, Range, TCString, Value, ValueType};
 use tcgeneric::*;
 
 use crate::closure::Closure;
@@ -572,6 +572,12 @@ impl From<IdRef> for Scalar {
     }
 }
 
+impl From<LinkHost> for Scalar {
+    fn from(host: LinkHost) -> Self {
+        Value::from(host).into()
+    }
+}
+
 impl From<Link> for Scalar {
     fn from(link: Link) -> Self {
         Value::from(link).into()
@@ -881,6 +887,7 @@ macro_rules! from_value {
 from_value!(Bytes);
 from_value!(Float);
 from_value!(Link);
+from_value!(LinkHost);
 from_value!(Number);
 from_value!(Range);
 from_value!(TCPathBuf);

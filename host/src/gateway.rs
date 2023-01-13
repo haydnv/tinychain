@@ -29,6 +29,13 @@ pub struct Config {
     pub request_ttl: Duration,
 }
 
+impl Config {
+    /// Construct the [`LinkHost`] of a [`Gateway`]
+    pub fn host(&self) -> LinkHost {
+        (self.addr, self.http_port).into()
+    }
+}
+
 /// A client used by [`Gateway`]
 #[async_trait]
 pub trait Client {
@@ -67,7 +74,7 @@ pub struct Gateway {
     config: Config,
     kernel: Kernel,
     txn_server: TxnServer,
-    root: LinkHost,
+    host: LinkHost,
     client: http::Client,
     actor: Actor,
 }
@@ -90,7 +97,7 @@ impl Gateway {
             config,
             kernel,
             txn_server,
-            root,
+            host: root,
             client: http::Client::new(),
             actor: Actor::new(Link::default().into()),
         }
@@ -102,19 +109,19 @@ impl Gateway {
     }
 
     /// Return the network address of this `Gateway`
-    pub fn root(&self) -> &LinkHost {
-        &self.root
+    pub fn host(&self) -> &LinkHost {
+        &self.host
     }
 
     /// Return a [`Link`] to the given path at this host.
     pub fn link(&self, path: TCPathBuf) -> Link {
-        Link::from((self.root.clone(), path))
+        Link::from((self.host.clone(), path))
     }
 
     /// Return a new, signed auth token with no claims.
     pub fn new_token(&self, txn_id: &TxnId) -> TCResult<(String, Claims)> {
         let token = Token::new(
-            self.root.clone().into(),
+            self.host.clone().into(),
             txn_id.time().into(),
             self.config.request_ttl,
             self.actor.id().clone(),
@@ -130,7 +137,7 @@ impl Gateway {
     pub async fn new_txn(self: &Arc<Self>, txn_id: TxnId, token: Option<String>) -> TCResult<Txn> {
         let token = if let Some(token) = token {
             use rjwt::Resolve;
-            Resolver::new(self, &self.root().clone().into(), &txn_id)
+            Resolver::new(self, &self.host().clone().into(), &txn_id)
                 .consume_and_sign(&self.actor, vec![], token, txn_id.time().into())
                 .map_err(TCError::unauthorized)
                 .await?
@@ -162,7 +169,7 @@ impl Gateway {
                 Ok(State::from(Value::from(public_key)))
             }
             None => self.kernel.get(txn, link.path(), key).await,
-            Some(host) if host == self.root() => self.kernel.get(txn, link.path(), key).await,
+            Some(host) if host == self.host() => self.kernel.get(txn, link.path(), key).await,
             _ => self.client.get(txn.clone(), link, key).await,
         }
     }
@@ -181,7 +188,7 @@ impl Gateway {
 
             match link.host() {
                 None => self.kernel.put(txn, link.path(), key, value).await,
-                Some(host) if host == self.root() => {
+                Some(host) if host == self.host() => {
                     self.kernel.put(txn, link.path(), key, value).await
                 }
                 _ => self.client.put(txn.clone(), link, key, value).await,
@@ -196,7 +203,7 @@ impl Gateway {
 
         match link.host() {
             None => self.kernel.post(txn, link.path(), params).await,
-            Some(host) if host == self.root() => self.kernel.post(txn, link.path(), params).await,
+            Some(host) if host == self.host() => self.kernel.post(txn, link.path(), params).await,
             _ => self.client.post(txn.clone(), link, params).await,
         }
     }
@@ -208,7 +215,7 @@ impl Gateway {
             debug!("DELETE {}: {}", link, key);
             match link.host() {
                 None => self.kernel.delete(txn, link.path(), key).await,
-                Some(host) if host == self.root() => {
+                Some(host) if host == self.host() => {
                     self.kernel.delete(txn, link.path(), key).await
                 }
                 _ => self.client.delete(txn, link, key).await,

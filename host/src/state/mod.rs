@@ -18,7 +18,7 @@ use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::{AsyncHash, Transaction};
-use tc_value::{Float, Link, Number, NumberType, TCString, Value, ValueType};
+use tc_value::{Float, Link, LinkHost, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
 use crate::chain::{BlockChain, Chain, ChainType, ChainVisitor};
@@ -530,6 +530,12 @@ impl From<Id> for State {
 impl From<InstanceClass> for State {
     fn from(class: InstanceClass) -> Self {
         Self::Object(class.into())
+    }
+}
+
+impl From<LinkHost> for State {
+    fn from(host: LinkHost) -> Self {
+        Self::Scalar(Scalar::from(host))
     }
 }
 
@@ -1160,6 +1166,7 @@ from_scalar!(Bytes);
 from_scalar!(Float);
 from_scalar!(Id);
 from_scalar!(IdRef);
+from_scalar!(LinkHost);
 from_scalar!(Number);
 from_scalar!(OpDef);
 from_scalar!(OpRef);

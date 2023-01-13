@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{join_all, try_join_all, TryFutureExt};
@@ -23,7 +24,7 @@ use crate::scalar::value::Link;
 use crate::scalar::{OpRef, Refer, Scalar, Subject, TCRef};
 use crate::state::{State, ToState};
 use crate::transact::TxnId;
-use crate::txn::Txn;
+use crate::txn::{Actor, Txn};
 
 pub const CHAINS: Label = label("chains");
 pub(super) const SCHEMA: Label = label("schemata");
@@ -250,6 +251,7 @@ impl fmt::Display for Version {
 #[derive(Clone)]
 pub struct Service {
     dir: fs::Dir,
+    actor: Arc<Actor>,
     schema: fs::File<VersionNumber, InstanceClass>,
     versions: TxnLock<BTreeMap<VersionNumber, Version>>,
 }
@@ -391,9 +393,9 @@ impl Recover for Service {
 
 impl Persist<fs::Dir> for Service {
     type Txn = Txn;
-    type Schema = ();
+    type Schema = Arc<Actor>;
 
-    fn create(txn_id: TxnId, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, actor: Arc<Actor>, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
         let mut contents = dir.try_write(txn_id)?;
         if contents.is_empty() {
@@ -401,6 +403,7 @@ impl Persist<fs::Dir> for Service {
 
             Ok(Self {
                 dir,
+                actor,
                 schema,
                 versions: TxnLock::new("service", txn_id, BTreeMap::new()),
             })
@@ -411,7 +414,7 @@ impl Persist<fs::Dir> for Service {
         }
     }
 
-    fn load(txn_id: TxnId, _schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    fn load(txn_id: TxnId, actor: Arc<Actor>, store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
         let (schema, mut versions) = {
             let dir = dir.try_read(txn_id)?;
@@ -439,6 +442,7 @@ impl Persist<fs::Dir> for Service {
 
         Ok(Self {
             dir,
+            actor,
             schema,
             versions: TxnLock::new("service", txn_id, versions),
         })

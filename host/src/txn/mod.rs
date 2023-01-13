@@ -11,7 +11,7 @@ use log::debug;
 use tc_error::*;
 use tc_transact::fs::{Dir, DirCreate};
 use tc_transact::Transaction;
-use tc_value::{Link, Value};
+use tc_value::{Link, LinkHost, Value};
 use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf, Tuple};
 
 use crate::fs;
@@ -152,7 +152,7 @@ impl Txn {
         if let Some(host) = self.leader(cluster_path) {
             // TODO: validate transaction claim formats on receipt
             let hostname = host.host().as_ref().expect("txn leader hostname");
-            hostname == self.gateway.root() && host.path().as_slice() == cluster_path
+            hostname == self.gateway.host() && host.path().as_slice() == cluster_path
         } else {
             false
         }
@@ -161,7 +161,7 @@ impl Txn {
     /// Check if the cluster at the specified path on this host is the owner of the transaction.
     pub fn is_owner(&self, cluster_path: &[PathSegment]) -> bool {
         if let Some(host) = self.owner() {
-            host.host().as_ref().expect("txn owner hostname") == self.gateway.root()
+            host.host().as_ref().expect("txn owner hostname") == self.gateway.host()
                 && host.path().as_slice() == cluster_path
         } else {
             false
@@ -226,8 +226,13 @@ impl Txn {
             .fold(None, |_, host| Some(host))
     }
 
+    /// Return this [`LinkHost`]
+    pub fn host(&self) -> &LinkHost {
+        self.gateway.host()
+    }
+
     /// Return a link to the given path on this host.
-    // TODO: accept P where P: ToOwned<TCPathBuf>
+    // TODO: delete
     pub fn link(&self, path: TCPathBuf) -> Link {
         self.gateway.link(path)
     }

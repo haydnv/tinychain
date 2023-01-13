@@ -93,7 +93,20 @@ impl Builder {
     pub fn with_public_key(mut self, public_key: Option<PathBuf>) -> Self {
         if let Some(path) = public_key {
             let public_key = std::fs::read_to_string(path).expect("public key file");
-            let public_key = pem::parse(public_key).expect("public key");
+            let mut public_key = pem::parse(public_key).expect("public key");
+
+            // TODO: why is this necessary?
+            while public_key.contents.len() > 32 {
+                public_key.contents.remove(0);
+            }
+
+            assert_eq!(
+                public_key.contents.len(),
+                32,
+                "a valid Ed25519 public key has 32 bytes, not {:x?}",
+                public_key.contents
+            );
+
             self.public_key = Some(public_key)
         }
 
@@ -129,14 +142,14 @@ impl Builder {
         path_label: tcgeneric::PathLabel,
     ) -> cluster::Cluster<T>
     where
-        cluster::Cluster<T>: transact::fs::Persist<fs::Dir, Schema = (value::Link, value::Link), Txn = txn::Txn>
-            + Send
-            + Sync,
+        cluster::Cluster<T>:
+            transact::fs::Persist<fs::Dir, Schema = cluster::Schema, Txn = txn::Txn> + Send + Sync,
     {
         use transact::fs::Persist;
         use transact::Transaction;
 
         let txn_id = *txn.id();
+        let host = self.gateway.as_ref().expect("gateway config").host();
 
         let dir = {
             let mut path = self.data_dir.clone();
@@ -145,15 +158,15 @@ impl Builder {
             self.load_dir(path, txn_id).await
         };
 
-        let cluster_link: value::Link = if let Some(host) = &self.lead {
-            (host.clone(), path_label.into()).into()
+        let actor = if let Some(public_key) = &self.public_key {
+            txn::Actor::with_public_key(value::Value::None, &public_key.contents)
+                .map(Arc::new)
+                .expect("actor")
         } else {
-            path_label.into()
+            Arc::new(txn::Actor::new(value::Value::None))
         };
 
-        let self_link = txn.link(cluster_link.path().clone());
-
-        let schema = (self_link, cluster_link);
+        let schema = cluster::Schema::new(host, path_label.into(), self.lead.clone(), actor);
         cluster::Cluster::<T>::load_or_create(txn_id, schema, dir.into()).expect("cluster")
     }
 
@@ -230,9 +243,7 @@ impl Builder {
         {
             let txn = cluster.claim(&txn).await?;
 
-            cluster
-                .add_replica(&txn, txn.link(cluster.link().path().clone()))
-                .await?;
+            cluster.add_replica(&txn, txn.host().clone()).await?;
 
             cluster.distribute_commit(&txn).await
         }

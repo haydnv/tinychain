@@ -39,7 +39,11 @@ fn duration(flag: &str) -> TCResult<Duration> {
 
 #[derive(Clone, Parser)]
 struct Config {
-    #[arg(long, default_value = "127.0.0.1", help = "the IP address to bind")]
+    #[arg(
+        long,
+        default_value = "127.0.0.1",
+        help = "the IP address of this host"
+    )]
     pub address: IpAddr,
 
     #[arg(
@@ -71,7 +75,10 @@ struct Config {
     )]
     pub log_level: String,
 
-    #[arg(long = "public_key", help = "path to a PEM file containing this host's public key")]
+    #[arg(
+        long = "public_key",
+        help = "path to a PEM file containing this host's public key"
+    )]
     pub public_key: Option<PathBuf>,
 
     #[arg(long, help = "a link to the cluster to replicate from on startup")]
@@ -113,6 +120,9 @@ impl Config {
 
 fn main() {
     let config = Config::parse();
+
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log_level))
+        .init();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_io()

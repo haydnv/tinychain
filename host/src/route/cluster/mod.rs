@@ -1,14 +1,14 @@
 use std::fmt;
 
 use bytes::Bytes;
-use futures::future::try_join_all;
-use futures::{future, TryFutureExt};
-use log::{debug, info};
+use futures::future::{self, TryFutureExt};
+use futures::stream::{FuturesUnordered, StreamExt};
+use log::{debug, info, warn};
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
-use tc_value::{Link, Value};
+use tc_value::{LinkHost, Value};
 use tcgeneric::{label, PathSegment, Tuple};
 
 use crate::cluster::{Cluster, Replica, REPLICAS};
@@ -89,16 +89,12 @@ where
                 if txn.is_owner(self.cluster.path()) {
                     return Err(TCError::internal(format!(
                         "{} got commit message for itself",
-                        txn.link(self.cluster.link().path().clone())
+                        self.cluster,
                     )));
                 }
 
                 #[cfg(debug_assertions)]
-                info!(
-                    "{} got commit message for {}",
-                    txn.link(self.cluster.link().path().clone()),
-                    txn.id()
-                );
+                info!("{} got commit message for {}", self.cluster, txn.id());
 
                 let result = if !txn.has_leader(self.cluster.path()) {
                     // in this case, the kernel did not claim leadership
@@ -180,16 +176,11 @@ where
             Box::pin(async move {
                 key.expect_none()?;
 
-                let replicas = self
-                    .cluster
+                self.cluster
                     .replicas(*txn.id())
                     .map_ok(|replicas| Value::Tuple(replicas.iter().cloned().collect()))
                     .map_ok(State::from)
-                    .await?;
-
-                Ok(State::Tuple(
-                    (self.cluster.link().clone().into(), replicas).into(),
-                ))
+                    .await
             })
         }))
     }
@@ -219,30 +210,35 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let new_replica = params.require::<Link>(&label("add").into())?;
+                let new_replica = params.require::<LinkHost>(&label("add").into())?;
                 params.expect_empty()?;
 
                 let txn_id = *txn.id();
-                let self_link = txn.link(self.cluster.link().path().clone());
+
                 if self.cluster.add_replica(txn, new_replica.clone()).await? {
                     let replicas = self.cluster.replicas(txn_id).await?;
-                    let requests = replicas
+
+                    let mut requests = replicas
                         .iter()
-                        .cloned()
-                        .filter(|replica| replica != &self_link && replica != &new_replica)
+                        .filter(|replica| *replica != txn.host() && *replica != &new_replica)
                         .map(|replica| {
                             txn.put(
-                                replica.append(REPLICAS),
+                                self.cluster.schema().link_to(replica).append(REPLICAS),
                                 Value::default(),
                                 new_replica.clone().into(),
                             )
-                        });
+                        })
+                        .collect::<FuturesUnordered<_>>();
 
-                    try_join_all(requests).await?;
+                    while let Some(result) = requests.next().await {
+                        if let Err(cause) = result {
+                            warn!("failed to propagate add replica request: {}", cause);
+                        }
+                    }
                 }
 
                 let state = self.cluster.state().state(txn_id).await?;
-                debug!("state of source replica {} is {}", self_link, state);
+                debug!("state of source replica {} is {}", self.cluster, state);
                 Ok(state)
             })
         }))
@@ -254,11 +250,11 @@ where
     {
         Some(Box::new(|txn, replicas| {
             Box::pin(async move {
-                let replicas = Tuple::<Link>::try_cast_from(replicas, |v| {
+                let replicas = Tuple::<LinkHost>::try_cast_from(replicas, |v| {
                     TCError::bad_request("expected a Link to a Cluster, not", v)
                 })?;
 
-                self.cluster.remove_replicas(txn, &replicas).await
+                self.cluster.remove_replicas(*txn.id(), &replicas).await
             })
         }))
     }

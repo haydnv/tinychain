@@ -26,7 +26,7 @@ use uuid::Uuid;
 use tc_error::*;
 use tcgeneric::*;
 
-use super::{Link, TCString, Version};
+use super::{Link, LinkHost, TCString, Version};
 
 pub use number_general::{
     Boolean, BooleanType, Complex, ComplexType, Float, FloatInstance, FloatType, Int, IntType,
@@ -711,6 +711,12 @@ impl From<Bytes> for Value {
 impl From<Id> for Value {
     fn from(id: Id) -> Self {
         Self::Id(id)
+    }
+}
+
+impl From<LinkHost> for Value {
+    fn from(host: LinkHost) -> Self {
+        Self::Link(host.into())
     }
 }
 
