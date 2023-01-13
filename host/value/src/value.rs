@@ -437,7 +437,7 @@ impl DestreamVisitor for ValueTypeVisitor {
 }
 
 /// A generic value enum
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub enum Value {
     Bytes(Bytes),
     Email(EmailAddress),
@@ -516,6 +516,55 @@ impl Default for Value {
         Self::None
     }
 }
+
+impl PartialEq<Value> for Value {
+    fn eq(&self, other: &Value) -> bool {
+        match (self, other) {
+            (Self::None, Self::None) => true,
+
+            (Self::Bytes(this), Self::Bytes(that)) => this == that,
+            (Self::Email(this), Self::Email(that)) => this == that,
+            (Self::Id(this), Self::Id(that)) => this == that,
+            (Self::Link(this), Self::Link(that)) => this == that,
+            (Self::Number(this), Self::Number(that)) => this == that,
+            (Self::String(this), Self::String(that)) => this == that,
+            (Self::Tuple(this), Self::Tuple(that)) => this == that,
+            (Self::Version(this), Self::Version(that)) => this == that,
+
+            (Self::String(this), that) => match that {
+                Self::Email(that) => this == &that.to_string(),
+                Self::Link(that) => that == this,
+                Self::Number(that) => {
+                    if let Ok(this) = Number::from_str(this) {
+                        &this == that
+                    } else {
+                        false
+                    }
+                }
+                Self::Version(that) => that == this.as_str(),
+                _ => false,
+            },
+
+            (this, Self::String(that)) => match this {
+                Self::Email(this) => that == &this.to_string(),
+                Self::Link(this) => this == that,
+                Self::Number(this) => {
+                    if let Ok(that) = Number::from_str(that) {
+                        this == &that
+                    } else {
+                        false
+                    }
+                }
+                Self::Version(this) => that == &this.to_string(),
+                _ => false,
+            },
+
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Value {}
 
 impl Instance for Value {
     type Class = ValueType;
@@ -871,7 +920,12 @@ impl TryCastFrom<Value> for Id {
     fn can_cast_from(value: &Value) -> bool {
         match value {
             Value::Id(_) => true,
+            Value::Number(n) => match n {
+                Number::Float(_) | Number::Complex(_) => false,
+                n => Self::can_cast_from(&n.to_string()),
+            },
             Value::String(s) => Self::can_cast_from(s),
+            Value::Version(_) => true,
             _ => false,
         }
     }
@@ -879,7 +933,12 @@ impl TryCastFrom<Value> for Id {
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
             Value::Id(id) => Some(id),
+            Value::Number(n) => match n {
+                Number::Float(_) | Number::Complex(_) => None,
+                n => Self::opt_cast_from(n.to_string()),
+            },
             Value::String(s) => Self::opt_cast_from(s),
+            Value::Version(version) => Self::opt_cast_from(version.to_string()),
             _ => None,
         }
     }

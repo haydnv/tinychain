@@ -23,6 +23,7 @@ pub use tc_tensor as tensor;
 pub use tc_transact as transact;
 pub use tc_value as value;
 pub use tcgeneric as generic;
+use tcgeneric::TCPathBuf;
 
 pub mod chain;
 pub mod closure;
@@ -148,12 +149,13 @@ impl Builder {
             self.load_dir(path, txn_id).await
         };
 
+        let actor_id = TCPathBuf::default().into();
         let actor = if let Some(public_key) = &self.public_key {
-            txn::Actor::with_public_key(value::Value::None, public_key)
+            txn::Actor::with_public_key(actor_id, public_key)
                 .map(Arc::new)
                 .expect("actor")
         } else {
-            Arc::new(txn::Actor::new(value::Value::None))
+            Arc::new(txn::Actor::new(actor_id))
         };
 
         let schema = cluster::Schema::new(host, path_label.into(), self.lead.clone(), actor);

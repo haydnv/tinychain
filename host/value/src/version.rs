@@ -38,6 +38,18 @@ impl Ord for Version {
     }
 }
 
+impl PartialEq<String> for Version {
+    fn eq(&self, other: &String) -> bool {
+        &self.to_string() == other
+    }
+}
+
+impl PartialEq<str> for Version {
+    fn eq(&self, other: &str) -> bool {
+        self.to_string().as_str() == other
+    }
+}
+
 impl<D: Digest> Hash<D> for Version {
     fn hash(self) -> Output<D> {
         Hash::<D>::hash([self.major, self.minor, self.rev])

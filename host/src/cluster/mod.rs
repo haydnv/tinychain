@@ -54,7 +54,7 @@ pub struct Schema {
     path: TCPathBuf,
     host: LinkHost,
     lead: Option<LinkHost>,
-    actor: Arc<Actor>,
+    actor: Arc<Actor>, // TODO: remove this and use the public key of the gateway instead
 }
 
 impl Schema {
@@ -66,6 +66,11 @@ impl Schema {
             lead,
             actor,
         }
+    }
+
+    /// Borrow the [`LinkHost`] of the lead replica, if any.
+    pub fn lead(&self) -> Option<&LinkHost> {
+        self.lead.as_ref()
     }
 
     /// Construct a canonical [`Link`]
@@ -85,6 +90,11 @@ impl Schema {
     /// Construct a [`Link`] to this [`Replica`]
     pub fn self_link(&self) -> Link {
         self.link_to(&self.host)
+    }
+
+    /// Borrow the public key of this [`Cluster`]
+    pub fn public_key(&self) -> &[u8] {
+        self.actor.public_key().as_bytes()
     }
 
     fn extend<N: Into<PathSegment>>(&self, name: N) -> Self {
@@ -147,7 +157,7 @@ impl<T> Cluster<T> {
         self.schema.path.as_slice()
     }
 
-    /// Borrow the public key of this `Cluster`.
+    /// Borrow the public key of this replica.
     pub fn public_key(&self) -> &[u8] {
         self.actor.public_key().as_bytes()
     }

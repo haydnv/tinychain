@@ -149,10 +149,10 @@ impl Txn {
 
     /// Check if this host is leading the transaction for the specified cluster.
     pub fn is_leader(&self, cluster_path: &[PathSegment]) -> bool {
-        if let Some(host) = self.leader(cluster_path) {
+        if let Some(leader) = self.leader(cluster_path) {
             // TODO: validate transaction claim formats on receipt
-            let hostname = host.host().as_ref().expect("txn leader hostname");
-            hostname == self.gateway.host() && host.path().as_slice() == cluster_path
+            let hostname = leader.host().expect("txn leader hostname");
+            hostname == self.gateway.host() && leader.path().as_slice() == cluster_path
         } else {
             false
         }
@@ -160,9 +160,9 @@ impl Txn {
 
     /// Check if the cluster at the specified path on this host is the owner of the transaction.
     pub fn is_owner(&self, cluster_path: &[PathSegment]) -> bool {
-        if let Some(host) = self.owner() {
-            host.host().as_ref().expect("txn owner hostname") == self.gateway.host()
-                && host.path().as_slice() == cluster_path
+        if let Some(owner) = self.owner() {
+            owner.host().expect("txn owner hostname") == self.gateway.host()
+                && owner.path().as_slice() == cluster_path
         } else {
             false
         }

@@ -122,7 +122,7 @@ where
     Cluster<Dir<T>>: Route + Send + Sync,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        debug!("Dir::route {}", TCPath::from(path));
+        debug!("DirEntry::route {}", TCPath::from(path));
 
         match self {
             Self::Dir(dir) => dir.route(path),

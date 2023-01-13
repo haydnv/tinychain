@@ -1,5 +1,6 @@
 //! [`Link`] and its components
 
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt;
 use std::iter;
@@ -15,6 +16,7 @@ use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 use sha2::digest::{Digest, Output};
 
+use crate::TCString;
 use tc_error::*;
 use tcgeneric::{Id, PathLabel, PathSegment, TCPathBuf};
 
@@ -266,6 +268,24 @@ impl Ord for LinkHost {
     }
 }
 
+impl PartialEq<String> for LinkHost {
+    fn eq(&self, other: &String) -> bool {
+        &self.to_string() == other
+    }
+}
+
+impl PartialEq<TCString> for LinkHost {
+    fn eq(&self, other: &TCString) -> bool {
+        other == &self.to_string()
+    }
+}
+
+impl PartialEq<str> for LinkHost {
+    fn eq(&self, other: &str) -> bool {
+        self.to_string().as_str() == other
+    }
+}
+
 impl TryCastFrom<Value> for LinkHost {
     fn can_cast_from(value: &Value) -> bool {
         match value {
@@ -345,8 +365,8 @@ impl Link {
     }
 
     /// Borrow this [`Link`]'s [`LinkHost`], if it has one.
-    pub fn host(&'_ self) -> &'_ Option<LinkHost> {
-        &self.host
+    pub fn host(&self) -> Option<&LinkHost> {
+        self.host.as_ref()
     }
 
     /// Borrow this [`Link`]'s path.
@@ -380,6 +400,34 @@ impl PartialEq<[PathSegment]> for Link {
         }
 
         &self.path == other
+    }
+}
+
+impl PartialEq<String> for Link {
+    fn eq(&self, other: &String) -> bool {
+        self == other.as_str()
+    }
+}
+
+impl PartialEq<TCString> for Link {
+    fn eq(&self, other: &TCString) -> bool {
+        self == other.as_str()
+    }
+}
+
+impl PartialEq<str> for Link {
+    fn eq(&self, other: &str) -> bool {
+        let other = other.borrow();
+
+        if other.is_empty() {
+            false
+        } else if other.starts_with('/') {
+            self.host.is_none() && &self.path == other
+        } else if other.ends_with('/') {
+            self.to_string() == other[..other.len() - 1]
+        } else {
+            self.to_string() == other
+        }
     }
 }
 
@@ -586,9 +634,15 @@ impl fmt::Display for Link {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(host) = &self.host {
             write!(f, "{}", host)?;
-        }
 
-        write!(f, "{}", self.path)
+            if !self.path.is_empty() {
+                write!(f, "{}", self.path)?;
+            }
+
+            Ok(())
+        } else {
+            write!(f, "{}", self.path)
+        }
     }
 }
 
@@ -597,7 +651,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_eq() {
+    fn test_link_host_eq() {
         let a = LinkHost {
             protocol: LinkProtocol::HTTP,
             address: Ipv4Addr::new(1, 2, 3, 4).into(),
@@ -610,6 +664,27 @@ mod tests {
             port: Some(234),
         };
 
+        assert_eq!(&a, "http://1.2.3.4:123");
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn test_link_eq() {
+        assert_eq!(Link::default(), "/".to_string());
+
+        let link = Link::from_str("/").expect("link");
+        assert_eq!(link, link);
+        assert_eq!(link, Link::from(TCPathBuf::default()));
+        assert_eq!(&link, "/");
+        assert_ne!(&link, "");
+
+        let link = Link::from_str("http://123.45.67.8/").expect("link");
+        assert_eq!(link, link);
+
+        assert_eq!(&link, "http://123.45.67.8/");
+        assert_eq!(&link, "http://123.45.67.8");
+
+        assert_ne!(&link, "https://123.45.67.8/");
+        assert_ne!(&link, "https://123.45.67.8:80");
     }
 }

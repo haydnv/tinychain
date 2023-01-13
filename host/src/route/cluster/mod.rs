@@ -3,17 +3,18 @@ use std::fmt;
 use bytes::Bytes;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
-use log::{debug, info, warn};
+use log::{debug, info, trace, warn};
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
-use tc_value::{LinkHost, Value};
-use tcgeneric::{label, PathSegment, Tuple};
+use tc_value::{Link, LinkHost, Value};
+use tcgeneric::{label, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::cluster::{Cluster, Replica, REPLICAS};
-use crate::object::{InstanceClass, Object};
+use crate::object::InstanceClass;
 use crate::state::State;
+use crate::txn::Txn;
 
 use super::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
 
@@ -36,9 +37,27 @@ where
     {
         Some(Box::new(move |_txn, key| {
             Box::pin(future::ready((|key: Value| {
-                key.expect_none()?;
-                let public_key = Bytes::from(self.cluster.public_key().to_vec());
-                Ok(Value::from(public_key).into())
+                trace!("GET key {} from {}", key, self.cluster);
+
+                if key.is_none() {
+                    // return the public key of this replica
+                    let public_key = Bytes::from(self.cluster.public_key().to_vec());
+                    return Ok(Value::from(public_key).into());
+                }
+
+                // TODO: remove this code and use the public key of the gateway instead
+
+                let key = TCPathBuf::try_cast_from(key, |v| {
+                    TCError::bad_request("invalid key specification", v)
+                })?;
+
+                if key == TCPathBuf::default() {
+                    // return the public key of this cluster
+                    let public_key = Bytes::from(self.cluster.schema().public_key().to_vec());
+                    Ok(Value::from(public_key).into())
+                } else {
+                    Err(TCError::not_found(key))
+                }
             })(key)))
         }))
     }
@@ -50,23 +69,45 @@ where
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
                 if key.is_none() {
+                    // this is a notification of a new participant in the current transaction
+
                     let participant = value
                         .try_cast_into(|v| TCError::bad_request("invalid participant link", v))?;
 
                     return self.cluster.mutate(&txn, participant).await;
                 }
 
+                // this is a request to install a new cluster
+
                 let value = if InstanceClass::can_cast_from(&value) {
-                    InstanceClass::try_cast_from(value, |v| {
+                    let class = InstanceClass::try_cast_from(value, |v| {
                         TCError::bad_request("invalid class definition", v)
-                    })
-                    .map(Object::Class)
-                    .map(State::Object)?
+                    })?;
+
+                    let link = class
+                        .extends()
+                        .ok_or_else(|| TCError::bad_request("missing Cluster link", &class))?;
+
+                    if link.host().is_some() && link.host() != self.cluster.schema().lead() {
+                        return Err(TCError::not_implemented(
+                            "install a Cluster with a different lead replica",
+                        ));
+                    }
+
+                    if !link.path().starts_with(self.cluster.path()) {
+                        return Err(TCError::unsupported(format!(
+                            "cannot install {} at {}",
+                            link,
+                            self.cluster.link().path()
+                        )));
+                    }
+
+                    State::Object(class.into())
                 } else {
                     value
                 };
 
-                self.cluster.state().put(&txn, &[], key, value).await
+                self.cluster.state().put(&txn, &[], key.into(), value).await
             })
         }))
     }
@@ -271,10 +312,32 @@ where
     T: Replica + Route + Transact + fmt::Display + Send + Sync,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        trace!("Cluster::route {}", TCPath::from(path));
+
         match path {
             path if path.is_empty() => Some(Box::new(ClusterHandler::from(self))),
             path if path == &[REPLICAS] => Some(Box::new(ReplicaHandler::from(self))),
             path => self.state().route(path),
         }
+    }
+}
+
+async fn validate_install<N: Into<PathSegment> + Clone + fmt::Display>(
+    txn: &Txn,
+    parent: &Link,
+    name: &N,
+) -> TCResult<()> {
+    debug!("check authorization to install {} at {}", name, parent);
+
+    let authorized = txn
+        .request()
+        .scopes()
+        .get(parent, &TCPathBuf::default().into())
+        .ok_or_else(|| TCError::unauthorized(format!("install request for {}", name)))?;
+
+    if authorized.contains(&TCPathBuf::from(name.clone().into())) {
+        Ok(())
+    } else {
+        Err(TCError::forbidden("install a new Cluster at", name))
     }
 }
