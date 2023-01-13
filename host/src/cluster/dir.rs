@@ -5,7 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use futures::future::{join_all, try_join_all, TryFutureExt};
+use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
+use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, info};
 use safecast::CastInto;
 
@@ -67,17 +68,23 @@ pub enum DirEntry<T> {
     Item(Cluster<BlockChain<T>>),
 }
 
+/// A commit guard for a [`DirEntry`]
+pub enum DirEntryCommit<T: Transact + Clone + Send + Sync + 'static> {
+    Dir(<Cluster<Dir<T>> as Transact>::Commit),
+    Item(<Cluster<BlockChain<T>> as Transact>::Commit),
+}
+
 #[async_trait]
 impl<T: Transact + Clone + Send + Sync + 'static> Transact for DirEntry<T> {
-    type Commit = ();
+    type Commit = DirEntryCommit<T>;
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("commit {} at {}", self, txn_id);
 
         match self {
-            Self::Dir(dir) => dir.commit(txn_id).await,
-            Self::Item(item) => item.commit(txn_id).await,
-        };
+            Self::Dir(dir) => dir.commit(txn_id).map(DirEntryCommit::Dir).await,
+            Self::Item(item) => item.commit(txn_id).map(DirEntryCommit::Item).await,
+        }
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
@@ -367,43 +374,32 @@ impl<T: Transact + Clone + Send + Sync + 'static> Transact for Dir<T>
 where
     DirEntry<T>: Clone,
 {
-    type Commit = ();
+    type Commit = Option<Map<DirEntryCommit<T>>>;
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("commit {}", self);
 
-        if let Some(entries) = self.contents.commit(txn_id).await {
-            join_all(entries.iter().map(|(_name, entry)| async move {
-                match entry {
-                    DirEntry::Dir(dir) => dir.commit(txn_id).await,
-                    DirEntry::Item(item) => item.commit(txn_id).await,
-                }
-            }))
-            .await;
+        if let Some(contents) = self.contents.commit(txn_id).await {
+            let commits = contents
+                .iter()
+                .map(|(name, entry)| entry.commit(txn_id).map(|guard| (name.clone(), guard)))
+                .collect::<FuturesUnordered<_>>();
+
+            Some(commits.collect().await)
+        } else {
+            None
         }
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
         if let Some(contents) = self.contents.rollback(txn_id).await {
-            join_all(contents.iter().map(|(_name, entry)| async move {
-                match entry {
-                    DirEntry::Dir(dir) => dir.rollback(txn_id).await,
-                    DirEntry::Item(item) => item.rollback(txn_id).await,
-                }
-            }))
-            .await;
+            join_all(contents.values().map(|entry| entry.rollback(txn_id))).await;
         }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         if let Some(contents) = self.contents.finalize(txn_id).await {
-            join_all(contents.iter().map(|(_name, entry)| async move {
-                match entry {
-                    DirEntry::Dir(dir) => dir.finalize(txn_id).await,
-                    DirEntry::Item(item) => item.finalize(txn_id).await,
-                }
-            }))
-            .await;
+            join_all(contents.values().map(|entry| entry.finalize(txn_id))).await;
         }
     }
 }
