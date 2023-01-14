@@ -1,6 +1,6 @@
-:mod:`app`
+:mod:`service`
 ==========================
 
-.. automodule:: tinychain.app
+.. automodule:: tinychain.service
     :members:
     :show-inheritance:

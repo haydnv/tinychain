@@ -7,7 +7,6 @@ Modules
 .. toctree::
    :maxdepth: 3
 
-   app
    btree
    chain
    generic
@@ -24,6 +23,7 @@ Modules
    scalar.number
    scalar.ref
    scalar.value
+   service
    state
    table
    tensor
