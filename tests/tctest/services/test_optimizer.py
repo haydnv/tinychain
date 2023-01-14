@@ -70,15 +70,16 @@ class OptimizerTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.actor = rjwt.Actor('/')
-        cls.host = start_host(NS, public_key=cls.actor.public_key)
+        actor = rjwt.Actor('/')
 
-        cls.host.put(tc.URI(tc.service.Library), str(tc.ml.NS)[1:], tc.URI(tc.service.Library) + tc.ml.NS)
-        cls.host.install(tc.ml.NeuralNets())
-        cls.host.install(tc.ml.Optimizers())
+        cls.host = start_host(NS, public_key=actor.public_key)
 
-        cls.host.put(tc.URI(tc.service.Library), cls.URI[-3], cls.URI[:-2])
-        cls.host.install(OptimizerTester())
+        cls.host.create_namespace(actor, tc.URI(tc.service.Library), tc.ml.NS)
+        cls.host.install(actor, tc.ml.NeuralNets())
+        cls.host.install(actor, tc.ml.Optimizers())
+
+        cls.host.create_namespace(actor, cls.URI.path()[0], NS)
+        cls.host.install(actor, OptimizerTester())
 
     def testCNN(self):
         inputs = np.ones([BATCH_SIZE, 3, 5, 5])

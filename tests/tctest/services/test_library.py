@@ -45,7 +45,10 @@ class LibraryVersionTests(unittest.TestCase):
             print(f"host {i} replicas", hosts[i].get("/lib/replicas"))
             print()
 
-        hosts[0].put("/lib", "test_library", tc.URI(LEAD, "lib", "test_library"))
+        print()
+        print("CREATE DIR")
+
+        hosts[0].create_namespace(actor, tc.URI(TestLibV0).path()[0], NS, LEAD)
 
         for i in range(len(hosts)):
             print()
@@ -61,7 +64,9 @@ class LibraryVersionTests(unittest.TestCase):
             print(f"host {i} replicas", hosts[i].get("/lib/test_library/replicas"))
             print()
 
-        hosts[0].install(TestLibV0())
+        print()
+        print("INSTALL LIBRARY")
+        hosts[0].install(actor, TestLibV0())
         print()
 
         for host in hosts:
@@ -83,7 +88,7 @@ class LibraryVersionTests(unittest.TestCase):
         print("host stopped")
         print()
 
-        hosts[1].update(TestLibV1())
+        hosts[1].update(actor, TestLibV1())
 
         hosts[2].start(wait_time=2)
 

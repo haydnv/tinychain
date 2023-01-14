@@ -370,8 +370,13 @@ impl Link {
     }
 
     /// Borrow this [`Link`]'s path.
-    pub fn path(&'_ self) -> &'_ TCPathBuf {
+    pub fn path(&self) -> &TCPathBuf {
         &self.path
+    }
+
+    /// Borrow this [`Link`]'s path mutably.
+    pub fn path_mut(&mut self) -> &mut TCPathBuf {
+        &mut self.path
     }
 
     /// Append the given [`PathSegment`] to this [`Link`] and return it.
@@ -480,6 +485,13 @@ impl From<(LinkHost, TCPathBuf)> for Link {
             host: Some(host),
             path,
         }
+    }
+}
+
+impl From<(Option<LinkHost>, TCPathBuf)> for Link {
+    fn from(tuple: (Option<LinkHost>, TCPathBuf)) -> Link {
+        let (host, path) = tuple;
+        Link { host, path }
     }
 }
 

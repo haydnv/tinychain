@@ -29,7 +29,7 @@ class ServiceVersionTests(unittest.TestCase):
             start_host(NS, http_port=8703, public_key=actor.public_key, replicate=LEAD),
         ]
 
-        hosts[0].put(tc.URI(tc.service.Service), "test_service", tc.URI(LEAD, "service", "test_service"))
+        hosts[0].create_namespace(actor, tc.URI(tc.service.Service), NS, LEAD)
 
         print()
         print()
@@ -50,7 +50,7 @@ class ServiceVersionTests(unittest.TestCase):
             print(f"host {i} replicas", hosts[i].get(endpoint.append("replicas")))
             print()
 
-        hosts[0].install(TestServiceV0())
+        hosts[0].install(actor, TestServiceV0())
         print()
 
         endpoint = tc.URI(TestServiceV0).path().append("hello")

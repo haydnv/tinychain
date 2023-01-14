@@ -9,13 +9,13 @@ use tcgeneric::{Map, PathSegment, TCPath, TCPathBuf};
 use crate::cluster::{library, DirItem, Library};
 use crate::kernel::CLASS;
 use crate::object::InstanceClass;
-use crate::route::cluster::dir::{expect_version, extract_classes};
 use crate::route::object::method::route_attr;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
 
-use super::dir::DirHandler;
+use super::authorize_install;
+use super::dir::{expect_version, extract_classes, DirHandler};
 
 impl Route for library::Version {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -73,6 +73,19 @@ impl<'a> Handler<'a> for LibraryHandler<'a> {
                     })?;
 
                     let (link, version) = expect_version(value)?;
+
+                    {
+                        let (host, mut path) = link.clone().into_inner();
+
+                        let name = path.pop().ok_or_else(|| {
+                            TCError::bad_request("cluster link is missing a path", &link)
+                        })?;
+
+                        let parent = (host, path).into();
+                        let entry_path = [name, number.clone().into()].into_iter().collect();
+                        authorize_install(txn, &parent, &entry_path)?;
+                    }
+
                     let (version, classes) = extract_classes(version)?;
 
                     if !classes.is_empty() && txn.is_leader(link.path()) {
@@ -144,6 +157,19 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
                 })?;
 
                 let (link, lib) = expect_version(value)?;
+
+                {
+                    let mut parent = link.clone();
+                    if parent.path_mut().pop().as_ref() != Some(&name) {
+                        return Err(TCError::unsupported(format!(
+                            "invalid link for {}: {}",
+                            name, parent
+                        )));
+                    }
+
+                    authorize_install(txn, &parent, &TCPathBuf::from(name.clone()))?;
+                }
+
                 let (version, classes) = extract_classes(lib)?;
 
                 if link.path().len() <= 1 {

@@ -91,7 +91,10 @@ class URI(object):
         segments = self.split()
 
         if isinstance(item, int):
-            return segments[item]
+            if item == 0:
+                return URI(segments[0])
+            else:
+                return URI('/').append(segments[item])
         elif isinstance(item, slice):
             if not segments[item]:
                 return URI('/')
@@ -101,9 +104,15 @@ class URI(object):
             elif "://" in segments[item][0]:
                 return URI.join(segments[item])
             elif len(segments[item]) == 1:
-                return segments[item]
+                [segment] = segments[item]
+                if "://" in segment or segment[0] in ['/', '$']:
+                    return URI(segment)
+                else:
+                    return URI('/').append(segment)
             else:
                 return URI('/').extend(*segments[item])
+        else:
+            raise TypeError(f"cannot index a URI with {item}")
 
     def __gt__(self, other):
         return self.startswith(other) and len(self) > len(other)
@@ -112,7 +121,7 @@ class URI(object):
         return self.startswith(other)
 
     def __len__(self):
-        return len(str(self))
+        return len(self.split())
 
     def __lt__(self, other):
         return other.startswith(self) and len(self) < len(other)

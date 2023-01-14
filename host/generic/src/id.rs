@@ -119,38 +119,22 @@ impl PartialEq<str> for TCPathBuf {
     fn eq(&self, other: &str) -> bool {
         if other.is_empty() {
             return false;
+        } else if self.segments.is_empty() {
+            return other == "/";
         }
 
-        let mut start = 0;
         let mut i = 0;
-        loop {
-            if i == self.len()
-                && (start == other.len() || (start == other.len() - 1 && other.ends_with("/")))
-            {
-                return true;
-            } else if i == self.len() {
+        for segment in other.split('/') {
+            if i >= self.segments.len() {
                 return false;
-            } else if start >= other.len() {
-                return false;
-            }
-
-            let segment = self.segments[i].as_str();
-            if &other[start..start + 1] == "/" {
-                start += 1;
-                if other.len() < start + segment.len() {
-                    return false;
-                }
-            } else {
-                return false;
-            }
-
-            if &other[start..(start + segment.len())] == segment {
-                start += segment.len();
+            } else if segment == self.segments[i] {
                 i += 1;
             } else {
                 return false;
             }
         }
+
+        self.segments.len() == i
     }
 }
 

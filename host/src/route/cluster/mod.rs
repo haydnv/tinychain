@@ -71,8 +71,9 @@ where
                 if key.is_none() {
                     // this is a notification of a new participant in the current transaction
 
-                    let participant = value
-                        .try_cast_into(|v| TCError::bad_request("invalid participant link", v))?;
+                    let participant = value.try_cast_into(|v| {
+                        TCError::bad_request("expected a participant Link but found", v)
+                    })?;
 
                     return self.cluster.mutate(&txn, participant).await;
                 }
@@ -322,22 +323,40 @@ where
     }
 }
 
-async fn validate_install<N: Into<PathSegment> + Clone + fmt::Display>(
-    txn: &Txn,
-    parent: &Link,
-    name: &N,
-) -> TCResult<()> {
-    debug!("check authorization to install {} at {}", name, parent);
+fn authorize_install(txn: &Txn, parent: &Link, entry_path: &TCPathBuf) -> TCResult<()> {
+    debug!(
+        "check authorization to install {} at {}",
+        entry_path, parent
+    );
 
-    let authorized = txn
-        .request()
-        .scopes()
-        .get(parent, &TCPathBuf::default().into())
-        .ok_or_else(|| TCError::unauthorized(format!("install request for {}", name)))?;
-
-    if authorized.contains(&TCPathBuf::from(name.clone().into())) {
-        Ok(())
+    let replicate_from_this_host = if let Some(lead) = parent.host() {
+        lead == txn.host()
     } else {
-        Err(TCError::forbidden("install a new Cluster at", name))
+        true
+    };
+
+    if replicate_from_this_host {
+        // this is a new install, make sure the request was signed with the cluster's private key
+
+        let parent = if parent.host().is_some() {
+            parent.clone()
+        } else {
+            (txn.host().clone(), parent.path().clone()).into()
+        };
+
+        let authorized = txn
+            .request()
+            .scopes()
+            .get(&parent, &TCPathBuf::default().into())
+            .ok_or_else(|| TCError::unauthorized(format!("install request for {}", parent)))?;
+
+        if authorized.iter().any(|scope| entry_path.starts_with(scope)) {
+            Ok(())
+        } else {
+            Err(TCError::forbidden("install a new Cluster at", entry_path))
+        }
+    } else {
+        // this is a replica, it doesn't make sense to require a recently-signed token
+        Ok(())
     }
 }
