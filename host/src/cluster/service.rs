@@ -1,3 +1,5 @@
+//! A replicated, versioned [`Service`]
+
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -25,11 +27,11 @@ use crate::state::{State, ToState};
 use crate::transact::TxnId;
 use crate::txn::Txn;
 
-pub const CHAINS: Label = label("chains");
 pub(super) const SCHEMA: Label = label("schemata");
 
 const ERR_MISSING_LINK: &str = "missing Link for Service version";
 
+/// An attribute of a [`Version`]
 #[derive(Clone)]
 pub enum Attr {
     Chain(Chain<CollectionBase>),
@@ -48,6 +50,7 @@ impl fmt::Display for Attr {
     }
 }
 
+/// A version of a [`Service`]
 #[derive(Clone)]
 pub struct Version {
     path: TCPathBuf,
@@ -247,6 +250,7 @@ impl fmt::Display for Version {
     }
 }
 
+/// A stateful collection of [`Chain`]s and [`Scalar`] methods ([`Attr`]s)
 #[derive(Clone)]
 pub struct Service {
     dir: fs::Dir,

@@ -20,7 +20,7 @@ use crate::scalar::{OpRef, Scalar, TCRef};
 
 use super::PREFIX;
 
-/// The [`Class`] of a [`Collection`].
+/// The [`Class`] of a `Collection`.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CollectionType {
     BTree(BTreeType),
@@ -88,7 +88,7 @@ impl fmt::Display for CollectionType {
     }
 }
 
-/// The schema of a [`Chain`] whose [`Subject`] is a `Collection`.
+/// The schema of a `Collection`.
 #[derive(Clone, Eq, PartialEq)]
 pub enum CollectionSchema {
     BTree(tc_btree::RowSchema),

@@ -1,4 +1,4 @@
-//! A [`Chain`] which stores every mutation of its [`Subject`] in a series of `ChainBlock`s.
+//! A `Chain` which stores every mutation of its subject in a series of `ChainBlock`s.
 //!
 //! Each block in the chain begins with the hash of the previous block.
 
@@ -35,7 +35,7 @@ use super::{ChainInstance, Recover, CHAIN};
 
 pub(crate) const HISTORY: Label = label(".history");
 
-/// A [`Chain`] which stores every mutation of its [`Subject`] in a series of `ChainBlock`s
+/// A `Chain` which stores every mutation of its subject in a series of `ChainBlock`s
 #[derive(Clone)]
 pub struct BlockChain<T> {
     subject: T,

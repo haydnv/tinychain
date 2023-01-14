@@ -49,6 +49,7 @@ pub trait Replica {
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
 }
 
+/// The static configuration of a [`Cluster`]
 #[derive(Clone)]
 pub struct Schema {
     path: TCPathBuf,

@@ -1,3 +1,4 @@
+/// A replicated, versioned set of [`InstanceClass`]es
 use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
@@ -17,6 +18,7 @@ use crate::txn::Txn;
 
 use super::DirItem;
 
+/// A version of a set of [`InstanceClass`]es
 #[derive(Clone)]
 pub struct Version {
     classes: fs::File<Id, InstanceClass>,
@@ -55,6 +57,7 @@ impl fmt::Display for Version {
     }
 }
 
+/// A versioned set of [`InstanceClass`]es
 #[derive(Clone)]
 pub struct Class {
     dir: fs::Dir,

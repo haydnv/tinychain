@@ -388,7 +388,7 @@ pub trait Persist<D: Dir>: Sized {
     type Txn: Transaction<D>;
     type Schema: Clone + Send + Sync;
 
-    /// Create a new instance of [`Self`] from an empty [`Self::Store`].
+    /// Create a new instance of [`Self`] from an empty `Store`.
     fn create(txn_id: TxnId, schema: Self::Schema, store: D::Store) -> TCResult<Self>;
 
     /// Load a saved instance of [`Self`] from persistent storage.

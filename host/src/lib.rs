@@ -47,6 +47,7 @@ pub const MIN_CACHE_SIZE: usize = 5000;
 type TokioError = Box<dyn std::error::Error + Send + Sync + 'static>;
 type UserSpace = (kernel::Class, kernel::Library, kernel::Service);
 
+/// Build a new host.
 pub struct Builder {
     cache: Arc<freqfs::Cache<fs::CacheBlock>>,
     data_dir: PathBuf,
@@ -57,6 +58,7 @@ pub struct Builder {
 }
 
 impl Builder {
+    /// Load the transactional filesystem cache.
     pub async fn load(cache_size: usize, data_dir: PathBuf, workspace: PathBuf) -> Self {
         assert!(
             data_dir.exists(),
@@ -81,16 +83,19 @@ impl Builder {
         }
     }
 
+    /// Specify the [`gateway::Config`] of this host.
     pub fn with_gateway(mut self, gateway: gateway::Config) -> Self {
         self.gateway = Some(gateway);
         self
     }
 
+    /// Specify the host to replicate from (if any).
     pub fn with_lead(mut self, lead: Option<value::LinkHost>) -> Self {
         self.lead = lead;
         self
     }
 
+    /// Specify the public key of the cluster to join (if any).
     pub fn with_public_key(mut self, public_key: Option<String>) -> Self {
         if let Some(public_key) = public_key {
             let public_key = hex::decode(public_key).expect("public key");
@@ -249,6 +254,7 @@ impl Builder {
         Ok(())
     }
 
+    /// Start a server and replicate its state from the lead replica, if any.
     pub async fn replicate_and_serve(self) -> Result<(), TokioError> {
         let (gateway, userspace) = self.bootstrap().await;
 
