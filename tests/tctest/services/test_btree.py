@@ -27,7 +27,7 @@ class BTreeChainTests(PersistenceTest, unittest.TestCase):
 
         return Persistent()
 
-    def execute(self, hosts):
+    def execute(self, _actor, hosts):
         row1 = [1, "one"]
         row2 = [2, "two"]
 

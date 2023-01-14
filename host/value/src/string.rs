@@ -53,6 +53,18 @@ impl Deref for TCString {
     }
 }
 
+impl PartialEq<String> for TCString {
+    fn eq(&self, other: &String) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl PartialEq<str> for TCString {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
 impl From<String> for TCString {
     fn from(s: String) -> Self {
         Self(s)

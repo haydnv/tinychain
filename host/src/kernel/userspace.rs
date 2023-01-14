@@ -322,14 +322,16 @@ where
             if owner.path() == cluster.path() {
                 debug!("{} owns this transaction, no need to notify", cluster);
             } else if txn.is_leader(cluster.path()) {
-                let self_link = txn.link(cluster.link().path().clone());
-                txn.put(owner.clone(), Value::default(), self_link.into())
-                    .await?;
+                txn.put(
+                    owner.clone(),
+                    Value::default(),
+                    cluster.schema().self_link().into(),
+                )
+                .await?;
             } else {
-                let self_link = txn.link(cluster.link().path().clone());
                 debug!(
                     "{} is not leading this transaction, no need to notify owner",
-                    self_link
+                    cluster
                 );
             }
 

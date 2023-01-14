@@ -109,6 +109,35 @@ impl<Idx: std::slice::SliceIndex<[PathSegment]>> std::ops::Index<Idx> for TCPath
     }
 }
 
+impl PartialEq<String> for TCPathBuf {
+    fn eq(&self, other: &String) -> bool {
+        self == other.as_str()
+    }
+}
+
+impl PartialEq<str> for TCPathBuf {
+    fn eq(&self, other: &str) -> bool {
+        if other.is_empty() {
+            return false;
+        } else if self.segments.is_empty() {
+            return other == "/";
+        }
+
+        let mut i = 0;
+        for segment in other.split('/') {
+            if i >= self.segments.len() {
+                return false;
+            } else if segment == self.segments[i] {
+                i += 1;
+            } else {
+                return false;
+            }
+        }
+
+        self.segments.len() == i
+    }
+}
+
 impl IntoIterator for TCPathBuf {
     type Item = PathSegment;
     type IntoIter = std::vec::IntoIter<Self::Item>;

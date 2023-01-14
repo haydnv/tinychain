@@ -112,10 +112,6 @@ impl FileEntry {
         class: EntryType,
         txn_id: TxnId,
     ) -> TCResult<Self> {
-        fn err<T: fmt::Display>(class: T) -> TCError {
-            TCError::bad_request("cannot load file for", class)
-        }
-
         match class {
             EntryType::BTree => File::load(cache, txn_id).map_ok(Self::BTree).await,
             EntryType::Chain => File::load(cache, txn_id).map_ok(Self::Chain).await,

@@ -5,6 +5,8 @@ import pathlib
 import shutil
 import subprocess
 import time
+
+import rjwt
 import tinychain as tc
 
 
@@ -38,7 +40,11 @@ class Docker(tc.host.Local.Process):
 
         # build the Docker image
         print("building Docker image")
-        (image, _logs) = self.client.images.build(path=".", dockerfile=DOCKERFILE)
+        try:
+            (image, _logs) = self.client.images.build(path=".", dockerfile=DOCKERFILE)
+        except Exception as e:
+            exit(f"building Docker image failed: {e}")
+
         print("built Docker image")
 
         # construct the TinyChain host arguments
@@ -48,8 +54,11 @@ class Docker(tc.host.Local.Process):
         cmd = ' '.join(cmd)
 
         # run a Docker container
-        print(f"running new Docker container with image {image.id}")
-        self.container = self.client.containers.run(image.id, cmd, network_mode=DOCKER_NETWORK_MODE, detach=True)
+        print(f"running new Docker container with image {image.id}...")
+        self.container = self.client.containers.run(
+            image.id, cmd,
+            network_mode=DOCKER_NETWORK_MODE,
+            detach=True)
 
         time.sleep(wait_time)
         print(self.container.logs().decode("utf-8"))
@@ -71,7 +80,7 @@ class Docker(tc.host.Local.Process):
         self.stop()
 
 
-def start_docker(ns, host_uri=None, wait_time=1., **flags):
+def start_docker(ns, host_uri=None, public_key=None, wait_time=1., **flags):
     assert ns.startswith('/'), f"namespace must be a URI path, not {ns}"
 
     if not os.path.exists(DOCKERFILE):
@@ -84,6 +93,9 @@ def start_docker(ns, host_uri=None, wait_time=1., **flags):
         del flags["http_port"]
     elif host_uri is not None and host_uri.port():
         port = host_uri.port()
+
+    if public_key:
+        flags["public_key"] = public_key.hex()
 
     process = Docker(http_port=port, **flags)
     process.start(wait_time)
@@ -106,7 +118,7 @@ class Local(tc.host.Local.Process):
             raise ValueError(f"invalid port: {http_port}")
 
         if "data_dir" in flags:
-            _maybe_create_dir(flags["data_dir"], force_create)
+            _maybe_create_dir(flags["data_dir"])
 
         args = [
             path,
@@ -153,7 +165,7 @@ class Local(tc.host.Local.Process):
             self.stop()
 
 
-def start_local_host(ns, host_uri=None, overwrite=True, wait_time=1, **flags):
+def start_local_host(ns, host_uri=None, public_key=None, wait_time=1, **flags):
     assert ns.startswith('/'), f"namespace must be a URI path, not {ns}"
     name = str(ns)[1:].replace('/', '_')
 
@@ -168,8 +180,11 @@ def start_local_host(ns, host_uri=None, overwrite=True, wait_time=1, **flags):
     elif host_uri is not None and host_uri.port():
         port = host_uri.port()
 
+    if public_key:
+        flags["public_key"] = public_key.hex()
+
     data_dir = f"/tmp/tc/data/{port}/{name}"
-    if overwrite and os.path.exists(data_dir):
+    if os.path.exists(data_dir):
         shutil.rmtree(data_dir)
 
     if "log_level" not in flags:
@@ -200,11 +215,9 @@ else:
     start_host = start_docker
 
 
-def _maybe_create_dir(path, force):
+def _maybe_create_dir(path):
     path = pathlib.Path(path)
     if path.exists() and path.is_dir():
         return
-    elif force:
-        os.makedirs(path)
     else:
-        raise RuntimeError(f"no directory at {path}")
+        os.makedirs(path)

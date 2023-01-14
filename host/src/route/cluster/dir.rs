@@ -40,13 +40,9 @@ where
     where
         State: From<Item>,
     {
-        let replicate_from_this_host = {
-            if link.host().is_none() {
-                true
-            } else {
-                let self_link = txn.link(link.path().clone());
-                self_link == link
-            }
+        let replicate_from_this_host = match link.host() {
+            None => true,
+            Some(host) => host == txn.host(),
         };
 
         if let Some(item) = item {
@@ -59,9 +55,7 @@ where
                     .put(&txn, &[], VersionNumber::default().into(), item.into())
                     .await?;
             } else {
-                cluster
-                    .add_replica(txn, txn.link(cluster.link().path().clone()))
-                    .await?;
+                cluster.add_replica(txn, txn.host().clone()).await?;
             }
         } else {
             let cluster = self.dir.create_dir(txn, name, link).await?;
@@ -69,9 +63,7 @@ where
             if replicate_from_this_host {
                 return Ok(());
             } else {
-                cluster
-                    .add_replica(txn, txn.link(cluster.link().path().clone()))
-                    .await?;
+                cluster.add_replica(txn, txn.host().clone()).await?;
             }
         }
 
@@ -130,7 +122,7 @@ where
     Cluster<Dir<T>>: Route + Send + Sync,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        debug!("Dir::route {}", TCPath::from(path));
+        debug!("DirEntry::route {}", TCPath::from(path));
 
         match self {
             Self::Dir(dir) => dir.route(path),

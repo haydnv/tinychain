@@ -22,13 +22,22 @@ pub struct Map<T> {
 }
 
 impl<T> Map<T> {
+    /// Construct a new [`Map`].
     pub fn new() -> Self {
         Self {
             inner: BTreeMap::new(),
         }
     }
 
+    /// Construct a new [`Map`] with a single entry.
+    pub fn one<K: Into<Id>>(key: K, value: T) -> Self {
+        let mut map = Self::new();
+        map.insert(key.into(), value);
+        map
+    }
+
     #[inline]
+    /// Return an error if this [`Map`] is not empty.
     pub fn expect_empty(&self) -> TCResult<()>
     where
         T: fmt::Display,
@@ -40,10 +49,13 @@ impl<T> Map<T> {
         }
     }
 
+    /// Retrieve this [`Map`]'s underlying [`BTreeMap`].
     pub fn into_inner(self) -> BTreeMap<Id, T> {
         self.inner
     }
 
+    /// Remove and return the parameter with the given `name`, or the `default` if not present.
+    // TODO: accept a Borrow<Id>
     pub fn option<P, D>(&mut self, name: &Id, default: D) -> TCResult<P>
     where
         P: TryCastFrom<T>,
@@ -59,6 +71,8 @@ impl<T> Map<T> {
         }
     }
 
+    /// Remove and return the parameter with the given `name`, or it's type's [`Default`].
+    // TODO: accept a Borrow<Id>
     pub fn or_default<P>(&mut self, name: &Id) -> TCResult<P>
     where
         P: Default + TryCastFrom<T>,
@@ -73,6 +87,8 @@ impl<T> Map<T> {
         }
     }
 
+    /// Remove and return the parameter with the given `name`, or a "not found" error.
+    // TODO: accept a Borrow<Id>
     pub fn require<P>(&mut self, name: &Id) -> TCResult<P>
     where
         P: TryCastFrom<T>,

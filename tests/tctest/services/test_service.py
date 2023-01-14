@@ -1,4 +1,6 @@
 import unittest
+
+import rjwt
 import tinychain as tc
 
 from ..process import start_host
@@ -20,12 +22,14 @@ class TestServiceV0(tc.service.Service):
 
 class ServiceVersionTests(unittest.TestCase):
     def testCreateService(self):
+        actor = rjwt.Actor('/')
+
         hosts = [
-            start_host(NS, http_port=8702, replicate=LEAD),
-            start_host(NS, http_port=8703, replicate=LEAD),
+            start_host(NS, http_port=8702, public_key=actor.public_key, replicate=LEAD),
+            start_host(NS, http_port=8703, public_key=actor.public_key, replicate=LEAD),
         ]
 
-        hosts[0].put(tc.URI(tc.service.Service), "test_service", tc.URI(LEAD, "service", "test_service"))
+        hosts[0].create_namespace(actor, tc.URI(tc.service.Service), NS, LEAD)
 
         print()
         print()
@@ -38,7 +42,7 @@ class ServiceVersionTests(unittest.TestCase):
             print()
 
         print()
-        hosts.append(start_host(NS, http_port=8704, replicate=LEAD))
+        hosts.append(start_host(NS, http_port=8704, public_key=actor.public_key, replicate=LEAD))
         print()
 
         for i in range(len(hosts)):
@@ -46,7 +50,7 @@ class ServiceVersionTests(unittest.TestCase):
             print(f"host {i} replicas", hosts[i].get(endpoint.append("replicas")))
             print()
 
-        hosts[0].install(TestServiceV0())
+        hosts[0].install(actor, TestServiceV0())
         print()
 
         endpoint = tc.URI(TestServiceV0).path().append("hello")
@@ -54,7 +58,7 @@ class ServiceVersionTests(unittest.TestCase):
             print(host)
             self.assertEqual(hosts[i].get(endpoint), "Hello, World!")
 
-        hosts.append(start_host(NS, http_port=8705, replicate=LEAD))
+        hosts.append(start_host(NS, http_port=8705, public_key=actor.public_key, replicate=LEAD))
 
         for host in hosts:
             print(host)

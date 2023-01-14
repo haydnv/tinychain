@@ -100,6 +100,15 @@ impl<T> IntoIterator for Tuple<T> {
     }
 }
 
+impl<'a, T> IntoIterator for &'a Tuple<T> {
+    type Item = &'a T;
+    type IntoIter = <&'a Vec<T> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter()
+    }
+}
+
 impl<F, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for Vec<T> {
     fn can_cast_from(tuple: &Tuple<F>) -> bool {
         tuple.iter().all(T::can_cast_from)

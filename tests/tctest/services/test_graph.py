@@ -1,5 +1,6 @@
 import unittest
 
+import rjwt
 import tinychain as tc
 
 from ..process import DEFAULT_PORT, start_host
@@ -42,15 +43,17 @@ class TestService(tc.graph.Graph):
 class GraphTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host(NS)
+        actor = rjwt.Actor('/')
 
-        cls.host.put(tc.URI(tc.service.Service), str(NS)[1:], tc.URI(TestService)[:-2])
-        cls.host.install(TestService())
+        cls.host = start_host(NS, replicate=LEAD, public_key=actor.public_key)
+        cls.host.create_namespace(actor, tc.URI(TestService).path()[0], NS, LEAD)
+        cls.host.install(actor, TestService())
 
     def testCreateUser(self):
         uri = tc.URI(TestService).path()
         count = self.host.get(uri.extend("user", "count"))
         user_id = self.host.post(uri.append("create_user"), {"first_name": "First", "last_name": "Last"})
+
         self.assertEqual(self.host.get(uri.extend("user", "count")), count + 1)
         self.assertEqual(self.host.get(uri.append("user"), [user_id]), [user_id, "First", "Last"])
 

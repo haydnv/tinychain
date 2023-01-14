@@ -6,9 +6,10 @@ import logging
 
 import json
 import requests
+import rjwt
 import urllib.parse
 
-from .service import Library, Service
+from .service import Library, Model, Service
 from .context import to_json
 from .error import *
 from .scalar.value import Nil
@@ -145,14 +146,62 @@ class Host(object):
 
         return self._handle(request)
 
-    def install(self, service):
+    def create_namespace(self, actor, base_dir, ns, lead=None):
+        ns = URI(ns)
+        lead = None if lead is None else URI(lead)
+
+        if ns.host() is not None:
+            raise ValueError(f"namespace {ns} should not include a host")
+
+        if len(ns) != 1:
+            raise NotImplementedError(f"create a namespace {ns} (len {len(ns)}) by creating directories recursively")
+
+        if lead is not None and lead.path() is not None:
+            raise ValueError(f"lead for {ns} ({lead}) should not have a path component")
+
+        logging.info(f"create namespace {base_dir}{ns} on {self}")
+
+        auth_host = lead if lead else URI(self)
+
+        issuer = str(auth_host + base_dir)
+        token = rjwt.Token.issue(issuer, '/', [str(ns)])
+        token = actor.sign_token(token)
+
+        issuer = str(auth_host + URI(Model))
+        token = rjwt.Token.consume(token, issuer, '/', [str(ns)])
+        token = actor.sign_token(token)
+
+        lead = base_dir + ns if lead is None else lead + base_dir + ns
+        return self.put(base_dir, str(ns)[1:], lead, token)
+
+    def install(self, actor, service):
         """Install the given `service` on this host"""
 
-        if not (URI(Library) < URI(service).path() or URI(Service) < URI(service).path()):
-            raise ValueError(f"not a library or service: {service}")
+        if isinstance(service, Service):
+            if not URI(service).path().startswith(URI(Service)):
+                raise ValueError(f"invalid path for Service: {URI(service)}")
+        elif isinstance(service, Library):
+            if not URI(service).path().startswith(URI(Library)):
+                raise ValueError(f"invalid path for Library: {URI(service)}")
+        else:
+            raise ValueError(f"not a Library or Service: {service}")
+
+        lead = URI(service)[0] if URI(service).host() else None
+        path = URI(service).path()
+        base_dir = path[0]
+        ns = path[1:-2]
+        name = path[-2]
+        _version = path[-1]
+
+        logging.info(f"install {name} at {base_dir}{ns} on {self}")
+
+        if URI(service).host() is None:
+            lead = URI(self)
+        else:
+            lead = URI(service)[0]
 
         deps = []
-        for name, cls in inspect.getmembers(service, inspect.isclass):
+        for _, cls in inspect.getmembers(service, inspect.isclass):
             if issubclass(cls, Library):
                 deps.append(cls)
             elif issubclass(cls, State):
@@ -165,13 +214,37 @@ class Host(object):
         else:
             logging.info(f"installing {service}")
 
-        name = URI(service).path()[-2]
-        self.put(URI(service).path()[:-2], name, service)
+        auth_host = URI(lead) if lead else URI(self)
+        issuer = str(auth_host + base_dir + ns)
+        token = rjwt.Token.issue(issuer, '/', [str(name)])
+        token = actor.sign_token(token)
 
-    def update(self, service):
+        issuer = str(auth_host + URI(Model) + ns)
+        token = rjwt.Token.consume(token, issuer, '/', [str(name)])
+        token = actor.sign_token(token)
+
+        return self.put(URI(service).path()[:-2], str(name)[1:], service, token)
+
+    def update(self, actor, service):
         """Update the version of given `service` on this host"""
 
-        self.put(URI(service).path()[:-1], URI(service)[-1], service)
+        lead = URI(service)[0] if URI(service).host() else None
+        path = URI(service).path()
+        base_dir = path[0]
+        ns = path[1:-2]
+        name = path[-2]
+        version = path[-1]
+
+        auth_host = URI(lead) if lead else URI(self)
+        issuer = str(auth_host + base_dir + ns)
+        token = rjwt.Token.issue(issuer, '/', [str(name + version)])
+        token = actor.sign_token(token)
+
+        issuer = str(auth_host + URI(Model) + ns)
+        token = rjwt.Token.consume(token, issuer, '/', [str(name)])
+        token = actor.sign_token(token)
+
+        return self.put(URI(service).path()[:-1], str(version)[1:], service, token)
 
 
 class Local(Host):

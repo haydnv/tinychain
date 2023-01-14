@@ -39,7 +39,11 @@ fn duration(flag: &str) -> TCResult<Duration> {
 
 #[derive(Clone, Parser)]
 struct Config {
-    #[arg(long, default_value = "127.0.0.1", help = "the IP address to bind")]
+    #[arg(
+        long,
+        default_value = "127.0.0.1",
+        help = "the IP address of this host"
+    )]
     pub address: IpAddr,
 
     #[arg(
@@ -70,6 +74,12 @@ struct Config {
         help = "the log message level to write",
     )]
     pub log_level: String,
+
+    #[arg(
+        long = "public_key",
+        help = "a hexadecimal string representation of this host's clusters' public key"
+    )]
+    pub public_key: Option<String>,
 
     #[arg(long, help = "a link to the cluster to replicate from on startup")]
     pub replicate: Option<LinkHost>,
@@ -111,6 +121,9 @@ impl Config {
 fn main() {
     let config = Config::parse();
 
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log_level))
+        .init();
+
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
         .enable_time()
@@ -119,13 +132,15 @@ fn main() {
         .expect("tokio runtime");
 
     let gateway_config = config.gateway();
-    let mut builder = Builder::new(config.data_dir, config.workspace)
-        .with_cache_size(config.cache_size)
-        .with_gateway(gateway_config);
-
-    if let Some(lead) = config.replicate {
-        builder = builder.with_lead(lead);
-    }
+    let builder = runtime
+        .block_on(Builder::load(
+            config.cache_size,
+            config.data_dir,
+            config.workspace,
+        ))
+        .with_public_key(config.public_key)
+        .with_gateway(gateway_config)
+        .with_lead(config.replicate);
 
     match runtime.block_on(builder.replicate_and_serve()) {
         Ok(_) => {}
