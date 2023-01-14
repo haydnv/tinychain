@@ -49,7 +49,7 @@ pub trait DirCreateItem<T: DirItem> {
 
 #[async_trait]
 pub trait DirItem:
-    Persist<fs::Dir, Txn = Txn, Schema = Arc<Actor>> + Transact + Clone + Send + Sync
+    Persist<fs::Dir, Txn = Txn, Schema = ()> + Transact + Clone + Send + Sync
 {
     type Schema;
     type Version;
@@ -294,7 +294,7 @@ where
             dir.create_store(name.clone())
         };
 
-        let item = BlockChain::create(txn_id, schema.actor.clone(), store)?;
+        let item = BlockChain::create(txn_id, (), store)?;
         let item = Cluster::with_state(schema, txn_id, item);
         contents.insert(name.clone(), DirEntry::Item(item.clone()));
 

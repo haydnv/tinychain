@@ -1,6 +1,5 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use destream::{de, en};
@@ -18,7 +17,7 @@ use crate::fs;
 use crate::object::ObjectType;
 use crate::scalar::{OpDef, Scalar};
 use crate::state::State;
-use crate::txn::{Actor, Txn};
+use crate::txn::Txn;
 
 use super::DirItem;
 
@@ -115,7 +114,6 @@ impl fmt::Display for Version {
 
 #[derive(Clone)]
 pub struct Library {
-    actor: Arc<Actor>,
     file: fs::File<VersionNumber, Version>,
 }
 
@@ -199,13 +197,13 @@ impl Transact for Library {
 
 impl Persist<fs::Dir> for Library {
     type Txn = Txn;
-    type Schema = Arc<Actor>;
+    type Schema = ();
 
-    fn create(txn_id: TxnId, actor: Arc<Actor>, store: fs::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, _schema: (), store: fs::Store) -> TCResult<Self> {
         let file = super::dir::File::try_from(store)?;
         let versions = file.try_read(txn_id)?;
         if versions.is_empty() {
-            Ok(Self { actor, file })
+            Ok(Self { file })
         } else {
             Err(TCError::unsupported(
                 "cannot create a new library from a non-empty file",
@@ -213,8 +211,8 @@ impl Persist<fs::Dir> for Library {
         }
     }
 
-    fn load(_txn_id: TxnId, actor: Arc<Actor>, store: fs::Store) -> TCResult<Self> {
-        store.try_into().map(|file| Self { actor, file })
+    fn load(_txn_id: TxnId, _schema: (), store: fs::Store) -> TCResult<Self> {
+        store.try_into().map(|file| Self { file })
     }
 
     fn dir(&self) -> <fs::Dir as Dir>::Inner {

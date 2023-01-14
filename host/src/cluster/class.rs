@@ -1,7 +1,6 @@
 use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 
@@ -14,7 +13,7 @@ use tcgeneric::{Id, Map};
 use crate::fs;
 use crate::object::InstanceClass;
 use crate::state::State;
-use crate::txn::{Actor, Txn};
+use crate::txn::Txn;
 
 use super::DirItem;
 
@@ -58,7 +57,6 @@ impl fmt::Display for Version {
 
 #[derive(Clone)]
 pub struct Class {
-    actor: Arc<Actor>,
     dir: fs::Dir,
 }
 
@@ -151,14 +149,14 @@ impl Transact for Class {
 
 impl Persist<fs::Dir> for Class {
     type Txn = Txn;
-    type Schema = Arc<Actor>;
+    type Schema = ();
 
-    fn create(txn_id: TxnId, actor: Arc<Actor>, store: fs::Store) -> TCResult<Self> {
+    fn create(txn_id: TxnId, _schema: (), store: fs::Store) -> TCResult<Self> {
         let dir = fs::Dir::try_from(store)?;
         let contents = dir.try_write(txn_id)?;
 
         if contents.is_empty() {
-            Ok(Self { actor, dir })
+            Ok(Self { dir })
         } else {
             Err(TCError::unsupported(
                 "cannot create a new Class cluster with a non-empty directory",
@@ -166,8 +164,8 @@ impl Persist<fs::Dir> for Class {
         }
     }
 
-    fn load(_txn_id: TxnId, actor: Arc<Actor>, store: fs::Store) -> TCResult<Self> {
-        fs::Dir::try_from(store).map(|dir| Self { actor, dir })
+    fn load(_txn_id: TxnId, _schema: (), store: fs::Store) -> TCResult<Self> {
+        fs::Dir::try_from(store).map(|dir| Self { dir })
     }
 
     fn dir(&self) -> <fs::Dir as Dir>::Inner {

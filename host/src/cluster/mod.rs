@@ -565,19 +565,17 @@ where
 
 impl<T: Persist<fs::Dir, Txn = Txn>> Persist<fs::Dir> for Cluster<BlockChain<T>>
 where
-    BlockChain<T>: Persist<fs::Dir, Schema = Arc<Actor>, Txn = Txn>,
+    BlockChain<T>: Persist<fs::Dir, Schema = (), Txn = Txn>,
 {
     type Txn = Txn;
     type Schema = Schema;
 
     fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        BlockChain::create(txn_id, schema.actor.clone(), store)
-            .map(|state| Self::with_state(schema, txn_id, state))
+        BlockChain::create(txn_id, (), store).map(|state| Self::with_state(schema, txn_id, state))
     }
 
     fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        BlockChain::load(txn_id, schema.actor.clone(), store)
-            .map(|state| Self::with_state(schema, txn_id, state))
+        BlockChain::load(txn_id, (), store).map(|state| Self::with_state(schema, txn_id, state))
     }
 
     fn dir(&self) -> <fs::Dir as tc_transact::fs::Dir>::Inner {
