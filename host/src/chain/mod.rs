@@ -35,8 +35,10 @@ const BLOCK_SIZE: usize = 1_000_000; // TODO: reduce to 4,096
 const CHAIN: Label = label("chain");
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
+/// Defines a method to recover the state of this [`Chain`] from a transaction failure.
 #[async_trait]
 pub trait Recover {
+    /// Recover this state after loading, in case the last transaction failed or was interrupted.
     async fn recover(&self, txn: &Txn) -> TCResult<()>;
 }
 
@@ -49,7 +51,7 @@ pub trait ChainInstance<T> {
     /// Append the given PUT op to the latest block in this `Chain`.
     async fn append_put(&self, txn: &Txn, key: Value, value: State) -> TCResult<()>;
 
-    /// Borrow the [`Subject`] of this [`Chain`] immutably.
+    /// Borrow the subject of this [`Chain`].
     fn subject(&self) -> &T;
 }
 
@@ -106,7 +108,7 @@ impl fmt::Display for ChainType {
     }
 }
 
-/// A data structure responsible for maintaining the transactional integrity of its [`Subject`].
+/// A data structure responsible for maintaining the integrity of a mutable subject.
 // TODO: remove the generic type and replace with:
 // enum Chain { Block(BlockChain<Box<dyn Public>>, Sync(SyncChain<Box<dyn Restore>>) }
 #[derive(Clone)]

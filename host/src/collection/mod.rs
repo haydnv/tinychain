@@ -31,29 +31,41 @@ pub use schema::{CollectionSchema, CollectionType};
 mod base;
 mod schema;
 
+/// A view of a [`tc_btree::BTree`]
 pub type BTree = tc_btree::BTree<fs::File<NodeId, Node>, fs::Dir, Txn>;
+
+/// A [`tc_btree::BTreeFile`]
 pub type BTreeFile = tc_btree::BTreeFile<fs::File<NodeId, Node>, fs::Dir, Txn>;
 
+/// A view of a [`tc_table::Table`]
 pub type Table = tc_table::Table<fs::File<NodeId, Node>, fs::Dir, Txn>;
+
+/// A [`tc_table::TableIndex`]
 pub type TableIndex = tc_table::TableIndex<fs::File<NodeId, Node>, fs::Dir, Txn>;
 
 #[cfg(feature = "tensor")]
 pub type Tensor = tc_tensor::Tensor<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
+
 #[cfg(feature = "tensor")]
 pub type DenseAccessor =
     tc_tensor::DenseAccessor<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
+
 #[cfg(feature = "tensor")]
 pub type DenseTensor<B> =
     tc_tensor::DenseTensor<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn, B>;
+
 #[cfg(feature = "tensor")]
 pub type DenseTensorFile =
     tc_tensor::BlockListFile<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
+
 #[cfg(feature = "tensor")]
 pub type SparseAccessor =
     tc_tensor::SparseAccessor<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;
+
 #[cfg(feature = "tensor")]
 pub type SparseTensor<A> =
     tc_tensor::SparseTensor<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn, A>;
+
 #[cfg(feature = "tensor")]
 pub type SparseTable =
     tc_tensor::SparseTable<fs::File<u64, Array>, fs::File<NodeId, Node>, fs::Dir, Txn>;

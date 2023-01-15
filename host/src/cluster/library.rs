@@ -1,3 +1,5 @@
+//! A replicated, versioned, stateless [`Library`]
+
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 
@@ -21,6 +23,7 @@ use crate::txn::Txn;
 
 use super::DirItem;
 
+/// A version of a [`Library`]
 #[derive(Clone)]
 pub struct Version {
     lib: Map<Scalar>,
@@ -112,6 +115,7 @@ impl fmt::Display for Version {
     }
 }
 
+/// A versioned collection of [`Scalar`]s
 #[derive(Clone)]
 pub struct Library {
     file: fs::File<VersionNumber, Version>,

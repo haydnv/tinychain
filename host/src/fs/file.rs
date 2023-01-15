@@ -23,11 +23,14 @@ use tc_transact::{Transact, TxnId};
 
 use super::{io_err, CacheBlock, VERSION};
 
+/// A read guard on a [`File`]
 pub type FileReadGuard<K, B> = FileGuard<K, B, TxnLockReadGuard<BTreeMap<K, TxnLock<TxnId>>>>;
 
+/// An exclusive read guard on a [`File`]
 pub type FileReadGuardExclusive<K, B> =
     FileGuard<K, B, TxnLockReadGuardExclusive<BTreeMap<K, TxnLock<TxnId>>>>;
 
+/// A write guard on a [`File`]
 pub type FileWriteGuard<K, B> = FileGuard<K, B, TxnLockWriteGuard<BTreeMap<K, TxnLock<TxnId>>>>;
 
 /// A read lock guard for a block in a [`File`]

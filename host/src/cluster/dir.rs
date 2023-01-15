@@ -1,3 +1,5 @@
+//! A directory of [`Cluster`]s
+
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -25,7 +27,7 @@ use crate::txn::{Actor, Txn};
 
 use super::{Class, Cluster, Library, Replica, Schema, Service, REPLICAS};
 
-/// The type of file stored in a [`library`] directory
+/// The type of file stored in a [`Library`] directory
 pub type File = fs::File<VersionNumber, super::library::Version>;
 
 /// The name of the endpoint which lists the names of each entry in a [`Dir`]
@@ -47,6 +49,7 @@ pub trait DirCreateItem<T: DirItem> {
     ) -> TCResult<Cluster<BlockChain<T>>>;
 }
 
+/// Defines methods common to any item in a [`Dir`].
 #[async_trait]
 pub trait DirItem:
     Persist<fs::Dir, Txn = Txn, Schema = ()> + Transact + Clone + Send + Sync
@@ -54,6 +57,7 @@ pub trait DirItem:
     type Schema;
     type Version;
 
+    /// Create a new [`Self::Version`] of this [`DirItem`].
     async fn create_version(
         &self,
         txn: &Txn,
@@ -62,6 +66,7 @@ pub trait DirItem:
     ) -> TCResult<Self::Version>;
 }
 
+/// An entry in a [`Dir`] of [`Cluster`]s
 #[derive(Clone)]
 pub enum DirEntry<T> {
     Dir(Cluster<Dir<T>>),
@@ -226,6 +231,7 @@ where
     }
 }
 
+/// Defines a method to create a new subdirectory in a [`Dir`].
 #[async_trait]
 impl<T: Send + Sync> DirCreate for Dir<T>
 where
@@ -233,6 +239,7 @@ where
     Cluster<Self>: Clone,
     Self: Persist<fs::Dir, Txn = Txn, Schema = Schema> + Route + fmt::Display,
 {
+    /// Create a new subdirectory in this [`Dir`].
     async fn create_dir(
         &self,
         txn: &Txn,
@@ -266,11 +273,13 @@ where
     }
 }
 
+/// Defines a method to create a new item in this [`Dir`].
 #[async_trait]
 impl<T: DirItem + Route + fmt::Display> DirCreateItem<T> for Dir<T>
 where
     DirEntry<T>: Clone,
 {
+    /// Create a new item in this [`Dir`].
     async fn create_item(
         &self,
         txn: &Txn,

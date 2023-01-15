@@ -7,6 +7,7 @@ use std::fmt;
 
 use destream::en;
 
+/// A result of type `T`, or a [`TCError`]
 pub type TCResult<T> = Result<T, TCError>;
 
 struct ErrorData {

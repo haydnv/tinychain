@@ -42,7 +42,7 @@ pub struct Kernel {
 }
 
 impl Kernel {
-    /// Initialize a new [`Kernel`] with no [`UserSpace`].
+    /// Initialize a new [`Kernel`] with no userspace.
     pub fn bootstrap() -> Self {
         Self {
             system: System,
@@ -50,7 +50,7 @@ impl Kernel {
         }
     }
 
-    /// Initialize a new [`Kernel`] with no [`UserSpace`].
+    /// Initialize a new [`Kernel`] with no userspace.
     pub fn with_userspace(class: Class, library: Library, service: Service) -> Self {
         Self {
             system: System,

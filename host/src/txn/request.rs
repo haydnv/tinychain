@@ -13,9 +13,16 @@ use tcgeneric::{NetworkTime, TCPathBuf};
 
 use crate::gateway::Gateway;
 
+/// The type of [`rjwt::Actor`] used to sign auth tokens
 pub type Actor = rjwt::Actor<Value>;
+
+/// The type of [`rjwt::Claims`] communicated in auth tokens
 pub type Claims = rjwt::Claims<Link, Value, Vec<Scope>>;
+
+/// The type of scope communicated by [`Claims`]
 pub type Scope = TCPathBuf;
+
+/// The type of token used to authenticate requests between hosts
 pub type Token = rjwt::Token<Link, Value, Vec<Scope>>;
 
 /// A `Txn`'s authorization.

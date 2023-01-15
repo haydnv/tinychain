@@ -30,6 +30,7 @@ use crate::transact::fs::BlockData;
 
 use super::{io_err, CacheBlock, File};
 
+/// The type of entry in a [`Dir`]
 pub enum EntryType {
     BTree,
     Chain,
@@ -71,7 +72,9 @@ impl EntryType {
     }
 }
 
+/// Define the file extension for a type of [`File`]
 pub trait FileExt {
+    /// The extension for this type of [`File`]
     fn ext() -> &'static str;
 }
 
@@ -164,6 +167,7 @@ impl fmt::Display for DirEntry {
     }
 }
 
+/// An entry in a [`Dir`] which can be resolved to either a [`FileEntry`] or a sub-[`Dir`]
 pub enum Store {
     Create(DirWriteGuard, PathSegment),
     Get(DirReadGuard, PathSegment),
@@ -446,8 +450,11 @@ where
     }
 }
 
+/// A read guard on a [`Dir`]
 pub type DirReadGuard =
     DirGuard<freqfs::DirReadGuard<CacheBlock>, TxnLockReadGuard<BTreeMap<PathSegment, DirEntry>>>;
+
+/// A write guard on a [`Dir`]
 pub type DirWriteGuard =
     DirGuard<freqfs::DirWriteGuard<CacheBlock>, TxnLockWriteGuard<BTreeMap<PathSegment, DirEntry>>>;
 
