@@ -1,9 +1,9 @@
 [package]
 name = "tc-math"
-version = "0.6.0"
-authors = ["haydn@tinychain.net"]
-edition = "2018"
-description = "Mathematical algorithms for TinyChain tensors. Unstable."
+version = "0.7.0"
+authors = ["code@tinychain.net"]
+edition = "2021"
+description = "Mathematical algorithms for TinyChain tensors. DEPRECATED."
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/haydnv/tinychain.git"
@@ -13,8 +13,8 @@ categories = ["algorithms", "concurrency", "mathematics", "science"]
 
 [dependencies]
 log = { version = "0.4", features = ["release_max_level_warn"] }
-tc-error = { path = "../error" }
-tc-transact = { path = "../transact", features = ["tensor"] }
-tc-value = { path = "../value" }
-tc-tensor = { path = "../tensor" }
-tcgeneric = { path = "../generic" }
+tc-error = "0.7"
+tc-transact = { version = "0.16", features = ["tensor"] }
+tc-value = "0.8"
+tc-tensor = "0.8"
+tcgeneric = "0.6"
