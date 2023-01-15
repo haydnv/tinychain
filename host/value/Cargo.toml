@@ -1,14 +1,14 @@
 [package]
 name = "tc-value"
-version = "0.7.0"
-authors = ["haydn@tinychain.net"]
-edition = "2018"
-description = "TinyChain's representation of a value which can be collated and stored. Unstable."
+version = "0.8.0"
+authors = ["code@tinychain.net"]
+edition = "2021"
+description = "TinyChain's representation of a value which can be collated and stored."
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/haydnv/tinychain.git"
 
-keywords = ["tinychain"]
+keywords = ["tinychain", "scalar", "value", "collate"]
 categories = ["data-structures"]
 
 [dependencies]
@@ -28,6 +28,6 @@ safecast = "0.1"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0", features = [] }
 sha2 = "0.10"
-tcgeneric = { path = "../generic" }
-tc-error = { path = "../error" }
+tcgeneric = "0.6"
+tc-error = "0.7"
 uuid = "1.1"
