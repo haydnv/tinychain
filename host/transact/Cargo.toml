@@ -1,8 +1,8 @@
 [package]
 name = "tc-transact"
-version = "0.15.0"
-authors = ["haydn@tinychain.net"]
-edition = "2018"
+version = "0.16.0"
+authors = ["code@tinychain.net"]
+edition = "2021"
 description = "Traits and locking utilities for a TinyChain transaction."
 license = "Apache-2.0"
 readme = "README.md"
@@ -28,8 +28,8 @@ rand = "0.8"
 safecast = "~0.1.2"
 sha2 = "0.10"
 tbon = { version = "~0.3.4", features = ["tokio-io"] }
-tcgeneric = { path = "../generic" }
-tc-error = { path = "../error" }
-tc-value = { path = "../value" }
-tokio = { version = "1.18", features = ["sync"] }
+tcgeneric = "0.6"
+tc-error = "0.7"
+tc-value = "0.8"
+tokio = { version = "1.24", features = ["sync"] }
 txn_lock = { version = "0.5", features = ["logging"] }
