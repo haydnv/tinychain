@@ -1,8 +1,6 @@
 import aiohttp
 import asyncio
 import json
-import logging
-import rjwt
 
 from ..context import to_json
 from ..uri import URI
@@ -75,6 +73,9 @@ class Host(Host):
 
     async def create_namespace(self, actor, base_dir, ns, lead=None):
         return await self.put(*self._namespace_args(actor, base_dir, ns, lead))
+
+    async def install(self, actor, service):
+        return await self.put(*self._install_args(actor, service))
 
 
 class Local(Host, Local):

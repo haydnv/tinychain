@@ -20,5 +20,5 @@ hr-id = { version = "~0.2.1", features=["all"] }
 safecast = "0.1"
 serde = { version = "1.0", features = [] }
 sha2 = "0.10"
-tc-error = "0.7.0"
+tc-error = { path = "../error" }
 uuid = "1.1"

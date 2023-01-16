@@ -28,8 +28,8 @@ rand = "0.8"
 safecast = "~0.1.2"
 sha2 = "0.10"
 tbon = { version = "~0.3.4", features = ["tokio-io"] }
-tcgeneric = "0.6"
-tc-error = "0.7"
-tc-value = "0.8"
+tcgeneric = { path = "../generic" }
+tc-error = { path = "../error" }
+tc-value = { path = "../value" }
 tokio = { version = "1.24", features = ["sync"] }
-txn_lock = { version = "0.5", features = ["logging"] }
+txn_lock = { version = "~0.5.1", features = ["logging"] }

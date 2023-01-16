@@ -11,7 +11,7 @@ import time
 import tinychain as tc
 
 from .. import benchmark
-from ..process import start_local_host
+from ..process import start_local_host_async
 
 
 LEAD = "http://127.0.0.1:8702"
@@ -83,7 +83,7 @@ async def start_and_install_deps(chain_type, actor, **flags):
     assert "public_key" not in flags
     flags["public_key"] = actor.public_key
 
-    host = start_local_host(NS, **flags)
+    host = start_local_host_async(NS, **flags)
 
     uri = tc.URI(tc.ml.NeuralNets)
 
@@ -245,7 +245,7 @@ class ReplicationBenchmarks(benchmark.Benchmark):
         for i in range(1, self.NUM_HOSTS):
             port = default_port + i
             host_uri = tc.URI(f"http://127.0.0.1:{port}/")
-            host = start_local_host(NS, host_uri, replicate="http://127.0.0.1:8702", wait_time=2)
+            host = start_local_host_async(NS, host_uri, replicate="http://127.0.0.1:8702", wait_time=2)
 
             self.hosts.append(host)
 

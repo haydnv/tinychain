@@ -165,7 +165,7 @@ class Local(tc.host.Local.Process):
             self.stop()
 
 
-def start_local_host(ns, host_uri=None, public_key=None, wait_time=1, **flags):
+def _start_local_host_process(ns, host_uri=None, public_key=None, wait_time=1, **flags):
     assert ns.startswith('/'), f"namespace must be a URI path, not {ns}"
     name = str(ns)[1:].replace('/', '_')
 
@@ -206,7 +206,16 @@ def start_local_host(ns, host_uri=None, public_key=None, wait_time=1, **flags):
 
     process.start(wait_time)
 
+    return process, port
+
+def start_local_host(ns, host_uri=None, public_key=None, wait_time=1, **flags):
+    process, port = _start_local_host_process(ns, host_uri, public_key, wait_time, **flags)
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
+
+
+def start_local_host_async(ns, host_uri=None, public_key=None, wait_time=1, **flags):
+    process, port = _start_local_host_process(ns, host_uri, public_key, wait_time, **flags)
+    return tc.host.asynchronous.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
 # use this alias to switch between Local and Docker host types
