@@ -205,6 +205,7 @@ def start_local_host(ns, host_uri=None, public_key=None, wait_time=1, **flags):
         **flags)
 
     process.start(wait_time)
+
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 

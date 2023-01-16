@@ -9,87 +9,58 @@ import json
 import logging
 import random
 import time
+
+import rjwt
 import tinychain as tc
 
-from .process import start_local_host
+from .process import Local
 
 DEFAULT_CACHE_SIZE = "8G"
 DEFAULT_CONCURRENCY = 5
 WORKSPACE = "/tmp/tc/tmp"
 
-BACKOFF = 0.01
-TIMEOUT = aiohttp.ClientTimeout(total=86400)
 
+def start_local_host(ns, host_uri=None, public_key=None, wait_time=1, **flags):
+    assert ns.startswith('/'), f"namespace must be a URI path, not {ns}"
+    name = str(ns)[1:].replace('/', '_')
 
-# TODO: move this class into a new async module in tc.host
-class Host(object):
-    RETRYABLE = [409, 502, 503]
+    if not os.path.isfile(TC_PATH):
+        hint = "use the TC_PATH environment variable to set the path to the TinyChain host binary"
+        raise RuntimeError(f"invalid executable path: {TC_PATH} ({hint})")
 
-    def __init__(self, host):
-        self.__uri__ = tc.URI(host)
-        self._host = host  # keep a reference here so it doesn't get dropped
+    port = DEFAULT_PORT
+    if flags.get("http_port"):
+        port = flags["http_port"]
+        del flags["http_port"]
+    elif host_uri is not None and host_uri.port():
+        port = host_uri.port()
 
-    async def get(self, path, key=None):
-        endpoint = str(tc.URI(self) + path)
+    if public_key:
+        flags["public_key"] = public_key.hex()
 
-        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
-            response = await session.get(endpoint, params={"key": json.dumps(tc.to_json(key))})
+    data_dir = f"/tmp/tc/data/{port}/{name}"
+    if os.path.exists(data_dir):
+        shutil.rmtree(data_dir)
 
-            backoff = BACKOFF
-            while response.status in self.RETRYABLE:
-                await asyncio.sleep(backoff)
-                response = await session.get(endpoint, params={"key": json.dumps(key)})
-                backoff *= 2
+    if "log_level" not in flags:
+        flags["log_level"] = "debug"
 
-            return response
+    if "workspace" in flags:
+        workspace = flags["workspace"] + f"/{port}/{name}"
+        del flags["workspace"]
+    else:
+        workspace = DEFAULT_WORKSPACE + f"/{port}/{name}"
 
-    async def put(self, path, key=None, value=None):
-        endpoint = str(tc.URI(self) + path)
+    process = Local(
+        TC_PATH,
+        workspace=workspace,
+        force_create=True,
+        data_dir=data_dir,
+        http_port=port,
+        **flags)
 
-        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
-            response = await session.put(endpoint, params={"key": json.dumps(tc.to_json(key))}, json=tc.to_json(value))
-
-            backoff = BACKOFF
-            while response.status in self.RETRYABLE:
-                await asyncio.sleep(backoff)
-                response = await session.put(endpoint, params={"key": json.dumps(key)}, json=value)
-                backoff *= 2
-
-            return response
-
-    async def post(self, path, params={}):
-        endpoint = str(tc.URI(self) + path)
-
-        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
-            response = await session.post(endpoint, json=tc.to_json(params))
-
-            backoff = BACKOFF
-            while response.status in self.RETRYABLE:
-                await asyncio.sleep(backoff)
-                response = await session.post(endpoint, json=params)
-                backoff *= 2
-
-            return response
-
-    async def delete(self, path, key=None):
-        endpoint = str(tc.URI(self) + path)
-
-        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
-            response = await session.delete(endpoint, params={"key": json.dumps(tc.to_json(key))})
-
-            backoff = BACKOFF
-            while response.status in self.RETRYABLE:
-                await asyncio.sleep(backoff)
-                response = await session.get(endpoint, params={"key": json.dumps(key)})
-                backoff *= 2
-
-            return response
-
-    def start(self, **flags):
-        return self._host.start(**flags)
-
-    def stop(self):
-        return self._host.stop()
+    process.start(wait_time)
+    return tc.host.asyncronous.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
 class Benchmark(object):
@@ -118,7 +89,7 @@ class Benchmark(object):
         success = (len(responses) / len(requests)) * 100
         return responses, elapsed, success
 
-    async def start(self, **flags):
+    async def start(self, actor, **flags):
         pass
 
     def stop(self):
@@ -149,6 +120,8 @@ async def main(benchmarks):
     if os.path.exists(WORKSPACE):
         shutil.rmtree(WORKSPACE)
 
+    actor = rjwt.Actor('/')
+
     for benchmark in benchmarks:
         print(f"running {benchmark}")
 
@@ -156,7 +129,7 @@ async def main(benchmarks):
         for test in benchmark:
             if patterns is None or any(pattern in test.__name__ for pattern in patterns):
                 if not started:
-                    await benchmark.start(cache_size=cache_size, workspace=workspace)
+                    await benchmark.start(actor, cache_size=cache_size, workspace=workspace)
                     started = True
                     print()
 

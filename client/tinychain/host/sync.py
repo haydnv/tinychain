@@ -146,7 +146,7 @@ class Host(object):
 
         return self._handle(request)
 
-    def create_namespace(self, actor, base_dir, ns, lead=None):
+    def _namespace_args(self, actor, base_dir, ns, lead):
         ns = URI(ns)
         lead = None if lead is None else URI(lead)
 
@@ -172,11 +172,12 @@ class Host(object):
         token = actor.sign_token(token)
 
         lead = base_dir + ns if lead is None else lead + base_dir + ns
-        return self.put(base_dir, str(ns)[1:], lead, token)
+        return base_dir, str(ns)[1:], lead, token
 
-    def install(self, actor, service):
-        """Install the given `service` on this host"""
+    def create_namespace(self, actor, base_dir, ns, lead=None):
+        return self.put(*self._namespace_args(actor, base_dir, ns, lead))
 
+    def _install_args(self, actor, service):
         if isinstance(service, Service):
             if not URI(service).path().startswith(URI(Service)):
                 raise ValueError(f"invalid path for Service: {URI(service)}")
@@ -223,7 +224,12 @@ class Host(object):
         token = rjwt.Token.consume(token, issuer, '/', [str(name)])
         token = actor.sign_token(token)
 
-        return self.put(URI(service).path()[:-2], str(name)[1:], service, token)
+        return URI(service).path()[:-2], str(name)[1:], service, token
+
+    def install(self, actor, service):
+        """Install the given `service` on this host"""
+
+        return self.put(*self._install_args(actor, service))
 
     def update(self, actor, service):
         """Update the version of given `service` on this host"""

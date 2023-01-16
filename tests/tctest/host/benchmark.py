@@ -76,45 +76,50 @@ class DataStructures(tc.service.Service):
         return cxt.optimizer.train(1, cxt.inputs)
 
 
-async def start_and_install_deps(chain_type, **flags):
+async def start_and_install_deps(chain_type, actor, **flags):
     assert "replicate" not in flags
     flags["replicate"] = LEAD
 
+    assert "public_key" not in flags
+    flags["public_key"] = actor.public_key
+
     host = start_local_host(NS, **flags)
-    host = benchmark.Host(host)
 
     uri = tc.URI(tc.ml.NeuralNets)
 
     start = time.time()
-    response = await host.put(uri[0], uri[1], uri[:2])
+    response = await host.create_namespace(actor, tc.URI(tc.service.Library), tc.ml.NS, LEAD)
     assert response.status == 200, await response.text()
     elapsed = time.time() - start
     print(f"created library directory in {elapsed:.4f}")
 
     start = time.time()
-    response = await host.put(uri[:2], uri[2], tc.ml.NeuralNets())
+    response = await host.install(actor, tc.ml.NeuralNets())
     assert response.status == 200, await response.text()
     elapsed = time.time() - start
     print(f"installed library in {elapsed:.4f}")
 
-    uri = tc.URI(tc.ml.Optimizers)
     start = time.time()
-    response = await host.put(uri[:2], uri[2], tc.ml.Optimizers())
+    response = await host.install(actor, tc.ml.Optimizers())
     assert response.status == 200, await response.text()
     elapsed = time.time() - start
     print(f"installed library in {elapsed:.4f}")
 
+    start = time.time()
     uri = tc.URI(DataStructures).path()
-    start = time.time()
-    response = await host.put(uri[0], uri[1], uri[:2])
+    response = await host.create_namespace(actor, uri[0], uri[1:-2], LEAD)
     assert response.status == 200, await response.text()
     elapsed = time.time() - start
     print(f"created service directory in {elapsed:.4f}")
 
-    await host.put(uri[:2], uri[2], DataStructures(chain_type))
     start = time.time()
+    response = await host.install(actor, DataStructures(chain_type))
     assert response.status == 200, await response.text()
+    elapsed = time.time() - start
     print(f"installed service in {elapsed:.2f}")
+
+    check = await host.get(tc.URI(DataStructures).path()[:-2], '/')
+    assert check.status == 200, await check.text()
 
     return host
 
@@ -124,21 +129,20 @@ class ConcurrentWriteBenchmarks(benchmark.Benchmark):
     SCALES = [1, 5, 10, 100]
 
     def __init__(self):
-        self._base_path = tc.URI(DataStructures).path()
         self.host = None
 
     def __repr__(self):
         return "concurrent write benchmarks"
 
-    async def start(self, **flags):
-        self.host = await start_and_install_deps(tc.chain.Sync, **flags)
+    async def start(self, actor, **flags):
+        self.host = await start_and_install_deps(tc.chain.Sync, actor, **flags)
 
     def stop(self):
         if self.host:
             self.host.stop()
 
     def _link(self, path):
-        return self._base_path + path
+        return tc.URI(DataStructures).path() + path
 
     async def btree_insert(self, num_users, concurrency):
         requests = [self.host.put(self._link("/btree_insert"), value=random.randint(0, 100000)) for _ in range(num_users)]
@@ -174,10 +178,6 @@ class ConcurrentWriteBenchmarks(benchmark.Benchmark):
         await self.host.delete(self._link("/table"))
 
     async def neural_net_train(self, num_users, concurrency):
-        # TODO: why does this test fail with concurrency > 1?
-        if concurrency > 1:
-            return
-
         requests = [self.host.get(self._link("/neural_net_train")) for _ in range(num_users)]
         responses, elapsed, success = await self.run(requests, concurrency)
         qps = num_users / elapsed
@@ -195,9 +195,8 @@ class LoadBenchmarks(benchmark.Benchmark):
     def __repr__(self):
         return "load benchmarks"
 
-    async def start(self, **flags):
-        host = await start_and_install_deps(tc.chain.Sync, **flags)
-        self.host = benchmark.Host(host)
+    async def start(self, actor, **flags):
+        self.host = await start_and_install_deps(tc.chain.Sync, actor, **flags)
 
     def stop(self):
         if self.host:
@@ -236,19 +235,19 @@ class ReplicationBenchmarks(benchmark.Benchmark):
     def __repr__(self):
         return f"replication benchmarks with {self.NUM_HOSTS} hosts"
 
-    async def start(self, **flags):
+    async def start(self, actor, **flags):
         default_port = tc.URI(DataStructures).port()
         assert default_port
 
-        host = await start_and_install_deps(tc.chain.Block, **flags)
-        self.hosts.append(benchmark.Host(host))
+        host = await start_and_install_deps(tc.chain.Block, actor, **flags)
+        self.hosts.append(host)
 
         for i in range(1, self.NUM_HOSTS):
             port = default_port + i
             host_uri = tc.URI(f"http://127.0.0.1:{port}/")
             host = start_local_host(NS, host_uri, replicate="http://127.0.0.1:8702", wait_time=2)
 
-            self.hosts.append(benchmark.Host(host))
+            self.hosts.append(host)
 
     def stop(self):
         for host in self.hosts:

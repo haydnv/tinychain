@@ -1,6 +1,7 @@
 import tinychain.error
 import tinychain.graph
 import tinychain.host
+import tinychain.host.asynchronous
 import tinychain.math
 import tinychain.math.interface
 import tinychain.math.linalg
