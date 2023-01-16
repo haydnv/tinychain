@@ -225,7 +225,7 @@ where
             .cloned()
             .ok_or_else(|| TCError::internal("ownerless transaction"))?;
 
-        if owner.path() == self.path() {
+        if self.path().starts_with(owner.path()) {
             return self.distribute_commit(&txn).await;
         } else if txn.leader(self.path()).is_some() {
             return self.distribute_commit(&txn).await;
@@ -458,7 +458,7 @@ where
                 .owner()
                 .ok_or_else(|| TCError::internal("ownerless transaction"))?;
 
-            if owner.path() == self.path() {
+            if self.path().starts_with(owner.path()) {
                 return self.add_replica(&txn, self.schema.host.clone()).await;
             } else if txn.leader(self.path()).is_some() {
                 return self.add_replica(&txn, self.schema.host.clone()).await;
