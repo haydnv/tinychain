@@ -9,6 +9,6 @@ Example usage:
 # python3 and pip3 may be python and pip on newer systems
 pip3 install -r tests/requirements.txt
 python3 -m tests.tctest.client
-python3 -m tests.tctest.apps -k Library
+python3 -m tests.tctest.services -k Library
 python3 -m tests.tctest # run all tests
 ```
