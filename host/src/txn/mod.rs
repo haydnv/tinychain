@@ -150,22 +150,23 @@ impl Txn {
     /// Check if this host is leading the transaction for the specified cluster.
     pub fn is_leader(&self, cluster_path: &[PathSegment]) -> bool {
         if let Some(leader) = self.leader(cluster_path) {
-            // TODO: validate transaction claim formats on receipt
-            let hostname = leader.host().expect("txn leader hostname");
-            hostname == self.gateway.host() && leader.path().as_slice() == cluster_path
-        } else {
-            false
+            if leader.host() == Some(self.gateway.host()) {
+                return cluster_path == leader.path().as_slice();
+            }
         }
+
+        false
     }
 
     /// Check if the cluster at the specified path on this host is the owner of the transaction.
     pub fn is_owner(&self, cluster_path: &[PathSegment]) -> bool {
         if let Some(owner) = self.owner() {
-            owner.host().expect("txn owner hostname") == self.gateway.host()
-                && owner.path().as_slice() == cluster_path
-        } else {
-            false
+            if owner.host() == Some(self.gateway.host()) {
+                return cluster_path == owner.path().as_slice();
+            }
         }
+
+        false
     }
 
     /// Claim leadership of this transaction for the given cluster.
@@ -183,25 +184,29 @@ impl Txn {
             ));
         }
 
-        if self.leader(&cluster_path).is_none() {
-            self.grant(actor, cluster_path, vec![self.active.scope().clone()])
-                .await
-        } else {
-            Err(TCError::forbidden(
-                "transaction received duplicate leadership claim",
+        if let Some(leader) = self.leader(&cluster_path) {
+            Err(TCError::internal(format!(
+                "{} tried to claim leadership of {} but {} is already the leader",
+                cluster_path,
                 self.id(),
-            ))
+                leader
+            )))
+        } else {
+            let scopes = vec![self.active.scope().clone()];
+            self.grant(actor, cluster_path, scopes).await
         }
     }
 
     /// Return the leader of this transaction for the given cluster, if there is one.
     pub fn leader(&self, cluster_path: &[PathSegment]) -> Option<&Link> {
         let active_scope = self.active.scope();
+
         self.request
             .scopes()
             .iter()
+            .filter(|(_, actor_id, _)| *actor_id == &Value::None)
             .filter_map(|(host, _actor_id, scopes)| {
-                if host.path().starts_with(cluster_path) && scopes.contains(active_scope) {
+                if scopes.contains(active_scope) && cluster_path.starts_with(host.path()) {
                     Some(host)
                 } else {
                     None
@@ -213,9 +218,11 @@ impl Txn {
     /// Return the owner of this transaction, if there is one.
     pub fn owner(&self) -> Option<&Link> {
         let active_scope = self.active.scope();
+
         self.request
             .scopes()
             .iter()
+            .filter(|(_, actor_id, _)| *actor_id == &Value::None)
             .filter_map(|(host, _actor_id, scopes)| {
                 if scopes.contains(active_scope) {
                     Some(host)
@@ -232,36 +239,35 @@ impl Txn {
     }
 
     /// Return a link to the given path on this host.
-    // TODO: delete
     pub fn link(&self, path: TCPathBuf) -> Link {
         self.gateway.link(path)
     }
 
     /// Return the [`Request`] which initiated this transaction on this host.
-    pub fn request(&'_ self) -> &'_ Request {
+    pub fn request(&self) -> &Request {
         &self.request
     }
 
     /// Resolve a GET op within this transaction context.
-    // TODO: accept a Borrow<Link> and an Into<Value>
+    // TODO: accept a Borrow<Link> and a CastInto<Value>
     pub async fn get(&self, link: Link, key: Value) -> TCResult<State> {
         self.gateway.get(self, link, key).await
     }
 
     /// Resolve a PUT op within this transaction context.
-    // TODO: accept a Borrow<Link>, an Into<Value>, and an Into<State>
+    // TODO: accept a Borrow<Link>, a CastInto<Value>, and a CastInto<State>
     pub async fn put(&self, link: Link, key: Value, value: State) -> TCResult<()> {
         self.gateway.put(self, link, key, value).await
     }
 
     /// Resolve a POST op within this transaction context.
-    // TODO: accept a Borrow<Link> and an Into<State>
+    // TODO: accept a Borrow<Link>
     pub async fn post(&self, link: Link, params: State) -> TCResult<State> {
         self.gateway.post(self, link, params).await
     }
 
     /// Resolve a DELETE op within this transaction context.
-    // TODO: accept a Borrow<Link> and an Into<Value>
+    // TODO: accept a Borrow<Link> and a CastInto<Value>
     pub async fn delete(&self, link: Link, key: Value) -> TCResult<()> {
         self.gateway.delete(self, link, key).await
     }

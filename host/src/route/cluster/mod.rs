@@ -128,11 +128,18 @@ where
                     ));
                 }
 
-                if txn.is_owner(self.cluster.path()) {
-                    return Err(TCError::internal(format!(
-                        "{} got commit message for itself",
-                        self.cluster,
-                    )));
+                if let Some(owner) = txn.owner() {
+                    if owner.host() == Some(txn.host()) && owner.path() == self.cluster.path() {
+                        return Err(TCError::bad_request(
+                            "cluster received a commit message for itself",
+                            self.cluster,
+                        ));
+                    }
+                } else {
+                    return Err(TCError::bad_request(
+                        "commit message for an ownerless transaction",
+                        txn.id(),
+                    ));
                 }
 
                 #[cfg(debug_assertions)]
