@@ -181,7 +181,7 @@ impl<T> Cluster<T> {
 
     /// Claim leadership of the given [`Txn`].
     pub async fn lead(&self, txn: Txn) -> TCResult<Txn> {
-        if txn.is_leader(self.path()) {
+        if txn.has_leader(self.path()) {
             Ok(txn)
         } else {
             let mut led = self.led.write().await;
@@ -220,20 +220,12 @@ where
 
     /// Claim leadership of this [`Txn`], then commit all replicas.
     pub async fn lead_and_distribute_commit(&self, txn: Txn) -> TCResult<()> {
-        let owner = txn
-            .owner()
-            .cloned()
-            .ok_or_else(|| TCError::internal("ownerless transaction"))?;
-
-        if self.path().starts_with(owner.path()) {
-            return self.distribute_commit(&txn).await;
-        } else if txn.leader(self.path()).is_some() {
-            return self.distribute_commit(&txn).await;
+        if txn.has_leader(self.path()) {
+            self.distribute_commit(&txn).await
+        } else {
+            let txn = txn.lead(&self.actor, self.schema.path.clone()).await?;
+            self.distribute_commit(&txn).await
         }
-
-        let txn = txn.lead(&self.actor, self.schema.path.clone()).await?;
-
-        self.distribute_commit(&txn).await
     }
 
     #[cfg(not(debug_assertions))]
@@ -453,20 +445,12 @@ where
 
     /// Claim leadership of the given [`Txn`] and add a replica to this `Cluster`.
     pub async fn lead_and_add_replica(&self, txn: Txn) -> TCResult<bool> {
-        {
-            let owner = txn
-                .owner()
-                .ok_or_else(|| TCError::internal("ownerless transaction"))?;
-
-            if self.path().starts_with(owner.path()) {
-                return self.add_replica(&txn, self.schema.host.clone()).await;
-            } else if txn.leader(self.path()).is_some() {
-                return self.add_replica(&txn, self.schema.host.clone()).await;
-            }
+        if txn.has_leader(self.path()) {
+            self.add_replica(&txn, self.schema.host.clone()).await
+        } else {
+            let txn = txn.lead(&self.actor, self.schema.path.clone()).await?;
+            self.add_replica(&txn, self.schema.host.clone()).await
         }
-
-        let txn = txn.lead(&self.actor, self.schema.path.clone()).await?;
-        self.add_replica(&txn, self.schema.host.clone()).await
     }
 
     /// Remove one or more replicas from this `Cluster`.

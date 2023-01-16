@@ -151,7 +151,7 @@ impl Txn {
     pub fn is_leader(&self, cluster_path: &[PathSegment]) -> bool {
         if let Some(leader) = self.leader(cluster_path) {
             if leader.host() == Some(self.gateway.host()) {
-                return cluster_path.starts_with(leader.path());
+                return cluster_path == leader.path().as_slice();
             }
         }
 
@@ -162,7 +162,7 @@ impl Txn {
     pub fn is_owner(&self, cluster_path: &[PathSegment]) -> bool {
         if let Some(owner) = self.owner() {
             if owner.host() == Some(self.gateway.host()) {
-                return cluster_path.starts_with(owner.path());
+                return cluster_path == owner.path().as_slice();
             }
         }
 
@@ -184,14 +184,16 @@ impl Txn {
             ));
         }
 
-        if self.leader(&cluster_path).is_none() {
+        if let Some(leader) = self.leader(&cluster_path) {
+            Err(TCError::internal(format!(
+                "{} tried to claim leadership of {} but {} is already the leader",
+                cluster_path,
+                self.id(),
+                leader
+            )))
+        } else {
             let scopes = vec![self.active.scope().clone()];
             self.grant(actor, cluster_path, scopes).await
-        } else {
-            Err(TCError::forbidden(
-                "transaction received duplicate leadership claim",
-                self.id(),
-            ))
         }
     }
 
@@ -202,6 +204,7 @@ impl Txn {
         self.request
             .scopes()
             .iter()
+            .filter(|(_, actor_id, _)| *actor_id == &Value::None)
             .filter_map(|(host, _actor_id, scopes)| {
                 if scopes.contains(active_scope) && cluster_path.starts_with(host.path()) {
                     Some(host)
@@ -219,6 +222,7 @@ impl Txn {
         self.request
             .scopes()
             .iter()
+            .filter(|(_, actor_id, _)| *actor_id == &Value::None)
             .filter_map(|(host, _actor_id, scopes)| {
                 if scopes.contains(active_scope) {
                     Some(host)
