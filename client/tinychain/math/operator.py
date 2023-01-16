@@ -98,7 +98,7 @@ class Operator(Op):
 
     def simplify(self):
         """
-        Return a simplified but logically equivalent version of this operator, if possible.
+        Return a simplified but logically equivalent version of this :class:`Operator`, if possible.
         For example, `Mul(2, 1).simplify()` will return 2.
 
         IMPORTANT: don't call `simplify` until after constructing an entire operator graph.
@@ -887,30 +887,24 @@ def simplify(state):
         return rtype(form=state)
 
 
-def shape_of(numeric):
-    if isinstance(numeric, (bool, complex, float, int)):
-        from ..shape import Shape
-        return Shape(tuple())
-    elif isinstance(numeric, Numeric):
-        return numeric.shape
-    else:
-        raise ValueError(f"{numeric} has no shape")
+def ones_like(numeric, keepdims=True):
+    """Construct a constant with each element equal to one, with the same shape and data type as `numeric`."""
 
-
-def ones_like(state, keepdims=True):
     from ..collection.tensor import Dense
     from ..scalar.number import Number
 
-    if isinstance(state, Number):
-        return type(state)(form=1)
-    elif is_literal(state) or not keepdims:
+    if isinstance(numeric, Number):
+        return type(numeric)(form=1)
+    elif is_literal(numeric) or not keepdims:
         return Number(1)
     else:
-        cls = type(state) if hasattr(type(state), "ones_like") else Dense
-        return cls.ones_like(state)
+        cls = type(numeric) if hasattr(type(numeric), "ones_like") else Dense
+        return cls.ones_like(numeric)
 
 
 def zeros_like(state, keepdims=True):
+    """Construct a constant with each element equal to zero, with the same shape and data type as `numeric`."""
+
     from ..collection.tensor import Sparse
     from ..scalar.number import Number
 
@@ -923,7 +917,7 @@ def zeros_like(state, keepdims=True):
         return cls.zeros_like(state)
 
 
-def debug_shape(numeric):
+def _debug_shape(numeric):
     if not hasattr(numeric, "shape"):
         raise ValueError(f"{numeric} has no shape")
 
@@ -941,7 +935,7 @@ def debug_shape(numeric):
     from ..collection.tensor import NDArray
 
     if isinstance(op.subject, NDArray):
-        debug_shape(op.subject)
+        _debug_shape(op.subject)
 
     if isinstance(op.args, NDArray):
-        debug_shape(op.args)
+        _debug_shape(op.args)

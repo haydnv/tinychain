@@ -405,6 +405,8 @@ class LinearAlgebra(Library):
 
 
 def norm(x):
+    """Helper function to compute the norm of a matrix `x`"""
+
     return (x**2).sum()**0.5
 
 
