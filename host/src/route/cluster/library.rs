@@ -214,7 +214,7 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
                         .await?;
                     }
 
-                    let version = InstanceClass::anonymous(Some(link.clone()), version);
+                    let version = InstanceClass::extend(link.clone(), version);
 
                     self.create_item_or_dir(txn, link, name, Some(version))
                         .await

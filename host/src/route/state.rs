@@ -43,7 +43,7 @@ impl<'a> Handler<'a> for ClassHandler {
                     proto.insert(id, member);
                 }
 
-                let class = InstanceClass::anonymous(Some(self.class.path().into()), proto);
+                let class = InstanceClass::extend(self.class.path().clone(), proto);
                 Ok(Object::Class(class).into())
             })
         }))

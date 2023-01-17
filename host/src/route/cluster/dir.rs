@@ -132,13 +132,8 @@ where
 }
 
 pub(super) fn expect_version(version: State) -> TCResult<(Link, Map<Scalar>)> {
-    let class =
-        InstanceClass::try_cast_from(version, |v| TCError::bad_request("invalid Class", v))?;
-
-    let (link, version) = class.into_inner();
-    let link = link.ok_or_else(|| TCError::bad_request("missing cluster link for", &version))?;
-
-    Ok((link, version))
+    InstanceClass::try_cast_from(version, |v| TCError::bad_request("invalid Class", v))
+        .map(|class| class.into_inner())
 }
 
 pub(super) fn extract_classes(mut lib: Map<Scalar>) -> TCResult<(Map<Scalar>, Map<InstanceClass>)> {

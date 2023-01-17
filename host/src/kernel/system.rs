@@ -97,9 +97,7 @@ impl Dispatch for System {
                 })
                 .collect::<TCResult<Map<Scalar>>>()?;
 
-            Ok(State::Object(
-                InstanceClass::extend(extends, None, proto).into(),
-            ))
+            Ok(State::Object(InstanceClass::extend(extends, proto).into()))
         } else {
             let params = data.try_into()?;
             Static.post(txn, path, params).await

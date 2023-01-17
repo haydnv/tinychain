@@ -11,10 +11,7 @@ use crate::kernel::CLASS;
 use crate::object::InstanceClass;
 use crate::route::cluster::dir::{expect_version, extract_classes};
 use crate::route::object::method::route_attr;
-use crate::route::{
-    DeleteHandler, GetHandler, Handler, MethodNotAllowedHandler, PostHandler, Public, PutHandler,
-    Route,
-};
+use crate::route::*;
 use crate::scalar::{OpRef, OpRefType, Scalar, Subject, TCRef};
 use crate::state::State;
 use crate::txn::Txn;
@@ -77,8 +74,6 @@ impl<'a> ServiceHandler<'a> {
                 })?;
 
                 let (link, version) = class.into_inner();
-                let link =
-                    link.ok_or_else(|| TCError::bad_request("missing cluster link for", &version))?;
 
                 let mut classes = Map::new();
                 let mut schema = Map::new();
@@ -89,7 +84,7 @@ impl<'a> ServiceHandler<'a> {
                             TCRef::Op(OpRef::Post((Subject::Link(classpath), proto)))
                                 if !proto.is_empty() =>
                             {
-                                let class = InstanceClass::anonymous(Some(classpath), proto);
+                                let class = InstanceClass::extend(classpath, proto);
                                 classes.insert(name, class);
                             }
                             tc_ref => {
@@ -115,7 +110,7 @@ impl<'a> ServiceHandler<'a> {
                         .await?;
                 }
 
-                let schema = InstanceClass::anonymous(Some(link.clone()), schema);
+                let schema = InstanceClass::extend(link.clone(), schema);
                 let version = self
                     .service
                     .create_version(txn, number.clone(), schema)
@@ -274,7 +269,7 @@ impl<'a> Handler<'a> for DirHandler<'a, Service> {
                         .await?;
                     }
 
-                    let version = InstanceClass::anonymous(Some(link.clone()), version);
+                    let version = InstanceClass::extend(link.clone(), version);
 
                     self.create_item_or_dir(txn, link, name, Some(version))
                         .await

@@ -4,7 +4,6 @@ use std::fmt;
 
 use async_trait::async_trait;
 use destream::{de, en};
-use futures::TryFutureExt;
 use safecast::{TryCastFrom, TryCastInto};
 use sha2::digest::Output;
 use sha2::Sha256;
@@ -148,12 +147,14 @@ impl TryCastFrom<Object> for Value {
 #[async_trait]
 impl<'en> IntoView<'en, Dir> for Object {
     type Txn = Txn;
-    type View = ObjectView<'en>;
+    type View = ObjectView;
 
-    async fn into_view(self, txn: Txn) -> TCResult<ObjectView<'en>> {
+    async fn into_view(self, _txn: Txn) -> TCResult<ObjectView> {
         match self {
             Self::Class(class) => Ok(ObjectView::Class(class)),
-            Self::Instance(instance) => instance.into_view(txn).map_ok(ObjectView::Instance).await,
+            Self::Instance(_instance) => {
+                Err(TCError::not_implemented("view of user-defined instance"))
+            }
         }
     }
 }
@@ -179,12 +180,11 @@ impl fmt::Display for Object {
 }
 
 /// A view of an [`Object`] at a specific [`Txn`], used for serialization.
-pub enum ObjectView<'en> {
+pub enum ObjectView {
     Class(InstanceClass),
-    Instance(InstanceView<'en>),
 }
 
-impl<'en> en::IntoStream<'en> for ObjectView<'en> {
+impl<'en> en::IntoStream<'en> for ObjectView {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         use destream::en::EncodeMap;
 
@@ -192,9 +192,6 @@ impl<'en> en::IntoStream<'en> for ObjectView<'en> {
 
         match self {
             Self::Class(class) => map.encode_entry(ObjectType::Class.path().to_string(), class),
-            Self::Instance(instance) => {
-                map.encode_entry(ObjectType::Instance.path().to_string(), instance)
-            }
         }?;
 
         map.end()

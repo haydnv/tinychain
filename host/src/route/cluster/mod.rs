@@ -3,7 +3,7 @@ use std::fmt;
 use bytes::Bytes;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
-use log::{debug, info, trace, warn};
+use log::*;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -85,9 +85,7 @@ where
                         TCError::bad_request("invalid class definition", v)
                     })?;
 
-                    let link = class
-                        .extends()
-                        .ok_or_else(|| TCError::bad_request("missing Cluster link", &class))?;
+                    let link = class.extends();
 
                     if link.host().is_some() && link.host() != self.cluster.schema().lead() {
                         return Err(TCError::not_implemented(

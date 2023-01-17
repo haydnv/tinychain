@@ -29,8 +29,6 @@ use crate::txn::Txn;
 
 pub(super) const SCHEMA: Label = label("schemata");
 
-const ERR_MISSING_LINK: &str = "missing Link for Service version";
-
 /// An attribute of a [`Version`]
 #[derive(Clone)]
 pub enum Attr {
@@ -109,7 +107,6 @@ impl Persist<fs::Dir> for Version {
         let dir = fs::Dir::try_from(store)?;
 
         let (link, proto) = schema.into_inner();
-        let link = link.ok_or_else(|| TCError::bad_request(ERR_MISSING_LINK, &proto))?;
 
         let mut attrs = Map::new();
 
@@ -151,7 +148,6 @@ impl Persist<fs::Dir> for Version {
         let dir = fs::Dir::try_from(store)?;
 
         let (link, proto) = schema.into_inner();
-        let link = link.ok_or_else(|| TCError::bad_request(ERR_MISSING_LINK, &proto))?;
 
         let mut attrs = Map::new();
 
@@ -288,10 +284,9 @@ impl DirItem for Service {
         class: InstanceClass,
     ) -> TCResult<Version> {
         let (link, proto) = class.into_inner();
-        let link = link.ok_or_else(|| TCError::bad_request(ERR_MISSING_LINK, &proto))?;
 
         let proto = validate(&link, &number, proto)?;
-        let schema = InstanceClass::anonymous(Some(link), proto);
+        let schema = InstanceClass::extend(link, proto);
 
         let txn_id = *txn.id();
         let (dir, mut schemata, mut versions) = try_join!(

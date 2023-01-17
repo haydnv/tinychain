@@ -25,7 +25,7 @@ pub enum StateView<'en> {
     Closure((HashMap<Id, StateView<'en>>, OpDef)),
     Collection(CollectionView<'en>),
     Map(HashMap<Id, StateView<'en>>),
-    Object(Box<ObjectView<'en>>),
+    Object(Box<ObjectView>),
     Scalar(Scalar),
     Stream(en::SeqStream<TCResult<StateView<'en>>, TCBoxTryStream<'en, StateView<'en>>>),
     Tuple(Vec<StateView<'en>>),

@@ -1,9 +1,9 @@
-//! User-defined class implementation.
+//! A user-defined class.
 
-use async_hash::Hash;
 use std::fmt;
 use std::ops::Deref;
 
+use async_hash::Hash;
 use async_trait::async_trait;
 use destream::{de, en};
 use safecast::{CastFrom, TryCastFrom};
@@ -12,7 +12,7 @@ use sha2::Digest;
 use tc_transact::fs::BlockData;
 
 use tc_value::{Link, Value};
-use tcgeneric::{path_label, Id, Map, NativeClass, PathLabel, TCPathBuf};
+use tcgeneric::{path_label, Map, NativeClass, PathLabel};
 
 use crate::scalar::*;
 use crate::state::StateType;
@@ -24,66 +24,38 @@ const PATH: PathLabel = path_label(&["state", "class"]);
 /// A user-defined class.
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct InstanceClass {
-    extends: Option<Link>, // TODO: this should just be a Link with a default value, not an Option
-    link: Option<Link>,    // TODO: DELETE
+    extends: Link,
     proto: Map<Scalar>,
 }
 
 impl InstanceClass {
-    /// Construct a new class.
-    pub fn new(link: Option<Link>, proto: Map<Scalar>) -> Self {
+    /// Construct a new base class.
+    pub fn new(proto: Map<Scalar>) -> Self {
         Self {
-            extends: None,
-            link,
+            extends: PATH.into(),
             proto,
         }
     }
 
-    /// Extend an existing class.
-    pub fn extend(extends: Link, link: Option<Link>, proto: Map<Scalar>) -> Self {
+    /// Construct a new class which extends the class at `extends`.
+    pub fn extend<L: Into<Link>>(extends: L, proto: Map<Scalar>) -> Self {
         Self {
-            extends: Some(extends),
-            link,
-            proto,
-        }
-    }
-
-    /// Construct a new anonymous class.
-    pub fn anonymous(extends: Option<Link>, proto: Map<Scalar>) -> Self {
-        Self {
-            extends,
-            link: None,
+            extends: extends.into(),
             proto,
         }
     }
 
     /// Borrow the link to this class' parent.
-    // TODO: rename to `link`
-    pub fn extends(&self) -> Option<&Link> {
-        self.extends.as_ref()
-    }
-
-    /// Return the link to this class, if any.
-    // TODO: delete
-    pub fn link(&self) -> Link {
-        if let Some(link) = &self.link {
-            link.clone()
-        } else {
-            TCPathBuf::from(PATH).into()
-        }
+    pub fn extends(&self) -> &Link {
+        &self.extends
     }
 
     /// Consume this class and return its data.
-    pub fn into_inner(self) -> (Option<Link>, Map<Scalar>) {
+    pub fn into_inner(self) -> (Link, Map<Scalar>) {
         (self.extends, self.proto)
     }
 
-    /// Return `false` if this class has a self-`Link`
-    pub fn is_anonymous(&self) -> bool {
-        self.link.is_none()
-    }
-
-    /// Return the instance data of this class.
+    /// Borrow the prototype of this class.
     pub fn proto(&'_ self) -> &'_ Map<Scalar> {
         &self.proto
     }
@@ -97,10 +69,10 @@ impl<D: Digest> Hash<D> for InstanceClass {
 
 impl<'a, D: Digest> Hash<D> for &'a InstanceClass {
     fn hash(self) -> Output<D> {
-        if let Some(link) = &self.extends {
-            Hash::<D>::hash((link, self.proto.deref()))
-        } else {
+        if self.extends == Link::from(PATH) {
             Hash::<D>::hash(self.proto.deref())
+        } else {
+            Hash::<D>::hash((&self.extends, self.proto.deref()))
         }
     }
 }
@@ -123,15 +95,14 @@ impl BlockData for InstanceClass {
 
 impl From<StateType> for InstanceClass {
     fn from(st: StateType) -> Self {
-        Self::extend(st.path().into(), None, Map::default())
+        Self::extend(st.path(), Map::default())
     }
 }
 
 impl CastFrom<Link> for InstanceClass {
-    fn cast_from(value: Link) -> Self {
+    fn cast_from(extends: Link) -> Self {
         Self {
-            extends: Some(value),
-            link: None,
+            extends,
             proto: Map::new(),
         }
     }
@@ -147,11 +118,7 @@ impl TryCastFrom<PostRef> for InstanceClass {
 
     fn opt_cast_from(value: PostRef) -> Option<Self> {
         match value {
-            (Subject::Link(link), proto) => Some(Self {
-                extends: Some(link),
-                link: None,
-                proto,
-            }),
+            (Subject::Link(extends), proto) => Some(Self { extends, proto }),
             _ => None,
         }
     }
@@ -209,15 +176,11 @@ impl TryCastFrom<Scalar> for InstanceClass {
 
 impl CastFrom<InstanceClass> for Scalar {
     fn cast_from(class: InstanceClass) -> Self {
-        let extends = class
-            .extends
-            .unwrap_or(class.link.unwrap_or(ObjectType::Class.path().into()));
-
         if class.proto.is_empty() {
-            Self::Value(extends.into())
+            Self::Value(class.extends.into())
         } else {
             Self::Ref(Box::new(TCRef::Op(OpRef::Post((
-                extends.into(),
+                class.extends.into(),
                 class.proto,
             )))))
         }
@@ -243,10 +206,8 @@ impl TryCastFrom<Value> for InstanceClass {
 impl TryCastFrom<InstanceClass> for StateType {
     fn can_cast_from(class: &InstanceClass) -> bool {
         if class.proto.is_empty() {
-            if let Some(classpath) = &class.extends {
-                if classpath.host().is_none() {
-                    return StateType::from_path(classpath.path()).is_some();
-                }
+            if class.extends.host().is_none() {
+                return StateType::from_path(class.extends.path()).is_some();
             }
         }
 
@@ -255,10 +216,8 @@ impl TryCastFrom<InstanceClass> for StateType {
 
     fn opt_cast_from(class: InstanceClass) -> Option<Self> {
         if class.proto.is_empty() {
-            if let Some(classpath) = &class.extends {
-                if classpath.host().is_none() {
-                    return StateType::from_path(classpath.path());
-                }
+            if class.extends.host().is_none() {
+                return StateType::from_path(class.extends.path());
             }
         }
 
@@ -268,13 +227,12 @@ impl TryCastFrom<InstanceClass> for StateType {
 
 impl TryCastFrom<InstanceClass> for Link {
     fn can_cast_from(class: &InstanceClass) -> bool {
-        class.proto.is_empty() && class.extends.is_some()
+        class.proto.is_empty()
     }
 
     fn opt_cast_from(class: InstanceClass) -> Option<Self> {
-        let extends = class.extends?;
         if class.proto.is_empty() {
-            Some(extends.into())
+            Some(class.extends.into())
         } else {
             None
         }
@@ -302,29 +260,21 @@ impl de::FromStream for InstanceClass {
 
 impl<'en> en::ToStream<'en> for InstanceClass {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
-        if let Some(class) = &self.extends {
-            use en::EncodeMap;
+        use en::EncodeMap;
 
-            let mut map = encoder.encode_map(Some(1))?;
-            map.encode_entry(class.to_string(), &self.proto)?;
-            map.end()
-        } else {
-            self.proto.to_stream(encoder)
-        }
+        let mut map = encoder.encode_map(Some(1))?;
+        map.encode_entry(&self.extends, &self.proto)?;
+        map.end()
     }
 }
 
 impl<'en> en::IntoStream<'en> for InstanceClass {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        if let Some(class) = self.extends {
-            use en::EncodeMap;
+        use en::EncodeMap;
 
-            let mut map = encoder.encode_map(Some(1))?;
-            map.encode_entry(class.to_string(), self.proto)?;
-            map.end()
-        } else {
-            self.proto.into_stream(encoder)
-        }
+        let mut map = encoder.encode_map(Some(1))?;
+        map.encode_entry(self.extends, self.proto)?;
+        map.end()
     }
 }
 
@@ -336,27 +286,7 @@ impl fmt::Debug for InstanceClass {
 
 impl fmt::Display for InstanceClass {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(link) = &self.link {
-            write!(f, "class {}", link)
-        } else if let Some(link) = &self.extends {
-            #[cfg(debug_assertions)]
-            {
-                write!(f, "anonymous subclass of {}: {}", link, self.proto)
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                write!(f, "anonymous subclass of {}", link)
-            }
-        } else {
-            #[cfg(debug_assertions)]
-            {
-                write!(f, "anonymous class: {}", self.proto)
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                f.write_str("anonymous class")
-            }
-        }
+        f.write_str("Class")
     }
 }
 
@@ -371,26 +301,13 @@ impl de::Visitor for InstanceClassVisitor {
     }
 
     async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<InstanceClass, A::Error> {
-        if let Some(key) = access.next_key::<String>(()).await? {
-            if let Ok(extends) = key.parse() {
-                log::debug!("Class extends {}", extends);
-                let proto = access.next_value(()).await?;
-                log::debug!("prototype is {}", proto);
-                return Ok(InstanceClass::extend(extends, None, proto));
-            }
-
-            let mut proto = Map::new();
-            let id: Id = key.parse().map_err(de::Error::custom)?;
-            proto.insert(id, access.next_value(()).await?);
-
-            while let Some(id) = access.next_key(()).await? {
-                let value = access.next_value(()).await?;
-                proto.insert(id, value);
-            }
-
-            Ok(InstanceClass::anonymous(None, proto.into()))
+        if let Some(extends) = access.next_key::<Link>(()).await? {
+            log::debug!("Class extends {}", extends);
+            let proto = access.next_value(()).await?;
+            log::debug!("prototype is {}", proto);
+            return Ok(InstanceClass::extend(extends, proto));
         } else {
-            Ok(InstanceClass::anonymous(None, Map::default()))
+            Err(de::Error::invalid_length(0, 1))
         }
     }
 }
