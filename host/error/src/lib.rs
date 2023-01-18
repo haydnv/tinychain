@@ -57,7 +57,7 @@ where
 
 /// The category of a `TCError`.
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub enum ErrorType {
+pub enum ErrorKind {
     BadGateway,
     BadRequest,
     Conflict,
@@ -71,7 +71,7 @@ pub enum ErrorType {
     Unavailable,
 }
 
-impl<'en> en::IntoStream<'en> for ErrorType {
+impl<'en> en::IntoStream<'en> for ErrorKind {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         format!(
             "/error/{}",
@@ -93,13 +93,13 @@ impl<'en> en::IntoStream<'en> for ErrorType {
     }
 }
 
-impl fmt::Debug for ErrorType {
+impl fmt::Debug for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(self, f)
     }
 }
 
-impl fmt::Display for ErrorType {
+impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match self {
             Self::BadGateway => "bad gateway",
@@ -119,13 +119,13 @@ impl fmt::Display for ErrorType {
 
 /// A general error description.
 pub struct TCError {
-    code: ErrorType,
+    code: ErrorKind,
     data: ErrorData,
 }
 
 impl TCError {
     /// Returns a new error with the given code and message.
-    pub fn new<I: fmt::Display>(code: ErrorType, message: I) -> Self {
+    pub fn new<I: fmt::Display>(code: ErrorKind, message: I) -> Self {
         Self {
             code,
             data: message.into(),
@@ -133,7 +133,7 @@ impl TCError {
     }
 
     /// Reconstruct a [`TCError`] from its [`ErrorType`] and data.
-    pub fn with_stack<I, S, SI>(code: ErrorType, message: I, stack: S) -> Self
+    pub fn with_stack<I, S, SI>(code: ErrorKind, message: I, stack: S) -> Self
     where
         I: fmt::Display,
         SI: fmt::Display,
@@ -150,7 +150,7 @@ impl TCError {
 
     /// Error indicating that the an upstream server send an invalid response.
     pub fn bad_gateway<I: fmt::Display>(cause: I) -> Self {
-        Self::new(ErrorType::BadGateway, cause)
+        Self::new(ErrorKind::BadGateway, cause)
     }
 
     /// Error indicating that the request is badly-constructed or nonsensical.
@@ -162,7 +162,7 @@ impl TCError {
             panic!("{}", info)
         }
 
-        Self::new(ErrorType::BadRequest, info)
+        Self::new(ErrorKind::BadRequest, info)
     }
 
     /// Error indicating that the request depends on a resource which is exclusively locked
@@ -172,13 +172,13 @@ impl TCError {
         // panic!("{}", message);
         //
         // #[cfg(not(debug_assertions))]
-        Self::new(ErrorType::Conflict, message)
+        Self::new(ErrorKind::Conflict, message)
     }
 
     /// Error indicating that the request actor's credentials do not authorize access to some
     /// request dependencies.
     pub fn forbidden<M: fmt::Display, I: fmt::Display>(message: M, id: I) -> Self {
-        Self::new(ErrorType::Forbidden, format!("{}: {}", message, id))
+        Self::new(ErrorKind::Forbidden, format!("{}: {}", message, id))
     }
 
     /// A truly unexpected error, for which the calling application cannot define any specific
@@ -190,7 +190,7 @@ impl TCError {
         #[cfg(not(debug_assertions))]
         {
             log::error!("{}", info);
-            Self::new(ErrorType::Internal, info)
+            Self::new(ErrorKind::Internal, info)
         }
     }
 
@@ -206,43 +206,38 @@ impl TCError {
         panic!("{}", message);
 
         #[cfg(not(debug_assertions))]
-        Self::new(ErrorType::MethodNotAllowed, message)
+        Self::new(ErrorKind::MethodNotAllowed, message)
     }
 
     /// Error indicating that the requested resource does not exist at the specified location.
     pub fn not_found<I: fmt::Display>(locator: I) -> Self {
-        Self::new(ErrorType::NotFound, locator)
+        Self::new(ErrorKind::NotFound, locator)
     }
 
     /// Error indicating that a required feature is not yet implemented.
     pub fn not_implemented<F: fmt::Display>(feature: F) -> Self {
-        Self::new(ErrorType::NotImplemented, feature)
+        Self::new(ErrorKind::NotImplemented, feature)
     }
 
     /// Error indicating that the request failed to complete in the allotted time.
     pub fn timeout<I: fmt::Display>(info: I) -> Self {
-        Self::new(ErrorType::Timeout, info)
+        Self::new(ErrorKind::Timeout, info)
     }
 
     /// Error indicating that the user's credentials are missing or nonsensical.
     pub fn unauthorized<I: fmt::Display>(info: I) -> Self {
         Self::new(
-            ErrorType::Unauthorized,
+            ErrorKind::Unauthorized,
             format!("invalid credentials: {}", info),
         )
     }
 
     /// Error indicating that this host is currently overloaded
     pub fn unavailable<I: fmt::Display>(info: I) -> Self {
-        Self::new(ErrorType::Unavailable, info)
+        Self::new(ErrorKind::Unavailable, info)
     }
 
-    /// Error indicating that the request is badly-constructed or nonsensical.
-    pub fn unsupported<I: fmt::Display>(info: I) -> Self {
-        Self::new(ErrorType::BadRequest, info)
-    }
-
-    pub fn code(&self) -> ErrorType {
+    pub fn code(&self) -> ErrorKind {
         self.code
     }
 
@@ -298,4 +293,12 @@ impl fmt::Display for TCError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}: {}", self.code, self.data.message)
     }
+}
+
+/// Error indicating that the request is badly-constructed or nonsensical.
+#[macro_export]
+macro_rules! bad_request {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::BadRequest, format!($($t)*))
+    }}
 }

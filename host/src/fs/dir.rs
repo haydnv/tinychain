@@ -225,7 +225,7 @@ where
             Store::Dir(dir) => Err(TCError::bad_request("expected a file but found", dir)),
             Store::File(file) => file
                 .into_type()
-                .ok_or_else(|| TCError::unsupported("file is of unexpected type")),
+                .ok_or_else(|| bad_request!("unexpected file type")),
             Store::Create(mut parent, name) => fs::DirCreateFile::create_file(&mut parent, name),
             Store::GetOrCreate(mut parent, name) => {
                 fs::DirCreateFile::get_or_create_file(&mut parent, name)

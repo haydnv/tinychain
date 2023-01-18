@@ -452,7 +452,7 @@ impl Refer for OpRef {
         where
             T: fmt::Display + 'a,
         {
-            move |v| TCError::unsupported(format!("{} is not a valid key for {}", v, subject))
+            move |v| bad_request!("{} is not a valid key for {}", v, subject)
         }
 
         match self {

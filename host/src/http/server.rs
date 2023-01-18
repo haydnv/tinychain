@@ -291,7 +291,7 @@ fn transform_error(err: TCError, encoding: Encoding) -> hyper::Response<Body> {
     );
 
     use hyper::StatusCode;
-    use tc_error::ErrorType::*;
+    use tc_error::ErrorKind::*;
     *response.status_mut() = code;
 
     response

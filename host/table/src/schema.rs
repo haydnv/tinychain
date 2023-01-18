@@ -82,11 +82,11 @@ impl IndexSchema {
         reject_extras: bool,
     ) -> TCResult<(Key, Values)> {
         if reject_extras && self.len() != row.len() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "invalid row for schema {}: {}",
                 self,
                 Map::from(row)
-            )));
+            ));
         }
 
         let mut key = Vec::with_capacity(self.key().len());
@@ -113,10 +113,11 @@ impl IndexSchema {
     /// Given a [`Row`], return a `(key, values)` tuple.
     pub fn key_values_from_tuple(&self, tuple: Tuple<Value>) -> TCResult<(Vec<Value>, Vec<Value>)> {
         if self.len() != tuple.len() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "{} is not a valid row for schema {}",
-                tuple, self
-            )));
+                tuple,
+                self
+            ));
         }
 
         let mut key = tuple.into_inner();
@@ -209,13 +210,13 @@ impl IndexSchema {
     pub fn validate_key(&self, key: Key) -> TCResult<Key> {
         let key_len = key.len();
         if key_len != self.key.len() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "key {} has {} columns, but the table key has {}: {}",
                 Tuple::from(key),
                 key_len,
                 self.key.len(),
                 self
-            )));
+            ));
         }
 
         let mut validated = Vec::with_capacity(key.len());
@@ -231,11 +232,11 @@ impl IndexSchema {
     #[inline]
     pub fn validate_values(&self, values: Values) -> TCResult<Key> {
         if values.len() != self.values.len() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "invalid values {} for schema {}",
                 Tuple::from(values),
                 Tuple::<&Column>::from_iter(&self.values)
-            )));
+            ));
         }
 
         let mut validated = Vec::with_capacity(values.len());

@@ -14,8 +14,8 @@ use async_trait::async_trait;
 use collate::Collate;
 use destream::{de, en};
 use futures::future::{self, Future, TryFutureExt};
-use futures::stream::{self, FuturesOrdered, FuturesUnordered, TryStreamExt};
 use futures::join;
+use futures::stream::{self, FuturesOrdered, FuturesUnordered, TryStreamExt};
 use log::{debug, trace};
 use uuid::Uuid;
 
@@ -829,8 +829,8 @@ where
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         if self.inner.schema != backup.inner.schema {
-            return Err(TCError::unsupported(
-                "cannot restore a BTree from a backup with a different schema",
+            return Err(bad_request!(
+                "cannot restore a BTree from a backup with a different schema"
             ));
         }
 

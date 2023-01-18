@@ -94,11 +94,11 @@ where
                     }
 
                     if !link.path().starts_with(self.cluster.path()) {
-                        return Err(TCError::unsupported(format!(
+                        return Err(bad_request!(
                             "cannot install {} at {}",
                             link,
                             self.cluster.link().path()
-                        )));
+                        ));
                     }
 
                     State::Object(class.into())

@@ -1,4 +1,6 @@
-use tc_error::TCError;
+use log::debug;
+
+use tc_error::bad_request;
 use tc_value::{Bound, Range, Value};
 use tcgeneric::PathSegment;
 
@@ -21,12 +23,12 @@ impl<'a> Handler<'a> for CastHandler {
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                let err = format!("cannot cast into {} from {}", self.class, key);
+                debug!("cast {} into {}", key, self.class);
 
                 Scalar::Value(key)
                     .into_type(self.class)
                     .map(State::Scalar)
-                    .ok_or_else(|| TCError::unsupported(err))
+                    .ok_or_else(|| bad_request!("cannot cast into {}", self.class))
             })
         }))
     }

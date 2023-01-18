@@ -1410,7 +1410,7 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
         if let Some(subject) = self.subject {
             Ok(subject)
         } else {
-            Err(TCError::unsupported(ERR_NO_SELF))
+            Err(bad_request!("{}", ERR_NO_SELF))
         }
     }
 }

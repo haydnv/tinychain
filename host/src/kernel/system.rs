@@ -2,6 +2,7 @@ use std::convert::TryInto;
 use std::fmt;
 
 use async_trait::async_trait;
+use log::debug;
 use safecast::TryCastFrom;
 
 use tc_error::*;
@@ -33,11 +34,12 @@ impl Dispatch for System {
                 Err(TCError::unauthorized("access to /"))
             }
         } else if let Some(class) = ScalarType::from_path(path) {
-            let err = format!("cannot cast into an instance of {} from {}", class, key);
+            debug!("cast {} into {}", key, class);
+
             Scalar::from(key)
                 .into_type(class)
                 .map(State::Scalar)
-                .ok_or_else(|| TCError::unsupported(err))
+                .ok_or_else(|| bad_request!("cannot case into an instance of {}", class))
         } else {
             Static.get(txn, path, key).await
         }

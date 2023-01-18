@@ -160,10 +160,7 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
                 {
                     let mut parent = link.clone();
                     if parent.path_mut().pop().as_ref() != Some(&name) {
-                        return Err(TCError::unsupported(format!(
-                            "invalid link for {}: {}",
-                            name, parent
-                        )));
+                        return Err(bad_request!("invalid link for {}: {}", name, parent));
                     }
 
                     authorize_install(txn, &parent, &TCPathBuf::from(name.clone()))?;

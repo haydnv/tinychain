@@ -226,8 +226,12 @@ impl FromStr for TCPathBuf {
             let segments = to
                 .split('/')
                 .skip(1)
-                .map(PathSegment::from_str)
-                .map(|r| r.map_err(TCError::unsupported))
+                .map(|segment| match segment.parse() {
+                    Ok(segment) => Ok(segment),
+                    Err(cause) => {
+                        Err(TCError::bad_request("invalid path segment", segment).consume(cause))
+                    }
+                })
                 .collect::<TCResult<Vec<PathSegment>>>()?;
 
             Ok(TCPathBuf { segments })
@@ -236,7 +240,7 @@ impl FromStr for TCPathBuf {
                 .map(|id| TCPathBuf {
                     segments: iter::once(id).collect(),
                 })
-                .map_err(TCError::unsupported)
+                .map_err(|cause| TCError::bad_request("invalid path", to).consume(cause))
         }
     }
 }

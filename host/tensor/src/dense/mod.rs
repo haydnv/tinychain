@@ -85,11 +85,11 @@ where
         dtype: NumberType,
     ) -> TCResult<DenseTensor<FD, FS, D, T, BlockListCombine<FD, FS, D, T, B, OT>>> {
         if self.shape() != other.shape() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "cannot combine tensors with different shapes: {}, {}",
                 self.shape(),
                 other.shape()
-            )));
+            ));
         }
 
         let blocks = BlockListCombine::new(
@@ -716,11 +716,11 @@ where
 
     async fn argmax(self, txn: Self::Txn, axis: usize) -> TCResult<Self::Index> {
         if axis >= self.ndim() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "invalid argmax axis for tensor with {} dimensions: {}",
                 self.ndim(),
                 axis
-            )));
+            ));
         }
 
         let dtype = NumberType::UInt(UIntType::U64);
@@ -871,7 +871,7 @@ where
 
     fn pow(self, other: DenseTensor<FD, FS, D, T, O>) -> TCResult<Self::Combine> {
         if !other.dtype().is_real() {
-            return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
+            return Err(bad_request!("{}", ERR_COMPLEX_EXPONENT));
         }
 
         fn pow_array(l: &Array, r: &Array) -> Array {
@@ -979,7 +979,7 @@ where
 
     fn log_const(self, base: Number) -> TCResult<Self::Combine> {
         if base.class().is_complex() {
-            return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
+            return Err(bad_request!("{}", ERR_COMPLEX_EXPONENT));
         }
 
         let base = Number::Float(base.cast_into());
@@ -1009,7 +1009,7 @@ where
 
     fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
         if !other.class().is_real() {
-            return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
+            return Err(bad_request!("{}", ERR_COMPLEX_EXPONENT));
         }
 
         fn pow_array(l: Array, r: Number) -> Array {
@@ -1171,7 +1171,7 @@ where
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
         if self.dtype().is_complex() && dtype.is_real() {
-            return Err(TCError::unsupported("cannot cast a complex Tensor into a real Tensor; consider the real, imag, or abs methods instead"));
+            return Err(bad_request!("cannot cast a complex Tensor into a real Tensor; consider the real, imag, or abs methods instead"));
         }
 
         let blocks = BlockListCast::new(self.blocks, dtype);
@@ -1692,7 +1692,7 @@ fn encodable_c64<'en>(blocks: TCBoxTryStream<'en, Array>) -> impl Stream<Item = 
 
 #[inline]
 fn array_err(err: afarray::ArrayError) -> TCError {
-    TCError::new(ErrorType::BadRequest, err.to_string())
+    TCError::new(ErrorKind::BadRequest, err.to_string())
 }
 
 #[inline]

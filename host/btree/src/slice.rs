@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use futures::{TryFutureExt, TryStreamExt};
 
-use tc_error::{TCError, TCResult};
+use tc_error::{bad_request, TCResult};
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::ValueCollator;
@@ -51,8 +51,8 @@ impl<F: File<Key = NodeId, Block = Node>, D: Dir, T: Transaction<D>> BTreeSlice<
                         reverse,
                     })
                 } else {
-                    Err(TCError::unsupported(
-                        "BTreeSlice does not contain requested range",
+                    Err(bad_request!(
+                        "this BTree slice does not contain the requested range"
                     ))
                 }
             }
@@ -94,8 +94,8 @@ where
         if self.range.contains(&range, self.collator()) {
             Self::new(BTree::Slice(self), range, reverse)
         } else {
-            Err(TCError::unsupported(
-                "BTreeSlice does not contain the requested range",
+            Err(bad_request!(
+                "this BTree slice does not contain the requested range"
             ))
         }
     }

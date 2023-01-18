@@ -244,10 +244,11 @@ impl Bounds {
     /// Return the [`Shape`] of the `Tensor` slice with these `Bounds`.
     pub fn to_shape(&self, source_shape: &Shape) -> TCResult<Shape> {
         if source_shape.len() < self.len() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "invalid bounds {} for shape {}",
-                self, source_shape
-            )));
+                self,
+                source_shape
+            ));
         }
 
         let mut shape = source_shape.to_vec();
@@ -474,26 +475,29 @@ impl Shape {
     /// Return a `TCError` if this `Shape` is empty.
     pub fn validate(&self, debug_info: &'static str) -> TCResult<()> {
         if self.0.is_empty() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "error in {}: invalid tensor shape {}",
-                debug_info, self
-            )));
+                debug_info,
+                self
+            ));
         }
 
         let mut size = 1u64;
         for dim in &self.0 {
             if dim == &0 {
-                return Err(TCError::unsupported(format!(
+                return Err(bad_request!(
                     "error in {}: invalid tensor dimension {}",
-                    debug_info, dim
-                )));
+                    debug_info,
+                    dim
+                ));
             } else if let Some(m) = size.checked_mul(*dim) {
                 size = m;
             } else {
-                return Err(TCError::unsupported(format!(
+                return Err(bad_request!(
                     "error in {}: tensor shape {} exceeds the maximum allowed size of 2^64",
-                    debug_info, self
-                )));
+                    debug_info,
+                    self
+                ));
             }
         }
 
@@ -503,10 +507,9 @@ impl Shape {
     /// Return a `TCError` if any of the given axes is out of bounds.
     pub fn validate_axes(&self, axes: &[usize]) -> TCResult<()> {
         match axes.iter().max() {
-            Some(max) if max > &self.len() => Err(TCError::unsupported(format!(
-                "shape {} has no axis {}",
-                self, max
-            ))),
+            Some(max) if max > &self.len() => {
+                Err(bad_request!("shape {} has no axis {}", self, max))
+            }
             _ => Ok(()),
         }
     }
@@ -516,10 +519,11 @@ impl Shape {
         if self.contains_bounds(bounds) {
             Ok(())
         } else {
-            Err(TCError::unsupported(format!(
+            Err(bad_request!(
                 "Tensor of shape {} does not contain bounds {}",
-                self, bounds
-            )))
+                self,
+                bounds
+            ))
         }
     }
 
@@ -527,11 +531,11 @@ impl Shape {
     pub fn validate_coord(&self, coord: &[u64]) -> TCResult<()> {
         for (axis, index) in coord.iter().enumerate() {
             if index >= &self[axis] {
-                return Err(TCError::unsupported(format!(
+                return Err(bad_request!(
                     "Tensor of shape {} does not contain {}",
                     self,
                     Value::from_iter(coord.to_vec())
-                )));
+                ));
             }
         }
 

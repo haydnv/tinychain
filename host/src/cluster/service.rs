@@ -404,8 +404,8 @@ impl Persist<fs::Dir> for Service {
                 versions: TxnLock::new("service", txn_id, BTreeMap::new()),
             })
         } else {
-            Err(TCError::unsupported(
-                "cannot create a new Service from a non-empty directory",
+            Err(bad_request!(
+                "cannot create a new Service from a non-empty directory"
             ))
         }
     }
@@ -456,15 +456,8 @@ impl fmt::Display for Service {
 
 fn resolve_type<T: NativeClass>(subject: Subject) -> TCResult<T> {
     match subject {
-        Subject::Link(link) if link.host().is_none() => {
-            T::from_path(link.path()).ok_or_else(|| {
-                TCError::unsupported(format!(
-                    "{} is not a {}",
-                    link.path(),
-                    std::any::type_name::<T>()
-                ))
-            })
-        }
+        Subject::Link(link) if link.host().is_none() => T::from_path(link.path())
+            .ok_or_else(|| bad_request!("{} is not a {}", link.path(), std::any::type_name::<T>())),
         Subject::Link(link) => Err(TCError::not_implemented(format!(
             "support for a user-defined Class of {} in a Service: {}",
             std::any::type_name::<T>(),
@@ -495,10 +488,11 @@ fn validate(
                 for (id, provider) in op_def.form() {
                     // make sure not to duplicate requests to other clusters
                     if provider.is_inter_service_write(version_link.path()) {
-                        return Err(TCError::unsupported(format!(
+                        return Err(bad_request!(
                             "replicated op {} may not perform inter-service writes: {}",
-                            id, provider
-                        )));
+                            id,
+                            provider
+                        ));
                     }
                 }
 

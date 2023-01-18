@@ -572,8 +572,10 @@ impl FromStr for Link {
 
         let segments = segments
             .iter()
-            .map(|s| s.parse())
-            .map(|r| r.map_err(TCError::unsupported))
+            .map(|s| match s.parse() {
+                Ok(segment) => Ok(segment),
+                Err(cause) => Err(TCError::bad_request("invalid path segment", s).consume(cause)),
+            })
             .collect::<TCResult<Vec<PathSegment>>>()?;
 
         Ok(Link {

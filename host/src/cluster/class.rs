@@ -161,7 +161,7 @@ impl Persist<fs::Dir> for Class {
         if contents.is_empty() {
             Ok(Self { dir })
         } else {
-            Err(TCError::unsupported(
+            Err(bad_request!(
                 "cannot create a new Class cluster with a non-empty directory",
             ))
         }

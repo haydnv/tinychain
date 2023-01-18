@@ -186,7 +186,7 @@ where
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         match self {
             Self::Table(table) => table.write_value(txn_id, coord, value).await,
-            _ => Err(TCError::unsupported("cannot write to a Tensor view")),
+            _ => Err(bad_request!("cannot write to a Tensor view")),
         }
     }
 }
@@ -764,8 +764,8 @@ where
 {
     pub fn new(left: L, right: R, combinator: fn(Number, Number) -> Number) -> TCResult<Self> {
         if left.shape() != right.shape() {
-            return Err(TCError::unsupported(
-                "tried to combine SparseTensors with different shapes",
+            return Err(bad_request!(
+                "tried to combine SparseTensors with different shapes"
             ));
         }
 
@@ -803,9 +803,9 @@ where
             .map(|result| {
                 result.and_then(|(coord, n)| {
                     if n.is_infinite() {
-                        Err(TCError::unsupported(ERR_INF))
+                        Err(bad_request!("{}", ERR_INF))
                     } else if n.is_nan() {
-                        Err(TCError::unsupported(ERR_NAN))
+                        Err(bad_request!("{}", ERR_NAN))
                     } else {
                         Ok((coord, n))
                     }
@@ -1133,8 +1133,8 @@ where
 {
     pub fn new(left: L, right: R, combinator: fn(Number, Number) -> Number) -> TCResult<Self> {
         if left.shape() != right.shape() {
-            return Err(TCError::unsupported(
-                "tried to combine SparseTensors with different shapes",
+            return Err(bad_request!(
+                "tried to combine SparseTensors with different shapes"
             ));
         }
 
@@ -1890,8 +1890,8 @@ where
         debug_assert!(reduced.ndim() > 0);
 
         if reduced.ndim() == 0 {
-            Err(TCError::unsupported(
-                "cannot return a zero-dimensional slice from a reduced Tensor",
+            Err(bad_request!(
+                "cannot return a zero-dimensional slice from a reduced Tensor"
             ))
         } else {
             Ok(reduced)
@@ -2019,8 +2019,8 @@ where
         _txn: T,
         _axes: Vec<usize>,
     ) -> TCResult<TCBoxTryStream<'a, Coords>> {
-        Err(TCError::unsupported(
-            "cannot slice a reshaped Tensor; make a copy first",
+        Err(bad_request!(
+            "cannot slice a reshaped Tensor; make a copy first"
         ))
     }
 
@@ -2038,8 +2038,8 @@ where
     }
 
     fn slice(self, _bounds: Bounds) -> TCResult<Self::Slice> {
-        Err(TCError::unsupported(
-            "cannot slice a reshaped Tensor; make a copy first",
+        Err(bad_request!(
+            "cannot slice a reshaped Tensor; make a copy first"
         ))
     }
 

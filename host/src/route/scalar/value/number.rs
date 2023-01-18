@@ -67,7 +67,7 @@ impl<'a> Handler<'a> for Log {
         Some(Box::new(|_txn, value| {
             Box::pin(async move {
                 if self.n == Number::from(0) {
-                    return Err(TCError::unsupported("the logarithm of zero is undefined"));
+                    return Err(bad_request!("the logarithm of zero is undefined"));
                 }
 
                 let log = if value.is_none() {
@@ -141,10 +141,11 @@ where
         Some(Box::new(|_txn, value| {
             Box::pin(async move {
                 if value.is_some() {
-                    return Err(TCError::unsupported(format!(
+                    return Err(bad_request!(
                         "{} does not have any parameters (found {})",
-                        self.name, value
-                    )));
+                        self.name,
+                        value
+                    ));
                 }
 
                 Ok(State::from(Value::from((self.op)())))
@@ -166,7 +167,7 @@ impl Route for Number {
             "and" => Box::new(Dual::new(move |other| Ok(self.and(other)))),
             "div" => Box::new(Dual::new(move |other: Number| {
                 if other == other.class().zero() {
-                    Err(TCError::unsupported("cannot divide by zero"))
+                    Err(bad_request!("cannot divide by zero"))
                 } else {
                     Ok(*self / other)
                 }

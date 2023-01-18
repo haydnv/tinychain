@@ -461,10 +461,10 @@ where
 
         for replica in to_remove {
             if replica == &self.schema.host {
-                return Err(TCError::unsupported(format!(
+                return Err(bad_request!(
                     "{} received a remove request for itself",
                     self
-                )));
+                ));
             } else {
                 replicas.remove(replica);
             }
@@ -504,7 +504,7 @@ where
 
             while let Some((replica, result)) = results.next().await {
                 match result {
-                    Err(cause) if cause.code() == ErrorType::Conflict => return Err(cause),
+                    Err(cause) if cause.code() == ErrorKind::Conflict => return Err(cause),
                     Err(ref cause) => {
                         warn!("replica {} failed: {}", replica, cause);
                         failed.insert(replica.clone());

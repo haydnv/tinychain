@@ -526,11 +526,11 @@ where
                     key.try_cast_into(|v| TCError::bad_request("invalid values for Tuple/zip", v))?;
 
                 if self.keys.len() != values.len() {
-                    return Err(TCError::unsupported(format!(
+                    return Err(bad_request!(
                         "cannot zip {} keys with {} values",
                         self.keys.len(),
                         values.len()
-                    )));
+                    ));
                 }
 
                 let zipped =
@@ -639,15 +639,17 @@ fn cast_range(range: Range, len: i64) -> TCResult<(usize, usize)> {
     };
 
     if start >= len {
-        Err(TCError::unsupported(format!(
+        Err(bad_request!(
             "start index {} is out of bounds for Tuple with length {}",
-            start, len
-        )))
+            start,
+            len
+        ))
     } else if end > len {
-        Err(TCError::unsupported(format!(
+        Err(bad_request!(
             "end index {} is out of bounds for Tuple with length {}",
-            end, len
-        )))
+            end,
+            len
+        ))
     } else if start > end {
         Err(TCError::bad_request(
             "invalid range for Tuple",

@@ -78,7 +78,10 @@ impl FromStr for Version {
                 .parse()
                 .map_err(|err| TCError::bad_request("invalid major version", err))?
         } else {
-            return Err(TCError::unsupported("missing major version number"));
+            return Err(bad_request!(
+                "{} is missing missing a major version number",
+                s
+            ));
         };
 
         let minor = if let Some(minor) = parts.next() {
@@ -86,18 +89,21 @@ impl FromStr for Version {
                 .parse()
                 .map_err(|err| TCError::bad_request("invalid minor version", err))?
         } else {
-            return Err(TCError::unsupported("missing minor version number"));
+            return Err(bad_request!(
+                "{} is missing missing a minor version number",
+                s
+            ));
         };
 
         let rev = if let Some(rev) = parts.next() {
             rev.parse()
                 .map_err(|err| TCError::bad_request("invalid revision number", err))?
         } else {
-            return Err(TCError::unsupported("missing revision number"));
+            return Err(bad_request!("{} is missing missing a patch number", s));
         };
 
         if parts.next().is_some() {
-            return Err(TCError::unsupported("invalid semantic version"));
+            return Err(bad_request!("invalid semantic version number: {}", s));
         }
 
         Ok(Self { major, minor, rev })

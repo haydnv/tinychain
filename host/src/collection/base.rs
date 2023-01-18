@@ -169,10 +169,11 @@ impl Restore<fs::Dir> for CollectionBase {
             (Self::Dense(tensor), Self::Dense(backup)) => tensor.restore(txn_id, backup).await,
             #[cfg(feature = "tensor")]
             (Self::Sparse(tensor), Self::Sparse(backup)) => tensor.restore(txn_id, backup).await,
-            (collection, backup) => Err(TCError::unsupported(format!(
+            (collection, backup) => Err(bad_request!(
                 "cannot restore {} from {}",
-                collection, backup
-            ))),
+                collection,
+                backup
+            )),
         }
     }
 }

@@ -156,19 +156,19 @@ where
 
         let shape = if let Some(shape) = shape {
             if shape.size() < size {
-                return Err(TCError::unsupported(format!(
+                return Err(bad_request!(
                     "dense tensor with shape {} requires {} elements but found {}",
                     shape,
                     shape.size(),
                     size
-                )));
+                ));
             } else if shape.size() > size {
-                return Err(TCError::unsupported(format!(
+                return Err(bad_request!(
                     "dense tensor of shape {} requires {} elements but found {}--this could indicate a divide-by-zero error",
                     shape,
                     shape.size(),
                     size
-                )));
+                ));
             }
 
             shape
@@ -205,12 +205,12 @@ where
         }
 
         if size != shape.size() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "DenseTensor of shape {} requires {} values, found {}",
                 shape,
                 shape.size(),
                 size,
-            )));
+            ));
         }
 
         Ok(Self::new(file, Schema { shape, dtype }))
@@ -304,11 +304,11 @@ where
         D::Write: DirCreateFile<FD>,
     {
         if value.shape() != self.shape() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "cannot overwrite a Tensor of shape {} with one of shape {}",
                 self.shape(),
                 value.shape()
-            )));
+            ));
         }
 
         let txn_id = *txn.id();
@@ -446,11 +446,11 @@ where
 
         let slice_shape = bounds.to_shape(self.shape())?;
         if &slice_shape != value.shape() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "cannot overwrite a Tensor of shape {} with one of shape {}",
                 slice_shape,
                 value.shape()
-            )));
+            ));
         }
 
         let txn_id = *txn.id();

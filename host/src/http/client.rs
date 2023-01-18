@@ -68,7 +68,7 @@ impl crate::gateway::Client for Client {
 
     async fn get(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<State> {
         if txn.owner().is_none() {
-            return Err(TCError::unsupported(ERR_NO_OWNER));
+            return Err(bad_request!("{}", ERR_NO_OWNER));
         }
 
         let uri = build_url(&link, txn.id(), &key)?;
@@ -98,7 +98,7 @@ impl crate::gateway::Client for Client {
 
     async fn put(&self, txn: &Txn, link: ToUrl<'_>, key: Value, value: State) -> TCResult<()> {
         if txn.owner().is_none() {
-            return Err(TCError::unsupported(ERR_NO_OWNER));
+            return Err(bad_request!("{}", ERR_NO_OWNER));
         }
 
         let uri = build_url(&link, txn.id(), &key)?;
@@ -129,7 +129,7 @@ impl crate::gateway::Client for Client {
 
     async fn post(&self, txn: &Txn, link: ToUrl<'_>, params: State) -> TCResult<State> {
         if txn.owner().is_none() {
-            return Err(TCError::unsupported(ERR_NO_OWNER));
+            return Err(bad_request!("{}", ERR_NO_OWNER));
         }
 
         let uri = build_url(&link, txn.id(), &Value::default())?;
@@ -168,7 +168,7 @@ impl crate::gateway::Client for Client {
 
     async fn delete(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<()> {
         if txn.owner().is_none() {
-            return Err(TCError::unsupported(ERR_NO_OWNER));
+            return Err(bad_request!("{}", ERR_NO_OWNER));
         }
 
         let uri = build_url(&link, txn.id(), &key)?;
@@ -242,17 +242,17 @@ async fn transform_error(source: &ToUrl<'_>, response: hyper::Response<Body>) ->
 
     use hyper::StatusCode;
     let code = match status {
-        StatusCode::BAD_REQUEST => ErrorType::BadRequest,
-        StatusCode::CONFLICT => ErrorType::Conflict,
-        StatusCode::FORBIDDEN => ErrorType::Forbidden,
-        StatusCode::INTERNAL_SERVER_ERROR => ErrorType::Internal,
-        StatusCode::GATEWAY_TIMEOUT => ErrorType::Timeout,
-        StatusCode::METHOD_NOT_ALLOWED => ErrorType::MethodNotAllowed,
-        StatusCode::NOT_FOUND => ErrorType::NotFound,
-        StatusCode::NOT_IMPLEMENTED => ErrorType::NotImplemented,
-        StatusCode::UNAUTHORIZED => ErrorType::Unauthorized,
-        StatusCode::REQUEST_TIMEOUT => ErrorType::Timeout,
-        _ => ErrorType::BadGateway,
+        StatusCode::BAD_REQUEST => ErrorKind::BadRequest,
+        StatusCode::CONFLICT => ErrorKind::Conflict,
+        StatusCode::FORBIDDEN => ErrorKind::Forbidden,
+        StatusCode::INTERNAL_SERVER_ERROR => ErrorKind::Internal,
+        StatusCode::GATEWAY_TIMEOUT => ErrorKind::Timeout,
+        StatusCode::METHOD_NOT_ALLOWED => ErrorKind::MethodNotAllowed,
+        StatusCode::NOT_FOUND => ErrorKind::NotFound,
+        StatusCode::NOT_IMPLEMENTED => ErrorKind::NotImplemented,
+        StatusCode::UNAUTHORIZED => ErrorKind::Unauthorized,
+        StatusCode::REQUEST_TIMEOUT => ErrorKind::Timeout,
+        _ => ErrorKind::BadGateway,
     };
 
     TCError::new(code, message)

@@ -141,7 +141,7 @@ impl<T: Clone> Dir<T> {
         let lock = tc_transact::fs::Dir::try_read(&dir, txn_id)?;
 
         if !tc_transact::fs::DirRead::is_empty(&lock) {
-            return Err(TCError::unsupported(
+            return Err(bad_request!(
                 "cannot create a cluster directory from a non-empty filesystem directory",
             ));
         }
@@ -593,10 +593,12 @@ async fn entry_schema(
     link: Link,
 ) -> TCResult<Schema> {
     if link.path().last() != Some(&name) {
-        return Err(TCError::unsupported(format!(
+        return Err(bad_request!(
             "link for cluster directory entry {} must end with {} (found {})",
-            name, name, link
-        )));
+            name,
+            name,
+            link
+        ));
     }
 
     let (lead, path) = link.into_inner();

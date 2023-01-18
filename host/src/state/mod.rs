@@ -467,8 +467,8 @@ impl AsyncHash<crate::fs::Dir> for State {
             }
             Self::Object(object) => object.hash(txn).await,
             Self::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),
-            Self::Stream(_stream) => Err(TCError::unsupported(
-                "cannot hash a Stream; hash its source instead",
+            Self::Stream(_stream) => Err(bad_request!(
+                "cannot hash a Stream; hash its source instead"
             )),
             Self::Tuple(tuple) => {
                 let mut hashes = stream::iter(tuple)

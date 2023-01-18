@@ -190,8 +190,8 @@ impl ConcatenateHandler {
             tensor.shape().validate("concatenate")?;
 
             if tensor.ndim() != ndim {
-                return Err(TCError::unsupported(
-                    "Tensors to concatenate must have the same dimensions",
+                return Err(bad_request!(
+                    "Tensors to concatenate must have the same dimensions"
                 ));
             }
 
@@ -200,14 +200,14 @@ impl ConcatenateHandler {
             for x in 0..axis {
                 let dim = shape[x];
                 if dim != shape_out[x] {
-                    return Err(TCError::unsupported(ERR_OFF_AXIS));
+                    return Err(bad_request!("{}", ERR_OFF_AXIS));
                 }
             }
 
             if axis < tensor.ndim() {
                 for x in (axis + 1)..ndim {
                     if shape[x] != shape_out[x] {
-                        return Err(TCError::unsupported(ERR_OFF_AXIS));
+                        return Err(bad_request!("{}", ERR_OFF_AXIS));
                     }
                 }
             }
@@ -255,7 +255,7 @@ impl<'a> Handler<'a> for ConcatenateHandler {
                 params.expect_empty()?;
 
                 if tensors.is_empty() {
-                    return Err(TCError::unsupported("no Tensors to concatenate"));
+                    return Err(bad_request!("no Tensors to concatenate"));
                 }
 
                 let dtype = tensors
@@ -270,10 +270,11 @@ impl<'a> Handler<'a> for ConcatenateHandler {
                 };
 
                 if tensors[0].ndim() < axis {
-                    return Err(TCError::unsupported(format!(
+                    return Err(bad_request!(
                         "axis {} is out of bounds for {}",
-                        axis, tensors[0]
-                    )));
+                        axis,
+                        tensors[0]
+                    ));
                 }
 
                 let tensor = Self::concatenate_axis(txn, axis, dtype, tensors).await?;
@@ -507,7 +508,7 @@ impl<'a> Handler<'a> for LoadHandler {
                 } else if elements.matches::<Vec<Number>>() {
                     let elements: Vec<Number> = elements.opt_cast_into().expect("tensor elements");
                     if elements.is_empty() {
-                        return Err(TCError::unsupported(
+                        return Err(bad_request!(
                             "a dense Tensor cannot be loaded from a zero-element Tuple",
                         ));
                     }
@@ -525,11 +526,11 @@ impl<'a> Handler<'a> for LoadHandler {
                     };
 
                     if elements.len() as u64 != schema.shape.size() {
-                        return Err(TCError::unsupported(format!(
+                        return Err(bad_request!(
                             "wrong number of elements for Tensor with shape {}: {}",
                             schema.shape,
                             Tuple::from(elements)
-                        )));
+                        ));
                     }
 
                     if let Some(class) = self.class {
@@ -919,10 +920,7 @@ impl<'a> Handler<'a> for TileHandler {
                         multiples.push(n.cast_into());
                         Ok(multiples)
                     }
-                    Value::Number(n) => Err(TCError::unsupported(format!(
-                        "cannot tile a Tensor {} times",
-                        n
-                    )))?,
+                    Value::Number(n) => Err(bad_request!("cannot tile a Tensor {} times", n))?,
                     Value::Tuple(multiples) if multiples.len() == tensor.ndim() => multiples
                         .try_cast_into(|v| {
                             TCError::bad_request("invalid list of multiples for tile", v)
@@ -1144,7 +1142,7 @@ impl<'a> Handler<'a> for LogHandler {
 
                 // TODO: perform this check while computing the logarithm itself
                 if !self.tensor.clone().all(txn.clone()).await? {
-                    return Err(TCError::unsupported("the logarithm of zero is undefined"));
+                    return Err(bad_request!("the logarithm of zero is undefined"));
                 }
 
                 let log = if r.is_none() {
@@ -1411,11 +1409,11 @@ where
                 let bounds = cast_bounds(self.tensor.shape(), key)?;
 
                 if bounds.size() == 0 {
-                    return Err(TCError::unsupported(format!(
+                    return Err(bad_request!(
                         "invalid bounds for tensor with shape {}: {}",
                         self.tensor.shape(),
                         bounds
-                    )));
+                    ));
                 }
 
                 let shape = self.tensor.shape();
@@ -1987,10 +1985,11 @@ fn cast_axis(axis: Value, ndim: usize) -> TCResult<usize> {
     let axis: Number = axis.try_cast_into(|v| TCError::bad_request("invalid tensor axis", v))?;
 
     if axis >= (ndim as u64).into() {
-        Err(TCError::unsupported(format!(
+        Err(bad_request!(
             "axis {} is out of bounds for Tensor with {} dimensions",
-            axis, ndim
-        )))
+            axis,
+            ndim
+        ))
     } else if axis >= 0.into() {
         Ok(axis.cast_into())
     } else {
@@ -2045,11 +2044,11 @@ pub fn cast_bounds(shape: &Shape, value: Value) -> TCResult<Bounds> {
         }
         Value::Tuple(bounds) => {
             if bounds.len() > shape.len() {
-                return Err(TCError::unsupported(format!(
+                return Err(bad_request!(
                     "tensor of shape {} does not support bounds with {} axes",
                     shape,
                     bounds.len()
-                )));
+                ));
             }
 
             let mut axes = Vec::with_capacity(shape.len());
@@ -2092,8 +2091,8 @@ fn cast_shape(source_shape: &Shape, value: Tuple<Value>) -> TCResult<Vec<u64>> {
 
     let mut shape = vec![1; value.len()];
     if value.iter().filter(|dim| *dim == &Value::None).count() > 1 {
-        return Err(TCError::unsupported(
-            "Tensor /reshape only accepts one unknown dimension",
+        return Err(bad_request!(
+            "Tensor reshape accepts a maximum of one unknown dimension"
         ));
     }
 
@@ -2107,8 +2106,8 @@ fn cast_shape(source_shape: &Shape, value: Tuple<Value>) -> TCResult<Vec<u64>> {
                 unknown = Some(x);
             }
             Value::Number(dim) if dim == &Number::from(-1) => {
-                return Err(TCError::unsupported(
-                    "use value/none to specify an unknown dimension, not -1",
+                return Err(bad_request!(
+                    "use value/none to specify an unknown dimension, not -1"
                 ));
             }
             other => return Err(TCError::bad_request("invalid dimension for Tensor", other)),
@@ -2121,19 +2120,21 @@ fn cast_shape(source_shape: &Shape, value: Tuple<Value>) -> TCResult<Vec<u64>> {
         if size % known == 0 {
             shape[unknown] = size / known;
         } else {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "cannot reshape Tensor with size {} into shape {}",
-                size, value
-            )));
+                size,
+                value
+            ));
         }
     }
 
     if shape.iter().product::<u64>() == size {
         Ok(shape)
     } else {
-        Err(TCError::unsupported(format!(
+        Err(bad_request!(
             "cannot reshape Tensor with shape {} into shape {}",
-            source_shape, value
-        )))
+            source_shape,
+            value
+        ))
     }
 }

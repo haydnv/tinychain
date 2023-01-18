@@ -395,18 +395,18 @@ impl fmt::Display for Static {
     }
 }
 
-fn error_type(err_type: &Id) -> Option<ErrorType> {
+fn error_type(err_type: &Id) -> Option<ErrorKind> {
     match err_type.as_str() {
-        "bad_gateway" => Some(ErrorType::BadGateway),
-        "bad_request" => Some(ErrorType::BadRequest),
-        "conflict" => Some(ErrorType::Conflict),
-        "forbidden" => Some(ErrorType::Forbidden),
-        "internal" => Some(ErrorType::Internal),
-        "method_not_allowed" => Some(ErrorType::MethodNotAllowed),
-        "not_found" => Some(ErrorType::NotFound),
-        "not_implemented" => Some(ErrorType::NotImplemented),
-        "timeout" => Some(ErrorType::Timeout),
-        "unauthorized" => Some(ErrorType::Unauthorized),
+        "bad_gateway" => Some(ErrorKind::BadGateway),
+        "bad_request" => Some(ErrorKind::BadRequest),
+        "conflict" => Some(ErrorKind::Conflict),
+        "forbidden" => Some(ErrorKind::Forbidden),
+        "internal" => Some(ErrorKind::Internal),
+        "method_not_allowed" => Some(ErrorKind::MethodNotAllowed),
+        "not_found" => Some(ErrorKind::NotFound),
+        "not_implemented" => Some(ErrorKind::NotImplemented),
+        "timeout" => Some(ErrorKind::Timeout),
+        "unauthorized" => Some(ErrorKind::Unauthorized),
         _ => None,
     }
 }

@@ -34,20 +34,22 @@ impl Dimensions {
 
     fn extend(&mut self, labels: &[char], shape: &[u64]) -> TCResult<()> {
         if labels.len() != shape.len() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "tensor with {} dimensions does not match format string {}",
                 shape.len(),
                 labels.iter().copied().collect::<String>()
-            )));
+            ));
         }
 
         for (label, dim) in labels.iter().zip(shape) {
             if let Some(known) = self.shape.get(label) {
                 if dim != known {
-                    return Err(TCError::unsupported(format!(
+                    return Err(bad_request!(
                         "einsum found inconsistent dimensions for axis {}: {:?} vs {:?}",
-                        label, known, dim
-                    )));
+                        label,
+                        known,
+                        dim
+                    ));
                 }
             } else {
                 self.shape.insert(*label, *dim);
@@ -89,17 +91,15 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
     let f_inputs = parts[0].split(',');
     match f_inputs.count() {
         count if count == inputs.len() => Ok(()),
-        count => Err(TCError::unsupported(format!(
+        count => Err(bad_request!(
             "einsum got {} tensors with {} format strings",
             inputs.len(),
             count
-        ))),
+        )),
     }?;
 
     let f_output = parts.pop_back().ok_or_else(|| {
-        TCError::unsupported(
-            "einsum requires > 0 output dimensions; use sum to sum over an entire Tensor",
-        )
+        bad_request!("einsum requires > 0 output dimensions; use sum to sum over an entire Tensor")
     })?;
 
     let valid_subscripts: HashSet<char> = VALID_SUBSCRIPTS.iter().cloned().collect();
@@ -150,9 +150,7 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
         if elided.len() == num_elided {
             Ok(Some(elided))
         } else {
-            Err(TCError::unsupported(
-                "einsum got too many dimensions to elide",
-            ))
+            Err(bad_request!("einsum got too many dimensions to elide"))
         }
     } else {
         Ok(None)

@@ -1507,10 +1507,13 @@ pub fn broadcast_shape(left: &[u64], right: &[u64]) -> TCResult<Shape> {
         } else if *r == 1 {
             shape.push(*l)
         } else {
-            return Err(TCError::unsupported(format!(
-                "cannot broadcast dimension {} into {} (tensor shapes are {:?} and {:?})",
-                l, r, left, right,
-            )));
+            return Err(bad_request!(
+                "cannot broadcast dimension {} into {} (tensor shapes are {:?} and {:?}",
+                l,
+                r,
+                left,
+                right
+            ));
         }
     }
 
@@ -1569,10 +1572,10 @@ where
     let input_shape = input.shape();
 
     if input_shape.iter().any(|dim| dim >= &max_usize) {
-        return Err(TCError::unsupported(format!(
+        return Err(bad_request!(
             "Tensor of shape {} is too large to tile",
             input_shape
-        )));
+        ));
     }
 
     let slices = input_shape

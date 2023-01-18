@@ -109,10 +109,11 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
                     if deps.contains(&id) {
                         return Err(TCError::bad_request("circular dependency", id));
                     } else if deps.contains(&capture) {
-                        return Err(TCError::unsupported(format!(
+                        return Err(bad_request!(
                             "circular dependency between {} and {}",
-                            capture, id
-                        )));
+                            capture,
+                            id
+                        ));
                     }
 
                     let mut ready = true;

@@ -65,8 +65,8 @@ where
         if outer.contains(&inner, self.btree.collator()) {
             Ok(())
         } else {
-            Err(TCError::unsupported(
-                "slice does not contain requested bounds",
+            Err(bad_request!(
+                "this Table slice does not contain the requested bounds"
             ))
         }
     }
@@ -274,8 +274,8 @@ where
             .iter()
             .any(ColumnBound::is_range)
         {
-            return Err(TCError::unsupported(
-                "Index bounds must include a maximum of one range, only on the rightmost column",
+            return Err(bad_request!(
+                "index bounds must include a maximum of one range, only on the rightmost column"
             ));
         }
 
@@ -525,8 +525,8 @@ where
     }
 
     fn reverse(self) -> TCResult<Self::Reverse> {
-        Err(TCError::unsupported(
-            "cannot reverse a Table itself, consider reversing a slice of the table instead",
+        Err(bad_request!(
+            "cannot reverse a Table itself, consider reversing a slice of the Table instead"
         ))
     }
 
@@ -703,8 +703,8 @@ where
             }
 
             if bounds.len() == initial {
-                return Err(TCError::unsupported(
-                    "this Table has no Index to support the requested selection bounds",
+                return Err(bad_request!(
+                    "this Table has no Index to support the requested selection bounds"
                 ));
             }
         }
@@ -764,7 +764,7 @@ where
                         .map(|(id, bound)| format!("{}: {}", id, bound)),
                 );
 
-                return Err(TCError::unsupported(format!("this table has no index to support selection bounds on {}--available indices are {}", bounds, Tuple::<&Id>::from_iter(auxiliary.iter().map(|(id, _)| id)))));
+                return Err(bad_request!("this table has no index to support selection bounds on {}--available indices are {}", bounds, Tuple::<&Id>::from_iter(auxiliary.iter().map(|(id, _)| id))));
             }
         }
 
@@ -1007,8 +1007,8 @@ where
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         if self.inner.schema != backup.inner.schema {
-            return Err(TCError::unsupported(
-                "cannot restore a Table using a backup with a different schema",
+            return Err(bad_request!(
+                "cannot restore a Table from a backup with a different schema"
             ));
         }
 

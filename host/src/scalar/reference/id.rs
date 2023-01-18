@@ -112,8 +112,8 @@ impl FromStr for IdRef {
         } else {
             to[1..]
                 .parse()
-                .map(|to| IdRef { to })
-                .map_err(TCError::unsupported)
+                .map(|to| Self { to })
+                .map_err(|cause| bad_request!("invalid ID reference {}", to).consume(cause))
         }
     }
 }

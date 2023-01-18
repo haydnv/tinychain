@@ -729,10 +729,11 @@ where
 
                 let computed_hash = dest.save_state(txn, state).await?;
                 if &computed_hash != original_hash {
-                    return Err(TCError::unsupported(format!(
+                    return Err(bad_request!(
                         "cannot replicate state with inconsistent hash {} vs {}",
-                        original_hash, computed_hash
-                    )));
+                        original_hash,
+                        computed_hash
+                    ));
                 }
 
                 block.append_put(txn_id, key.clone(), computed_hash)
