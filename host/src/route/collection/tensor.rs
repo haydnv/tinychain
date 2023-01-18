@@ -1222,7 +1222,7 @@ impl NormHandler {
                 .map(State::Collection);
         } else if tensor.ndim() <= 2 {
             if keepdims {
-                Err(TCError::not_implemented("matrix norm with keepdims"))
+                Err(not_implemented!("matrix norm with keepdims"))
             } else {
                 let squared = tensor.pow_const(2i32.into())?;
                 let summed = squared.sum_all(txn).await?;
@@ -1322,9 +1322,7 @@ where
 {
     async fn call(&self, txn: &Txn, axis: Option<usize>, keepdims: bool) -> TCResult<State> {
         if axis.is_none() && keepdims {
-            Err(TCError::not_implemented(
-                "reduce all axes but keep dimensions",
-            ))
+            Err(not_implemented!("reduce all axes but keep dimensions"))
         } else if axis.is_none() || (axis == Some(0) && self.tensor.ndim() == 1) {
             (self.reduce_all)(self.tensor, txn.clone())
                 .map_ok(Value::from)

@@ -152,9 +152,7 @@ impl<'en> IntoView<'en, Dir> for Object {
     async fn into_view(self, _txn: Txn) -> TCResult<ObjectView> {
         match self {
             Self::Class(class) => Ok(ObjectView::Class(class)),
-            Self::Instance(_instance) => {
-                Err(TCError::not_implemented("view of user-defined instance"))
-            }
+            Self::Instance(_instance) => Err(not_implemented!("view of user-defined instance")),
         }
     }
 }

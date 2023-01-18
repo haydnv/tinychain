@@ -190,11 +190,6 @@ impl TCError {
         Self::new(ErrorKind::NotFound, locator)
     }
 
-    /// Error indicating that a required feature is not yet implemented.
-    pub fn not_implemented<F: fmt::Display>(feature: F) -> Self {
-        Self::new(ErrorKind::NotImplemented, feature)
-    }
-
     /// The [`ErrorKind`] of this error
     pub fn code(&self) -> ErrorKind {
         self.kind
@@ -256,7 +251,6 @@ impl fmt::Display for TCError {
     }
 }
 
-
 /// Error indicating that the an upstream server send an invalid response.
 #[macro_export]
 macro_rules! bad_gateway {
@@ -278,6 +272,14 @@ macro_rules! bad_request {
 macro_rules! forbidden {
     ($($t:tt)*) => {{
         $crate::TCError::new($crate::ErrorKind::Unavailable, format!($($t)*))
+    }}
+}
+
+/// Error indicating that a required feature is not yet implemented.
+#[macro_export]
+macro_rules! not_implemented {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::NotImplemented, format!($($t)*))
     }}
 }
 

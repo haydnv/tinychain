@@ -178,9 +178,7 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
 
     for f_input in &f_inputs {
         if f_input.iter().collect::<HashSet<_>>().len() != f_input.len() {
-            return Err(TCError::not_implemented(
-                "repeated subscripts in einsum input",
-            ));
+            return Err(not_implemented!("repeated subscripts in einsum input"));
         }
     }
 

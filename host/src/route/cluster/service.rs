@@ -192,7 +192,7 @@ impl<'a> Handler<'a> for ServiceHandler<'a> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if self.path.len() == 0 {
-                    return Err(TCError::not_implemented("delete a version of a Service"));
+                    return Err(not_implemented!("delete a version of a Service"));
                 }
 
                 let number = self.path[0].as_str().parse()?;

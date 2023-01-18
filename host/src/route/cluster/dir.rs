@@ -87,8 +87,8 @@ where
             if key.is_none() {
                 Box::pin(self.dir.state(*txn.id()))
             } else {
-                Box::pin(future::ready(Err(TCError::not_implemented(
-                    "cluster entry range query",
+                Box::pin(future::ready(Err(not_implemented!(
+                    "cluster entry range query"
                 ))))
             }
         }))

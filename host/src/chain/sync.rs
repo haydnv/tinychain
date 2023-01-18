@@ -324,7 +324,7 @@ where
         _store: fs::Store,
         _instance: SyncChain<T>,
     ) -> TCResult<Self> {
-        Err(TCError::not_implemented("SyncChain::copy_from"))
+        Err(not_implemented!("SyncChain::copy_from"))
     }
 }
 

@@ -70,7 +70,7 @@ impl ValueType {
         match self {
             Self::Bytes => match value {
                 Value::Bytes(bytes) => Ok(Value::Bytes(bytes)),
-                Value::Number(_) => Err(TCError::not_implemented("cast into Bytes from Number")),
+                Value::Number(_) => Err(not_implemented!("cast into Bytes from Number")),
                 Value::String(s) => s
                     .try_cast_into(|s| TCError::bad_request("cannot cast into Bytes from", s))
                     .map(Value::Bytes),

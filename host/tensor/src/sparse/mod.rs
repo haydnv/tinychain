@@ -529,10 +529,10 @@ where
 
     async fn diagonal(self, txn: Self::Txn) -> TCResult<Self::Diagonal> {
         if self.ndim() != 2 {
-            return Err(TCError::not_implemented(format!(
+            return Err(not_implemented!(
                 "diagonal of a {}-dimensional sparse Tensor",
                 self.ndim()
-            )));
+            ));
         }
 
         let size = self.shape()[0];

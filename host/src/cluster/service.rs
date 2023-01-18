@@ -458,11 +458,11 @@ fn resolve_type<T: NativeClass>(subject: Subject) -> TCResult<T> {
     match subject {
         Subject::Link(link) if link.host().is_none() => T::from_path(link.path())
             .ok_or_else(|| bad_request!("{} is not a {}", link.path(), std::any::type_name::<T>())),
-        Subject::Link(link) => Err(TCError::not_implemented(format!(
+        Subject::Link(link) => Err(not_implemented!(
             "support for a user-defined Class of {} in a Service: {}",
             std::any::type_name::<T>(),
             link
-        ))),
+        )),
         subject => Err(TCError::bad_request(
             format!("expected a {} but found", std::any::type_name::<T>()),
             subject,

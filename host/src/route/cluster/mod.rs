@@ -88,7 +88,7 @@ where
                     let link = class.extends();
 
                     if link.host().is_some() && link.host() != self.cluster.schema().lead() {
-                        return Err(TCError::not_implemented(
+                        return Err(not_implemented!(
                             "install a Cluster with a different lead replica",
                         ));
                     }

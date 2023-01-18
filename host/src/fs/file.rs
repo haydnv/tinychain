@@ -707,7 +707,7 @@ where
     where
         Q: Borrow<<Self::File as tc_transact::fs::File>::Key> + Send + Sync,
     {
-        Err(TCError::not_implemented("FileWriteGuard::try_delete_block"))
+        Err(not_implemented!("FileWriteGuard::try_delete_block"))
     }
 
     async fn copy_from<O>(&mut self, other: &O, truncate: bool) -> TCResult<()>
@@ -738,7 +738,7 @@ where
         O: FileRead,
         O::File: tc_transact::fs::File<Key = K, Block = B>,
     {
-        Err(TCError::not_implemented("FileWriteGuard::try_copy_from"))
+        Err(not_implemented!("FileWriteGuard::try_copy_from"))
     }
 
     async fn truncate(&mut self) -> TCResult<()> {
@@ -755,7 +755,7 @@ where
     }
 
     fn try_truncate(&mut self) -> TCResult<()> {
-        Err(TCError::not_implemented("FileWriteGuard::try_truncate"))
+        Err(not_implemented!("FileWriteGuard::try_truncate"))
     }
 }
 

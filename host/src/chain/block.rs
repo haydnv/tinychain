@@ -258,7 +258,7 @@ where
         _store: fs::Store,
         _instance: BlockChain<T>,
     ) -> TCResult<Self> {
-        Err(TCError::not_implemented("BlockChain::copy_from"))
+        Err(not_implemented!("BlockChain::copy_from"))
     }
 }
 
