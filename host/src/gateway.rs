@@ -212,7 +212,7 @@ impl Gateway {
             use rjwt::Resolve;
             Resolver::new(self, &self.host().clone().into(), &txn_id)
                 .consume_and_sign(&self.actor, vec![], token, txn_id.time().into())
-                .map_err(TCError::unauthorized)
+                .map_err(|cause| unauthorized!("credential error").consume(cause))
                 .await?
         } else {
             self.new_token(&txn_id)?

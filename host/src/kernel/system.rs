@@ -31,7 +31,7 @@ impl Dispatch for System {
                     TCPath::from(path)
                 )))
             } else {
-                Err(TCError::unauthorized("access to /"))
+                Err(forbidden!("access to /"))
             }
         } else if let Some(class) = ScalarType::from_path(path) {
             debug!("cast {} into {}", key, class);

@@ -353,12 +353,12 @@ fn authorize_install(txn: &Txn, parent: &Link, entry_path: &TCPathBuf) -> TCResu
             .request()
             .scopes()
             .get(&parent, &TCPathBuf::default().into())
-            .ok_or_else(|| TCError::unauthorized(format!("install request for {}", parent)))?;
+            .ok_or_else(|| unauthorized!("install request for {}", parent))?;
 
         if authorized.iter().any(|scope| entry_path.starts_with(scope)) {
             Ok(())
         } else {
-            Err(TCError::forbidden("install a new Cluster at", entry_path))
+            Err(forbidden!("install a new Cluster at {}", entry_path))
         }
     } else {
         // this is a replica, it doesn't make sense to require a recently-signed token

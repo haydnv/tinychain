@@ -40,7 +40,7 @@ impl HTTPServer {
         match tokio::time::timeout(self.gateway.request_ttl(), self.handle(request)).await {
             Ok(result) => result,
             Err(cause) => Ok(transform_error(
-                TCError::timeout(cause),
+                timeout!("request timed out").consume(cause),
                 Encoding::default(),
             )),
         }
@@ -133,17 +133,17 @@ impl HTTPServer {
             .unwrap_or_else(HashMap::new);
 
         let token = if let Some(header) = http_request.headers().get(hyper::header::AUTHORIZATION) {
-            let token = header.to_str().map_err(|e| {
-                TCError::unauthorized(format!("unable to parse authorization header: {}", e))
-            })?;
+            let token = header
+                .to_str()
+                .map_err(|e| unauthorized!("unable to parse authorization header: {}", e))?;
 
             if token.starts_with("Bearer") {
                 Some(token[6..].trim().to_string())
             } else {
-                return Err(TCError::unauthorized(format!(
+                return Err(unauthorized!(
                     "unable to parse authorization header: {} (should start with \"Bearer\"",
                     token
-                )));
+                ));
             }
         } else {
             None

@@ -99,10 +99,7 @@ impl Txn {
             self.grant(actor, cluster_path, vec![self.active.scope().clone()])
                 .await
         } else {
-            Err(TCError::forbidden(
-                "tried to claim owned transaction",
-                self.id(),
-            ))
+            Err(forbidden!("tried to claim owned transaction {}", self.id(),))
         }
     }
 
@@ -128,7 +125,7 @@ impl Txn {
 
         let (token, claims) = resolver
             .consume_and_sign(actor, scopes, token, txn_id.time().into())
-            .map_err(TCError::unauthorized)
+            .map_err(|cause| unauthorized!("signature error").consume(cause))
             .await?;
 
         Ok(Self {

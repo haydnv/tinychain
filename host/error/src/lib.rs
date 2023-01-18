@@ -175,12 +175,6 @@ impl TCError {
         Self::new(ErrorKind::Conflict, message)
     }
 
-    /// Error indicating that the request actor's credentials do not authorize access to some
-    /// request dependencies.
-    pub fn forbidden<M: fmt::Display, I: fmt::Display>(message: M, id: I) -> Self {
-        Self::new(ErrorKind::Forbidden, format!("{}: {}", message, id))
-    }
-
     /// Error indicating that the requested resource exists but does not support the request method.
     pub fn method_not_allowed<M: fmt::Display, S: fmt::Display, P: fmt::Display>(
         method: M,
@@ -206,34 +200,19 @@ impl TCError {
         Self::new(ErrorKind::NotImplemented, feature)
     }
 
-    /// Error indicating that the request failed to complete in the allotted time.
-    pub fn timeout<I: fmt::Display>(info: I) -> Self {
-        Self::new(ErrorKind::Timeout, info)
-    }
-
-    /// Error indicating that the user's credentials are missing or nonsensical.
-    pub fn unauthorized<I: fmt::Display>(info: I) -> Self {
-        Self::new(
-            ErrorKind::Unauthorized,
-            format!("invalid credentials: {}", info),
-        )
-    }
-
-    /// Error indicating that this host is currently overloaded
-    pub fn unavailable<I: fmt::Display>(info: I) -> Self {
-        Self::new(ErrorKind::Unavailable, info)
-    }
-
+    /// The [`ErrorKind`] of this error
     pub fn code(&self) -> ErrorKind {
         self.kind
     }
 
+    /// The error message of this error
     pub fn message(&'_ self) -> &'_ str {
         &self.data.message
     }
 
-    pub fn consume<I: fmt::Display>(mut self, info: I) -> Self {
-        self.data.stack.push(info.to_string());
+    /// Construct a new error with the given `cause`
+    pub fn consume<I: fmt::Display>(mut self, cause: I) -> Self {
+        self.data.stack.push(cause.to_string());
         self
     }
 }
@@ -282,7 +261,7 @@ impl fmt::Display for TCError {
     }
 }
 
-/// Error indicating that the request is badly-constructed or nonsensical.
+/// Error indicating that the request is badly-constructed or nonsensical
 #[macro_export]
 macro_rules! bad_request {
     ($($t:tt)*) => {{
@@ -290,10 +269,42 @@ macro_rules! bad_request {
     }}
 }
 
-/// A truly unexpected error, for which no handling behavior can be defined.
+/// Error indicating that the requestor's credentials do not authorize the request to be fulfilled
+#[macro_export]
+macro_rules! forbidden {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::Unavailable, format!($($t)*))
+    }}
+}
+
+/// Error indicating that the request failed to complete in the allotted time.
+#[macro_export]
+macro_rules! timeout {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::Timeout, format!($($t)*))
+    }}
+}
+
+/// A truly unexpected error, for which no handling behavior can be defined
 #[macro_export]
 macro_rules! unexpected {
     ($($t:tt)*) => {{
         $crate::TCError::new($crate::ErrorKind::Internal, format!($($t)*))
+    }}
+}
+
+/// Error indicating that the user's credentials are missing or nonsensical.
+#[macro_export]
+macro_rules! unauthorized {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::Unauthorized, format!($($t)*))
+    }}
+}
+
+/// Error indicating that this host is currently overloaded
+#[macro_export]
+macro_rules! unavailable {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::Unavailable, format!($($t)*))
     }}
 }
