@@ -110,7 +110,7 @@ impl History {
         let file = self.file.read().await;
         let block = file
             .get_file(&block_name(PENDING))
-            .ok_or_else(|| TCError::internal("BlockChain is missing its pending block"))?;
+            .ok_or_else(|| unexpected!("BlockChain is missing its pending block"))?;
 
         block.read().map_err(fs::io_err).await
     }
@@ -119,7 +119,7 @@ impl History {
         let file = self.file.read().await;
         let block = file
             .get_file(&block_name(PENDING))
-            .ok_or_else(|| TCError::internal("BlockChain is missing its pending block"))?;
+            .ok_or_else(|| unexpected!("BlockChain is missing its pending block"))?;
 
         block.write().map_err(fs::io_err).await
     }
@@ -201,7 +201,7 @@ impl History {
 
             let last_hash = dest.current_hash().to_vec();
             if &last_hash[..] != &source.current_hash()[..] {
-                return Err(TCError::internal(err_divergent(*latest)));
+                return Err(unexpected!("{}", err_divergent(*latest)));
             }
 
             last_hash
@@ -244,7 +244,7 @@ impl History {
 
             last_hash = dest.current_hash().to_vec();
             if &last_hash[..] != &source.current_hash()[..] {
-                return Err(TCError::internal(err_divergent(block_id)));
+                return Err(unexpected!("{}", err_divergent(block_id)));
             }
         }
 
@@ -346,10 +346,10 @@ impl Persist<fs::Dir> for History {
         //     if block.last_hash() == &last_hash {
         //         last_hash = block.last_hash().clone();
         //     } else {
-        //         return Err(TCError::internal(format!(
+        //         return Err(internal!(
         //             "block {} hash does not match previous block",
         //             latest
-        //         )));
+        //         ));
         //     }
         //
         //     cutoff = block.mutations.keys().last().copied().unwrap_or(cutoff);
@@ -762,7 +762,7 @@ impl<'en> IntoView<'en, fs::Dir> for History {
         let seq = stream::iter(0..((*latest) + 1))
             .map(move |block_id| {
                 file.get_file(&block_name(block_id))
-                    .ok_or_else(|| TCError::internal("missing chain block"))
+                    .ok_or_else(|| unexpected!("missing chain block"))
             })
             .and_then(|block| Box::pin(async move { block.read().map_err(fs::io_err).await }))
             .map_ok(move |block: FileReadGuard<_, ChainBlock>| {

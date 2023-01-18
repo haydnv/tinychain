@@ -456,10 +456,10 @@ impl Persist<fs::Dir> for Dir<Class> {
                         let contents = cache.try_read().expect("cache read");
 
                         if contents.is_empty() {
-                            return Err(TCError::internal(format!(
+                            return Err(unexpected!(
                                 "an empty directory at {} is ambiguous",
                                 schema.path
-                            )));
+                            ));
                         }
 
                         contents.contains(&*crate::chain::HISTORY)
@@ -471,10 +471,7 @@ impl Persist<fs::Dir> for Dir<Class> {
                         Cluster::load(txn_id, schema, dir.clone().into()).map(DirEntry::Dir)
                     }
                 }
-                file => Err(TCError::internal(format!(
-                    "invalid Class dir entry: {}",
-                    file
-                ))),
+                file => Err(unexpected!("invalid Class dir entry: {}", file)),
             }?;
 
             contents.insert(name.clone(), entry);
@@ -515,10 +512,11 @@ impl Persist<fs::Dir> for Dir<Library> {
                         contents.insert(name.clone(), DirEntry::Item(lib));
                     }
                     file => {
-                        return Err(TCError::internal(format!(
+                        return Err(unexpected!(
                             "{} is in the library directory but {} is not a library",
-                            name, file
-                        )))
+                            name,
+                            file
+                        ))
                     }
                 },
             };
@@ -550,10 +548,9 @@ impl Persist<fs::Dir> for Dir<Service> {
             let schema = schema.extend(name.clone());
 
             let entry = match entry {
-                fs::DirEntry::File(file) => Err(TCError::internal(format!(
-                    "invalid Service directory entry: {}",
-                    file
-                ))),
+                fs::DirEntry::File(file) => {
+                    Err(unexpected!("invalid Service directory entry: {}", file))
+                }
                 fs::DirEntry::Dir(dir) => {
                     let is_service = {
                         let lock = tc_transact::fs::Dir::try_read(dir, txn_id)?;

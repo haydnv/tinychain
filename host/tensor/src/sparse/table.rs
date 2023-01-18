@@ -659,7 +659,7 @@ fn expect_row(mut row: Vec<Value>) -> TCResult<(Coord, Number)> {
         debug_assert_ne!(value, 0.into());
         expect_coord(row).map(|coord| (coord, value))
     } else {
-        Err(TCError::internal(ERR_CORRUPT))
+        Err(unexpected!("{}", ERR_CORRUPT))
     }
 }
 

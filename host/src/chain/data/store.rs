@@ -138,17 +138,16 @@ impl Store {
 
         if let Scalar::Ref(tc_ref) = scalar {
             if let TCRef::Op(OpRef::Get((OpSubject::Ref(hash, classpath), schema))) = *tc_ref {
-                let class = CollectionType::from_path(&classpath).ok_or_else(|| {
-                    TCError::internal(format!("invalid Collection type: {}", classpath))
-                })?;
+                let class = CollectionType::from_path(&classpath)
+                    .ok_or_else(|| unexpected!("invalid Collection type: {}", classpath))?;
 
                 let dir = self.dir.read(txn_id).await?;
                 Self::resolve_inner(dir, txn_id, hash.into(), schema, class).map(State::from)
             } else {
-                Err(TCError::internal(format!(
+                Err(unexpected!(
                     "invalid subject for historical Chain state {}",
                     tc_ref
-                )))
+                ))
             }
         } else {
             Ok(scalar.into())
@@ -167,10 +166,7 @@ impl Store {
         match class {
             CollectionType::BTree(_) => {
                 fn schema_err<I: fmt::Display>(info: I) -> TCError {
-                    TCError::internal(format!(
-                        "invalid BTree schema for historical Chain state: {}",
-                        info
-                    ))
+                    unexpected!("invalid BTree schema for historical Chain state: {}", info)
                 }
 
                 let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
@@ -178,17 +174,14 @@ impl Store {
 
                 let store = dir
                     .get_store(hash)
-                    .ok_or_else(|| TCError::internal("missing historical state"))?;
+                    .ok_or_else(|| unexpected!("missing historical state"))?;
 
                 BTreeFile::load(txn_id, schema, store).map(|btree| Collection::BTree(btree.into()))
             }
 
             CollectionType::Table(_) => {
                 fn schema_err<I: fmt::Display>(info: I) -> TCError {
-                    TCError::internal(format!(
-                        "invalid Table schema for historical Chain state: {}",
-                        info
-                    ))
+                    unexpected!("invalid Table schema for historical Chain state: {}", info)
                 }
 
                 let schema = Value::try_cast_from(schema, |v| schema_err(v))?;
@@ -196,26 +189,24 @@ impl Store {
 
                 let store = dir
                     .get_store(hash)
-                    .ok_or_else(|| TCError::internal("missing historical state"))?;
+                    .ok_or_else(|| unexpected!("missing historical state"))?;
 
                 TableIndex::load(txn_id, schema, store).map(|table| Collection::Table(table.into()))
             }
 
             #[cfg(feature = "tensor")]
             CollectionType::Tensor(tt) => {
-                let schema: Value = schema.try_cast_into(|s| {
-                    TCError::internal(format!("invalid Tensor schema: {}", s))
-                })?;
+                let schema: Value =
+                    schema.try_cast_into(|s| unexpected!("invalid Tensor schema: {}", s))?;
 
-                let schema = schema.try_cast_into(|v| {
-                    TCError::internal(format!("invalid Tensor schema: {}", v))
-                })?;
+                let schema =
+                    schema.try_cast_into(|v| unexpected!("invalid Tensor schema: {}", v))?;
 
                 match tt {
                     TensorType::Dense => {
                         let store = dir
                             .get_store(hash)
-                            .ok_or_else(|| TCError::internal("missing historical state"))?;
+                            .ok_or_else(|| unexpected!("missing historical state"))?;
 
                         DenseTensor::load(txn_id, schema, store)
                             .map(|tensor| Collection::Tensor(tensor.into()))
@@ -223,7 +214,7 @@ impl Store {
                     TensorType::Sparse => {
                         let store = dir
                             .get_store(hash)
-                            .ok_or_else(|| TCError::internal("missing historical state"))?;
+                            .ok_or_else(|| unexpected!("missing historical state"))?;
 
                         SparseTensor::load(txn_id, schema, store)
                             .map(|tensor| Collection::Tensor(tensor.into()))

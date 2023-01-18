@@ -768,8 +768,8 @@ where
         trace!("BTreeFile::create got file write lock");
 
         if !file.is_empty() {
-            return Err(TCError::internal(
-                "Tried to create a new BTree without a new File",
+            return Err(unexpected!(
+                "tried to create a new BTree without a new File"
             ));
         }
 
@@ -804,13 +804,12 @@ where
             }
         }
 
-        let root =
-            root.ok_or_else(|| TCError::internal("BTree corrupted (no root block configured)"))?;
+        let root = root.ok_or_else(|| unexpected!("BTree corrupted (no root block configured)"))?;
 
         if blocks.contains(&root) {
             Ok(BTreeFile::new(file, txn_id, schema, order, root))
         } else {
-            Err(TCError::internal("BTree corrupted (missing root block)"))
+            Err(unexpected!("BTree corrupted (missing root block)"))
         }
     }
 

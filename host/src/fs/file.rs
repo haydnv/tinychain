@@ -653,10 +653,11 @@ where
         initial_value: B,
         size_hint: usize,
     ) -> TCResult<(K, BlockWriteGuard<K, B>)> {
-        let block_id: <Self::File as tc_transact::fs::File>::Key = Uuid::new_v4()
+        let uuid = Uuid::new_v4();
+        let block_id: <Self::File as tc_transact::fs::File>::Key = uuid
             .to_string()
             .parse()
-            .map_err(TCError::internal)?;
+            .map_err(|cause| unexpected!("invalid block id: {}", uuid).consume(cause))?;
 
         self.create_block(block_id.clone(), initial_value, size_hint)
             .map_ok(move |block| (block_id, block))
@@ -672,10 +673,11 @@ where
         <Self::File as tc_transact::fs::File>::Key,
         <Self::File as tc_transact::fs::File>::BlockWrite,
     )> {
-        let block_id: <Self::File as tc_transact::fs::File>::Key = Uuid::new_v4()
+        let uuid = Uuid::new_v4();
+        let block_id: <Self::File as tc_transact::fs::File>::Key = uuid
             .to_string()
             .parse()
-            .map_err(TCError::internal)?;
+            .map_err(|cause| unexpected!("invalid block ID {}", uuid).consume(cause))?;
 
         self.try_create_block(block_id.clone(), initial_value, size_hint)
             .map(move |block| (block_id, block))
@@ -785,10 +787,10 @@ where
     pub fn new(canon: freqfs::DirLock<CacheBlock>, txn_id: TxnId) -> TCResult<Self> {
         let mut fs_dir = canon
             .try_write()
-            .map_err(|cause| TCError::internal(format!("new file is already in use: {}", cause)))?;
+            .map_err(|cause| unexpected!("new file is already in use: {}", cause))?;
 
         if fs_dir.len() > 0 {
-            return Err(TCError::internal("new file is not empty"));
+            return Err(unexpected!("new file is not empty"));
         }
 
         Ok(Self {
@@ -825,11 +827,11 @@ where
             trace!("File::load found block {}", name);
 
             if name.len() < B::ext().len() + 1 || !name.ends_with(B::ext()) {
-                return Err(TCError::internal(format!(
+                return Err(unexpected!(
                     "block has invalid extension: {} (expected {})",
                     name,
                     B::ext()
-                )));
+                ));
             }
 
             let (size_hint, contents) = match block {
@@ -844,16 +846,17 @@ where
                     (size_hint, contents)
                 }
                 freqfs::DirEntry::Dir(_) => {
-                    return Err(TCError::internal(format!(
+                    return Err(unexpected!(
                         "expected block file but found directory: {}",
                         name
-                    )))
+                    ))
                 }
             };
 
-            let block_id: K = name[..(name.len() - B::ext().len() - 1)]
+            let block_id = &name[..(name.len() - B::ext().len() - 1)];
+            let block_id: K = block_id
                 .parse()
-                .map_err(TCError::internal)?;
+                .map_err(|cause| unexpected!("invalid block ID: {}", block_id).consume(cause))?;
 
             blocks.insert(
                 block_id,
@@ -1218,7 +1221,11 @@ where
         .rfind('.')
         .ok_or_else(|| TCError::bad_request("invalid block name", name))?;
 
-    let name = std::str::from_utf8(&name.as_bytes()[..i]).map_err(TCError::internal)?;
+    // make sure the name is valid unicode
+    let name = &name[..i];
+    let name = std::str::from_utf8(name.as_bytes())
+        .map_err(|cause| unexpected!("invalid block ID {}", name).consume(cause))?;
+
     name.parse()
         .map_err(|cause| TCError::bad_request("invalid block name", cause))
 }

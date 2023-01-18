@@ -539,7 +539,7 @@ impl Dir {
 
                 let fs_cache = match fs_cache {
                     freqfs::DirEntry::Dir(dir_lock) => dir_lock.clone(),
-                    _ => return Err(TCError::internal(format!("{} is not a directory", name))),
+                    _ => return Err(unexpected!("{} is not a directory", name)),
                 };
 
                 let (name, entry) = if is_file(name).await {
@@ -549,7 +549,9 @@ impl Dir {
                 } else if is_dir(&fs_cache).await {
                     assert!(ext_class(name).is_none());
                     let subdir = Dir::load(fs_cache, txn_id).await?;
-                    let name = name.parse().map_err(TCError::internal)?;
+                    let name = name.parse().map_err(|cause| {
+                        unexpected!("invalid bdirectory name {}", name).consume(cause)
+                    })?;
                     (name, DirEntry::Dir(subdir))
                 } else {
                     #[cfg(debug_assertions)]
@@ -557,10 +559,10 @@ impl Dir {
                     #[cfg(not(debug_assertions))]
                     let fs_path = name;
 
-                    return Err(TCError::internal(format!(
+                    return Err(unexpected!(
                         "directory {} contains both blocks and subdirectories",
                         fs_path
-                    )));
+                    ));
                 };
 
                 listing.insert(name, entry);
@@ -763,11 +765,14 @@ async fn is_file(name: &str) -> bool {
 fn file_class(name: &str) -> TCResult<(PathSegment, EntryType)> {
     let i = name
         .rfind('.')
-        .ok_or_else(|| TCError::internal(format!("invalid file name {}", name)))?;
+        .ok_or_else(|| unexpected!("invalid file name {}", name))?;
 
-    let stem = name[..i].parse().map_err(TCError::internal)?;
-    let class = ext_class(&name[i..])
-        .ok_or_else(|| TCError::internal(format!("invalid file extension {}", name)))?;
+    let stem = &name[..i];
+    let stem = PathSegment::from_str(stem).map_err(|cause| {
+        unexpected!("invalid stem {} for file name {}", stem, name).consume(cause)
+    })?;
+
+    let class = ext_class(name).ok_or_else(|| unexpected!("invalid file extension {}", name))?;
 
     Ok((stem, class))
 }

@@ -416,7 +416,7 @@ impl Persist<fs::Dir> for Service {
             let dir = dir.try_read(txn_id)?;
             let schema: fs::File<VersionNumber, InstanceClass> = dir
                 .get_file(&SCHEMA.into())?
-                .ok_or_else(|| TCError::internal("service missing schema file"))?;
+                .ok_or_else(|| unexpected!("service missing schema file"))?;
 
             (schema, BTreeMap::new())
         };
@@ -425,7 +425,7 @@ impl Persist<fs::Dir> for Service {
         for number in version_schema.block_ids() {
             let schema = version_schema
                 .try_read_block(number)
-                .map_err(|cause| TCError::internal("a Service schema is not present in the cache--consider increasing the cache size").consume(cause))?;
+                .map_err(|cause| unexpected!("a Service schema is not present in the cache--consider increasing the cache size").consume(cause))?;
 
             // `get_or_create_store` here in case of a service with no persistent data
             let store = dir

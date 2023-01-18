@@ -69,11 +69,26 @@ impl HTTPServer {
         let body = match accept_encoding {
             Encoding::Json => match destream_json::encode(view) {
                 Ok(response) => Body::wrap_stream(response.chain(delimiter(b"\n"))),
-                Err(cause) => return Ok(transform_error(TCError::internal(cause), Encoding::Json)),
+                Err(cause) => {
+                    return Ok(transform_error(
+                        unexpected!("JSON encoding error").consume(cause),
+                        Encoding::Json,
+                    ))
+                }
             },
             Encoding::Tbon => match tbon::en::encode(view) {
-                Ok(response) => Body::wrap_stream(response.map_err(TCError::internal)),
-                Err(cause) => return Ok(transform_error(TCError::internal(cause), Encoding::Tbon)),
+                Ok(response) => {
+                    let response =
+                        response.map_err(|cause| unexpected!("TBON encoding error").consume(cause));
+
+                    Body::wrap_stream(response)
+                }
+                Err(cause) => {
+                    return Ok(transform_error(
+                        unexpected!("TBON encoding error").consume(cause),
+                        Encoding::Tbon,
+                    ))
+                }
             },
         };
 
@@ -260,6 +275,9 @@ fn get_param<T: DeserializeOwned>(
 }
 
 fn transform_error(err: TCError, encoding: Encoding) -> hyper::Response<Body> {
+    use hyper::StatusCode;
+    use tc_error::ErrorKind::*;
+
     let code = match err.code() {
         BadGateway => StatusCode::BAD_GATEWAY,
         BadRequest => StatusCode::BAD_REQUEST,
@@ -290,8 +308,6 @@ fn transform_error(err: TCError, encoding: Encoding) -> hyper::Response<Body> {
         encoding.as_str().parse().expect("content encoding"),
     );
 
-    use hyper::StatusCode;
-    use tc_error::ErrorKind::*;
     *response.status_mut() = code;
 
     response

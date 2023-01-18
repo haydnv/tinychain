@@ -187,12 +187,12 @@ impl Txn {
         }
 
         if let Some(leader) = self.leader(&cluster_path) {
-            Err(TCError::internal(format!(
+            Err(unexpected!(
                 "{} tried to claim leadership of {} but {} is already the leader",
                 cluster_path,
                 self.id(),
                 leader
-            )))
+            ))
         } else {
             let scopes = vec![self.active.scope().clone()];
             self.grant(actor, cluster_path, scopes).await

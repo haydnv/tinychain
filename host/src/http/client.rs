@@ -110,12 +110,15 @@ impl crate::gateway::Client for Client {
         let body = tbon::en::encode(view)
             .map_err(|e| TCError::bad_request("unable to encode stream", e))?;
 
+        let body = req
+            .body(Body::wrap_stream(body.map_err(|cause| {
+                unexpected!("TBON encoding error").consume(cause)
+            })))
+            .expect("request body");
+
         let response = self
             .client
-            .request(
-                req.body(Body::wrap_stream(body.map_err(TCError::internal)))
-                    .unwrap(),
-            )
+            .request(body)
             .map_err(|e| TCError::bad_gateway(e))
             .await?;
 
@@ -142,12 +145,15 @@ impl crate::gateway::Client for Client {
         let body = tbon::en::encode(params_view)
             .map_err(|e| TCError::bad_request("unable to encode stream", e))?;
 
+        let body = req
+            .body(Body::wrap_stream(body.map_err(|cause| {
+                unexpected!("TBON encoding error").consume(cause)
+            })))
+            .expect("request body");
+
         let response = self
             .client
-            .request(
-                req.body(Body::wrap_stream(body.map_err(TCError::internal)))
-                    .unwrap(),
-            )
+            .request(body)
             .map_err(|e| TCError::bad_gateway(e))
             .await?;
 

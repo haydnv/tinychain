@@ -196,8 +196,13 @@ impl Gateway {
             vec![],
         );
 
-        let signed = self.actor.sign_token(&token).map_err(TCError::internal)?;
+        let signed = self
+            .actor
+            .sign_token(&token)
+            .map_err(|cause| unexpected!("signing error").consume(cause))?;
+
         let claims = token.claims();
+
         Ok((signed, claims))
     }
 

@@ -964,15 +964,15 @@ where
 
         let file = dir_lock
             .get_file(&PRIMARY_INDEX.into())?
-            .ok_or_else(|| TCError::internal("cannot load Table: primary index is missing"))?;
+            .ok_or_else(|| unexpected!("cannot load Table: primary index is missing"))?;
 
         let primary = Index::load(txn_id, schema.primary().clone(), file.into())?;
 
         let mut auxiliary = Vec::with_capacity(schema.indices().len());
         for (name, columns) in schema.indices() {
-            let file = dir_lock.get_file(name)?.ok_or_else(|| {
-                TCError::internal(format!("cannot load Table: missing index {}", name))
-            })?;
+            let file = dir_lock
+                .get_file(name)?
+                .ok_or_else(|| unexpected!("cannot load Table: missing index {}", name))?;
 
             let index_schema = schema.primary().auxiliary(columns)?;
 

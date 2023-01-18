@@ -119,7 +119,7 @@ impl fmt::Display for ErrorKind {
 
 /// A general error description.
 pub struct TCError {
-    code: ErrorKind,
+    kind: ErrorKind,
     data: ErrorData,
 }
 
@@ -127,7 +127,7 @@ impl TCError {
     /// Returns a new error with the given code and message.
     pub fn new<I: fmt::Display>(code: ErrorKind, message: I) -> Self {
         Self {
-            code,
+            kind: code,
             data: message.into(),
         }
     }
@@ -140,7 +140,7 @@ impl TCError {
         S: IntoIterator<Item = SI>,
     {
         Self {
-            code,
+            kind: code,
             data: ErrorData {
                 message: message.to_string(),
                 stack: stack.into_iter().map(|msg| msg.to_string()).collect(),
@@ -179,19 +179,6 @@ impl TCError {
     /// request dependencies.
     pub fn forbidden<M: fmt::Display, I: fmt::Display>(message: M, id: I) -> Self {
         Self::new(ErrorKind::Forbidden, format!("{}: {}", message, id))
-    }
-
-    /// A truly unexpected error, for which the calling application cannot define any specific
-    /// handling behavior.
-    pub fn internal<I: fmt::Display>(info: I) -> Self {
-        #[cfg(debug_assertions)]
-        panic!("{}", info);
-
-        #[cfg(not(debug_assertions))]
-        {
-            log::error!("{}", info);
-            Self::new(ErrorKind::Internal, info)
-        }
     }
 
     /// Error indicating that the requested resource exists but does not support the request method.
@@ -238,7 +225,7 @@ impl TCError {
     }
 
     pub fn code(&self) -> ErrorKind {
-        self.code
+        self.kind
     }
 
     pub fn message(&'_ self) -> &'_ str {
@@ -261,7 +248,7 @@ impl From<txn_lock::Error> for TCError {
 
 impl From<Infallible> for TCError {
     fn from(_: Infallible) -> Self {
-        Self::internal("an unanticipated error occurred--please file a bug report")
+        unexpected!("an unanticipated error occurred--please file a bug report")
     }
 }
 
@@ -269,7 +256,7 @@ impl<'en> en::ToStream<'en> for TCError {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         use en::EncodeMap;
         let mut map = encoder.encode_map(Some(1))?;
-        map.encode_entry(self.code, &self.data)?;
+        map.encode_entry(self.kind, &self.data)?;
         map.end()
     }
 }
@@ -278,7 +265,7 @@ impl<'en> en::IntoStream<'en> for TCError {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         use en::EncodeMap;
         let mut map = encoder.encode_map(Some(1))?;
-        map.encode_entry(self.code, self.data)?;
+        map.encode_entry(self.kind, self.data)?;
         map.end()
     }
 }
@@ -291,7 +278,7 @@ impl fmt::Debug for TCError {
 
 impl fmt::Display for TCError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}: {}", self.code, self.data.message)
+        write!(f, "{}: {}", self.kind, self.data.message)
     }
 }
 
@@ -300,5 +287,13 @@ impl fmt::Display for TCError {
 macro_rules! bad_request {
     ($($t:tt)*) => {{
         $crate::TCError::new($crate::ErrorKind::BadRequest, format!($($t)*))
+    }}
+}
+
+/// A truly unexpected error, for which no handling behavior can be defined.
+#[macro_export]
+macro_rules! unexpected {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::Internal, format!($($t)*))
     }}
 }
