@@ -12,10 +12,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use collate::Collate;
+use destream::de::Error;
 use destream::{de, en};
 use futures::future::{self, Future, TryFutureExt};
-use futures::stream::{self, FuturesOrdered, FuturesUnordered, TryStreamExt};
 use futures::join;
+use futures::stream::{self, FuturesOrdered, FuturesUnordered, TryStreamExt};
 use log::{debug, trace};
 use uuid::Uuid;
 
@@ -24,7 +25,7 @@ use tc_transact::fs::*;
 use tc_transact::lock::{TxnLock, TxnLockCommit};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
-use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream, Tuple};
+use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 
 use super::{
     BTree, BTreeInstance, BTreeSlice, BTreeType, BTreeWrite, Key, NodeId, Range, RowSchema,
@@ -202,7 +203,7 @@ impl fmt::Display for Node {
         write!(
             f,
             "\tkeys: {}",
-            Tuple::<NodeKey>::from_iter(self.keys.iter().cloned())
+            tcgeneric::Tuple::<NodeKey>::from_iter(self.keys.iter().cloned())
         )?;
 
         write!(f, "\t {} children", self.children.len())
@@ -599,14 +600,14 @@ where
 
     fn validate_key(&self, key: Key) -> TCResult<Key> {
         if key.len() != self.inner.schema.len() {
-            return Err(TCError::bad_request("invalid key length", Tuple::from(key)));
+            return Err(TCError::invalid_length(key.len(), self.inner.schema.len()));
         }
 
         key.into_iter()
             .zip(&self.inner.schema)
             .map(|(val, col)| {
                 val.into_type(col.dtype)
-                    .ok_or_else(|| TCError::bad_request("invalid value for column", &col.name))
+                    .ok_or_else(|| bad_request!("invalid value for column {}", &col.name))
             })
             .collect()
     }
@@ -667,7 +668,7 @@ where
         #[cfg(debug_assertions)]
         debug!(
             "insert {} into BTree, root node {} has {} keys and {} children (order is {})",
-            <Tuple<Value> as std::iter::FromIterator<Value>>::from_iter(key.to_vec()),
+            <tcgeneric::Tuple<Value> as std::iter::FromIterator<Value>>::from_iter(key.to_vec()),
             *root_id,
             root.keys.len(),
             root.children.len(),
@@ -768,8 +769,8 @@ where
         trace!("BTreeFile::create got file write lock");
 
         if !file.is_empty() {
-            return Err(TCError::internal(
-                "Tried to create a new BTree without a new File",
+            return Err(unexpected!(
+                "tried to create a new BTree without a new File"
             ));
         }
 
@@ -804,13 +805,12 @@ where
             }
         }
 
-        let root =
-            root.ok_or_else(|| TCError::internal("BTree corrupted (no root block configured)"))?;
+        let root = root.ok_or_else(|| unexpected!("BTree corrupted (no root block configured)"))?;
 
         if blocks.contains(&root) {
             Ok(BTreeFile::new(file, txn_id, schema, order, root))
         } else {
-            Err(TCError::internal("BTree corrupted (missing root block)"))
+            Err(unexpected!("BTree corrupted (missing root block)"))
         }
     }
 
@@ -829,8 +829,8 @@ where
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         if self.inner.schema != backup.inner.schema {
-            return Err(TCError::unsupported(
-                "cannot restore a BTree from a backup with a different schema",
+            return Err(bad_request!(
+                "cannot restore a BTree from a backup with a different schema"
             ));
         }
 
@@ -882,16 +882,16 @@ fn validate_schema(schema: &RowSchema) -> TCResult<usize> {
         if let Some(size) = col.dtype().size() {
             key_size += size;
             if col.max_len().is_some() {
-                return Err(TCError::bad_request(
-                    "Maximum length is not applicable to",
+                return Err(bad_request!(
+                    "maximum length is not applicable to a column of type {}",
                     col.dtype(),
                 ));
             }
         } else if let Some(size) = col.max_len() {
             key_size += size;
         } else {
-            return Err(TCError::bad_request(
-                "Type requires a maximum length",
+            return Err(bad_request!(
+                "column of type {} requires a maximum length",
                 col.dtype(),
             ));
         }

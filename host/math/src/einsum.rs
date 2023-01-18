@@ -34,20 +34,22 @@ impl Dimensions {
 
     fn extend(&mut self, labels: &[char], shape: &[u64]) -> TCResult<()> {
         if labels.len() != shape.len() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "tensor with {} dimensions does not match format string {}",
                 shape.len(),
                 labels.iter().copied().collect::<String>()
-            )));
+            ));
         }
 
         for (label, dim) in labels.iter().zip(shape) {
             if let Some(known) = self.shape.get(label) {
                 if dim != known {
-                    return Err(TCError::unsupported(format!(
+                    return Err(bad_request!(
                         "einsum found inconsistent dimensions for axis {}: {:?} vs {:?}",
-                        label, known, dim
-                    )));
+                        label,
+                        known,
+                        dim
+                    ));
                 }
             } else {
                 self.shape.insert(*label, *dim);
@@ -75,31 +77,29 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
     debug!("einsum format string is {}", format);
 
     if !format.contains("->") {
-        return Err(TCError::bad_request(
-            "invalid format for einsum (missing '->')",
+        return Err(bad_request!(
+            "invalid format {} for einsum (missing '->')",
             format,
         ));
     }
 
     let mut parts: VecDeque<&str> = format.split("->").collect();
     if parts.is_empty() || parts.len() > 2 {
-        return Err(TCError::bad_request("invalid format for einsum", format));
+        return Err(bad_request!("invalid format {} for einsum", format));
     }
 
     let f_inputs = parts[0].split(',');
     match f_inputs.count() {
         count if count == inputs.len() => Ok(()),
-        count => Err(TCError::unsupported(format!(
+        count => Err(bad_request!(
             "einsum got {} tensors with {} format strings",
             inputs.len(),
             count
-        ))),
+        )),
     }?;
 
     let f_output = parts.pop_back().ok_or_else(|| {
-        TCError::unsupported(
-            "einsum requires > 0 output dimensions; use sum to sum over an entire Tensor",
-        )
+        bad_request!("einsum requires > 0 output dimensions; use sum to sum over an entire Tensor")
     })?;
 
     let valid_subscripts: HashSet<char> = VALID_SUBSCRIPTS.iter().cloned().collect();
@@ -112,10 +112,7 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
                 .chars()
                 .all(|c| valid_subscripts.contains(&c))
             {
-                return Err(TCError::bad_request(
-                    "einsum got invalid subscript",
-                    f_input,
-                ));
+                return Err(bad_request!("einsum got invalid subscript {}", f_input));
             }
 
             let num_elided = tensor.ndim() - (f_input.len() - ELLIPSIS.len());
@@ -127,13 +124,10 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
 
             present_subscripts.extend(f_input[ELLIPSIS.len()..].chars());
         } else if f_input.contains(DOT) {
-            return Err(TCError::bad_request("invalid format for einsum", f_input));
+            return Err(bad_request!("invalid format {} for einsum", f_input));
         } else {
             if !f_input.chars().all(|c| valid_subscripts.contains(&c)) {
-                return Err(TCError::bad_request(
-                    "einsum got invalid subscript",
-                    f_input,
-                ));
+                return Err(bad_request!("einsum got invalid subscript {}", f_input));
             }
 
             present_subscripts.extend(f_input.chars());
@@ -150,9 +144,7 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
         if elided.len() == num_elided {
             Ok(Some(elided))
         } else {
-            Err(TCError::unsupported(
-                "einsum got too many dimensions to elide",
-            ))
+            Err(bad_request!("einsum got too many dimensions to elide"))
         }
     } else {
         Ok(None)
@@ -180,16 +172,14 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
 
     for f_input in &f_inputs {
         if f_input.iter().collect::<HashSet<_>>().len() != f_input.len() {
-            return Err(TCError::not_implemented(
-                "repeated subscripts in einsum input",
-            ));
+            return Err(not_implemented!("repeated subscripts in einsum input"));
         }
     }
 
     if f_output.chars().collect::<HashSet<_>>().len() != f_output.len() {
-        return Err(TCError::bad_request(
-            "einsum output cannot include repeated subscripts",
-            f_output,
+        return Err(bad_request!(
+            "einsum output {} cannot include repeated subscripts",
+            f_output
         ));
     }
 
@@ -201,18 +191,15 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
         .peekable();
 
     if invalid_subscripts.peek().is_some() {
-        return Err(TCError::bad_request(
-            "invalid subscripts in einsum format",
-            invalid_subscripts.collect::<Tuple<&char>>(),
+        return Err(bad_request!(
+            "invalid subscripts {} in einsum format",
+            invalid_subscripts.collect::<Tuple<&char>>()
         ));
     }
 
     for l in &f_output {
         if !present_subscripts.contains(l) {
-            return Err(TCError::bad_request(
-                "subscript in output but not in input",
-                l,
-            ));
+            return Err(bad_request!("subscript {} in output but not in input", l));
         }
     }
 
@@ -227,15 +214,13 @@ fn parse_format<T: TensorAccess>(inputs: &[T], format: &str) -> TCResult<(Vec<La
 
 fn validate_args<T: TensorAccess>(f_inputs: &[Label], tensors: &[T]) -> TCResult<Dimensions> {
     if f_inputs.len() != tensors.len() {
-        return Err(TCError::bad_request(
-            "number of Tensors passed to einsum does not match number of format strings",
-            format!("{} != {}", tensors.len(), f_inputs.len()),
+        return Err(bad_request!(
+            "number of Tensors passed to einsum does not match number of format strings: {} != {}",
+            tensors.len(),
+            f_inputs.len(),
         ));
     } else if tensors.is_empty() {
-        return Err(TCError::bad_request(
-            "no Tensor was provided to einsum",
-            "[]",
-        ));
+        return Err(bad_request!("no Tensor was provided to einsum"));
     }
 
     let mut dimensions = Dimensions::with_capacity(f_inputs.iter().map(|f| f.len()).sum());

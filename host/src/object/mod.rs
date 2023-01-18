@@ -92,10 +92,7 @@ impl AsyncHash<Dir> for Object {
     async fn hash(self, _txn: &Self::Txn) -> TCResult<Output<Sha256>> {
         match self {
             Self::Class(class) => Ok(async_hash::Hash::<Sha256>::hash(class)),
-            Self::Instance(instance) => Err(TCError::bad_request(
-                "cannot hash a user-defined instance",
-                instance,
-            )),
+            Self::Instance(instance) => Err(bad_request!("cannot hash {}", instance)),
         }
     }
 }
@@ -152,9 +149,7 @@ impl<'en> IntoView<'en, Dir> for Object {
     async fn into_view(self, _txn: Txn) -> TCResult<ObjectView> {
         match self {
             Self::Class(class) => Ok(ObjectView::Class(class)),
-            Self::Instance(_instance) => {
-                Err(TCError::not_implemented("view of user-defined instance"))
-            }
+            Self::Instance(_instance) => Err(not_implemented!("view of user-defined instance")),
         }
     }
 }

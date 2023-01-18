@@ -18,9 +18,8 @@ pub mod lock {
     use super::TxnId;
 
     pub use txn_lock::{
-        Error as TxnLockError,
-        TxnLockFinalize, TxnLockReadGuard, TxnLockReadGuardExclusive, TxnLockRollback,
-        TxnLockWriteGuard,
+        Error as TxnLockError, TxnLockFinalize, TxnLockReadGuard, TxnLockReadGuardExclusive,
+        TxnLockRollback, TxnLockWriteGuard,
     };
 
     pub type TxnLock<T> = txn_lock::TxnLock<TxnId, T>;

@@ -1,5 +1,6 @@
 use std::iter::FromIterator;
 
+use destream::de::Error;
 use futures::{future, StreamExt, TryFutureExt, TryStreamExt};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
@@ -37,7 +38,7 @@ impl<'a> Handler<'a> for CopyHandler {
             Box::pin(async move {
                 let schema: Value = params.require(&label("schema").into())?;
                 let schema = tc_btree::RowSchema::try_cast_from(schema, |v| {
-                    TCError::bad_request("invalid BTree schema", v)
+                    TCError::invalid_value(v, "a BTree schema")
                 })?;
 
                 let source: TCStream = params.require(&label("source").into())?;
@@ -51,14 +52,12 @@ impl<'a> Handler<'a> for CopyHandler {
                 let keys = source.into_stream(txn.clone()).await?;
                 keys.map(|r| {
                     r.and_then(|state| {
-                        Value::try_cast_from(state, |s| {
-                            TCError::bad_request("invalid BTree key", s)
-                        })
+                        Value::try_cast_from(state, |s| TCError::invalid_type(s, "a BTree key"))
                     })
                 })
                 .map(|r| {
                     r.and_then(|value| {
-                        value.try_cast_into(|v| TCError::bad_request("invalid BTree key", v))
+                        value.try_cast_into(|v| TCError::invalid_value(v, "a BTree key"))
                     })
                 })
                 .map_ok(|key| btree.insert(txn_id, key))
@@ -82,7 +81,7 @@ impl<'a> Handler<'a> for CreateHandler {
         Some(Box::new(|txn, value| {
             Box::pin(async move {
                 let schema = tc_btree::RowSchema::try_cast_from(value, |v| {
-                    TCError::bad_request("invalid BTree schema", v)
+                    TCError::invalid_value(v, "a BTree schema")
                 })?;
 
                 let store = txn.context().create_store_unique(*txn.id()).await?;
@@ -122,8 +121,8 @@ where
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
                 if key.is_some() {
-                    return Err(TCError::bad_request(
-                        "BTree::insert does not support an explicit key",
+                    return Err(bad_request!(
+                        "BTree::insert does not support an explicit key {}",
                         key,
                     ));
                 }
@@ -132,13 +131,13 @@ where
                     let keys = value.keys(*txn.id()).await?;
                     self.btree.try_insert_from(*txn.id(), keys).await
                 } else if value.matches::<Value>() {
-                    let value = Value::opt_cast_from(value).unwrap();
+                    let value = Value::opt_cast_from(value).expect("value");
                     let value =
-                        value.try_cast_into(|v| TCError::bad_request("invalid BTree key", v))?;
+                        value.try_cast_into(|v| TCError::invalid_value(v, "a BTree key"))?;
 
                     self.btree.insert(*txn.id(), value).await
                 } else {
-                    Err(TCError::bad_request("invalid BTree key", value))
+                    Err(TCError::invalid_value(value, "a BTree key"))
                 }
             })
         }))
@@ -190,8 +189,8 @@ impl<'a, T: BTreeInstance> Handler<'a> for CountHandler<'a, T> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
-                    return Err(TCError::bad_request(
-                        "BTree::count does not accept a key (call BTree::slice first)",
+                    return Err(bad_request!(
+                        "BTree::count does not accept a key {} (call BTree::slice first)",
                         key,
                     ));
                 }
@@ -220,10 +219,7 @@ impl<'a, T: BTreeInstance> Handler<'a> for FirstHandler<'a, T> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
-                    return Err(TCError::bad_request(
-                        "BTree::first does not accept a key",
-                        key,
-                    ));
+                    return Err(bad_request!("BTree::first does not accept a key {}", key));
                 }
 
                 let mut keys = self.btree.clone().keys(*txn.id()).await?;
@@ -263,10 +259,7 @@ where
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 if key.is_some() {
-                    return Err(TCError::bad_request(
-                        "BTree::reverse does not accept a key",
-                        key,
-                    ));
+                    return Err(bad_request!("BTree::reverse does not accept a key {}", key));
                 }
 
                 let reversed = self.btree.slice(Range::default(), true)?;
@@ -376,7 +369,7 @@ fn cast_into_range(scalar: Scalar) -> TCResult<Range> {
     };
 
     let mut prefix: Vec<Value> =
-        scalar.try_cast_into(|s| TCError::bad_request("invalid BTree range", s))?;
+        scalar.try_cast_into(|s| TCError::invalid_value(s, "invalid BTree range"))?;
 
     if !prefix.is_empty() && tc_value::Range::can_cast_from(prefix.last().unwrap()) {
         let range = tc_value::Range::opt_cast_from(prefix.pop().unwrap()).unwrap();

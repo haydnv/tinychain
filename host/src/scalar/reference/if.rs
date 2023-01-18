@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 use async_trait::async_trait;
+use destream::de::Error;
 use destream::{de, en};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
@@ -68,8 +69,8 @@ impl Refer for IfRef {
         debug!("If::resolve {}", self);
 
         if self.cond.is_conditional() {
-            return Err(TCError::bad_request(
-                "If does not allow a nested conditional",
+            return Err(bad_request!(
+                "If does not allow a nested conditional {}",
                 self.cond,
             ));
         }
@@ -84,10 +85,7 @@ impl Refer for IfRef {
                 Ok(self.or_else.into())
             }
         } else {
-            Err(TCError::bad_request(
-                "expected boolean if condition but found",
-                cond,
-            ))
+            Err(TCError::invalid_value(cond, "a boolean condition"))
         }
     }
 }

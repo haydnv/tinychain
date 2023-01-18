@@ -267,10 +267,10 @@ where
             Self::Merge(merge) => merge.order_by(order, reverse).map(Self::from),
             Self::Selection(selection) => selection.order_by(order, reverse).map(Self::from),
             Self::TableSlice(slice) => slice.order_by(order, reverse).map(Self::from),
-            other => Err(TCError::unsupported(format!(
+            other => Err(bad_request!(
                 "instance of {} does not support ordering",
                 other.class()
-            ))),
+            )),
         }
     }
 
@@ -282,10 +282,10 @@ where
             Self::Merge(merge) => merge.reverse().map(Self::from),
             Self::Selection(selection) => selection.reverse().map(Self::from),
             Self::TableSlice(slice) => slice.reverse().map(Self::from),
-            other => Err(TCError::unsupported(format!(
+            other => Err(bad_request!(
                 "instance of {} does not support ordering",
                 other.class()
-            ))),
+            )),
         }
     }
 
@@ -297,10 +297,10 @@ where
             Self::Merge(merge) => merge.validate_order(order),
             Self::Selection(selection) => selection.validate_order(order),
             Self::TableSlice(slice) => slice.validate_order(order),
-            other => Err(TCError::unsupported(format!(
+            other => Err(bad_request!(
                 "instance of {} does not support ordering",
                 other.class()
-            ))),
+            )),
         }
     }
 }
@@ -316,10 +316,7 @@ where
     async fn read(&self, txn_id: &TxnId, key: &Key) -> TCResult<Option<Vec<Value>>> {
         match self {
             Self::Table(table) => table.read(txn_id, key).await,
-            other => Err(TCError::unsupported(format!(
-                "{} does not support GET by key",
-                other
-            ))),
+            other => Err(bad_request!("{} does not support GET by key", other)),
         }
     }
 }
@@ -399,10 +396,10 @@ where
             Self::Table(table) => table.slice(bounds).map(Self::from),
             Self::Merge(merge) => merge.slice(bounds).map(Self::from),
             Self::TableSlice(slice) => slice.slice(bounds).map(Self::from),
-            other => Err(TCError::unsupported(format!(
+            other => Err(bad_request!(
                 "instance of {} does not support slicing",
                 other.class()
-            ))),
+            )),
         }
     }
 
@@ -411,10 +408,10 @@ where
             Self::Table(table) => table.validate_bounds(bounds),
             Self::Merge(merge) => merge.validate_bounds(bounds),
             Self::TableSlice(slice) => slice.validate_bounds(bounds),
-            other => Err(TCError::unsupported(format!(
+            other => Err(bad_request!(
                 "instance of {} does not support slicing",
                 other.class()
-            ))),
+            )),
         }
     }
 }
@@ -431,10 +428,10 @@ where
         if let Self::Table(table) = self {
             table.delete(txn_id, key).await
         } else {
-            Err(TCError::unsupported(format!(
-                "instance of {} does not support delete",
+            Err(bad_request!(
+                "instance of {} does not support deletion",
                 self.class()
-            )))
+            ))
         }
     }
 
@@ -442,10 +439,7 @@ where
         if let Self::Table(table) = self {
             table.update(txn_id, key, values).await
         } else {
-            Err(TCError::unsupported(format!(
-                "instance of {} does not support delete",
-                self.class()
-            )))
+            Err(bad_request!("instance of {} is not mutable", self.class()))
         }
     }
 
@@ -453,10 +447,7 @@ where
         if let Self::Table(table) = self {
             table.upsert(txn_id, key, values).await
         } else {
-            Err(TCError::unsupported(format!(
-                "instance of {} does not support delete",
-                self.class()
-            )))
+            Err(bad_request!("instance of {} is not mutable", self.class()))
         }
     }
 }

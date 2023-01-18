@@ -64,35 +64,39 @@ impl ValueType {
     where
         Value: From<V>,
     {
-        let on_err = |v: &Value| TCError::bad_request(format!("cannot cast into {} from", self), v);
+        let on_err = |v: &Value| bad_request!("cannot cast into {} from {}", self, v);
         let value = Value::from(value);
 
         match self {
             Self::Bytes => match value {
                 Value::Bytes(bytes) => Ok(Value::Bytes(bytes)),
-                Value::Number(_) => Err(TCError::not_implemented("cast into Bytes from Number")),
+                Value::Number(_) => Err(not_implemented!("cast into Bytes from Number")),
                 Value::String(s) => s
-                    .try_cast_into(|s| TCError::bad_request("cannot cast into Bytes from", s))
+                    .try_cast_into(|s| bad_request!("cannot cast into Bytes from {}", s))
                     .map(Value::Bytes),
-                other => Err(TCError::bad_request("cannot cast into Bytes from", other)),
+                other => Err(bad_request!("cannot cast into Bytes from {}", other)),
             },
             Self::Email => match value {
                 Value::Email(email) => Ok(Value::Email(email)),
+
                 Value::Id(id) => parse_email(id.as_str())
                     .map(Value::Email)
-                    .ok_or_else(|| TCError::bad_request("cannot cast into Email from", id)),
+                    .ok_or_else(|| bad_request!("cannot cast into Email from {}", id)),
+
                 Value::String(s) => parse_email(&s)
                     .map(Value::Email)
-                    .ok_or_else(|| TCError::bad_request("cannot cast into Email from", s)),
-                other => Err(TCError::bad_request("cannot cast into Email from", other)),
+                    .ok_or_else(|| bad_request!("cannot cast into Email from {}", s)),
+
+                other => Err(bad_request!("cannot cast into Email from {}", other)),
             },
             Self::Id => value.try_cast_into(on_err).map(Value::Id),
             Self::Link => value.try_cast_into(on_err).map(Value::String),
             Self::None => Ok(Value::None),
             Self::Number(nt) => value
-                .try_cast_into(|v| TCError::bad_request("cannot cast into Number from", v))
+                .try_cast_into(|v| bad_request!("cannot cast into Number from {}", v))
                 .map(|n| nt.cast(n))
                 .map(Value::Number),
+
             Self::String => value.try_cast_into(on_err).map(Value::String),
             Self::Tuple => value.try_cast_into(on_err).map(Value::Tuple),
             Self::Value => Ok(value),
@@ -101,11 +105,12 @@ impl ValueType {
                 Value::String(s) => s.parse().map(Value::Version),
                 Value::Tuple(t) => {
                     let (maj, min, rev) =
-                        t.try_cast_into(|t| TCError::bad_request("invalid semantic version", t))?;
+                        t.try_cast_into(|t| bad_request!("invalid semantic version {}", t))?;
+
                     Ok(Value::Version(Version::from((maj, min, rev))))
                 }
                 Value::Version(v) => Ok(Value::Version(v)),
-                other => Err(TCError::bad_request("cannot cast into Version from", other)),
+                other => Err(bad_request!("cannot cast into Version from {}", other)),
             },
         }
     }
@@ -341,7 +346,7 @@ impl TryFrom<ValueType> for NumberType {
     fn try_from(vt: ValueType) -> TCResult<NumberType> {
         match vt {
             ValueType::Number(nt) => Ok(nt),
-            other => Err(TCError::bad_request("expected a Number type, not", other)),
+            other => Err(TCError::invalid_type(other, "a Number class")),
         }
     }
 }
@@ -457,7 +462,7 @@ impl Value {
         if self.is_none() {
             Ok(())
         } else {
-            Err(TCError::bad_request("expected None but found", self))
+            Err(TCError::invalid_value(self, Value::None))
         }
     }
 
@@ -853,7 +858,11 @@ impl TryFrom<Value> for bool {
                 Number::Bool(b) => Ok(b.into()),
                 number => Ok(number == number.class().zero()),
             },
-            other => Err(TCError::bad_request("expected a boolean but found", other)),
+            Value::Id(id) if &id == "true" => Ok(true),
+            Value::Id(id) if &id == "false" => Ok(false),
+            Value::String(s) if &s == "true" => Ok(true),
+            Value::String(s) if &s == "false" => Ok(false),
+            other => Err(TCError::invalid_value(other, "a boolean")),
         }
     }
 }
@@ -864,7 +873,18 @@ impl TryFrom<Value> for Number {
     fn try_from(value: Value) -> TCResult<Self> {
         match value {
             Value::Number(number) => Ok(number),
-            other => Err(TCError::bad_request("expected Number but found", other)),
+
+            Value::Id(id) => id
+                .as_str()
+                .parse()
+                .map_err(|cause| TCError::invalid_value(id, " a Number").consume(cause)),
+
+            Value::String(s) => s
+                .as_str()
+                .parse()
+                .map_err(|cause| TCError::invalid_value(s, " a Number").consume(cause)),
+
+            other => Err(TCError::invalid_type(other, "a Number")),
         }
     }
 }
@@ -875,7 +895,7 @@ impl TryFrom<Value> for Tuple<Value> {
     fn try_from(value: Value) -> TCResult<Self> {
         match value {
             Value::Tuple(tuple) => Ok(tuple),
-            other => Err(TCError::bad_request("expected Tuple but found", other)),
+            other => Err(TCError::invalid_type(other, "a Tuple")),
         }
     }
 }

@@ -166,10 +166,7 @@ impl DirItem for Library {
         if file.contains(&number) {
             error!("duplicate library version {}", number);
 
-            Err(TCError::unsupported(format!(
-                "{} already has a version {}",
-                self, number
-            )))
+            Err(bad_request!("{} already has a version {}", self, number))
         } else {
             info!("create new library version {}", number);
             let version = Version::from(validate(schema)?);
@@ -209,8 +206,8 @@ impl Persist<fs::Dir> for Library {
         if versions.is_empty() {
             Ok(Self { file })
         } else {
-            Err(TCError::unsupported(
-                "cannot create a new library from a non-empty file",
+            Err(bad_request!(
+                "cannot create a new library from a non-empty file"
             ))
         }
     }
@@ -236,9 +233,7 @@ fn validate(proto: Map<Scalar>) -> TCResult<Map<Scalar>> {
         .filter_map(|member| member.as_type())
         .any(|op: &OpDef| op.is_write())
     {
-        Err(TCError::unsupported(
-            "a Library may not define write operations",
-        ))
+        Err(bad_request!("a Library may not define write operations"))
     } else {
         Ok(proto)
     }

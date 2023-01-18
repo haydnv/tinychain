@@ -4,6 +4,7 @@
 
 use std::convert::Infallible;
 use std::fmt;
+use std::fmt::Display;
 
 use destream::en;
 
@@ -57,7 +58,7 @@ where
 
 /// The category of a `TCError`.
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub enum ErrorType {
+pub enum ErrorKind {
     BadGateway,
     BadRequest,
     Conflict,
@@ -71,7 +72,7 @@ pub enum ErrorType {
     Unavailable,
 }
 
-impl<'en> en::IntoStream<'en> for ErrorType {
+impl<'en> en::IntoStream<'en> for ErrorKind {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         format!(
             "/error/{}",
@@ -93,13 +94,13 @@ impl<'en> en::IntoStream<'en> for ErrorType {
     }
 }
 
-impl fmt::Debug for ErrorType {
+impl fmt::Debug for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(self, f)
     }
 }
 
-impl fmt::Display for ErrorType {
+impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match self {
             Self::BadGateway => "bad gateway",
@@ -119,78 +120,32 @@ impl fmt::Display for ErrorType {
 
 /// A general error description.
 pub struct TCError {
-    code: ErrorType,
+    kind: ErrorKind,
     data: ErrorData,
 }
 
 impl TCError {
     /// Returns a new error with the given code and message.
-    pub fn new<I: fmt::Display>(code: ErrorType, message: I) -> Self {
+    pub fn new<I: fmt::Display>(code: ErrorKind, message: I) -> Self {
         Self {
-            code,
+            kind: code,
             data: message.into(),
         }
     }
 
     /// Reconstruct a [`TCError`] from its [`ErrorType`] and data.
-    pub fn with_stack<I, S, SI>(code: ErrorType, message: I, stack: S) -> Self
+    pub fn with_stack<I, S, SI>(code: ErrorKind, message: I, stack: S) -> Self
     where
         I: fmt::Display,
         SI: fmt::Display,
         S: IntoIterator<Item = SI>,
     {
         Self {
-            code,
+            kind: code,
             data: ErrorData {
                 message: message.to_string(),
                 stack: stack.into_iter().map(|msg| msg.to_string()).collect(),
             },
-        }
-    }
-
-    /// Error indicating that the an upstream server send an invalid response.
-    pub fn bad_gateway<I: fmt::Display>(cause: I) -> Self {
-        Self::new(ErrorType::BadGateway, cause)
-    }
-
-    /// Error indicating that the request is badly-constructed or nonsensical.
-    pub fn bad_request<M: fmt::Display, I: fmt::Display>(message: M, cause: I) -> Self {
-        let info = format!("{}: {}", message, cause);
-
-        #[cfg(debug_assertions)]
-        if info.starts_with("expected") {
-            panic!("{}", info)
-        }
-
-        Self::new(ErrorType::BadRequest, info)
-    }
-
-    /// Error indicating that the request depends on a resource which is exclusively locked
-    /// by another request.
-    pub fn conflict<M: fmt::Display>(message: M) -> Self {
-        // #[cfg(debug_assertions)]
-        // panic!("{}", message);
-        //
-        // #[cfg(not(debug_assertions))]
-        Self::new(ErrorType::Conflict, message)
-    }
-
-    /// Error indicating that the request actor's credentials do not authorize access to some
-    /// request dependencies.
-    pub fn forbidden<M: fmt::Display, I: fmt::Display>(message: M, id: I) -> Self {
-        Self::new(ErrorType::Forbidden, format!("{}: {}", message, id))
-    }
-
-    /// A truly unexpected error, for which the calling application cannot define any specific
-    /// handling behavior.
-    pub fn internal<I: fmt::Display>(info: I) -> Self {
-        #[cfg(debug_assertions)]
-        panic!("{}", info);
-
-        #[cfg(not(debug_assertions))]
-        {
-            log::error!("{}", info);
-            Self::new(ErrorType::Internal, info)
         }
     }
 
@@ -206,53 +161,37 @@ impl TCError {
         panic!("{}", message);
 
         #[cfg(not(debug_assertions))]
-        Self::new(ErrorType::MethodNotAllowed, message)
+        Self::new(ErrorKind::MethodNotAllowed, message)
     }
 
     /// Error indicating that the requested resource does not exist at the specified location.
     pub fn not_found<I: fmt::Display>(locator: I) -> Self {
-        Self::new(ErrorType::NotFound, locator)
+        Self::new(ErrorKind::NotFound, locator)
     }
 
-    /// Error indicating that a required feature is not yet implemented.
-    pub fn not_implemented<F: fmt::Display>(feature: F) -> Self {
-        Self::new(ErrorType::NotImplemented, feature)
+    /// The [`ErrorKind`] of this error
+    pub fn code(&self) -> ErrorKind {
+        self.kind
     }
 
-    /// Error indicating that the request failed to complete in the allotted time.
-    pub fn timeout<I: fmt::Display>(info: I) -> Self {
-        Self::new(ErrorType::Timeout, info)
-    }
-
-    /// Error indicating that the user's credentials are missing or nonsensical.
-    pub fn unauthorized<I: fmt::Display>(info: I) -> Self {
-        Self::new(
-            ErrorType::Unauthorized,
-            format!("invalid credentials: {}", info),
-        )
-    }
-
-    /// Error indicating that this host is currently overloaded
-    pub fn unavailable<I: fmt::Display>(info: I) -> Self {
-        Self::new(ErrorType::Unavailable, info)
-    }
-
-    /// Error indicating that the request is badly-constructed or nonsensical.
-    pub fn unsupported<I: fmt::Display>(info: I) -> Self {
-        Self::new(ErrorType::BadRequest, info)
-    }
-
-    pub fn code(&self) -> ErrorType {
-        self.code
-    }
-
+    /// The error message of this error
     pub fn message(&'_ self) -> &'_ str {
         &self.data.message
     }
 
-    pub fn consume<I: fmt::Display>(mut self, info: I) -> Self {
-        self.data.stack.push(info.to_string());
+    /// Construct a new error with the given `cause`
+    pub fn consume<I: fmt::Display>(mut self, cause: I) -> Self {
+        self.data.stack.push(cause.to_string());
         self
+    }
+}
+
+impl destream::de::Error for TCError {
+    fn custom<T: Display>(msg: T) -> Self {
+        Self {
+            kind: ErrorKind::BadRequest,
+            data: msg.to_string().into(),
+        }
     }
 }
 
@@ -260,13 +199,16 @@ impl std::error::Error for TCError {}
 
 impl From<txn_lock::Error> for TCError {
     fn from(err: txn_lock::Error) -> Self {
-        Self::conflict(err)
+        Self {
+            kind: ErrorKind::Conflict,
+            data: err.to_string().into(),
+        }
     }
 }
 
 impl From<Infallible> for TCError {
     fn from(_: Infallible) -> Self {
-        Self::internal("an unanticipated error occurred--please file a bug report")
+        unexpected!("an unanticipated error occurred--please file a bug report")
     }
 }
 
@@ -274,7 +216,7 @@ impl<'en> en::ToStream<'en> for TCError {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         use en::EncodeMap;
         let mut map = encoder.encode_map(Some(1))?;
-        map.encode_entry(self.code, &self.data)?;
+        map.encode_entry(self.kind, &self.data)?;
         map.end()
     }
 }
@@ -283,7 +225,7 @@ impl<'en> en::IntoStream<'en> for TCError {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         use en::EncodeMap;
         let mut map = encoder.encode_map(Some(1))?;
-        map.encode_entry(self.code, self.data)?;
+        map.encode_entry(self.kind, self.data)?;
         map.end()
     }
 }
@@ -296,6 +238,78 @@ impl fmt::Debug for TCError {
 
 impl fmt::Display for TCError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}: {}", self.code, self.data.message)
+        write!(f, "{}: {}", self.kind, self.data.message)
     }
+}
+
+/// Error indicating that the an upstream server send an invalid response.
+#[macro_export]
+macro_rules! bad_gateway {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::BadGateway, format!($($t)*))
+    }}
+}
+
+/// Error indicating that the request is badly-constructed or nonsensical
+#[macro_export]
+macro_rules! bad_request {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::BadRequest, format!($($t)*))
+    }}
+}
+
+/// Error indicating that the request cannot be fulfilled due to a conflict with another request.
+#[macro_export]
+macro_rules! conflict {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::Conflict, format!($($t)*))
+    }}
+}
+
+/// Error indicating that the requestor's credentials do not authorize the request to be fulfilled
+#[macro_export]
+macro_rules! forbidden {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::Unavailable, format!($($t)*))
+    }}
+}
+
+/// Error indicating that a required feature is not yet implemented.
+#[macro_export]
+macro_rules! not_implemented {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::NotImplemented, format!($($t)*))
+    }}
+}
+
+/// Error indicating that the request failed to complete in the allotted time.
+#[macro_export]
+macro_rules! timeout {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::Timeout, format!($($t)*))
+    }}
+}
+
+/// A truly unexpected error, for which no handling behavior can be defined
+#[macro_export]
+macro_rules! unexpected {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::Internal, format!($($t)*))
+    }}
+}
+
+/// Error indicating that the user's credentials are missing or nonsensical.
+#[macro_export]
+macro_rules! unauthorized {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::Unauthorized, format!($($t)*))
+    }}
+}
+
+/// Error indicating that this host is currently overloaded
+#[macro_export]
+macro_rules! unavailable {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::Unavailable, format!($($t)*))
+    }}
 }

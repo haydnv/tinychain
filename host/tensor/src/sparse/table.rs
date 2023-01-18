@@ -579,8 +579,8 @@ fn table_bounds(shape: &Shape, bounds: &Bounds) -> TCResult<tc_table::Bounds> {
                 Some((start, end).into())
             }
             Of(indices) => {
-                return Err(TCError::bad_request(
-                    "cannot select non-sequential indices from a sparse Tensor",
+                return Err(bad_request!(
+                    "cannot select non-sequential indices {} from a sparse Tensor",
                     Tuple::from(indices),
                 ))
             }
@@ -659,7 +659,7 @@ fn expect_row(mut row: Vec<Value>) -> TCResult<(Coord, Number)> {
         debug_assert_ne!(value, 0.into());
         expect_coord(row).map(|coord| (coord, value))
     } else {
-        Err(TCError::internal(ERR_CORRUPT))
+        Err(unexpected!("{}", ERR_CORRUPT))
     }
 }
 
@@ -668,6 +668,9 @@ fn expect_u64(value: Value) -> TCResult<u64> {
     if let Value::Number(Number::UInt(UInt::U64(unwrapped))) = value {
         Ok(unwrapped)
     } else {
-        Err(TCError::bad_request("expected u64 but found", value))
+        Err(unexpected!(
+            "sparse table axis {} should be a 64-bit unsigned integer",
+            value
+        ))
     }
 }

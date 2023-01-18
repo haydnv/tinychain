@@ -1,6 +1,7 @@
 use std::fmt;
 
 use bytes::Bytes;
+use destream::de::Error;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::*;
@@ -48,7 +49,7 @@ where
                 // TODO: remove this code and use the public key of the gateway instead
 
                 let key = TCPathBuf::try_cast_from(key, |v| {
-                    TCError::bad_request("invalid key specification", v)
+                    TCError::invalid_value(v, "a key specification")
                 })?;
 
                 if key == TCPathBuf::default() {
@@ -71,9 +72,8 @@ where
                 if key.is_none() {
                     // this is a notification of a new participant in the current transaction
 
-                    let participant = value.try_cast_into(|v| {
-                        TCError::bad_request("expected a participant Link but found", v)
-                    })?;
+                    let participant =
+                        value.try_cast_into(|v| TCError::invalid_value(v, "a participant Link"))?;
 
                     return self.cluster.mutate(&txn, participant).await;
                 }
@@ -82,23 +82,23 @@ where
 
                 let value = if InstanceClass::can_cast_from(&value) {
                     let class = InstanceClass::try_cast_from(value, |v| {
-                        TCError::bad_request("invalid class definition", v)
+                        TCError::invalid_type(v, "a Class")
                     })?;
 
                     let link = class.extends();
 
                     if link.host().is_some() && link.host() != self.cluster.schema().lead() {
-                        return Err(TCError::not_implemented(
+                        return Err(not_implemented!(
                             "install a Cluster with a different lead replica",
                         ));
                     }
 
                     if !link.path().starts_with(self.cluster.path()) {
-                        return Err(TCError::unsupported(format!(
+                        return Err(bad_request!(
                             "cannot install {} at {}",
                             link,
                             self.cluster.link().path()
-                        )));
+                        ));
                     }
 
                     State::Object(class.into())
@@ -120,22 +120,19 @@ where
                 // TODO: authorize request using a scope
 
                 if !params.is_empty() {
-                    return Err(TCError::bad_request(
-                        "unrecognized commit parameters",
-                        params,
-                    ));
+                    return Err(bad_request!("unrecognized commit parameters {}", params));
                 }
 
                 if let Some(owner) = txn.owner() {
                     if owner.host() == Some(txn.host()) && owner.path() == self.cluster.path() {
-                        return Err(TCError::bad_request(
-                            "cluster received a commit message for itself",
+                        return Err(bad_request!(
+                            "{} received a commit message for itself",
                             self.cluster,
                         ));
                     }
                 } else {
-                    return Err(TCError::bad_request(
-                        "commit message for an ownerless transaction",
+                    return Err(bad_request!(
+                        "commit message for an ownerless transaction {}",
                         txn.id(),
                     ));
                 }
@@ -240,9 +237,8 @@ where
             Box::pin(async move {
                 key.expect_none()?;
 
-                let link = link.try_cast_into(|v| {
-                    TCError::bad_request("expected a Link to a Cluster, not", v)
-                })?;
+                let link =
+                    link.try_cast_into(|v| TCError::invalid_value(v, "a Link to a Cluster"))?;
 
                 self.cluster.add_replica(txn, link).await?;
 
@@ -298,7 +294,7 @@ where
         Some(Box::new(|txn, replicas| {
             Box::pin(async move {
                 let replicas = Tuple::<LinkHost>::try_cast_from(replicas, |v| {
-                    TCError::bad_request("expected a Link to a Cluster, not", v)
+                    TCError::invalid_value(v, "a Link to a Cluster")
                 })?;
 
                 self.cluster.remove_replicas(*txn.id(), &replicas).await
@@ -353,12 +349,12 @@ fn authorize_install(txn: &Txn, parent: &Link, entry_path: &TCPathBuf) -> TCResu
             .request()
             .scopes()
             .get(&parent, &TCPathBuf::default().into())
-            .ok_or_else(|| TCError::unauthorized(format!("install request for {}", parent)))?;
+            .ok_or_else(|| unauthorized!("install request for {}", parent))?;
 
         if authorized.iter().any(|scope| entry_path.starts_with(scope)) {
             Ok(())
         } else {
-            Err(TCError::forbidden("install a new Cluster at", entry_path))
+            Err(forbidden!("install a new Cluster at {}", entry_path))
         }
     } else {
         // this is a replica, it doesn't make sense to require a recently-signed token

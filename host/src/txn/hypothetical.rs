@@ -4,6 +4,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use destream::de::Error;
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::error;
 use safecast::{TryCastFrom, TryCastInto};
@@ -106,7 +107,7 @@ impl<'a> Handler<'a> for &'a Hypothetical {
                 }
 
                 let participant = value.try_cast_into(|v| {
-                    TCError::bad_request("invalid transaction participant link", v)
+                    TCError::invalid_value(v, "a Link to a transaction participant")
                 })?;
 
                 let mut participants = self.participants.write().await;

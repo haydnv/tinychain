@@ -43,10 +43,11 @@ impl Request {
     }
 
     pub fn expires(&self) -> TCResult<NetworkTime> {
-        self.claims
-            .expires()
+        let expires = self.claims.expires();
+
+        expires
             .try_into()
-            .map_err(|e| TCError::bad_request("invalid auth token expiry", e))
+            .map_err(|cause| bad_request!("invalid token expiration time").consume(cause))
     }
 
     /// Return this request's authorizations.

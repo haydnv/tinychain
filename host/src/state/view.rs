@@ -39,7 +39,6 @@ impl<'en> IntoView<'en, fs::Dir> for State {
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         match self {
             Self::Chain(chain) => chain.into_view(txn).map_ok(StateView::Chain).await,
-            // Self::Chain(_chain) => Err(TCError::not_implemented("Chain::into_view")),
             Self::Closure(closure) => closure.into_view(txn).map_ok(StateView::Closure).await,
             Self::Collection(collection) => {
                 collection

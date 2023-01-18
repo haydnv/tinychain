@@ -2,6 +2,7 @@ use std::fmt;
 use std::pin::Pin;
 
 use async_trait::async_trait;
+use destream::de::Error;
 use futures::future::{self, Future};
 use safecast::TryCastFrom;
 
@@ -174,7 +175,7 @@ impl<'a> Handler<'a> for ErrorHandler<'a> {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let message = TCString::try_cast_from(key, |v| {
-                    TCError::bad_request("cannot cast into error message string from", v)
+                    TCError::invalid_value(v, "an error message string")
                 })?;
 
                 if let Some(err_type) = error_type(self.code) {
@@ -395,18 +396,18 @@ impl fmt::Display for Static {
     }
 }
 
-fn error_type(err_type: &Id) -> Option<ErrorType> {
+fn error_type(err_type: &Id) -> Option<ErrorKind> {
     match err_type.as_str() {
-        "bad_gateway" => Some(ErrorType::BadGateway),
-        "bad_request" => Some(ErrorType::BadRequest),
-        "conflict" => Some(ErrorType::Conflict),
-        "forbidden" => Some(ErrorType::Forbidden),
-        "internal" => Some(ErrorType::Internal),
-        "method_not_allowed" => Some(ErrorType::MethodNotAllowed),
-        "not_found" => Some(ErrorType::NotFound),
-        "not_implemented" => Some(ErrorType::NotImplemented),
-        "timeout" => Some(ErrorType::Timeout),
-        "unauthorized" => Some(ErrorType::Unauthorized),
+        "bad_gateway" => Some(ErrorKind::BadGateway),
+        "bad_request" => Some(ErrorKind::BadRequest),
+        "conflict" => Some(ErrorKind::Conflict),
+        "forbidden" => Some(ErrorKind::Forbidden),
+        "internal" => Some(ErrorKind::Internal),
+        "method_not_allowed" => Some(ErrorKind::MethodNotAllowed),
+        "not_found" => Some(ErrorKind::NotFound),
+        "not_implemented" => Some(ErrorKind::NotImplemented),
+        "timeout" => Some(ErrorKind::Timeout),
+        "unauthorized" => Some(ErrorKind::Unauthorized),
         _ => None,
     }
 }

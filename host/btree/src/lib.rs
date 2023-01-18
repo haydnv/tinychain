@@ -425,14 +425,14 @@ where
     async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
         match self {
             Self::File(file) => file.delete(txn_id, range).await,
-            _ => Err(TCError::unsupported(ERR_VIEW_WRITE)),
+            _ => Err(bad_request!("{}", ERR_VIEW_WRITE)),
         }
     }
 
     async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
         match self {
             Self::File(file) => file.insert(txn_id, key).await,
-            _ => Err(TCError::unsupported(ERR_VIEW_WRITE)),
+            _ => Err(bad_request!("{}", ERR_VIEW_WRITE)),
         }
     }
 }
@@ -635,10 +635,7 @@ impl<'en> en::IntoStream<'en> for BTreeView<'en> {
 #[inline]
 fn validate_range(range: Range, schema: &[Column]) -> TCResult<Range> {
     if range.len() > schema.len() {
-        return Err(TCError::bad_request(
-            "too many columns in range",
-            range.len(),
-        ));
+        return Err(bad_request!("too many columns in range {}", range.len()));
     }
 
     let (input_prefix, start, end) = range.into_inner();

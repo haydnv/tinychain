@@ -32,8 +32,7 @@ impl<'a> Handler<'a> for ClassVersionHandler<'a> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if self.path.is_empty() {
-                    let name =
-                        key.try_cast_into(|v| TCError::bad_request("invalid class name", v))?;
+                    let name = key.try_cast_into(|v| TCError::invalid_value(v, "a Class name"))?;
 
                     let class = self.class.get_class(*txn.id(), &name).await?;
                     Ok(State::Object(class.clone().into()))
@@ -87,17 +86,16 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
             Box::pin(async move {
                 if self.path.is_empty() {
                     let number =
-                        key.try_cast_into(|v| TCError::bad_request("invalid version number", v))?;
+                        key.try_cast_into(|v| TCError::invalid_value(v, "a version number"))?;
 
-                    let version = value.try_into_map(|s| {
-                        TCError::bad_request("expected a Map of Classes but found", s)
-                    })?;
+                    let version =
+                        value.try_into_map(|s| TCError::invalid_type(s, "a Map of Classes"))?;
 
                     let version = version
                         .into_iter()
                         .map(|(name, class)| {
                             InstanceClass::try_cast_from(class, |s| {
-                                TCError::bad_request("expected a Class but found", s)
+                                TCError::invalid_type(s, "a Class")
                             })
                             .map(|class| (name, class))
                         })
@@ -167,7 +165,7 @@ impl<'a> Handler<'a> for DirHandler<'a, Class> {
                 debug!("create new Class directory entry at {}", key);
 
                 let name = PathSegment::try_cast_from(key, |v| {
-                    TCError::bad_request("invalid path segment for Class directory entry", v)
+                    TCError::invalid_value(v, "a path segment for a Class directory entry")
                 })?;
 
                 let (link, classes): (Link, Option<Map<InstanceClass>>) =
@@ -176,14 +174,14 @@ impl<'a> Handler<'a> for DirHandler<'a, Class> {
                         (link, None)
                     } else {
                         let (link, classes): (Link, Map<State>) = value.try_cast_into(|s| {
-                            TCError::bad_request("expected a tuple (Link, (Class...)) but found", s)
+                            TCError::invalid_value(s, "a tuple (Link, (Class...)) but found")
                         })?;
 
                         let classes = classes
                             .into_iter()
                             .map(|(name, class)| {
                                 InstanceClass::try_cast_from(class, |s| {
-                                    TCError::bad_request("invalid Class definition", s)
+                                    TCError::invalid_value(s, "a Class definition")
                                 })
                                 .map(|class| (name, class))
                             })

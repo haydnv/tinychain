@@ -156,19 +156,19 @@ where
 
         let shape = if let Some(shape) = shape {
             if shape.size() < size {
-                return Err(TCError::unsupported(format!(
+                return Err(bad_request!(
                     "dense tensor with shape {} requires {} elements but found {}",
                     shape,
                     shape.size(),
                     size
-                )));
+                ));
             } else if shape.size() > size {
-                return Err(TCError::unsupported(format!(
+                return Err(bad_request!(
                     "dense tensor of shape {} requires {} elements but found {}--this could indicate a divide-by-zero error",
                     shape,
                     shape.size(),
                     size
-                )));
+                ));
             }
 
             shape
@@ -205,12 +205,12 @@ where
         }
 
         if size != shape.size() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "DenseTensor of shape {} requires {} values, found {}",
                 shape,
                 shape.size(),
                 size,
-            )));
+            ));
         }
 
         Ok(Self::new(file, Schema { shape, dtype }))
@@ -304,11 +304,11 @@ where
         D::Write: DirCreateFile<FD>,
     {
         if value.shape() != self.shape() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "cannot overwrite a Tensor of shape {} with one of shape {}",
                 self.shape(),
                 value.shape()
-            )));
+            ));
         }
 
         let txn_id = *txn.id();
@@ -446,11 +446,11 @@ where
 
         let slice_shape = bounds.to_shape(self.shape())?;
         if &slice_shape != value.shape() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "cannot overwrite a Tensor of shape {} with one of shape {}",
                 slice_shape,
                 value.shape()
-            )));
+            ));
         }
 
         let txn_id = *txn.id();
@@ -631,7 +631,7 @@ where
 
         for i in 0..div_ceil(schema.shape.size(), PER_BLOCK as u64) {
             if !blocks.contains(i) {
-                return Err(TCError::bad_request("tensor is missing block", i));
+                return Err(unexpected!("tensor is missing block {}", i));
             }
         }
 
@@ -674,15 +674,17 @@ where
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         if self.schema.shape != backup.schema.shape {
-            return Err(TCError::bad_request(
-                "cannot restore a dense Tensor from a backup with a different shape",
+            return Err(bad_request!(
+                "cannot restore a dense Tensor with shape {} from a backup with a different shape {}",
+                self.shape(),
                 &backup.schema.shape,
             ));
         }
 
         if self.schema.dtype != backup.schema.dtype {
-            return Err(TCError::bad_request(
-                "cannot restore a dense Tensor from a backup with a different data type",
+            return Err(bad_request!(
+                "cannot restore a dense Tensor with data type {} from a backup with a different data type {}",
+                self.dtype(),
                 &backup.schema.dtype,
             ));
         }

@@ -8,7 +8,7 @@ use std::str::FromStr;
 
 use async_hash::Hash;
 use async_trait::async_trait;
-use destream::de::{self, Decoder, FromStream};
+use destream::de::{self, Decoder, Error, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
 use safecast::TryCastFrom;
 use serde::de::{Deserialize, Deserializer};
@@ -221,13 +221,17 @@ impl FromStr for TCPathBuf {
         if to == "/" {
             Ok(TCPathBuf { segments: vec![] })
         } else if to.ends_with('/') {
-            Err(TCError::bad_request("Path cannot end with a slash", to))
+            Err(bad_request!("Path {} cannot end with a slash", to))
         } else if to.starts_with('/') {
             let segments = to
                 .split('/')
                 .skip(1)
-                .map(PathSegment::from_str)
-                .map(|r| r.map_err(TCError::unsupported))
+                .map(|segment| match segment.parse() {
+                    Ok(segment) => Ok(segment),
+                    Err(cause) => {
+                        Err(TCError::invalid_value(segment, "a path segment").consume(cause))
+                    }
+                })
                 .collect::<TCResult<Vec<PathSegment>>>()?;
 
             Ok(TCPathBuf { segments })
@@ -236,7 +240,7 @@ impl FromStr for TCPathBuf {
                 .map(|id| TCPathBuf {
                     segments: iter::once(id).collect(),
                 })
-                .map_err(TCError::unsupported)
+                .map_err(|cause| TCError::invalid_value(to, "a path").consume(cause))
         }
     }
 }

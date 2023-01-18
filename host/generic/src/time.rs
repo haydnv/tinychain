@@ -1,4 +1,4 @@
-//! Time utilities for TinyChain. UNSTABLE.
+//! Time utilities for TinyChain
 
 use std::convert::{TryFrom, TryInto};
 use std::ops;
@@ -73,11 +73,12 @@ impl TryFrom<time::SystemTime> for NetworkTime {
     fn try_from(st: time::SystemTime) -> TCResult<NetworkTime> {
         let st = st
             .duration_since(time::UNIX_EPOCH)
-            .map_err(|e| TCError::bad_request("invalid timestamp", e))?;
-        let nanos: u64 = st
-            .as_nanos()
-            .try_into()
-            .map_err(|e| TCError::bad_request("invalid timestamp", e))?;
+            .map_err(|cause| bad_request!("invalid timestamp: {:?}", st).consume(cause))?;
+
+        let nanos: u64 = st.as_nanos().try_into().map_err(|cause| {
+            bad_request!("expected a 64-bit timestamp but found {:?}", st).consume(cause)
+        })?;
+
         Ok(NetworkTime::from_nanos(nanos))
     }
 }

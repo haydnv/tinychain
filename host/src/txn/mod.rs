@@ -89,20 +89,14 @@ impl Txn {
         );
 
         if actor.id().is_some() {
-            return Err(TCError::bad_request(
-                "cluster ID must be None, not",
-                actor.id(),
-            ));
+            return Err(bad_request!("cluster ID must be None, not {}", actor.id()));
         }
 
         if self.owner().is_none() {
             self.grant(actor, cluster_path, vec![self.active.scope().clone()])
                 .await
         } else {
-            Err(TCError::forbidden(
-                "tried to claim owned transaction",
-                self.id(),
-            ))
+            Err(forbidden!("tried to claim owned transaction {}", self.id()))
         }
     }
 
@@ -128,7 +122,7 @@ impl Txn {
 
         let (token, claims) = resolver
             .consume_and_sign(actor, scopes, token, txn_id.time().into())
-            .map_err(TCError::unauthorized)
+            .map_err(|cause| unauthorized!("signature error").consume(cause))
             .await?;
 
         Ok(Self {
@@ -180,19 +174,16 @@ impl Txn {
         );
 
         if actor.id().is_some() {
-            return Err(TCError::bad_request(
-                "cluster ID must be None, not",
-                actor.id(),
-            ));
+            return Err(bad_request!("cluster ID must be None, not {}", actor.id()));
         }
 
         if let Some(leader) = self.leader(&cluster_path) {
-            Err(TCError::internal(format!(
+            Err(unexpected!(
                 "{} tried to claim leadership of {} but {} is already the leader",
                 cluster_path,
                 self.id(),
                 leader
-            )))
+            ))
         } else {
             let scopes = vec![self.active.scope().clone()];
             self.grant(actor, cluster_path, scopes).await

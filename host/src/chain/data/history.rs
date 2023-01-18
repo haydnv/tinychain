@@ -110,7 +110,7 @@ impl History {
         let file = self.file.read().await;
         let block = file
             .get_file(&block_name(PENDING))
-            .ok_or_else(|| TCError::internal("BlockChain is missing its pending block"))?;
+            .ok_or_else(|| unexpected!("BlockChain is missing its pending block"))?;
 
         block.read().map_err(fs::io_err).await
     }
@@ -119,7 +119,7 @@ impl History {
         let file = self.file.read().await;
         let block = file
             .get_file(&block_name(PENDING))
-            .ok_or_else(|| TCError::internal("BlockChain is missing its pending block"))?;
+            .ok_or_else(|| unexpected!("BlockChain is missing its pending block"))?;
 
         block.write().map_err(fs::io_err).await
     }
@@ -139,7 +139,7 @@ impl History {
         T: Route + fmt::Display,
     {
         let err_divergent =
-            |block_id| TCError::bad_request("chain to replicate diverges at block", block_id);
+            |block_id| bad_request!("chain to replicate diverges at block {}", block_id);
 
         debug!("replicate chain history");
 
@@ -149,9 +149,10 @@ impl History {
         debug!("chain to replicate ends with block {}", *other_latest);
 
         if (*latest) > (*other_latest) {
-            return Err(TCError::bad_request(
-                "cannot replicate from chain with fewer blocks",
+            return Err(bad_request!(
+                "a Chain with {} blocks cannot replicate a Chain with {} blocks",
                 *latest,
+                *other_latest,
             ));
         }
 
@@ -201,7 +202,7 @@ impl History {
 
             let last_hash = dest.current_hash().to_vec();
             if &last_hash[..] != &source.current_hash()[..] {
-                return Err(TCError::internal(err_divergent(*latest)));
+                return Err(unexpected!("{}", err_divergent(*latest)));
             }
 
             last_hash
@@ -244,7 +245,7 @@ impl History {
 
             last_hash = dest.current_hash().to_vec();
             if &last_hash[..] != &source.current_hash()[..] {
-                return Err(TCError::internal(err_divergent(block_id)));
+                return Err(unexpected!("{}", err_divergent(block_id)));
             }
         }
 
@@ -346,10 +347,10 @@ impl Persist<fs::Dir> for History {
         //     if block.last_hash() == &last_hash {
         //         last_hash = block.last_hash().clone();
         //     } else {
-        //         return Err(TCError::internal(format!(
+        //         return Err(unexpected!(
         //             "block {} hash does not match previous block",
         //             latest
-        //         )));
+        //         ));
         //     }
         //
         //     cutoff = block.mutations.keys().last().copied().unwrap_or(cutoff);
@@ -385,7 +386,11 @@ impl AsyncHash<fs::Dir> for History {
 
         if let Some(past_txn_id) = latest_block.mutations.keys().next() {
             if past_txn_id > txn.id() {
-                return Err(TCError::conflict("requested a hash too far in the past"));
+                return Err(conflict!(
+                    "requested a hash {} too far before the present {}",
+                    past_txn_id,
+                    txn.id()
+                ));
             }
         }
 
@@ -692,10 +697,7 @@ async fn parse_block_state(
                 let value = store.save_state(txn, value).await?;
                 parsed.push(Mutation::Put(key, value));
             } else {
-                return Err(TCError::bad_request(
-                    "unable to parse historical mutation",
-                    op,
-                ));
+                return Err(unexpected!("unable to parse historical mutation {}", op,));
             }
         }
 
@@ -729,10 +731,11 @@ where
 
                 let computed_hash = dest.save_state(txn, state).await?;
                 if &computed_hash != original_hash {
-                    return Err(TCError::unsupported(format!(
+                    return Err(bad_request!(
                         "cannot replicate state with inconsistent hash {} vs {}",
-                        original_hash, computed_hash
-                    )));
+                        original_hash,
+                        computed_hash
+                    ));
                 }
 
                 block.append_put(txn_id, key.clone(), computed_hash)
@@ -761,7 +764,7 @@ impl<'en> IntoView<'en, fs::Dir> for History {
         let seq = stream::iter(0..((*latest) + 1))
             .map(move |block_id| {
                 file.get_file(&block_name(block_id))
-                    .ok_or_else(|| TCError::internal("missing chain block"))
+                    .ok_or_else(|| unexpected!("missing chain block"))
             })
             .and_then(|block| Box::pin(async move { block.read().map_err(fs::io_err).await }))
             .map_ok(move |block: FileReadGuard<_, ChainBlock>| {

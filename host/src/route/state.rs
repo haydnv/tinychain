@@ -37,7 +37,7 @@ impl<'a> Handler<'a> for ClassHandler {
                 let mut proto = Map::new();
                 for (id, member) in params.into_iter() {
                     let member = member.try_cast_into(|s| {
-                        TCError::bad_request("invalid member for object prototype", s)
+                        TCError::invalid_value(s, "an attribute in an object prototype")
                     })?;
 
                     proto.insert(id, member);

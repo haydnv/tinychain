@@ -98,16 +98,16 @@ impl Refer for Case {
         assert_eq!(self.switch.len() + 1, self.case.len());
 
         if self.cond.is_conditional() {
-            return Err(TCError::bad_request(
-                "Case does not allow a nested conditional",
+            return Err(bad_request!(
+                "Case does not allow a nested conditional {}",
                 self.cond,
             ));
         }
 
         for switch in self.switch.iter() {
             if switch.is_conditional() {
-                return Err(TCError::bad_request(
-                    "Case does not allow a nested conditional",
+                return Err(bad_request!(
+                    "Case does not allow a nested conditional {}",
                     switch,
                 ));
             }

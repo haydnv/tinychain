@@ -2,6 +2,8 @@ use std::convert::TryInto;
 use std::fmt;
 
 use async_trait::async_trait;
+use destream::de::Error;
+use log::debug;
 use safecast::TryCastFrom;
 
 use tc_error::*;
@@ -30,14 +32,15 @@ impl Dispatch for System {
                     TCPath::from(path)
                 )))
             } else {
-                Err(TCError::unauthorized("access to /"))
+                Err(forbidden!("access to /"))
             }
         } else if let Some(class) = ScalarType::from_path(path) {
-            let err = format!("cannot cast into an instance of {} from {}", class, key);
+            debug!("cast {} into {}", key, class);
+
             Scalar::from(key)
                 .into_type(class)
                 .map(State::Scalar)
-                .ok_or_else(|| TCError::unsupported(err))
+                .ok_or_else(|| bad_request!("cannot case into an instance of {}", class))
         } else {
             Static.get(txn, path, key).await
         }
@@ -85,13 +88,13 @@ impl Dispatch for System {
             let extends = Link::from(TCPathBuf::from(path.to_vec()));
 
             let proto =
-                data.try_into_map(|state| TCError::bad_request("invalid class prototype", state))?;
+                data.try_into_map(|state| TCError::invalid_type(state, "a class prototype"))?;
 
             let proto = proto
                 .into_iter()
                 .map(|(key, state)| {
                     Scalar::try_cast_from(state, |s| {
-                        TCError::bad_request("Class prototype member must be a Scalar, not", s)
+                        TCError::invalid_type(s, "a Scalar Class attribute")
                     })
                     .map(|scalar| (key, scalar))
                 })

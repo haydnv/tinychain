@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use destream::de::Error;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
@@ -40,7 +41,7 @@ impl HTTPServer {
         match tokio::time::timeout(self.gateway.request_ttl(), self.handle(request)).await {
             Ok(result) => result,
             Err(cause) => Ok(transform_error(
-                TCError::timeout(cause),
+                timeout!("request timed out").consume(cause),
                 Encoding::default(),
             )),
         }
@@ -69,11 +70,26 @@ impl HTTPServer {
         let body = match accept_encoding {
             Encoding::Json => match destream_json::encode(view) {
                 Ok(response) => Body::wrap_stream(response.chain(delimiter(b"\n"))),
-                Err(cause) => return Ok(transform_error(TCError::internal(cause), Encoding::Json)),
+                Err(cause) => {
+                    return Ok(transform_error(
+                        unexpected!("JSON encoding error").consume(cause),
+                        Encoding::Json,
+                    ))
+                }
             },
             Encoding::Tbon => match tbon::en::encode(view) {
-                Ok(response) => Body::wrap_stream(response.map_err(TCError::internal)),
-                Err(cause) => return Ok(transform_error(TCError::internal(cause), Encoding::Tbon)),
+                Ok(response) => {
+                    let response =
+                        response.map_err(|cause| unexpected!("TBON encoding error").consume(cause));
+
+                    Body::wrap_stream(response)
+                }
+                Err(cause) => {
+                    return Ok(transform_error(
+                        unexpected!("TBON encoding error").consume(cause),
+                        Encoding::Tbon,
+                    ))
+                }
             },
         };
 
@@ -98,7 +114,7 @@ impl HTTPServer {
             if let Some(header) = http_request.headers().get(hyper::header::CONTENT_TYPE) {
                 header
                     .to_str()
-                    .map_err(|e| TCError::bad_request("request has invalid Content-Type", e))?
+                    .map_err(|cause| bad_request!("invalid Content-Type header").consume(cause))?
                     .parse()?
             } else {
                 Encoding::default()
@@ -118,17 +134,17 @@ impl HTTPServer {
             .unwrap_or_else(HashMap::new);
 
         let token = if let Some(header) = http_request.headers().get(hyper::header::AUTHORIZATION) {
-            let token = header.to_str().map_err(|e| {
-                TCError::unauthorized(format!("unable to parse authorization header: {}", e))
-            })?;
+            let token = header
+                .to_str()
+                .map_err(|e| unauthorized!("unable to parse authorization header: {}", e))?;
 
             if token.starts_with("Bearer") {
                 Some(token[6..].trim().to_string())
             } else {
-                return Err(TCError::unauthorized(format!(
+                return Err(unauthorized!(
                     "unable to parse authorization header: {} (should start with \"Bearer\"",
                     token
-                )));
+                ));
             }
         } else {
             None
@@ -233,12 +249,12 @@ async fn destream_body(body: hyper::Body, encoding: Encoding, txn: Txn) -> TCRes
     match encoding {
         Encoding::Json => {
             destream_json::try_decode(txn, body)
-                .map_err(|e| TCError::bad_request(ERR_DESERIALIZE, e))
+                .map_err(|cause| bad_request!("{}", ERR_DESERIALIZE).consume(cause))
                 .await
         }
         Encoding::Tbon => {
             tbon::de::try_decode(txn, body)
-                .map_err(|e| TCError::bad_request(ERR_DESERIALIZE, e))
+                .map_err(|cause| bad_request!("{}", ERR_DESERIALIZE).consume(cause))
                 .await
         }
     }
@@ -249,8 +265,8 @@ fn get_param<T: DeserializeOwned>(
     name: &str,
 ) -> TCResult<Option<T>> {
     if let Some(param) = params.remove(name) {
-        let val: T = serde_json::from_str(&param).map_err(|e| {
-            TCError::bad_request(&format!("Unable to parse URI parameter '{}'", name), e)
+        let val: T = serde_json::from_str(&param).map_err(|cause| {
+            TCError::invalid_value(param, format!("URI parameter {}", name)).consume(cause)
         })?;
 
         Ok(Some(val))
@@ -260,6 +276,9 @@ fn get_param<T: DeserializeOwned>(
 }
 
 fn transform_error(err: TCError, encoding: Encoding) -> hyper::Response<Body> {
+    use hyper::StatusCode;
+    use tc_error::ErrorKind::*;
+
     let code = match err.code() {
         BadGateway => StatusCode::BAD_GATEWAY,
         BadRequest => StatusCode::BAD_REQUEST,
@@ -290,8 +309,6 @@ fn transform_error(err: TCError, encoding: Encoding) -> hyper::Response<Body> {
         encoding.as_str().parse().expect("content encoding"),
     );
 
-    use hyper::StatusCode;
-    use tc_error::ErrorType::*;
     *response.status_mut() = code;
 
     response

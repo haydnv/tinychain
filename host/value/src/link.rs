@@ -9,6 +9,7 @@ use std::str::FromStr;
 
 use async_hash::Hash;
 use async_trait::async_trait;
+use destream::de::Error;
 use destream::{de, en};
 use number_general::Number;
 use safecast::{CastFrom, TryCastFrom};
@@ -174,7 +175,7 @@ impl FromStr for LinkHost {
 
     fn from_str(s: &str) -> TCResult<LinkHost> {
         if !s.starts_with("http://") {
-            return Err(TCError::bad_request("Unable to parse Link protocol", s));
+            return Err(TCError::invalid_value(s, "a Link protocol"));
         }
 
         let protocol = LinkProtocol::HTTP;
@@ -187,43 +188,44 @@ impl FromStr for LinkHost {
                 let last_segment: Vec<&str> = segments.pop().unwrap().split(':').collect();
                 if last_segment.len() == 2 {
                     segments.push(last_segment[0]);
-                    Some(
-                        last_segment[1]
-                            .parse()
-                            .map_err(|e| TCError::bad_request("Unable to parse port number", e))?,
-                    )
+
+                    let port = last_segment[1].parse().map_err(|cause| {
+                        TCError::invalid_value(last_segment[1], "a port number").consume(cause)
+                    })?;
+
+                    Some(port)
                 } else {
-                    return Err(TCError::bad_request("Unable to parse IPv6 address", s));
+                    return Err(TCError::invalid_value(s, "an IPv6 address"));
                 }
             } else {
                 None
             };
 
-            let address: Ipv6Addr = segments
-                .join("::")
-                .parse()
-                .map_err(|e| TCError::bad_request("Unable to parse IPv6 address", e))?;
+            let address = segments.join("::");
+            let address: Ipv6Addr = address.parse().map_err(|cause| {
+                TCError::invalid_value(address, "an IPv6 address").consume(cause)
+            })?;
 
             (address.into(), port)
         } else {
             let (address, port) = if s.contains(':') {
                 let segments: Vec<&str> = s.split(':').collect();
                 if segments.len() == 2 {
-                    let port: u16 = segments[1]
-                        .parse()
-                        .map_err(|e| TCError::bad_request("Unable to parse port number", e))?;
+                    let port: u16 = segments[1].parse().map_err(|cause| {
+                        TCError::invalid_value(segments[1], "a port number").consume(cause)
+                    })?;
 
                     (segments[0], Some(port))
                 } else {
-                    return Err(TCError::bad_request("Unable to parse network address", s));
+                    return Err(TCError::invalid_value(s, "a network address"));
                 }
             } else {
                 (s, None)
             };
 
-            let address: Ipv4Addr = address
-                .parse()
-                .map_err(|e| TCError::bad_request("Unable to parse IPv4 address", e))?;
+            let address: Ipv4Addr = address.parse().map_err(|cause| {
+                TCError::invalid_value(address, "an IPv4 address").consume(cause)
+            })?;
 
             (address.into(), port)
         };
@@ -552,7 +554,7 @@ impl FromStr for Link {
                 path: s.parse()?,
             });
         } else if !s.starts_with("http://") {
-            return Err(TCError::bad_request("Unable to parse Link protocol", s));
+            return Err(TCError::invalid_value(s, "a Link protocol"));
         }
 
         let s = if s.ends_with('/') {
@@ -563,7 +565,7 @@ impl FromStr for Link {
 
         let segments: Vec<&str> = s.split('/').collect();
         if segments.is_empty() {
-            return Err(TCError::bad_request("Unable to parse Link", s));
+            return Err(TCError::invalid_value(s, "a Link"));
         }
 
         let host: LinkHost = segments[..3].join("/").parse()?;
@@ -572,8 +574,10 @@ impl FromStr for Link {
 
         let segments = segments
             .iter()
-            .map(|s| s.parse())
-            .map(|r| r.map_err(TCError::unsupported))
+            .map(|s| match s.parse() {
+                Ok(segment) => Ok(segment),
+                Err(cause) => Err(TCError::invalid_value(s, "a path segment").consume(cause)),
+            })
             .collect::<TCResult<Vec<PathSegment>>>()?;
 
         Ok(Link {

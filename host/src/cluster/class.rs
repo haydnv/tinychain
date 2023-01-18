@@ -94,10 +94,10 @@ impl Class {
         for (number, file) in dir.iter() {
             let file = match file {
                 fs::DirEntry::File(fs::FileEntry::Class(file)) => Ok(file.clone()),
-                other => Err(TCError::internal(format!(
+                other => Err(unexpected!(
                     "class directory contains invalid file: {}",
                     other
-                ))),
+                )),
             }?;
 
             let version = Version::with_file(file).to_state(txn_id).await?;
@@ -161,7 +161,7 @@ impl Persist<fs::Dir> for Class {
         if contents.is_empty() {
             Ok(Self { dir })
         } else {
-            Err(TCError::unsupported(
+            Err(bad_request!(
                 "cannot create a new Class cluster with a non-empty directory",
             ))
         }

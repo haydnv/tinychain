@@ -52,13 +52,16 @@ impl crate::gateway::Client for Client {
         let response = self
             .client
             .request(req.body(Body::empty()).unwrap())
-            .map_err(|e| TCError::bad_gateway(e))
+            .map_err(|cause| bad_gateway!("error from host at {}", link).consume(cause))
             .await?;
 
         if response.status().is_success() {
             let body = response.into_body();
+
             tbon::de::try_decode((), body)
-                .map_err(|e| TCError::bad_gateway(e))
+                .map_err(|cause| {
+                    bad_gateway!("error decoding response from {}", link).consume(cause)
+                })
                 .await
         } else {
             let err = transform_error(&link, response).await;
@@ -68,7 +71,7 @@ impl crate::gateway::Client for Client {
 
     async fn get(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<State> {
         if txn.owner().is_none() {
-            return Err(TCError::unsupported(ERR_NO_OWNER));
+            return Err(bad_request!("{}", ERR_NO_OWNER));
         }
 
         let uri = build_url(&link, txn.id(), &key)?;
@@ -78,16 +81,13 @@ impl crate::gateway::Client for Client {
         let response = self
             .client
             .request(req.body(Body::empty()).unwrap())
-            .map_err(|e| TCError::bad_gateway(e))
+            .map_err(|cause| bad_gateway!("error from host at {}", link).consume(cause))
             .await?;
 
         if response.status().is_success() {
             tbon::de::try_decode(txn, response.into_body())
-                .map_err(|e| {
-                    TCError::bad_request(
-                        format!("error decoding response from {}: {}", link, key),
-                        e,
-                    )
+                .map_err(|cause| {
+                    bad_gateway!("error decoding response from {}", link).consume(cause)
                 })
                 .await
         } else {
@@ -98,7 +98,7 @@ impl crate::gateway::Client for Client {
 
     async fn put(&self, txn: &Txn, link: ToUrl<'_>, key: Value, value: State) -> TCResult<()> {
         if txn.owner().is_none() {
-            return Err(TCError::unsupported(ERR_NO_OWNER));
+            return Err(bad_request!("{}", ERR_NO_OWNER));
         }
 
         let uri = build_url(&link, txn.id(), &key)?;
@@ -108,15 +108,18 @@ impl crate::gateway::Client for Client {
         let txn = txn.subcontext_unique().await?;
         let view = value.into_view(txn).await?;
         let body = tbon::en::encode(view)
-            .map_err(|e| TCError::bad_request("unable to encode stream", e))?;
+            .map_err(|cause| bad_request!("unable to encode stream").consume(cause))?;
+
+        let body = req
+            .body(Body::wrap_stream(body.map_err(|cause| {
+                unexpected!("TBON encoding error").consume(cause)
+            })))
+            .expect("request body");
 
         let response = self
             .client
-            .request(
-                req.body(Body::wrap_stream(body.map_err(TCError::internal)))
-                    .unwrap(),
-            )
-            .map_err(|e| TCError::bad_gateway(e))
+            .request(body)
+            .map_err(|cause| bad_gateway!("error from host at {}", link).consume(cause))
             .await?;
 
         if response.status().is_success() {
@@ -129,7 +132,7 @@ impl crate::gateway::Client for Client {
 
     async fn post(&self, txn: &Txn, link: ToUrl<'_>, params: State) -> TCResult<State> {
         if txn.owner().is_none() {
-            return Err(TCError::unsupported(ERR_NO_OWNER));
+            return Err(bad_request!("{}", ERR_NO_OWNER));
         }
 
         let uri = build_url(&link, txn.id(), &Value::default())?;
@@ -140,24 +143,24 @@ impl crate::gateway::Client for Client {
         let subcontext = txn.subcontext(label("_params").into()).await?;
         let params_view = params.clone().into_view(subcontext).await?;
         let body = tbon::en::encode(params_view)
-            .map_err(|e| TCError::bad_request("unable to encode stream", e))?;
+            .map_err(|cause| bad_request!("unable to encode stream").consume(cause))?;
+
+        let body = req
+            .body(Body::wrap_stream(body.map_err(|cause| {
+                unexpected!("TBON encoding error").consume(cause)
+            })))
+            .expect("request body");
 
         let response = self
             .client
-            .request(
-                req.body(Body::wrap_stream(body.map_err(TCError::internal)))
-                    .unwrap(),
-            )
-            .map_err(|e| TCError::bad_gateway(e))
+            .request(body)
+            .map_err(|cause| bad_gateway!("error from host at {}", link).consume(cause))
             .await?;
 
         if response.status().is_success() {
             tbon::de::try_decode(txn, response.into_body())
-                .map_err(|e| {
-                    TCError::bad_request(
-                        format!("error decoding response from {}: {}", link, params),
-                        e,
-                    )
+                .map_err(|cause| {
+                    bad_gateway!("error decoding response from {}: {}", link, params).consume(cause)
                 })
                 .await
         } else {
@@ -168,7 +171,7 @@ impl crate::gateway::Client for Client {
 
     async fn delete(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<()> {
         if txn.owner().is_none() {
-            return Err(TCError::unsupported(ERR_NO_OWNER));
+            return Err(bad_request!("{}", ERR_NO_OWNER));
         }
 
         let uri = build_url(&link, txn.id(), &key)?;
@@ -177,7 +180,7 @@ impl crate::gateway::Client for Client {
         let response = self
             .client
             .request(req.body(Body::empty()).unwrap())
-            .map_err(|e| TCError::bad_gateway(e))
+            .map_err(|cause| bad_gateway!("error from host at {}", link).consume(cause))
             .await?;
 
         if response.status().is_success() {
@@ -198,7 +201,7 @@ fn build_url(link: &ToUrl<'_>, txn_id: &TxnId, key: &Value) -> TCResult<Url> {
 
     if key.is_some() {
         let key_json = serde_json::to_string(&key)
-            .map_err(|_| TCError::bad_request("unable to encode key", key))?;
+            .map_err(|cause| unexpected!("unable to encode key {}", key).consume(cause))?;
 
         url.query_pairs_mut().append_pair("key", &key_json);
     }
@@ -242,17 +245,17 @@ async fn transform_error(source: &ToUrl<'_>, response: hyper::Response<Body>) ->
 
     use hyper::StatusCode;
     let code = match status {
-        StatusCode::BAD_REQUEST => ErrorType::BadRequest,
-        StatusCode::CONFLICT => ErrorType::Conflict,
-        StatusCode::FORBIDDEN => ErrorType::Forbidden,
-        StatusCode::INTERNAL_SERVER_ERROR => ErrorType::Internal,
-        StatusCode::GATEWAY_TIMEOUT => ErrorType::Timeout,
-        StatusCode::METHOD_NOT_ALLOWED => ErrorType::MethodNotAllowed,
-        StatusCode::NOT_FOUND => ErrorType::NotFound,
-        StatusCode::NOT_IMPLEMENTED => ErrorType::NotImplemented,
-        StatusCode::UNAUTHORIZED => ErrorType::Unauthorized,
-        StatusCode::REQUEST_TIMEOUT => ErrorType::Timeout,
-        _ => ErrorType::BadGateway,
+        StatusCode::BAD_REQUEST => ErrorKind::BadRequest,
+        StatusCode::CONFLICT => ErrorKind::Conflict,
+        StatusCode::FORBIDDEN => ErrorKind::Forbidden,
+        StatusCode::INTERNAL_SERVER_ERROR => ErrorKind::Internal,
+        StatusCode::GATEWAY_TIMEOUT => ErrorKind::Timeout,
+        StatusCode::METHOD_NOT_ALLOWED => ErrorKind::MethodNotAllowed,
+        StatusCode::NOT_FOUND => ErrorKind::NotFound,
+        StatusCode::NOT_IMPLEMENTED => ErrorKind::NotImplemented,
+        StatusCode::UNAUTHORIZED => ErrorKind::Unauthorized,
+        StatusCode::REQUEST_TIMEOUT => ErrorKind::Timeout,
+        _ => ErrorKind::BadGateway,
     };
 
     TCError::new(code, message)

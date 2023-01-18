@@ -5,6 +5,7 @@ use std::iter;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
+use destream::de::Error;
 use destream::{de, en};
 use futures::future::TryFutureExt;
 use futures::stream::{StreamExt, TryStreamExt};
@@ -60,10 +61,7 @@ impl Schema {
         self.shape.validate(debug_info)?;
 
         fn err_nonspecific(dtype: NumberType) -> TCResult<()> {
-            Err(TCError::bad_request(
-                "tensor requires a specific Number type, not",
-                dtype,
-            ))
+            Err(TCError::invalid_type(dtype, "a specific Number class"))
         }
 
         match self.dtype {
@@ -1507,10 +1505,13 @@ pub fn broadcast_shape(left: &[u64], right: &[u64]) -> TCResult<Shape> {
         } else if *r == 1 {
             shape.push(*l)
         } else {
-            return Err(TCError::unsupported(format!(
-                "cannot broadcast dimension {} into {} (tensor shapes are {:?} and {:?})",
-                l, r, left, right,
-            )));
+            return Err(bad_request!(
+                "cannot broadcast dimension {} into {} (tensor shapes are {:?} and {:?}",
+                l,
+                r,
+                left,
+                right
+            ));
         }
     }
 
@@ -1569,10 +1570,10 @@ where
     let input_shape = input.shape();
 
     if input_shape.iter().any(|dim| dim >= &max_usize) {
-        return Err(TCError::unsupported(format!(
+        return Err(bad_request!(
             "Tensor of shape {} is too large to tile",
             input_shape
-        )));
+        ));
     }
 
     let slices = input_shape

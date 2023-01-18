@@ -9,7 +9,8 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use destream::{de, en};
+use destream::de::{self, Error};
+use destream::en;
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use log::{debug, warn};
@@ -644,7 +645,7 @@ impl TryFrom<Scalar> for bool {
     fn try_from(scalar: Scalar) -> Result<Self, Self::Error> {
         match scalar {
             Scalar::Value(value) => value.try_into(),
-            other => Err(TCError::bad_request("expected a boolean but found", other)),
+            other => Err(TCError::invalid_value(other, "a boolean")),
         }
     }
 }
@@ -655,7 +656,7 @@ impl TryFrom<Scalar> for Map<Scalar> {
     fn try_from(scalar: Scalar) -> TCResult<Map<Scalar>> {
         match scalar {
             Scalar::Map(map) => Ok(map),
-            other => Err(TCError::bad_request("expected a Map but found", other)),
+            other => Err(TCError::invalid_type(other, "a Map")),
         }
     }
 }
@@ -666,7 +667,7 @@ impl TryFrom<Scalar> for Range {
     fn try_from(scalar: Scalar) -> TCResult<Range> {
         match scalar {
             Scalar::Range(range) => Ok(range),
-            other => Err(TCError::bad_request("expected a Range but found", other)),
+            other => Err(TCError::invalid_value(other, "a Range")),
         }
     }
 }
@@ -677,10 +678,7 @@ impl TryFrom<Scalar> for TCRef {
     fn try_from(scalar: Scalar) -> Result<Self, Self::Error> {
         match scalar {
             Scalar::Ref(tc_ref) => Ok(*tc_ref),
-            other => Err(TCError::bad_request(
-                "expected a reference but found",
-                other,
-            )),
+            other => Err(TCError::invalid_value(other, "a reference")),
         }
     }
 }
@@ -691,7 +689,7 @@ impl TryFrom<Scalar> for Value {
     fn try_from(scalar: Scalar) -> TCResult<Value> {
         match scalar {
             Scalar::Value(value) => Ok(value),
-            other => Err(TCError::bad_request("expected Value but found", other)),
+            other => Err(TCError::invalid_type(other, "a Value")),
         }
     }
 }
@@ -1410,7 +1408,7 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
         if let Some(subject) = self.subject {
             Ok(subject)
         } else {
-            Err(TCError::unsupported(ERR_NO_SELF))
+            Err(bad_request!("{}", ERR_NO_SELF))
         }
     }
 }

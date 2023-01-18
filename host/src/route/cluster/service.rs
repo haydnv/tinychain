@@ -66,12 +66,11 @@ impl<'a> ServiceHandler<'a> {
                 debug!("create new Service version {}", key);
 
                 let number = VersionNumber::try_cast_from(key, |v| {
-                    TCError::bad_request("invalid version number", v)
+                    TCError::invalid_value(v, "a version number")
                 })?;
 
-                let class = InstanceClass::try_cast_from(value, |v| {
-                    TCError::bad_request("invalid Class", v)
-                })?;
+                let class =
+                    InstanceClass::try_cast_from(value, |v| TCError::invalid_type(v, "a Class"))?;
 
                 let (link, version) = class.into_inner();
 
@@ -192,7 +191,7 @@ impl<'a> Handler<'a> for ServiceHandler<'a> {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if self.path.len() == 0 {
-                    return Err(TCError::not_implemented("delete a version of a Service"));
+                    return Err(not_implemented!("delete a version of a Service"));
                 }
 
                 let number = self.path[0].as_str().parse()?;
@@ -220,15 +219,15 @@ impl<'a> Handler<'a> for DirHandler<'a, Service> {
                 debug!("create new Service {} in {}", key, self.dir);
 
                 let name = PathSegment::try_cast_from(key, |v| {
-                    TCError::bad_request("invalid path segment for Service directory entry", v)
+                    TCError::invalid_value(v, "a path segment for a Service directory entry")
                 })?;
 
                 let (link, service) = expect_version(value)?;
                 let (version, classes) = extract_classes(service)?;
 
                 if link.path().len() <= 1 {
-                    return Err(TCError::bad_request(
-                        "cannot create a new cluster at",
+                    return Err(bad_request!(
+                        "cannot create a new cluster at {}",
                         link.path(),
                     ));
                 }

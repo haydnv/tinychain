@@ -18,7 +18,7 @@ trait Accept: Default + FromStr {
         let header = if let Some(header) = header {
             header
                 .to_str()
-                .map_err(|e| TCError::bad_request("invalid Accept-Encoding header", e))?
+                .map_err(|cause| bad_request!("invalid Accept-Encoding header").consume(cause))?
         } else {
             return Ok(Self::default());
         };
@@ -32,15 +32,15 @@ trait Accept: Default + FromStr {
                 let opt: Vec<&str> = opt.split(';').collect();
 
                 if opt.len() != 2 {
-                    return Err(TCError::bad_request(
-                        "invalid encoding specified in Accept-Encoding header",
+                    return Err(bad_request!(
+                        "invalid encoding {} specified in Accept-Encoding header",
                         opt.join(";"),
                     ));
                 }
 
                 let format = opt[0].parse();
                 let q = opt[1].parse().map_err(|e| {
-                    TCError::bad_request("invalid quality value in Accept-Encoding header", e)
+                    bad_request!("invalid quality value {} in Accept-Encoding header", e)
                 })?;
 
                 if q > quality {
@@ -91,7 +91,7 @@ impl FromStr for Encoding {
         match s.trim() {
             "application/json" => Ok(Self::Json),
             "application/tbon" => Ok(Self::Tbon),
-            _ => Err(TCError::bad_request("encoding not supported", s)),
+            other => Err(bad_request!("encoding {} is not supported", other)),
         }
     }
 }

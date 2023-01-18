@@ -8,7 +8,7 @@ use std::str::FromStr;
 use async_hash::Hash;
 use async_trait::async_trait;
 use bytes::Bytes;
-use destream::de;
+use destream::de::{self, Error};
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use log::debug;
@@ -169,10 +169,7 @@ impl TryFrom<StateType> for ScalarType {
     fn try_from(st: StateType) -> TCResult<Self> {
         match st {
             StateType::Scalar(st) => Ok(st),
-            other => Err(TCError::bad_request(
-                "expected Scalar class but found",
-                other,
-            )),
+            other => Err(TCError::invalid_type(other, "a Scalar class")),
         }
     }
 }
@@ -467,8 +464,8 @@ impl AsyncHash<crate::fs::Dir> for State {
             }
             Self::Object(object) => object.hash(txn).await,
             Self::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),
-            Self::Stream(_stream) => Err(TCError::unsupported(
-                "cannot hash a Stream; hash its source instead",
+            Self::Stream(_stream) => Err(bad_request!(
+                "cannot hash a Stream; hash its source instead"
             )),
             Self::Tuple(tuple) => {
                 let mut hashes = stream::iter(tuple)
@@ -752,7 +749,7 @@ impl TryFrom<State> for bool {
     fn try_from(state: State) -> Result<Self, Self::Error> {
         match state {
             State::Scalar(scalar) => scalar.try_into(),
-            other => Err(TCError::bad_request("expected a boolean but found", other)),
+            other => Err(TCError::invalid_type(other, "a boolean")),
         }
     }
 }
@@ -763,10 +760,7 @@ impl TryFrom<State> for Collection {
     fn try_from(state: State) -> TCResult<Collection> {
         match state {
             State::Collection(collection) => Ok(collection),
-            other => Err(TCError::bad_request(
-                "expected a Collection but found",
-                other,
-            )),
+            other => Err(TCError::invalid_type(other, "a Collection")),
         }
     }
 }
@@ -790,7 +784,7 @@ impl TryFrom<State> for Scalar {
                 .collect::<TCResult<Tuple<Scalar>>>()
                 .map(Scalar::Tuple),
 
-            other => Err(TCError::bad_request("expected a Scalar, not", other)),
+            other => Err(TCError::invalid_type(other, "a Scalar")),
         }
     }
 }
@@ -807,7 +801,7 @@ impl TryFrom<State> for Map<Scalar> {
 
             State::Scalar(Scalar::Map(map)) => Ok(map),
 
-            other => Err(TCError::bad_request("expected a Map but found", other)),
+            other => Err(TCError::invalid_type(other, "a Map")),
         }
     }
 }
@@ -824,7 +818,7 @@ impl TryFrom<State> for Map<State> {
                 .map(|(id, scalar)| (id, State::Scalar(scalar)))
                 .collect()),
 
-            other => Err(TCError::bad_request("expected Map but found", other)),
+            other => Err(TCError::invalid_type(other, "a Map")),
         }
     }
 }
@@ -842,7 +836,7 @@ impl TryFrom<State> for Value {
                 .collect::<TCResult<Tuple<Value>>>()
                 .map(Value::Tuple),
 
-            other => Err(TCError::bad_request("expected Value but found", other)),
+            other => Err(TCError::invalid_type(other, "a Value")),
         }
     }
 }

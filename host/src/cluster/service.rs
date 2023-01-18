@@ -5,6 +5,7 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
+use destream::de::Error;
 use futures::future::{join_all, try_join_all, TryFutureExt};
 use futures::{join, try_join};
 use safecast::{as_type, AsType};
@@ -127,10 +128,10 @@ impl Persist<fs::Dir> for Version {
 
                         Ok(Attr::Chain(chain))
                     }
-                    other => Err(TCError::bad_request("invalid Service attribute", other)),
+                    other => Err(TCError::invalid_type(other, "a Service attribute")),
                 },
                 scalar if scalar.is_ref() => {
-                    Err(TCError::bad_request("invalid Service attribute", scalar))
+                    Err(TCError::invalid_value(scalar, "a Service attribute"))
                 }
                 scalar => Ok(Attr::Scalar(scalar)),
             }?;
@@ -168,10 +169,10 @@ impl Persist<fs::Dir> for Version {
 
                         Ok(Attr::Chain(chain))
                     }
-                    other => Err(TCError::bad_request("invalid Service attribute", other)),
+                    other => Err(TCError::invalid_type(other, "a Service attribute")),
                 },
                 scalar if scalar.is_ref() => {
-                    Err(TCError::bad_request("invalid Service attribute", scalar))
+                    Err(TCError::invalid_value(scalar, "a Service attribute"))
                 }
                 scalar => Ok(Attr::Scalar(scalar)),
             }?;
@@ -404,8 +405,8 @@ impl Persist<fs::Dir> for Service {
                 versions: TxnLock::new("service", txn_id, BTreeMap::new()),
             })
         } else {
-            Err(TCError::unsupported(
-                "cannot create a new Service from a non-empty directory",
+            Err(bad_request!(
+                "cannot create a new Service from a non-empty directory"
             ))
         }
     }
@@ -416,7 +417,7 @@ impl Persist<fs::Dir> for Service {
             let dir = dir.try_read(txn_id)?;
             let schema: fs::File<VersionNumber, InstanceClass> = dir
                 .get_file(&SCHEMA.into())?
-                .ok_or_else(|| TCError::internal("service missing schema file"))?;
+                .ok_or_else(|| unexpected!("service missing schema file"))?;
 
             (schema, BTreeMap::new())
         };
@@ -425,7 +426,7 @@ impl Persist<fs::Dir> for Service {
         for number in version_schema.block_ids() {
             let schema = version_schema
                 .try_read_block(number)
-                .map_err(|cause| TCError::internal("a Service schema is not present in the cache--consider increasing the cache size").consume(cause))?;
+                .map_err(|cause| unexpected!("a Service schema is not present in the cache--consider increasing the cache size").consume(cause))?;
 
             // `get_or_create_store` here in case of a service with no persistent data
             let store = dir
@@ -456,23 +457,16 @@ impl fmt::Display for Service {
 
 fn resolve_type<T: NativeClass>(subject: Subject) -> TCResult<T> {
     match subject {
-        Subject::Link(link) if link.host().is_none() => {
-            T::from_path(link.path()).ok_or_else(|| {
-                TCError::unsupported(format!(
-                    "{} is not a {}",
-                    link.path(),
-                    std::any::type_name::<T>()
-                ))
-            })
-        }
-        Subject::Link(link) => Err(TCError::not_implemented(format!(
+        Subject::Link(link) if link.host().is_none() => T::from_path(link.path())
+            .ok_or_else(|| bad_request!("{} is not a {}", link.path(), std::any::type_name::<T>())),
+        Subject::Link(link) => Err(not_implemented!(
             "support for a user-defined Class of {} in a Service: {}",
             std::any::type_name::<T>(),
             link
-        ))),
-        subject => Err(TCError::bad_request(
-            format!("expected a {} but found", std::any::type_name::<T>()),
+        )),
+        subject => Err(TCError::invalid_type(
             subject,
+            format!("a {}", std::any::type_name::<T>()),
         )),
     }
 }
@@ -495,10 +489,11 @@ fn validate(
                 for (id, provider) in op_def.form() {
                     // make sure not to duplicate requests to other clusters
                     if provider.is_inter_service_write(version_link.path()) {
-                        return Err(TCError::unsupported(format!(
+                        return Err(bad_request!(
                             "replicated op {} may not perform inter-service writes: {}",
-                            id, provider
-                        )));
+                            id,
+                            provider
+                        ));
                     }
                 }
 

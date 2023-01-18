@@ -20,7 +20,7 @@ use tc_value::{
     ComplexType, Float, FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry,
     UIntType,
 };
-use tcgeneric::{Instance, TCBoxTryFuture};
+use tcgeneric::{Instance, TCBoxTryFuture, Tuple};
 
 use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
 use super::stream::ReadValueAt;
@@ -95,11 +95,11 @@ where
         combinator: fn(Number, Number) -> Number,
     ) -> TCResult<SparseTensor<FD, FS, D, T, SparseCombinator<FD, FS, D, T, A, R>>> {
         if self.shape() != other.shape() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "cannot compare Tensors of different shapes: {}, {}",
                 self.shape(),
                 other.shape()
-            )));
+            ));
         }
 
         let accessor = SparseCombinator::new(self.accessor, other.accessor, combinator)?;
@@ -119,11 +119,11 @@ where
         R: SparseAccess<FD, FS, D, T>,
     {
         if self.shape() != other.shape() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "cannot condense sparse Tensor of size {} with another of size {}",
                 self.shape(),
                 other.shape()
-            )));
+            ));
         }
 
         let accessor = SparseCombinator::new(self.accessor, other.accessor, condensor)?;
@@ -141,11 +141,11 @@ where
         R: SparseAccess<FD, FS, D, T>,
     {
         if self.shape() != other.shape() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "cannot compare Tensors of different shapes: {}, {}",
                 self.shape(),
                 other.shape()
-            )));
+            ));
         }
 
         let accessor = SparseLeftCombinator::new(self.accessor, other.accessor, combinator)?;
@@ -174,8 +174,9 @@ where
         multiples: Vec<u64>,
     ) -> TCResult<Self> {
         if multiples.len() != tensor.ndim() {
-            return Err(TCError::bad_request(
-                "wrong number of multiples to tile a Tensor with shape",
+            return Err(bad_request!(
+                "wrong number of multiples {} to tile a Tensor with shape {}",
+                Tuple::from(multiples),
                 tensor.shape(),
             ))?;
         }
@@ -529,16 +530,16 @@ where
 
     async fn diagonal(self, txn: Self::Txn) -> TCResult<Self::Diagonal> {
         if self.ndim() != 2 {
-            return Err(TCError::not_implemented(format!(
+            return Err(not_implemented!(
                 "diagonal of a {}-dimensional sparse Tensor",
                 self.ndim()
-            )));
+            ));
         }
 
         let size = self.shape()[0];
         if size != self.shape()[1] {
-            return Err(TCError::bad_request(
-                "diagonal requires a square matrix but found",
+            return Err(bad_request!(
+                "diagonal requires a square matrix but found shape {}",
                 self.shape(),
             ));
         }
@@ -595,11 +596,11 @@ where
     ) -> TCResult<()> {
         let slice_shape = bounds.to_shape(self.shape())?;
         if &slice_shape != other.shape() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "cannot write tensor of shape {} to slice of shape {}",
                 other.shape(),
                 slice_shape,
-            )));
+            ));
         }
 
         let txn_id = *txn.id();
@@ -682,11 +683,11 @@ where
 
     async fn argmax(self, txn: Self::Txn, axis: usize) -> TCResult<Self::Index> {
         if axis >= self.ndim() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "invalid argmax axis for tensor with {} dimensions: {}",
                 self.ndim(),
                 axis
-            )));
+            ));
         }
 
         let shape = {
@@ -862,7 +863,7 @@ where
 
     fn log(self, base: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::LeftCombine> {
         if base.dtype().is_complex() {
-            return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
+            return Err(bad_request!("{}", ERR_COMPLEX_EXPONENT));
         }
 
         fn log(n: Number, base: Number) -> Number {
@@ -879,7 +880,7 @@ where
 
     fn pow(self, other: SparseTensor<FD, FS, D, T, R>) -> TCResult<Self::LeftCombine> {
         if other.dtype().is_complex() {
-            return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
+            return Err(bad_request!("{}", ERR_COMPLEX_EXPONENT));
         }
 
         debug!("SparseTensor::pow");
@@ -970,7 +971,7 @@ where
 
     fn log_const(self, base: Number) -> TCResult<Self::Combine> {
         if base.class().is_complex() {
-            return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
+            return Err(bad_request!("{}", ERR_COMPLEX_EXPONENT));
         }
 
         fn log(n: Number, base: Number) -> Number {
@@ -991,7 +992,7 @@ where
 
     fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
         if !other.class().is_real() {
-            return Err(TCError::unsupported(ERR_COMPLEX_EXPONENT));
+            return Err(bad_request!("{}", ERR_COMPLEX_EXPONENT));
         }
 
         Ok(SparseConstCombinator::new(self.accessor, other, Number::pow).into())
@@ -1123,7 +1124,7 @@ where
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
         if self.dtype().is_complex() && dtype.is_real() {
-            return Err(TCError::unsupported("cannot cast a complex Tensor into a real Tensor; consider the real, imag, or abs methods instead"));
+            return Err(bad_request!("cannot cast a complex Tensor into a real Tensor; consider the real, imag, or abs methods instead"));
         }
 
         let accessor = SparseCast::new(self.accessor, dtype);
@@ -1273,7 +1274,7 @@ where
     }
 
     fn not(&self) -> TCResult<Self::Unary> {
-        Err(TCError::unsupported(ERR_NOT_SPARSE))
+        Err(bad_request!("{}", ERR_NOT_SPARSE))
     }
 }
 

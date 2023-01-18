@@ -7,7 +7,8 @@ use std::ops::Deref;
 
 use async_hash::Hash;
 use async_trait::async_trait;
-use destream::{de, Decoder, EncodeMap, Encoder, FromStream, IntoStream, ToStream};
+use destream::de::{self, Decoder, Error, FromStream};
+use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use futures::TryFutureExt;
 use log::debug;
 use safecast::TryCastFrom;
@@ -292,7 +293,7 @@ impl TryFrom<TCRef> for OpRef {
     fn try_from(tc_ref: TCRef) -> TCResult<Self> {
         match tc_ref {
             TCRef::Op(op_ref) => Ok(op_ref),
-            other => Err(TCError::bad_request("expected an OpRef but found", other)),
+            other => Err(TCError::invalid_type(other, "an OpRef")),
         }
     }
 }

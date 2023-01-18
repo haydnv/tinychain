@@ -6,7 +6,7 @@ use std::convert::TryInto;
 use std::fmt;
 
 use async_trait::async_trait;
-use destream::de;
+use destream::de::{self, Error};
 use futures::future::TryFutureExt;
 use futures::stream::{FuturesUnordered, TryStreamExt};
 use log::debug;
@@ -90,7 +90,7 @@ impl Closure {
 
         match self.op {
             OpDef::Get((key_name, op_def)) => {
-                let key = args.try_cast_into(|s| TCError::bad_request("invalid key", s))?;
+                let key = args.try_cast_into(|s| TCError::invalid_type(s, "a Value"))?;
                 context.insert(key_name, key);
 
                 Executor::with_context(txn, subject.as_ref(), context, op_def)
@@ -98,8 +98,8 @@ impl Closure {
                     .await
             }
             OpDef::Put((key_name, value_name, op_def)) => {
-                let (key, value) = args
-                    .try_cast_into(|s| TCError::bad_request("invalid arguments for PUT Op", s))?;
+                let (key, value) =
+                    args.try_cast_into(|s| TCError::invalid_value(s, "arguments for PUT Op"))?;
 
                 context.insert(key_name, key);
                 context.insert(value_name, value);
@@ -117,7 +117,7 @@ impl Closure {
                     .await
             }
             OpDef::Delete((key_name, op_def)) => {
-                let key = args.try_cast_into(|s| TCError::bad_request("invalid key", s))?;
+                let key = args.try_cast_into(|s| TCError::invalid_type(s, "a Value"))?;
                 context.insert(key_name, key);
 
                 Executor::with_context(txn, subject.as_ref(), context, op_def)

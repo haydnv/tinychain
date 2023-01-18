@@ -6,7 +6,7 @@ use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
-use destream::de::{Decoder, FromStream};
+use destream::de::{Decoder, Error, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
 use safecast::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -45,7 +45,7 @@ impl<T> Map<T> {
         if self.is_empty() {
             Ok(())
         } else {
-            Err(TCError::bad_request("unexpected parameters", self))
+            Err(TCError::invalid_length(0, "no parameters").consume(self))
         }
     }
 
@@ -63,9 +63,7 @@ impl<T> Map<T> {
         T: fmt::Display,
     {
         if let Some(param) = self.remove(name) {
-            P::try_cast_from(param, |p| {
-                TCError::bad_request(format!("invalid value for {}", name), p)
-            })
+            P::try_cast_from(param, |p| TCError::invalid_value(p, name))
         } else {
             Ok((default)())
         }
@@ -80,7 +78,7 @@ impl<T> Map<T> {
     {
         if let Some(param) = self.remove(name) {
             P::try_cast_from(param, |p| {
-                TCError::bad_request(format!("invalid value for {}", name), p)
+                TCError::invalid_value(p, std::any::type_name::<P>())
             })
         } else {
             Ok(P::default())
@@ -94,13 +92,9 @@ impl<T> Map<T> {
         P: TryCastFrom<T>,
         T: fmt::Display,
     {
-        let param = self
-            .remove(name)
-            .ok_or_else(|| TCError::bad_request("missing required parameter", name))?;
+        let param = self.remove(name).ok_or_else(|| TCError::not_found(name))?;
 
-        P::try_cast_from(param, |p| {
-            TCError::bad_request(format!("invalid value for {}", name), p)
-        })
+        P::try_cast_from(param, |p| TCError::invalid_value(p, name))
     }
 }
 

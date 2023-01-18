@@ -1,3 +1,4 @@
+use destream::de::Error;
 use safecast::{CastFrom, TryCastInto};
 
 use tc_error::*;
@@ -27,7 +28,7 @@ where
     {
         Some(Box::new(|_txn, value| {
             Box::pin(async move {
-                let value = value.try_cast_into(|v| TCError::bad_request("not a Number", v))?;
+                let value = value.try_cast_into(|v| TCError::invalid_type(v, "a Number"))?;
                 (self.op)(value).map(Value::Number).map(State::from)
             })
         }))
@@ -67,16 +68,17 @@ impl<'a> Handler<'a> for Log {
         Some(Box::new(|_txn, value| {
             Box::pin(async move {
                 if self.n == Number::from(0) {
-                    return Err(TCError::unsupported("the logarithm of zero is undefined"));
+                    return Err(bad_request!("the logarithm of zero is undefined"));
                 }
 
                 let log = if value.is_none() {
                     Ok(self.n.ln())
                 } else {
                     let base: Number =
-                        value.try_cast_into(|v| TCError::bad_request("not a Number", v))?;
+                        value.try_cast_into(|v| TCError::invalid_type(v, "a Number"))?;
+
                     if base.class().is_complex() {
-                        Err(TCError::bad_request("invalid base for log", base))
+                        Err(bad_request!("invalid base {} for log", base))
                     } else {
                         let base = Float::cast_from(base);
                         Ok(self.n.log(base))
@@ -101,12 +103,10 @@ impl<'a> Handler<'a> for Log {
                     self.n.ln()
                 } else {
                     let base: Number =
-                        base.try_cast_into(|v| TCError::bad_request("invalid base for log", v))?;
+                        base.try_cast_into(|v| bad_request!("invalid base {} for log", v))?;
+
                     if base.class().is_complex() {
-                        return Err(TCError::bad_request(
-                            "log does not support a complex base",
-                            base,
-                        ));
+                        return Err(bad_request!("log does not support a complex base {}", base));
                     }
 
                     let base = Float::cast_from(base);
@@ -141,10 +141,11 @@ where
         Some(Box::new(|_txn, value| {
             Box::pin(async move {
                 if value.is_some() {
-                    return Err(TCError::unsupported(format!(
+                    return Err(bad_request!(
                         "{} does not have any parameters (found {})",
-                        self.name, value
-                    )));
+                        self.name,
+                        value
+                    ));
                 }
 
                 Ok(State::from(Value::from((self.op)())))
@@ -166,7 +167,7 @@ impl Route for Number {
             "and" => Box::new(Dual::new(move |other| Ok(self.and(other)))),
             "div" => Box::new(Dual::new(move |other: Number| {
                 if other == other.class().zero() {
-                    Err(TCError::unsupported("cannot divide by zero"))
+                    Err(bad_request!("cannot divide by zero"))
                 } else {
                     Ok(*self / other)
                 }

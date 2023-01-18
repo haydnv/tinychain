@@ -8,7 +8,7 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::de::{self, Decoder, FromStream};
+use destream::de::{self, Decoder, Error, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use futures::{try_join, TryFutureExt};
 use log::debug;
@@ -267,7 +267,7 @@ impl TryFrom<Subject> for Link {
     fn try_from(subject: Subject) -> TCResult<Self> {
         match subject {
             Subject::Link(link) => Ok(link),
-            other => Err(TCError::bad_request("expected a Link but found", other)),
+            other => Err(TCError::invalid_value(other, "a Link")),
         }
     }
 }
@@ -278,7 +278,7 @@ impl TryFrom<Subject> for TCPathBuf {
     fn try_from(subject: Subject) -> TCResult<Self> {
         match subject {
             Subject::Link(link) if link.host().is_none() => Ok(link.into_path()),
-            other => Err(TCError::bad_request("expected a Path but found", other)),
+            other => Err(TCError::invalid_value(other, "a Path")),
         }
     }
 }
@@ -452,7 +452,7 @@ impl Refer for OpRef {
         where
             T: fmt::Display + 'a,
         {
-            move |v| TCError::unsupported(format!("{} is not a valid key for {}", v, subject))
+            move |v| bad_request!("{} is not a valid key for {}", v, subject)
         }
 
         match self {

@@ -224,14 +224,14 @@ where
     ) -> TCResult<()> {
         match self {
             Self::File(file) => file.write(txn, bounds, value).await,
-            _ => Err(TCError::unsupported("cannot write to a Tensor view")),
+            _ => Err(bad_request!("cannot write to a Tensor view")),
         }
     }
 
     async fn write_value(&self, txn_id: TxnId, bounds: Bounds, number: Number) -> TCResult<()> {
         match self {
             Self::File(file) => file.write_value(txn_id, bounds, number).await,
-            _ => Err(TCError::unsupported("cannot write to a Tensor view")),
+            _ => Err(bad_request!("cannot write to a Tensor view")),
         }
     }
 }
@@ -297,9 +297,10 @@ where
         dtype: NumberType,
     ) -> TCResult<Self> {
         if left.shape() != right.shape() {
-            return Err(TCError::bad_request(
-                format!("cannot combine shape {} with shape", left.shape()),
-                right.shape(),
+            return Err(bad_request!(
+                "cannot combine shape {} with shape {}",
+                left.shape(),
+                right.shape()
             ));
         }
 
@@ -387,10 +388,10 @@ where
                     result.and_then(|array| {
                         if array.is_nan().any() {
                             debug!("result {} is NaN", array);
-                            Err(TCError::unsupported(ERR_NAN))
+                            Err(bad_request!("{}", ERR_NAN))
                         } else if array.is_infinite().any() {
                             debug!("result {} is infinite", array);
-                            Err(TCError::unsupported(ERR_INF))
+                            Err(bad_request!("{}", ERR_INF))
                         } else {
                             Ok(array)
                         }
@@ -451,9 +452,9 @@ where
 
         let values = (self.combinator)(&left, &right);
         if values.is_infinite().any() {
-            Err(TCError::unsupported(ERR_INF))
+            Err(bad_request!("{}", ERR_INF))
         } else if values.is_nan().any() {
-            Err(TCError::unsupported(ERR_NAN))
+            Err(bad_request!("{}", ERR_NAN))
         } else {
             Ok(values)
         }
@@ -480,9 +481,9 @@ where
 
             let value = (self.value_combinator)(left, right);
             if value.is_infinite() {
-                Err(TCError::unsupported(ERR_INF))
+                Err(bad_request!("{}", ERR_INF))
             } else if value.is_nan() {
-                Err(TCError::unsupported(ERR_NAN))
+                Err(bad_request!("{}", ERR_NAN))
             } else {
                 Ok((coord, value))
             }
@@ -1200,8 +1201,8 @@ where
 
         let axis = if let Some(permutation) = &permutation {
             if permutation.len() != self.ndim() {
-                return Err(TCError::bad_request(
-                    "invalid permutation",
+                return Err(bad_request!(
+                    "invalid permutation: {}",
                     permutation.iter().collect::<Tuple<&usize>>(),
                 ));
             }
@@ -1269,12 +1270,18 @@ impl Reductor {
 
     fn reduce_block(self, block: Array) -> TCResult<Array> {
         match self {
-            Self::Max(_dtype, stride) => block.reduce_max(stride).map_err(TCError::unsupported),
-            Self::Min(_dtype, stride) => block.reduce_min(stride).map_err(TCError::unsupported),
-            Self::Product(_dtype, stride) => {
-                block.reduce_product(stride).map_err(TCError::unsupported)
-            }
-            Self::Sum(_dtype, stride) => block.reduce_sum(stride).map_err(TCError::unsupported),
+            Self::Max(_dtype, stride) => block.reduce_max(stride).map_err(|cause| {
+                bad_request!("unable to calculate maximum along axis").consume(cause)
+            }),
+            Self::Min(_dtype, stride) => block.reduce_min(stride).map_err(|cause| {
+                bad_request!("unable to calculate minimum along axis").consume(cause)
+            }),
+            Self::Product(_dtype, stride) => block.reduce_product(stride).map_err(|cause| {
+                bad_request!("unable to calculate product along axis").consume(cause)
+            }),
+            Self::Sum(_dtype, stride) => block
+                .reduce_sum(stride)
+                .map_err(|cause| bad_request!("unable to calculate sum along axis").consume(cause)),
         }
     }
 
@@ -1597,8 +1604,8 @@ where
     }
 
     fn slice(self, _bounds: Bounds) -> TCResult<Self::Slice> {
-        Err(TCError::unsupported(
-            "cannot slice a reshaped Tensor; make a copy first",
+        Err(bad_request!(
+            "cannot slice a reshaped Tensor; make a copy first"
         ))
     }
 

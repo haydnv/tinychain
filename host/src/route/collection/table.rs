@@ -1,3 +1,4 @@
+use destream::de::Error;
 use futures::{future, StreamExt, TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::*;
@@ -39,7 +40,7 @@ impl<'a> Handler<'a> for CopyHandler {
             Box::pin(async move {
                 let schema: Value = params.require(&label("schema").into())?;
                 let schema = tc_table::TableSchema::try_cast_from(schema, |v| {
-                    TCError::bad_request("invalid Table schema", v)
+                    TCError::invalid_value(v, "a Table schema")
                 })?;
 
                 let source: TCStream = params.require(&label("source").into())?;
@@ -53,14 +54,12 @@ impl<'a> Handler<'a> for CopyHandler {
                 let rows = source.into_stream(txn.clone()).await?;
                 rows.map(|r| {
                     r.and_then(|state| {
-                        Value::try_cast_from(state, |s| {
-                            TCError::bad_request("invalid Table row", s)
-                        })
+                        Value::try_cast_from(state, |s| TCError::invalid_type(s, "a Value"))
                     })
                 })
                 .map(|r| {
                     r.and_then(|value| {
-                        value.try_cast_into(|v| TCError::bad_request("invalid Table row", v))
+                        value.try_cast_into(|v| TCError::invalid_value(v, "a table row"))
                     })
                 })
                 .map(|r| {
@@ -91,7 +90,7 @@ impl<'a> Handler<'a> for CreateHandler {
         Some(Box::new(|txn, value| {
             Box::pin(async move {
                 let schema = tc_table::TableSchema::try_cast_from(value, |v| {
-                    TCError::bad_request("invalid Table schema", v)
+                    TCError::invalid_value(v, "a Table schema")
                 })?;
 
                 let store = txn.context().create_store_unique(*txn.id()).await?;
@@ -175,7 +174,7 @@ where
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let limit = key.try_cast_into(|v| {
-                    TCError::bad_request("limit must be a positive integer, not", v)
+                    bad_request!("limit must be a positive integer, not {}", v)
                 })?;
 
                 Ok(Collection::Table(self.table.limit(limit).into()).into())
@@ -217,7 +216,7 @@ where
                     let order = key.opt_cast_into().unwrap();
                     self.table.order_by(order, false)?
                 } else {
-                    return Err(TCError::bad_request("invalid column list to order by", key));
+                    return Err(bad_request!("invalid column list to order by: {}", key));
                 };
 
                 Ok(Collection::Table(ordered.into()).into())
@@ -274,13 +273,13 @@ where
 
                 if values.is_map() {
                     let values =
-                        values.try_into_map(|s| TCError::bad_request("invalid row values", s))?;
+                        values.try_into_map(|s| TCError::invalid_type(s, "a Map of row values"))?;
 
                     let values = values
                         .into_iter()
                         .map(|(id, state)| {
                             Value::try_cast_from(state, |s| {
-                                TCError::bad_request("invalid column value", s)
+                                TCError::invalid_type(s, "a Value for a column")
                             })
                             .map(|value| (id, value))
                         })
@@ -288,19 +287,20 @@ where
 
                     self.table.update(*txn.id(), key, values).await
                 } else if values.is_tuple() {
-                    let values =
-                        values.try_into_tuple(|s| TCError::bad_request("invalid row values", s))?;
+                    let values = values.try_into_tuple(|s| {
+                        TCError::invalid_type(s, "a Tuple of Values for a Table row")
+                    })?;
 
                     let values = values
                         .into_iter()
                         .map(|state| {
-                            state.try_cast_into(|s| TCError::bad_request("invalid column value", s))
+                            state.try_cast_into(|s| TCError::invalid_value(s, "a column value"))
                         })
                         .collect::<TCResult<Vec<Value>>>()?;
 
                     self.table.upsert(*txn.id(), key, values).await
                 } else {
-                    Err(TCError::bad_request("invalid row values", values))
+                    Err(TCError::invalid_value(values, "a Table row"))
                 }
             })
         }))
@@ -377,7 +377,7 @@ where
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let columns =
-                    key.try_cast_into(|v| TCError::bad_request("invalid column list", v))?;
+                    key.try_cast_into(|v| TCError::invalid_value(v, "a Tuple of column names"))?;
 
                 Ok(Collection::Table(self.table.select(columns)?.into()).into())
             })
@@ -424,7 +424,7 @@ where
         Some(Box::new(|_txn, params| {
             Box::pin(async move {
                 let bounds = Scalar::try_cast_from(State::Map(params), |s| {
-                    TCError::bad_request("invalid Table bounds", s)
+                    TCError::invalid_type(s, "a Scalar Map of Table bounds")
                 })?;
 
                 let bounds = cast_into_bounds(bounds)?;
@@ -512,7 +512,7 @@ fn cast_into_bounds(scalar: Scalar) -> TCResult<Bounds> {
     }
 
     let scalar = Map::<Value>::try_cast_from(scalar, |s| {
-        TCError::bad_request("invalid selection bounds for Table", s)
+        bad_request!("invalid selection bounds for Table: {}", s)
     })?;
 
     scalar
@@ -526,7 +526,7 @@ fn cast_into_bounds(scalar: Scalar) -> TCResult<Bounds> {
             } else if bound.matches::<Value>() {
                 Ok(ColumnBound::Is(bound.opt_cast_into().unwrap()))
             } else {
-                Err(TCError::bad_request("invalid column bound", bound))
+                Err(bad_request!("invalid column bound {}", bound))
             }
             .map(|bound| (col_name, bound))
         })
@@ -535,7 +535,7 @@ fn cast_into_bounds(scalar: Scalar) -> TCResult<Bounds> {
 
 #[inline]
 fn primary_key<T: TableInstance>(key: Value, table: &T) -> TCResult<Key> {
-    let key = key.try_cast_into(|v| TCError::bad_request("invalid Table key", v))?;
+    let key = key.try_cast_into(|v| TCError::invalid_value(v, "a Table key"))?;
     table.schema().primary().validate_key(key)
 }
 

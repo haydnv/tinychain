@@ -26,11 +26,9 @@ impl Broadcast {
         shape.validate("broadcast")?;
 
         if source_shape.is_empty() {
-            return Err(TCError::unsupported("cannot broadcast an empty Tensor"));
+            return Err(bad_request!("cannot broadcast an empty Tensor"));
         } else if shape.is_empty() {
-            return Err(TCError::unsupported(
-                "cannot broadcast into an empty Tensor",
-            ));
+            return Err(bad_request!("cannot broadcast into an empty Tensor"));
         } else if source_shape == shape {
             warn!(
                 "broadcast a Tensor with shape {} into {}",
@@ -42,10 +40,11 @@ impl Broadcast {
         debug_assert!(source_shape.len() <= ndim);
 
         if source_shape.len() > ndim {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "cannot broadcast {} into {}",
-                source_shape, shape
-            )));
+                source_shape,
+                shape
+            ));
         }
 
         let offset = ndim - source_shape.len();
@@ -59,10 +58,11 @@ impl Broadcast {
             } else if shape[axis] == 1 || source_shape[axis - offset] == 1 {
                 inverted_axes.push(axis - offset);
             } else {
-                return Err(TCError::unsupported(format!(
+                return Err(bad_request!(
                     "cannot broadcast {} into {}",
-                    source_shape, shape
-                )));
+                    source_shape,
+                    shape
+                ));
             }
         }
 
@@ -158,7 +158,11 @@ pub struct Expand {
 impl Expand {
     pub fn new(source_shape: Shape, expand: usize) -> TCResult<Expand> {
         if expand > source_shape.len() {
-            return Err(TCError::bad_request("axis out of bounds", expand));
+            return Err(bad_request!(
+                "axis {} is out of bounds for shape {}",
+                expand,
+                source_shape
+            ));
         }
 
         let mut shape = source_shape.to_vec();
@@ -274,10 +278,7 @@ pub struct Flip {
 impl Flip {
     pub fn new(shape: Shape, axis: usize) -> TCResult<Self> {
         if axis > shape.len() {
-            Err(TCError::unsupported(format!(
-                "invalid axis {} for shape {}",
-                axis, shape
-            )))
+            Err(bad_request!("invalid axis {} for shape {}", axis, shape))
         } else {
             Ok(Self { shape, axis })
         }
@@ -339,19 +340,17 @@ pub struct Reduce {
 impl Reduce {
     pub fn new(source_shape: Shape, axis: usize, keepdims: bool) -> TCResult<Reduce> {
         if source_shape.size() == 0 {
-            return Err(TCError::unsupported("cannot reduce a zero-size tensor"));
+            return Err(bad_request!("cannot reduce a zero-size tensor"));
         }
 
         if axis >= source_shape.len() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "cannot reduce axis {} of tensor with shape {}",
-                axis, source_shape
-            )));
+                axis,
+                source_shape
+            ));
         } else if source_shape[axis] == 0 {
-            return Err(TCError::unsupported(format!(
-                "cannot reduce axis {} with dimension 0",
-                axis
-            )));
+            return Err(bad_request!("cannot reduce axis {} with dimension 0", axis));
         }
 
         let mut shape = source_shape.clone();
@@ -446,10 +445,11 @@ impl Reshape {
         shape.validate(debug_info)?;
 
         if source_shape.size() != shape.size() {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "cannot reshape tensor with shape {} into {}",
-                source_shape, shape
-            )));
+                source_shape,
+                shape
+            ));
         }
 
         let source_bounds = coord_bounds(&source_shape);
@@ -687,20 +687,21 @@ impl Transpose {
         };
 
         if permutation.len() != ndim {
-            return Err(TCError::unsupported(format!(
+            return Err(bad_request!(
                 "tensor with shape {} cannot transpose axes {}",
                 source_shape,
                 Tuple::from(permutation)
-            )));
+            ));
         } else if permutation.iter().max().expect("transpose last axis") > &ndim {
-            return Err(TCError::bad_request(
-                "cannot transpose nonexistent axis",
-                permutation.iter().max().unwrap(),
+            return Err(bad_request!(
+                "shape {} has no axis {}",
+                source_shape,
+                permutation.iter().max().unwrap()
             ));
         } else if permutation.iter().cloned().collect::<HashSet<_>>().len() != permutation.len() {
-            return Err(TCError::bad_request(
-                "cannot transpose the same axis twice",
-                Tuple::from(permutation),
+            return Err(bad_request!(
+                "cannot transpose the same axis twice: {}",
+                Tuple::from(permutation)
             ));
         }
 

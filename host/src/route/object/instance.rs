@@ -25,10 +25,10 @@ where
         'b: 'a,
     {
         Some(Box::new(move |_txn, _key| {
-            Box::pin(future::ready(Err(TCError::not_implemented(format!(
+            Box::pin(future::ready(Err(not_implemented!(
                 "{} has no /copy method",
                 self.instance
-            )))))
+            ))))
         }))
     }
 }

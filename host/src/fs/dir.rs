@@ -204,7 +204,7 @@ impl TryFrom<Store> for Dir {
                 fs::DirRead::get_dir(&parent, &name)?.ok_or_else(|| TCError::not_found(name))
             }
             Store::Dir(dir) => Ok(dir),
-            Store::File(file) => Err(TCError::bad_request("expected a directory but found", file)),
+            Store::File(file) => Err(bad_request!("expected a directory but found {}", file)),
         }
     }
 }
@@ -222,10 +222,10 @@ where
 
     fn try_from(store: Store) -> TCResult<Self> {
         match store {
-            Store::Dir(dir) => Err(TCError::bad_request("expected a file but found", dir)),
+            Store::Dir(dir) => Err(bad_request!("expected a file but found {}", dir)),
             Store::File(file) => file
                 .into_type()
-                .ok_or_else(|| TCError::unsupported("file is of unexpected type")),
+                .ok_or_else(|| bad_request!("unexpected file type")),
             Store::Create(mut parent, name) => fs::DirCreateFile::create_file(&mut parent, name),
             Store::GetOrCreate(mut parent, name) => {
                 fs::DirCreateFile::get_or_create_file(&mut parent, name)
@@ -309,8 +309,8 @@ where
     fn get_dir(&self, name: &PathSegment) -> TCResult<Option<Self::Lock>> {
         match self.contents.get(name) {
             Some(DirEntry::Dir(dir)) => Ok(Some(dir.clone())),
-            Some(_) => Err(TCError::bad_request(
-                "expected a directory but found a file at",
+            Some(_) => Err(bad_request!(
+                "expected a directory but found a file at {}",
                 name,
             )),
             None => Ok(None),
@@ -342,14 +342,14 @@ where
                 .clone()
                 .into_type()
                 .map(Some)
-                .ok_or_else(|| TCError::bad_request("unexpected file type", file)),
+                .ok_or_else(|| bad_request!("unexpected file type {}", file)),
 
             Some(_) => {
                 #[cfg(debug_assertions)]
                 let name = format!("{} in {}", name, self.cache.path().to_str().expect("path"));
 
-                Err(TCError::bad_request(
-                    "expected a file but found a directory at",
+                Err(bad_request!(
+                    "expected a file but found a directory at {}",
                     name,
                 ))
             }
@@ -365,13 +365,13 @@ where
 {
     fn create_dir(&mut self, name: PathSegment) -> TCResult<Self::Lock> {
         if self.contents.contains_key(&name) {
-            return Err(TCError::bad_request("directory already exists", name));
+            return Err(bad_request!("directory {} already exists", name));
         }
 
         let fs_name = name.to_string();
         if ext_class(&fs_name).is_some() {
-            return Err(TCError::bad_request(
-                "a directory name may not end with a file extension",
+            return Err(bad_request!(
+                "a directory name {} may not end with a file extension",
                 name,
             ));
         }
@@ -412,7 +412,7 @@ where
 {
     fn create_file(&mut self, name: Id) -> TCResult<File<K, B>> {
         if self.contents.contains_key(&name) {
-            return Err(TCError::bad_request("file already exists", name));
+            return Err(bad_request!("file {} already exists", name));
         }
 
         let canon = self
@@ -539,7 +539,7 @@ impl Dir {
 
                 let fs_cache = match fs_cache {
                     freqfs::DirEntry::Dir(dir_lock) => dir_lock.clone(),
-                    _ => return Err(TCError::internal(format!("{} is not a directory", name))),
+                    _ => return Err(unexpected!("{} is not a directory", name)),
                 };
 
                 let (name, entry) = if is_file(name).await {
@@ -549,7 +549,9 @@ impl Dir {
                 } else if is_dir(&fs_cache).await {
                     assert!(ext_class(name).is_none());
                     let subdir = Dir::load(fs_cache, txn_id).await?;
-                    let name = name.parse().map_err(TCError::internal)?;
+                    let name = name.parse().map_err(|cause| {
+                        unexpected!("invalid bdirectory name {}", name).consume(cause)
+                    })?;
                     (name, DirEntry::Dir(subdir))
                 } else {
                     #[cfg(debug_assertions)]
@@ -557,10 +559,10 @@ impl Dir {
                     #[cfg(not(debug_assertions))]
                     let fs_path = name;
 
-                    return Err(TCError::internal(format!(
+                    return Err(unexpected!(
                         "directory {} contains both blocks and subdirectories",
                         fs_path
-                    )));
+                    ));
                 };
 
                 listing.insert(name, entry);
@@ -763,11 +765,14 @@ async fn is_file(name: &str) -> bool {
 fn file_class(name: &str) -> TCResult<(PathSegment, EntryType)> {
     let i = name
         .rfind('.')
-        .ok_or_else(|| TCError::internal(format!("invalid file name {}", name)))?;
+        .ok_or_else(|| unexpected!("invalid file name {}", name))?;
 
-    let stem = name[..i].parse().map_err(TCError::internal)?;
-    let class = ext_class(&name[i..])
-        .ok_or_else(|| TCError::internal(format!("invalid file extension {}", name)))?;
+    let stem = &name[..i];
+    let stem = PathSegment::from_str(stem).map_err(|cause| {
+        unexpected!("invalid stem {} for file name {}", stem, name).consume(cause)
+    })?;
+
+    let class = ext_class(name).ok_or_else(|| unexpected!("invalid file extension {}", name))?;
 
     Ok((stem, class))
 }

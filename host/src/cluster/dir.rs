@@ -141,7 +141,7 @@ impl<T: Clone> Dir<T> {
         let lock = tc_transact::fs::Dir::try_read(&dir, txn_id)?;
 
         if !tc_transact::fs::DirRead::is_empty(&lock) {
-            return Err(TCError::unsupported(
+            return Err(bad_request!(
                 "cannot create a cluster directory from a non-empty filesystem directory",
             ));
         }
@@ -252,10 +252,7 @@ where
         let mut contents = self.contents.write(txn_id).await?;
 
         if contents.contains_key(&name) {
-            return Err(TCError::bad_request(
-                "there is already a directory at",
-                name,
-            ));
+            return Err(bad_request!("there is already a directory at {}", name));
         }
 
         let mut cache = self.cache.write().await;
@@ -280,6 +277,7 @@ where
     DirEntry<T>: Clone,
 {
     /// Create a new item in this [`Dir`].
+    // TODO: make this method idempotent
     async fn create_item(
         &self,
         txn: &Txn,
@@ -294,7 +292,7 @@ where
         let mut contents = self.contents.write(txn_id).await?;
 
         if contents.contains_key(&name) {
-            return Err(TCError::bad_request("there is already a cluster at", name));
+            return Err(bad_request!("there is already a cluster at {}", name));
         }
 
         let store = {
@@ -345,9 +343,8 @@ where
             .post(source.clone().append(REPLICAS), State::Map(params))
             .await?;
 
-        let entries = entries.try_into_map(|s| {
-            TCError::bad_gateway(format!("{} listed invalid directory entries {}", source, s))
-        })?;
+        let entries = entries
+            .try_into_map(|s| bad_gateway!("{} listed invalid directory entries {}", source, s))?;
 
         debug!("directory entries to replicate are {}", entries);
 
@@ -456,10 +453,10 @@ impl Persist<fs::Dir> for Dir<Class> {
                         let contents = cache.try_read().expect("cache read");
 
                         if contents.is_empty() {
-                            return Err(TCError::internal(format!(
+                            return Err(unexpected!(
                                 "an empty directory at {} is ambiguous",
                                 schema.path
-                            )));
+                            ));
                         }
 
                         contents.contains(&*crate::chain::HISTORY)
@@ -471,10 +468,7 @@ impl Persist<fs::Dir> for Dir<Class> {
                         Cluster::load(txn_id, schema, dir.clone().into()).map(DirEntry::Dir)
                     }
                 }
-                file => Err(TCError::internal(format!(
-                    "invalid Class dir entry: {}",
-                    file
-                ))),
+                file => Err(unexpected!("invalid Class dir entry: {}", file)),
             }?;
 
             contents.insert(name.clone(), entry);
@@ -515,10 +509,11 @@ impl Persist<fs::Dir> for Dir<Library> {
                         contents.insert(name.clone(), DirEntry::Item(lib));
                     }
                     file => {
-                        return Err(TCError::internal(format!(
+                        return Err(unexpected!(
                             "{} is in the library directory but {} is not a library",
-                            name, file
-                        )))
+                            name,
+                            file
+                        ))
                     }
                 },
             };
@@ -550,10 +545,9 @@ impl Persist<fs::Dir> for Dir<Service> {
             let schema = schema.extend(name.clone());
 
             let entry = match entry {
-                fs::DirEntry::File(file) => Err(TCError::internal(format!(
-                    "invalid Service directory entry: {}",
-                    file
-                ))),
+                fs::DirEntry::File(file) => {
+                    Err(unexpected!("invalid Service directory entry: {}", file))
+                }
                 fs::DirEntry::Dir(dir) => {
                     let is_service = {
                         let lock = tc_transact::fs::Dir::try_read(dir, txn_id)?;
@@ -593,10 +587,12 @@ async fn entry_schema(
     link: Link,
 ) -> TCResult<Schema> {
     if link.path().last() != Some(&name) {
-        return Err(TCError::unsupported(format!(
+        return Err(bad_request!(
             "link for cluster directory entry {} must end with {} (found {})",
-            name, name, link
-        )));
+            name,
+            name,
+            link
+        ));
     }
 
     let (lead, path) = link.into_inner();
