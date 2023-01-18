@@ -52,13 +52,16 @@ impl crate::gateway::Client for Client {
         let response = self
             .client
             .request(req.body(Body::empty()).unwrap())
-            .map_err(|e| TCError::bad_gateway(e))
+            .map_err(|cause| bad_gateway!("error from host at {}", link).consume(cause))
             .await?;
 
         if response.status().is_success() {
             let body = response.into_body();
+
             tbon::de::try_decode((), body)
-                .map_err(|e| TCError::bad_gateway(e))
+                .map_err(|cause| {
+                    bad_gateway!("error decoding response from {}", link).consume(cause)
+                })
                 .await
         } else {
             let err = transform_error(&link, response).await;
@@ -78,16 +81,13 @@ impl crate::gateway::Client for Client {
         let response = self
             .client
             .request(req.body(Body::empty()).unwrap())
-            .map_err(|e| TCError::bad_gateway(e))
+            .map_err(|cause| bad_gateway!("error from host at {}", link).consume(cause))
             .await?;
 
         if response.status().is_success() {
             tbon::de::try_decode(txn, response.into_body())
-                .map_err(|e| {
-                    TCError::bad_request(
-                        format!("error decoding response from {}: {}", link, key),
-                        e,
-                    )
+                .map_err(|cause| {
+                    bad_gateway!("error decoding response from {}", link).consume(cause)
                 })
                 .await
         } else {
@@ -119,7 +119,7 @@ impl crate::gateway::Client for Client {
         let response = self
             .client
             .request(body)
-            .map_err(|e| TCError::bad_gateway(e))
+            .map_err(|cause| bad_gateway!("error from host at {}", link).consume(cause))
             .await?;
 
         if response.status().is_success() {
@@ -154,7 +154,7 @@ impl crate::gateway::Client for Client {
         let response = self
             .client
             .request(body)
-            .map_err(|e| TCError::bad_gateway(e))
+            .map_err(|cause| bad_gateway!("error from host at {}", link).consume(cause))
             .await?;
 
         if response.status().is_success() {
@@ -183,7 +183,7 @@ impl crate::gateway::Client for Client {
         let response = self
             .client
             .request(req.body(Body::empty()).unwrap())
-            .map_err(|e| TCError::bad_gateway(e))
+            .map_err(|cause| bad_gateway!("error from host at {}", link).consume(cause))
             .await?;
 
         if response.status().is_success() {

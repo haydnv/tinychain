@@ -345,9 +345,8 @@ where
             .post(source.clone().append(REPLICAS), State::Map(params))
             .await?;
 
-        let entries = entries.try_into_map(|s| {
-            TCError::bad_gateway(format!("{} listed invalid directory entries {}", source, s))
-        })?;
+        let entries = entries
+            .try_into_map(|s| bad_gateway!("{} listed invalid directory entries {}", source, s))?;
 
         debug!("directory entries to replicate are {}", entries);
 

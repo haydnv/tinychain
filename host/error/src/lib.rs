@@ -148,11 +148,6 @@ impl TCError {
         }
     }
 
-    /// Error indicating that the an upstream server send an invalid response.
-    pub fn bad_gateway<I: fmt::Display>(cause: I) -> Self {
-        Self::new(ErrorKind::BadGateway, cause)
-    }
-
     /// Error indicating that the request is badly-constructed or nonsensical.
     pub fn bad_request<M: fmt::Display, I: fmt::Display>(message: M, cause: I) -> Self {
         let info = format!("{}: {}", message, cause);
@@ -259,6 +254,15 @@ impl fmt::Display for TCError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}: {}", self.kind, self.data.message)
     }
+}
+
+
+/// Error indicating that the an upstream server send an invalid response.
+#[macro_export]
+macro_rules! bad_gateway {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::BadGateway, format!($($t)*))
+    }}
 }
 
 /// Error indicating that the request is badly-constructed or nonsensical

@@ -331,11 +331,11 @@ where
             info!("{} distributed commit {} of {}", self, txn.id(), self);
             Ok(())
         } else if succeeded == 0 {
-            Err(TCError::bad_gateway(format!(
+            Err(bad_gateway!(
                 "{} failed to replicate commit {}",
                 self,
                 txn.id()
-            )))
+            ))
         } else {
             // in this case, the transaction failed to replicate
             // but as a result it's not possible to remove the bad replicas
