@@ -92,8 +92,7 @@ impl<'a> Handler<'a> for LibraryHandler<'a> {
                         let mut class_path = TCPathBuf::from(CLASS);
                         class_path.extend(link.path()[1..].iter().cloned());
 
-                        txn.put(class_path.into(), number.clone().into(), classes.into())
-                            .await?;
+                        txn.put(class_path, number.clone(), classes).await?;
                     }
 
                     self.lib.create_version(txn, number, version).await?;
@@ -194,12 +193,7 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
 
                 if version.is_empty() && classes.is_empty() {
                     if txn.is_leader(parent_dir_path) {
-                        txn.put(
-                            class_dir_path.into(),
-                            name.clone().into(),
-                            class_link.into(),
-                        )
-                        .await?;
+                        txn.put(class_dir_path, name.clone(), class_link).await?;
                     }
 
                     self.create_item_or_dir::<Map<Scalar>>(txn, link, name, None)
@@ -207,8 +201,8 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
                 } else {
                     if txn.is_leader(parent_dir_path) {
                         txn.put(
-                            class_dir_path.into(),
-                            name.clone().into(),
+                            class_dir_path,
+                            name.clone(),
                             State::Tuple((class_link.into(), classes.into()).into()),
                         )
                         .await?;

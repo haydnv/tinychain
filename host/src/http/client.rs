@@ -9,9 +9,10 @@ use url::Url;
 
 use tc_error::*;
 use tc_transact::{IntoView, Transaction, TxnId};
-use tc_value::{Link, Value};
+use tc_value::Value;
 use tcgeneric::label;
 
+use crate::gateway::ToUrl;
 use crate::http::Encoding;
 use crate::state::State;
 use crate::txn::Txn;
@@ -38,14 +39,14 @@ impl Client {
 
 #[async_trait]
 impl crate::gateway::Client for Client {
-    async fn fetch<T: destream::FromStream<Context = ()>>(
-        &self,
-        txn_id: &TxnId,
-        link: &Link,
-        key: &Value,
-    ) -> TCResult<T> {
-        let uri = url(link, txn_id, key)?;
+    async fn fetch<T>(&self, txn_id: &TxnId, link: ToUrl<'_>, key: &Value) -> TCResult<T>
+    where
+        T: destream::FromStream<Context = ()>,
+    {
+        let uri = build_url(&link, txn_id, key)?;
+
         debug!("FETCH {}", uri);
+
         let req = req_builder("GET", uri, None);
 
         let response = self
@@ -60,17 +61,17 @@ impl crate::gateway::Client for Client {
                 .map_err(|e| TCError::bad_gateway(e))
                 .await
         } else {
-            let err = transform_error(link, response).await;
+            let err = transform_error(&link, response).await;
             Err(err)
         }
     }
 
-    async fn get(&self, txn: Txn, link: Link, key: Value) -> TCResult<State> {
+    async fn get(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<State> {
         if txn.owner().is_none() {
             return Err(TCError::unsupported(ERR_NO_OWNER));
         }
 
-        let uri = url(&link, txn.id(), &key)?;
+        let uri = build_url(&link, txn.id(), &key)?;
         let req = req_builder("GET", uri, Some(txn.request().token()));
 
         let txn = txn.subcontext_unique().await?;
@@ -95,12 +96,12 @@ impl crate::gateway::Client for Client {
         }
     }
 
-    async fn put(&self, txn: Txn, link: Link, key: Value, value: State) -> TCResult<()> {
+    async fn put(&self, txn: &Txn, link: ToUrl<'_>, key: Value, value: State) -> TCResult<()> {
         if txn.owner().is_none() {
             return Err(TCError::unsupported(ERR_NO_OWNER));
         }
 
-        let uri = url(&link, txn.id(), &key)?;
+        let uri = build_url(&link, txn.id(), &key)?;
         let req = req_builder("PUT", uri, Some(txn.request().token()))
             .header(hyper::header::CONTENT_TYPE, Encoding::Tbon.as_str());
 
@@ -126,12 +127,12 @@ impl crate::gateway::Client for Client {
         }
     }
 
-    async fn post(&self, txn: Txn, link: Link, params: State) -> TCResult<State> {
+    async fn post(&self, txn: &Txn, link: ToUrl<'_>, params: State) -> TCResult<State> {
         if txn.owner().is_none() {
             return Err(TCError::unsupported(ERR_NO_OWNER));
         }
 
-        let uri = url(&link, txn.id(), &Value::default())?;
+        let uri = build_url(&link, txn.id(), &Value::default())?;
         let req = req_builder("POST", uri, Some(txn.request().token()))
             .header(hyper::header::CONTENT_TYPE, Encoding::Tbon.as_str());
 
@@ -165,12 +166,12 @@ impl crate::gateway::Client for Client {
         }
     }
 
-    async fn delete(&self, txn: &Txn, link: Link, key: Value) -> TCResult<()> {
+    async fn delete(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<()> {
         if txn.owner().is_none() {
             return Err(TCError::unsupported(ERR_NO_OWNER));
         }
 
-        let uri = url(&link, txn.id(), &key)?;
+        let uri = build_url(&link, txn.id(), &key)?;
         let req = req_builder("DELETE", uri, Some(txn.request().token()));
 
         let response = self
@@ -188,9 +189,9 @@ impl crate::gateway::Client for Client {
     }
 }
 
-fn url(link: &Link, txn_id: &TxnId, key: &Value) -> TCResult<Url> {
-    let mut url =
-        Url::parse(&link.to_string()).map_err(|e| TCError::bad_request("invalid URL", e))?;
+#[inline]
+fn build_url(link: &ToUrl<'_>, txn_id: &TxnId, key: &Value) -> TCResult<Url> {
+    let mut url = link.to_url();
 
     url.query_pairs_mut()
         .append_pair("txn_id", &txn_id.to_string());
@@ -218,7 +219,7 @@ fn req_builder(method: &str, url: Url, auth: Option<&str>) -> http::request::Bui
     }
 }
 
-async fn transform_error(source: &Link, response: hyper::Response<Body>) -> TCError {
+async fn transform_error(source: &ToUrl<'_>, response: hyper::Response<Body>) -> TCError {
     const MAX_ERR_SIZE: usize = 5000;
 
     let status = response.status();

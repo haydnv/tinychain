@@ -75,11 +75,6 @@ pub struct TCPathBuf {
 }
 
 impl TCPathBuf {
-    /// Return a complete slice of the underlying vector.
-    pub fn as_slice(&'_ self) -> &'_ [PathSegment] {
-        &self.segments[..]
-    }
-
     /// Consumes `self` and returns its underlying vector.
     pub fn into_vec(self) -> Vec<PathSegment> {
         self.segments
@@ -91,6 +86,11 @@ impl TCPathBuf {
         self
     }
 
+    /// Remove and return the last segment in this path, if any.
+    pub fn pop(&mut self) -> Option<PathSegment> {
+        self.segments.pop()
+    }
+
     /// If this path begins with the specified prefix, returns the suffix following the prefix.
     pub fn suffix<'a>(&self, path: &'a [PathSegment]) -> Option<&'a [PathSegment]> {
         if path.starts_with(&self.segments) {
@@ -98,6 +98,12 @@ impl TCPathBuf {
         } else {
             None
         }
+    }
+}
+
+impl Extend<PathSegment> for TCPathBuf {
+    fn extend<T: IntoIterator<Item = PathSegment>>(&mut self, iter: T) {
+        self.segments.extend(iter)
     }
 }
 
@@ -154,15 +160,15 @@ impl std::borrow::Borrow<[PathSegment]> for TCPathBuf {
 }
 
 impl Deref for TCPathBuf {
-    type Target = Vec<PathSegment>;
+    type Target = [PathSegment];
 
-    fn deref(&self) -> &Vec<PathSegment> {
+    fn deref(&self) -> &[PathSegment] {
         &self.segments
     }
 }
 
 impl DerefMut for TCPathBuf {
-    fn deref_mut(&mut self) -> &mut Vec<PathSegment> {
+    fn deref_mut(&mut self) -> &mut [PathSegment] {
         &mut self.segments
     }
 }
@@ -286,7 +292,7 @@ impl<'en> ToStream<'en> for TCPathBuf {
 
 impl TryCastFrom<TCPathBuf> for Id {
     fn can_cast_from(path: &TCPathBuf) -> bool {
-        path.as_slice().len() == 1
+        path.len() == 1
     }
 
     fn opt_cast_from(path: TCPathBuf) -> Option<Id> {
@@ -313,6 +319,14 @@ pub struct TCPath<'a> {
 impl Default for TCPath<'static> {
     fn default() -> Self {
         Self { inner: &[] }
+    }
+}
+
+impl<'a> Deref for TCPath<'a> {
+    type Target = [PathSegment];
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }
 

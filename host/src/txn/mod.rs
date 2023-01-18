@@ -2,11 +2,13 @@
 
 use std::hash::{Hash, Hasher};
 use std::iter::FromIterator;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use log::debug;
+use safecast::{CastFrom, CastInto};
 
 use tc_error::*;
 use tc_transact::fs::{Dir, DirCreate};
@@ -15,7 +17,7 @@ use tc_value::{Link, LinkHost, Value};
 use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf, Tuple};
 
 use crate::fs;
-use crate::gateway::Gateway;
+use crate::gateway::{Gateway, ToUrl};
 use crate::state::State;
 
 pub use request::*;
@@ -151,7 +153,7 @@ impl Txn {
     pub fn is_leader(&self, cluster_path: &[PathSegment]) -> bool {
         if let Some(leader) = self.leader(cluster_path) {
             if leader.host() == Some(self.gateway.host()) {
-                return cluster_path == leader.path().as_slice();
+                return cluster_path == leader.path().deref();
             }
         }
 
@@ -162,7 +164,7 @@ impl Txn {
     pub fn is_owner(&self, cluster_path: &[PathSegment]) -> bool {
         if let Some(owner) = self.owner() {
             if owner.host() == Some(self.gateway.host()) {
-                return cluster_path == owner.path().as_slice();
+                return cluster_path == owner.path().deref();
             }
         }
 
@@ -249,27 +251,46 @@ impl Txn {
     }
 
     /// Resolve a GET op within this transaction context.
-    // TODO: accept a Borrow<Link> and a CastInto<Value>
-    pub async fn get(&self, link: Link, key: Value) -> TCResult<State> {
-        self.gateway.get(self, link, key).await
+    pub async fn get<'a, L, V>(&'a self, link: L, key: V) -> TCResult<State>
+    where
+        L: Into<ToUrl<'a>>,
+        Value: CastFrom<V>,
+    {
+        self.gateway.get(self, link.into(), key.cast_into()).await
     }
 
     /// Resolve a PUT op within this transaction context.
-    // TODO: accept a Borrow<Link>, a CastInto<Value>, and a CastInto<State>
-    pub async fn put(&self, link: Link, key: Value, value: State) -> TCResult<()> {
-        self.gateway.put(self, link, key, value).await
+    pub async fn put<'a, L, K, V>(&'a self, link: L, key: K, value: V) -> TCResult<()>
+    where
+        L: Into<ToUrl<'a>>,
+        Value: CastFrom<K>,
+        State: CastFrom<V>,
+    {
+        self.gateway
+            .put(self, link.into(), key.cast_into(), value.cast_into())
+            .await
     }
 
     /// Resolve a POST op within this transaction context.
-    // TODO: accept a Borrow<Link>
-    pub async fn post(&self, link: Link, params: State) -> TCResult<State> {
-        self.gateway.post(self, link, params).await
+    pub async fn post<'a, L, P>(&'a self, link: L, params: P) -> TCResult<State>
+    where
+        L: Into<ToUrl<'a>>,
+        State: CastFrom<P>,
+    {
+        self.gateway
+            .post(self, link.into(), params.cast_into())
+            .await
     }
 
     /// Resolve a DELETE op within this transaction context.
-    // TODO: accept a Borrow<Link> and a CastInto<Value>
-    pub async fn delete(&self, link: Link, key: Value) -> TCResult<()> {
-        self.gateway.delete(self, link, key).await
+    pub async fn delete<'a, L, V>(&'a self, link: L, key: V) -> TCResult<()>
+    where
+        L: Into<ToUrl<'a>>,
+        Value: CastFrom<V>,
+    {
+        self.gateway
+            .delete(self, link.into(), key.cast_into())
+            .await
     }
 }
 

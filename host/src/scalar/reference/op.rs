@@ -459,7 +459,7 @@ impl Refer for OpRef {
             Self::Get((subject, key)) => match subject {
                 Subject::Link(link) => {
                     let key = resolve(key, context, txn).await?;
-                    let key = key.try_cast_into(invalid_key(&link))?;
+                    let key = Value::try_cast_from(key, invalid_key(&link))?;
                     txn.get(link, key).await
                 }
                 Subject::Ref(id_ref, path) => {
@@ -471,7 +471,7 @@ impl Refer for OpRef {
             Self::Put((subject, key, value)) => match subject {
                 Subject::Link(link) => {
                     let key = resolve(key, context, txn).await?;
-                    let key = key.try_cast_into(invalid_key(&link))?;
+                    let key = Value::try_cast_from(key, invalid_key(&link))?;
 
                     let value = resolve(value, context, txn).await?;
 
@@ -506,7 +506,7 @@ impl Refer for OpRef {
             Self::Delete((subject, key)) => match subject {
                 Subject::Link(link) => {
                     let key = resolve(key, context, txn).await?;
-                    let key = key.try_cast_into(invalid_key(&link))?;
+                    let key = Value::try_cast_from(key, invalid_key(&link))?;
                     txn.delete(link, key).map_ok(|()| State::default()).await
                 }
                 Subject::Ref(id_ref, path) => {

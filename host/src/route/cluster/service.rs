@@ -106,8 +106,7 @@ impl<'a> ServiceHandler<'a> {
                         number, class_path
                     );
 
-                    txn.put(class_path.into(), number.clone().into(), classes.into())
-                        .await?;
+                    txn.put(class_path, number.clone(), classes).await?;
                 }
 
                 let schema = InstanceClass::extend(link.clone(), schema);
@@ -249,24 +248,16 @@ impl<'a> Handler<'a> for DirHandler<'a, Service> {
 
                 if version.is_empty() && classes.is_empty() {
                     if txn.is_leader(parent_dir_path) {
-                        txn.put(
-                            class_dir_path.into(),
-                            name.clone().into(),
-                            class_link.into(),
-                        )
-                        .await?;
+                        txn.put(class_dir_path, name.clone(), class_link).await?;
                     }
 
                     self.create_item_or_dir::<Map<State>>(txn, link, name, None)
                         .await
                 } else {
                     if txn.is_leader(parent_dir_path) {
-                        txn.put(
-                            class_dir_path.into(),
-                            name.clone().into(),
-                            State::Tuple((class_link.into(), classes.into()).into()),
-                        )
-                        .await?;
+                        let classes = vec![class_link.into(), classes.into()].into();
+                        txn.put(class_dir_path, name.clone(), State::Tuple(classes))
+                            .await?;
                     }
 
                     let version = InstanceClass::extend(link.clone(), version);

@@ -272,7 +272,7 @@ where
                             txn.put(
                                 self.cluster.schema().link_to(replica).append(REPLICAS),
                                 Value::default(),
-                                new_replica.clone().into(),
+                                new_replica.clone(),
                             )
                         })
                         .collect::<FuturesUnordered<_>>();

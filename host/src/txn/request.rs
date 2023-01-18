@@ -96,7 +96,7 @@ impl<'a> rjwt::Resolve for Resolver<'a> {
     async fn resolve(&self, host: &Link, actor_id: &Value) -> Result<Actor, rjwt::Error> {
         let public_key: Bytes = self
             .gateway
-            .fetch(&self.txn_id, host, actor_id)
+            .fetch(&self.txn_id, host.into(), actor_id)
             .map_err(|e| rjwt::Error::new(rjwt::ErrorKind::Fetch, e))
             .await?;
 

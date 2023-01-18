@@ -155,7 +155,7 @@ impl<T> Cluster<T> {
 
     /// Borrow the path of this `Cluster`, relative to this host.
     pub fn path(&self) -> &[PathSegment] {
-        self.schema.path.as_slice()
+        self.schema.path.deref()
     }
 
     /// Borrow the public key of this replica.
@@ -185,9 +185,7 @@ impl<T> Cluster<T> {
             Ok(txn)
         } else {
             let mut led = self.led.write().await;
-
             let txn = txn.lead(&self.actor, self.schema.path.clone()).await?;
-
             led.insert(*txn.id(), leader::Leader::new());
             Ok(txn)
         }
@@ -526,6 +524,7 @@ where
 
         if !failed.is_empty() {
             let failed = Value::from_iter(failed);
+
             let mut cleanup = succeeded
                 .into_iter()
                 .map(|replica| {

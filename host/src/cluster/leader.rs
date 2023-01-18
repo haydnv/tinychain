@@ -43,7 +43,7 @@ impl Leader {
             return;
         }
 
-        let mut commits = FuturesUnordered::from_iter(mutated.drain().map(|dep| {
+        let mut commits = FuturesUnordered::from_iter(mutated.drain().map(move |dep| {
             debug!("sending commit message to dependency at {}", dep);
             txn.post(dep.clone(), State::Map(Map::default()))
                 .map(|result| (dep, result))
@@ -69,10 +69,10 @@ impl Leader {
             return;
         }
 
-        let mut rollbacks = FuturesUnordered::from_iter(mutated.drain().map(|dependent| {
-            debug!("sending rollback message to dependency at {}", dependent);
-            txn.delete(dependent.clone(), Value::default())
-                .map(|result| (dependent, result))
+        let mut rollbacks = FuturesUnordered::from_iter(mutated.drain().map(|dep| {
+            debug!("sending rollback message to dependency at {}", dep);
+            txn.delete(dep.clone(), Value::default())
+                .map(|result| (dep, result))
         }));
 
         while let Some((dep, result)) = rollbacks.next().await {

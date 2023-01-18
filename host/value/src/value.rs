@@ -745,6 +745,12 @@ impl<'en> en::IntoStream<'en> for Value {
     }
 }
 
+impl From<()> for Value {
+    fn from(_: ()) -> Value {
+        Value::None
+    }
+}
+
 impl From<bool> for Value {
     fn from(b: bool) -> Self {
         Self::Number(Number::from(b))

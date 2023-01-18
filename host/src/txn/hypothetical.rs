@@ -61,7 +61,6 @@ impl Hypothetical {
             if let Some(participants) = participants.remove(txn.id()) {
                 let mut rollbacks: FuturesUnordered<_> = participants
                     .iter()
-                    .cloned()
                     .map(|link| txn.delete(link, Value::default()))
                     .collect();
 

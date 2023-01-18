@@ -10,7 +10,7 @@ struct ClusterHandler {
 impl ClusterHandler {
     fn new(cluster: &ClusterRef, path: &[PathSegment]) -> Self {
         let mut cluster_path = cluster.path().clone();
-        cluster_path.extend_from_slice(path);
+        cluster_path.extend(path.into_iter().cloned());
         Self { path: cluster_path }
     }
 }
@@ -20,9 +20,7 @@ impl<'a> Handler<'a> for ClusterHandler {
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, key| {
-            Box::pin(txn.get(self.path.into(), key))
-        }))
+        Some(Box::new(|txn, key| Box::pin(txn.get(self.path, key))))
     }
 
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
@@ -30,7 +28,7 @@ impl<'a> Handler<'a> for ClusterHandler {
         'b: 'a,
     {
         Some(Box::new(|txn, key, value| {
-            Box::pin(txn.put(self.path.into(), key, value))
+            Box::pin(txn.put(self.path, key, value))
         }))
     }
 
@@ -39,7 +37,7 @@ impl<'a> Handler<'a> for ClusterHandler {
         'b: 'a,
     {
         Some(Box::new(|txn, params| {
-            Box::pin(txn.post(self.path.into(), params.into()))
+            Box::pin(txn.post(self.path, params))
         }))
     }
 
@@ -47,9 +45,7 @@ impl<'a> Handler<'a> for ClusterHandler {
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, key| {
-            Box::pin(txn.delete(self.path.into(), key))
-        }))
+        Some(Box::new(|txn, key| Box::pin(txn.delete(self.path, key))))
     }
 }
 
