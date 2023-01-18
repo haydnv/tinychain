@@ -160,16 +160,6 @@ impl TCError {
         Self::new(ErrorKind::BadRequest, info)
     }
 
-    /// Error indicating that the request depends on a resource which is exclusively locked
-    /// by another request.
-    pub fn conflict<M: fmt::Display>(message: M) -> Self {
-        // #[cfg(debug_assertions)]
-        // panic!("{}", message);
-        //
-        // #[cfg(not(debug_assertions))]
-        Self::new(ErrorKind::Conflict, message)
-    }
-
     /// Error indicating that the requested resource exists but does not support the request method.
     pub fn method_not_allowed<M: fmt::Display, S: fmt::Display, P: fmt::Display>(
         method: M,
@@ -211,7 +201,10 @@ impl std::error::Error for TCError {}
 
 impl From<txn_lock::Error> for TCError {
     fn from(err: txn_lock::Error) -> Self {
-        Self::conflict(err)
+        Self {
+            kind: ErrorKind::Conflict,
+            data: err.to_string().into(),
+        }
     }
 }
 
@@ -264,6 +257,14 @@ macro_rules! bad_gateway {
 macro_rules! bad_request {
     ($($t:tt)*) => {{
         $crate::TCError::new($crate::ErrorKind::BadRequest, format!($($t)*))
+    }}
+}
+
+/// Error indicating that the request cannot be fulfilled due to a conflict with another request.
+#[macro_export]
+macro_rules! conflict {
+    ($($t:tt)*) => {{
+        $crate::TCError::new($crate::ErrorKind::Conflict, format!($($t)*))
     }}
 }
 

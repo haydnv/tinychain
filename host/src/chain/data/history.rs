@@ -385,7 +385,11 @@ impl AsyncHash<fs::Dir> for History {
 
         if let Some(past_txn_id) = latest_block.mutations.keys().next() {
             if past_txn_id > txn.id() {
-                return Err(TCError::conflict("requested a hash too far in the past"));
+                return Err(conflict!(
+                    "requested a hash {} too far before the present {}",
+                    past_txn_id,
+                    txn.id()
+                ));
             }
         }
 

@@ -24,7 +24,7 @@ fn file_ext(path: &'_ Path) -> Option<&'_ str> {
 // TODO: move to the error crate & impl From<io::Error> for TCError
 pub(crate) fn io_err(err: io::Error) -> TCError {
     match err.kind() {
-        io::ErrorKind::WouldBlock => TCError::conflict(err),
+        io::ErrorKind::WouldBlock => conflict!("synchronous filesystem access failed").consume(err),
         io::ErrorKind::NotFound => TCError::not_found(err),
         io::ErrorKind::PermissionDenied => {
             unexpected!("host filesystem permission denied").consume(err)
