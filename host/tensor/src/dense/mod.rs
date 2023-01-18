@@ -22,7 +22,7 @@ use tc_value::{
     ComplexType, Float, FloatType, Number, NumberClass, NumberCollator, NumberInstance, NumberType,
     Trigonometry, UIntType,
 };
-use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
+use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream, Tuple};
 
 use super::sparse::{DenseToSparse, SparseTensor};
 use super::stream::{Read, ReadValueAt};
@@ -177,8 +177,9 @@ where
         multiples: Vec<u64>,
     ) -> TCResult<Self> {
         if multiples.len() != tensor.ndim() {
-            return Err(TCError::bad_request(
-                "wrong number of multiples to tile a Tensor with shape",
+            return Err(bad_request!(
+                "wrong number of multiples {} to tile a Tensor with shape {}",
+                Tuple::from(multiples),
                 tensor.shape(),
             ));
         }
@@ -578,16 +579,16 @@ where
 
     async fn diagonal(self, txn: Self::Txn) -> TCResult<Self::Diagonal> {
         if self.ndim() < 2 {
-            return Err(TCError::bad_request(
-                "cannot take the diagonal of a Tensor with shape",
+            return Err(bad_request!(
+                "cannot take the diagonal of a Tensor with shape {}",
                 self.shape(),
             ));
         }
 
         let size = self.shape()[self.ndim() - 1];
         if size != self.shape()[self.ndim() - 2] {
-            return Err(TCError::bad_request(
-                "diagonal requires a square matrix but found",
+            return Err(bad_request!(
+                "diagonal requires a square matrix but found shape {}",
                 self.shape(),
             ));
         }

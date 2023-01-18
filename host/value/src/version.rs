@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use async_hash::Hash;
 use async_trait::async_trait;
+use destream::de::Error;
 use destream::{de, en};
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
@@ -12,12 +13,12 @@ use sha2::digest::{Digest, Output};
 use tc_error::*;
 use tcgeneric::Id;
 
-/// A semantic version with a major, minor, and revision number, e.g. "0.1.12"
+/// A semantic version with a major, minor, and patch number, e.g. "0.1.12"
 #[derive(Clone, Copy, Default, std::hash::Hash, Eq, PartialEq)]
 pub struct Version {
     major: u32,
     minor: u32,
-    rev: u32,
+    patch: u32,
 }
 
 impl PartialOrd for Version {
@@ -30,7 +31,7 @@ impl Ord for Version {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.major.cmp(&other.major) {
             Ordering::Equal => match self.minor.cmp(&other.minor) {
-                Ordering::Equal => self.rev.cmp(&other.rev),
+                Ordering::Equal => self.patch.cmp(&other.patch),
                 ordering => ordering,
             },
             ordering => ordering,
@@ -52,14 +53,18 @@ impl PartialEq<str> for Version {
 
 impl<D: Digest> Hash<D> for Version {
     fn hash(self) -> Output<D> {
-        Hash::<D>::hash([self.major, self.minor, self.rev])
+        Hash::<D>::hash([self.major, self.minor, self.patch])
     }
 }
 
 impl From<(u32, u32, u32)> for Version {
     fn from(version: (u32, u32, u32)) -> Self {
-        let (major, minor, rev) = version;
-        Self { major, minor, rev }
+        let (major, minor, patch) = version;
+        Self {
+            major,
+            minor,
+            patch,
+        }
     }
 }
 
@@ -68,15 +73,15 @@ impl FromStr for Version {
 
     fn from_str(s: &str) -> TCResult<Self> {
         if s.find('.').is_none() {
-            return Err(TCError::bad_request("not a valid version number", s));
+            return Err(TCError::invalid_value(s, "a version number"));
         }
 
         let mut parts = s.split('.');
 
         let major = if let Some(major) = parts.next() {
-            major
-                .parse()
-                .map_err(|err| TCError::bad_request("invalid major version", err))?
+            major.parse().map_err(|cause| {
+                TCError::invalid_value(major, "a major version number").consume(cause)
+            })?
         } else {
             return Err(bad_request!(
                 "{} is missing missing a major version number",
@@ -85,9 +90,9 @@ impl FromStr for Version {
         };
 
         let minor = if let Some(minor) = parts.next() {
-            minor
-                .parse()
-                .map_err(|err| TCError::bad_request("invalid minor version", err))?
+            minor.parse().map_err(|cause| {
+                TCError::invalid_value(minor, "a minor version number").consume(cause)
+            })?
         } else {
             return Err(bad_request!(
                 "{} is missing missing a minor version number",
@@ -95,9 +100,10 @@ impl FromStr for Version {
             ));
         };
 
-        let rev = if let Some(rev) = parts.next() {
-            rev.parse()
-                .map_err(|err| TCError::bad_request("invalid revision number", err))?
+        let patch = if let Some(patch) = parts.next() {
+            patch
+                .parse()
+                .map_err(|cause| TCError::invalid_value(patch, "a patch number").consume(cause))?
         } else {
             return Err(bad_request!("{} is missing missing a patch number", s));
         };
@@ -106,7 +112,11 @@ impl FromStr for Version {
             return Err(bad_request!("invalid semantic version number: {}", s));
         }
 
-        Ok(Self { major, minor, rev })
+        Ok(Self {
+            major,
+            minor,
+            patch: patch,
+        })
     }
 }
 
@@ -159,6 +169,6 @@ impl fmt::Debug for Version {
 
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}.{}.{}", self.major, self.minor, self.rev)
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
     }
 }

@@ -297,9 +297,10 @@ where
         dtype: NumberType,
     ) -> TCResult<Self> {
         if left.shape() != right.shape() {
-            return Err(TCError::bad_request(
-                format!("cannot combine shape {} with shape", left.shape()),
-                right.shape(),
+            return Err(bad_request!(
+                "cannot combine shape {} with shape {}",
+                left.shape(),
+                right.shape()
             ));
         }
 
@@ -1200,8 +1201,8 @@ where
 
         let axis = if let Some(permutation) = &permutation {
             if permutation.len() != self.ndim() {
-                return Err(TCError::bad_request(
-                    "invalid permutation",
+                return Err(bad_request!(
+                    "invalid permutation: {}",
                     permutation.iter().collect::<Tuple<&usize>>(),
                 ));
             }

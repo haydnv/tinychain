@@ -95,7 +95,7 @@ where
             .iter()
             .map(|col| {
                 row.remove(&col.name)
-                    .ok_or_else(|| TCError::bad_request("missing value for column", &col.name))
+                    .ok_or_else(|| bad_request!("missing value for column {}", &col.name))
             })
             .collect::<TCResult<Key>>()?;
 
@@ -112,7 +112,7 @@ where
             .map(|col| {
                 row.get(&col.name)
                     .cloned()
-                    .ok_or_else(|| TCError::bad_request("missing value for column", &col.name))
+                    .ok_or_else(|| bad_request!("missing value for column {}", &col.name))
             })
             .collect::<TCResult<Key>>()?;
 
@@ -124,7 +124,7 @@ where
                 } else if let Some(value) = row.remove(&col.name) {
                     Ok(value)
                 } else {
-                    Err(TCError::bad_request("missing value for column", &col.name))
+                    Err(bad_request!("missing value for column {}", &col.name))
                 }
             })
             .collect::<TCResult<Key>>()?;
@@ -177,9 +177,10 @@ where
         if self.schema.starts_with(&order) {
             Ok(IndexSlice::all(self.btree, self.schema, reverse))
         } else {
-            Err(TCError::bad_request(
-                &format!("Index with schema {} does not support order", self.schema),
-                Value::from_iter(order),
+            Err(bad_request!(
+                "index with schema {} does not support order {}",
+                self.schema,
+                Value::from_iter(order)
             ))
         }
     }
@@ -190,10 +191,10 @@ where
 
     fn validate_order(&self, order: &[Id]) -> TCResult<()> {
         if !self.schema.starts_with(&order) {
-            let order: Vec<String> = order.iter().map(|c| c.to_string()).collect();
-            Err(TCError::bad_request(
-                &format!("cannot order index with schema {} by", self.schema),
-                order.join(", "),
+            Err(bad_request!(
+                "cannot order index with schema {} by {}",
+                self.schema,
+                Tuple::<&Id>::from_iter(order)
             ))
         } else {
             Ok(())
@@ -259,9 +260,9 @@ where
         }
 
         if !bounds.is_empty() {
-            return Err(TCError::bad_request(
-                "Index has no such columns: {}",
-                Value::from_iter(bounds.keys().cloned()),
+            return Err(bad_request!(
+                "index has no such columns: {}",
+                Tuple::<&Id>::from_iter(bounds.keys()),
             ));
         }
 
@@ -421,9 +422,9 @@ where
             }
         }
 
-        Err(TCError::bad_request(
-            "this table has no index which supports bounds",
-            bounds,
+        Err(bad_request!(
+            "this table has no index which supports the bounds {}",
+            bounds
         ))
     }
 
@@ -518,8 +519,8 @@ where
             }
         }
 
-        Err(TCError::bad_request(
-            "table has no index to order by",
+        Err(bad_request!(
+            "this table has no index to order by {}",
             Tuple::<Id>::from_iter(columns),
         ))
     }
@@ -557,10 +558,9 @@ where
             }
 
             if order == &initial[..] {
-                let order: Vec<String> = order.iter().map(|id| id.to_string()).collect();
-                return Err(TCError::bad_request(
-                    "This table has no index to support the order",
-                    order.join(", "),
+                return Err(bad_request!(
+                    "this table has no index to support the order {}",
+                    Tuple::<&Id>::from_iter(order),
                 ));
             }
         }
@@ -935,8 +935,8 @@ where
         let mut auxiliary = Vec::with_capacity(schema.indices().len());
         for (name, column_names) in schema.indices() {
             if name == &PRIMARY_INDEX {
-                return Err(TCError::bad_request(
-                    "cannot create an auxiliary index with reserved name",
+                return Err(bad_request!(
+                    "cannot create an auxiliary index with the reserved name {}",
                     PRIMARY_INDEX,
                 ));
             }

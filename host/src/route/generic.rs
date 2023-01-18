@@ -5,6 +5,7 @@ use std::iter::Cloned;
 use std::ops::Deref;
 use std::str::FromStr;
 
+use destream::de::Error;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, FuturesOrdered, StreamExt, TryStreamExt};
 use log::debug;
@@ -37,14 +38,14 @@ where
             Box::pin(async move {
                 if self.tuple.is_empty() {
                     let key = Tuple::<Value>::try_cast_from(key, |v| {
-                        TCError::bad_request("not a Tuple", v)
+                        TCError::invalid_type(v, "a Tuple")
                     })?;
 
                     return Ok(Value::Tuple(key).into());
                 }
 
                 let suffix =
-                    Tuple::<Value>::try_cast_from(key, |v| TCError::bad_request("not a Tuple", v))?;
+                    Tuple::<Value>::try_cast_from(key, |v| TCError::invalid_value(v, "a Tuple"))?;
 
                 let items = self.tuple.iter().cloned().map(State::from);
                 let items = items.chain(suffix.into_iter().map(Scalar::Value).map(State::Scalar));
@@ -186,7 +187,6 @@ where
                     return Ok(false.into());
                 }
 
-                const ERR: &str = "cannot cast into Value from";
                 let eq = self
                     .map
                     .into_iter()
@@ -197,8 +197,11 @@ where
                         }
 
                         let this = State::from(this);
-                        let this = Value::try_cast_from(this, |s| TCError::bad_request(ERR, s))?;
-                        let that = Value::try_cast_from(that, |s| TCError::bad_request(ERR, s))?;
+                        let this =
+                            Value::try_cast_from(this, |s| TCError::invalid_type(s, "a Value"))?;
+                        let that =
+                            Value::try_cast_from(that, |s| TCError::invalid_type(s, "a Value"))?;
+
                         Ok(this == that)
                     })
                     .collect::<TCResult<Vec<bool>>>()?;
@@ -236,15 +239,16 @@ where
                     return Ok(false.into());
                 }
 
-                const ERR: &str = "cannot cast into Value from";
                 let eq = self
                     .tuple
                     .into_iter()
                     .zip(other)
                     .map(|(this, that)| {
                         let this = State::from(this);
-                        let this = Value::try_cast_from(this, |s| TCError::bad_request(ERR, s))?;
-                        let that = Value::try_cast_from(that, |s| TCError::bad_request(ERR, s))?;
+                        let this =
+                            Value::try_cast_from(this, |s| TCError::invalid_type(s, "a Value"))?;
+                        let that =
+                            Value::try_cast_from(that, |s| TCError::invalid_type(s, "a Value"))?;
                         Ok(this == that)
                     })
                     .collect::<TCResult<Vec<bool>>>()?;
@@ -285,7 +289,7 @@ where
                 if key.is_none() {
                     Ok(State::from(self.map.clone()))
                 } else {
-                    let key = Id::try_cast_from(key, |v| TCError::bad_request("invalid Id", v))?;
+                    let key = Id::try_cast_from(key, |v| TCError::invalid_type(v, "an Id"))?;
                     self.map.get(&key).cloned().map(State::from).ok_or_else(|| {
                         let msg = format!(
                             "{} in Map with keys {}",
@@ -500,7 +504,7 @@ where
                             .map(State::from)
                             .ok_or_else(|| TCError::not_found(format!("no such index: {}", i)))
                     }
-                    other => Err(TCError::bad_request("invalid tuple index", other)),
+                    other => Err(TCError::invalid_value(other, "a tuple index")),
                 }
             })
         }))
@@ -523,7 +527,7 @@ where
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let values: Tuple<Value> =
-                    key.try_cast_into(|v| TCError::bad_request("invalid values for Tuple/zip", v))?;
+                    key.try_cast_into(|v| bad_request!("invalid values for Tuple/zip: {}", v))?;
 
                 if self.keys.len() != values.len() {
                     return Err(bad_request!(
@@ -617,7 +621,7 @@ fn cast_range(range: Range, len: i64) -> TCResult<(usize, usize)> {
             start + 1
         }
         Bound::Un => 0,
-        other => return Err(TCError::bad_request("invalid start index for Tuple", other)),
+        other => return Err(bad_request!("invalid start index {} for Tuple", other)),
     };
 
     let end = match range.end {
@@ -635,7 +639,7 @@ fn cast_range(range: Range, len: i64) -> TCResult<(usize, usize)> {
             }
         }
         Bound::Un => len,
-        other => return Err(TCError::bad_request("invalid end index for Tuple", other)),
+        other => return Err(bad_request!("invalid end index {} for Tuple", other)),
     };
 
     if start >= len {
@@ -651,8 +655,8 @@ fn cast_range(range: Range, len: i64) -> TCResult<(usize, usize)> {
             len
         ))
     } else if start > end {
-        Err(TCError::bad_request(
-            "invalid range for Tuple",
+        Err(bad_request!(
+            "invalid range for Tuple: {}",
             Tuple::<i64>::from((start, end)),
         ))
     } else {
@@ -670,7 +674,7 @@ impl<'a> Handler<'a> for CreateMapHandler {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let value = Tuple::<(Id, Value)>::try_cast_from(key, |v| {
-                    TCError::bad_request("invalid Map", v)
+                    TCError::invalid_type(v, "a Map")
                 })?;
 
                 let map = value
@@ -735,7 +739,7 @@ impl<'a> Handler<'a> for CreateRangeHandler {
                     let stop: usize = key.opt_cast_into().expect("range stop");
                     Ok(State::Tuple((0..stop).into_iter().collect()))
                 } else {
-                    Err(TCError::bad_request("invalid range", key))
+                    Err(TCError::invalid_value(key, "a range"))
                 }
             })
         }))

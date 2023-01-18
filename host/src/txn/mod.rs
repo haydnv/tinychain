@@ -89,17 +89,14 @@ impl Txn {
         );
 
         if actor.id().is_some() {
-            return Err(TCError::bad_request(
-                "cluster ID must be None, not",
-                actor.id(),
-            ));
+            return Err(bad_request!("cluster ID must be None, not {}", actor.id()));
         }
 
         if self.owner().is_none() {
             self.grant(actor, cluster_path, vec![self.active.scope().clone()])
                 .await
         } else {
-            Err(forbidden!("tried to claim owned transaction {}", self.id(),))
+            Err(forbidden!("tried to claim owned transaction {}", self.id()))
         }
     }
 
@@ -177,10 +174,7 @@ impl Txn {
         );
 
         if actor.id().is_some() {
-            return Err(TCError::bad_request(
-                "cluster ID must be None, not",
-                actor.id(),
-            ));
+            return Err(bad_request!("cluster ID must be None, not {}", actor.id()));
         }
 
         if let Some(leader) = self.leader(&cluster_path) {

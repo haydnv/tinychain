@@ -20,7 +20,7 @@ use tc_value::{
     ComplexType, Float, FloatType, Number, NumberClass, NumberInstance, NumberType, Trigonometry,
     UIntType,
 };
-use tcgeneric::{Instance, TCBoxTryFuture};
+use tcgeneric::{Instance, TCBoxTryFuture, Tuple};
 
 use super::dense::{BlockListSparse, DenseTensor, PER_BLOCK};
 use super::stream::ReadValueAt;
@@ -174,8 +174,9 @@ where
         multiples: Vec<u64>,
     ) -> TCResult<Self> {
         if multiples.len() != tensor.ndim() {
-            return Err(TCError::bad_request(
-                "wrong number of multiples to tile a Tensor with shape",
+            return Err(bad_request!(
+                "wrong number of multiples {} to tile a Tensor with shape {}",
+                Tuple::from(multiples),
                 tensor.shape(),
             ))?;
         }
@@ -537,8 +538,8 @@ where
 
         let size = self.shape()[0];
         if size != self.shape()[1] {
-            return Err(TCError::bad_request(
-                "diagonal requires a square matrix but found",
+            return Err(bad_request!(
+                "diagonal requires a square matrix but found shape {}",
                 self.shape(),
             ));
         }

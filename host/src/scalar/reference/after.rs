@@ -64,8 +64,8 @@ impl Refer for After {
     ) -> TCResult<State> {
         debug!("After::resolve {} from context ()", self);
         if self.when.is_conditional() {
-            return Err(TCError::bad_request(
-                "After does not allow a conditional clause",
+            return Err(bad_request!(
+                "After does not allow a conditional clause {}",
                 self.when,
             ));
         }

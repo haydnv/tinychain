@@ -6,7 +6,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use destream::de;
+use destream::de::{self, Error};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use log::debug;
 use safecast::TryCastFrom;
@@ -108,12 +108,12 @@ impl FromStr for IdRef {
     #[inline]
     fn from_str(to: &str) -> TCResult<Self> {
         if !to.starts_with('$') || to.len() < 2 {
-            Err(TCError::bad_request("invalid IdRef", to))
+            Err(TCError::invalid_value(to, "a reference to an ID"))
         } else {
             to[1..]
                 .parse()
                 .map(|to| Self { to })
-                .map_err(|cause| bad_request!("invalid ID reference {}", to).consume(cause))
+                .map_err(|cause| TCError::invalid_value(to, "a reference to an ID").consume(cause))
         }
     }
 }

@@ -4,6 +4,7 @@
 
 use std::convert::Infallible;
 use std::fmt;
+use std::fmt::Display;
 
 use destream::en;
 
@@ -148,18 +149,6 @@ impl TCError {
         }
     }
 
-    /// Error indicating that the request is badly-constructed or nonsensical.
-    pub fn bad_request<M: fmt::Display, I: fmt::Display>(message: M, cause: I) -> Self {
-        let info = format!("{}: {}", message, cause);
-
-        #[cfg(debug_assertions)]
-        if info.starts_with("expected") {
-            panic!("{}", info)
-        }
-
-        Self::new(ErrorKind::BadRequest, info)
-    }
-
     /// Error indicating that the requested resource exists but does not support the request method.
     pub fn method_not_allowed<M: fmt::Display, S: fmt::Display, P: fmt::Display>(
         method: M,
@@ -194,6 +183,15 @@ impl TCError {
     pub fn consume<I: fmt::Display>(mut self, cause: I) -> Self {
         self.data.stack.push(cause.to_string());
         self
+    }
+}
+
+impl destream::de::Error for TCError {
+    fn custom<T: Display>(msg: T) -> Self {
+        Self {
+            kind: ErrorKind::BadRequest,
+            data: msg.to_string().into(),
+        }
     }
 }
 

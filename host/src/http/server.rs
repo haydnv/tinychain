@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use destream::de::Error;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
@@ -113,7 +114,7 @@ impl HTTPServer {
             if let Some(header) = http_request.headers().get(hyper::header::CONTENT_TYPE) {
                 header
                     .to_str()
-                    .map_err(|e| TCError::bad_request("request has invalid Content-Type", e))?
+                    .map_err(|cause| bad_request!("invalid Content-Type header").consume(cause))?
                     .parse()?
             } else {
                 Encoding::default()
@@ -248,12 +249,12 @@ async fn destream_body(body: hyper::Body, encoding: Encoding, txn: Txn) -> TCRes
     match encoding {
         Encoding::Json => {
             destream_json::try_decode(txn, body)
-                .map_err(|e| TCError::bad_request(ERR_DESERIALIZE, e))
+                .map_err(|cause| bad_request!("{}", ERR_DESERIALIZE).consume(cause))
                 .await
         }
         Encoding::Tbon => {
             tbon::de::try_decode(txn, body)
-                .map_err(|e| TCError::bad_request(ERR_DESERIALIZE, e))
+                .map_err(|cause| bad_request!("{}", ERR_DESERIALIZE).consume(cause))
                 .await
         }
     }
@@ -264,8 +265,8 @@ fn get_param<T: DeserializeOwned>(
     name: &str,
 ) -> TCResult<Option<T>> {
     if let Some(param) = params.remove(name) {
-        let val: T = serde_json::from_str(&param).map_err(|e| {
-            TCError::bad_request(&format!("Unable to parse URI parameter '{}'", name), e)
+        let val: T = serde_json::from_str(&param).map_err(|cause| {
+            TCError::invalid_value(param, format!("URI parameter {}", name)).consume(cause)
         })?;
 
         Ok(Some(val))

@@ -28,7 +28,7 @@ impl Broadcast {
         if source_shape.is_empty() {
             return Err(bad_request!("cannot broadcast an empty Tensor"));
         } else if shape.is_empty() {
-            return Err(bad_request!("cannot broadcast into an empty Tensor",));
+            return Err(bad_request!("cannot broadcast into an empty Tensor"));
         } else if source_shape == shape {
             warn!(
                 "broadcast a Tensor with shape {} into {}",
@@ -158,7 +158,11 @@ pub struct Expand {
 impl Expand {
     pub fn new(source_shape: Shape, expand: usize) -> TCResult<Expand> {
         if expand > source_shape.len() {
-            return Err(TCError::bad_request("axis out of bounds", expand));
+            return Err(bad_request!(
+                "axis {} is out of bounds for shape {}",
+                expand,
+                source_shape
+            ));
         }
 
         let mut shape = source_shape.to_vec();
@@ -689,14 +693,15 @@ impl Transpose {
                 Tuple::from(permutation)
             ));
         } else if permutation.iter().max().expect("transpose last axis") > &ndim {
-            return Err(TCError::bad_request(
-                "cannot transpose nonexistent axis",
-                permutation.iter().max().unwrap(),
+            return Err(bad_request!(
+                "shape {} has no axis {}",
+                source_shape,
+                permutation.iter().max().unwrap()
             ));
         } else if permutation.iter().cloned().collect::<HashSet<_>>().len() != permutation.len() {
-            return Err(TCError::bad_request(
-                "cannot transpose the same axis twice",
-                Tuple::from(permutation),
+            return Err(bad_request!(
+                "cannot transpose the same axis twice: {}",
+                Tuple::from(permutation)
             ));
         }
 

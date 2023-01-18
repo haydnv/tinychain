@@ -6,7 +6,7 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
-use destream::de;
+use destream::de::{self, Error};
 use futures::future::TryFutureExt;
 use futures::join;
 use log::debug;
@@ -80,7 +80,7 @@ impl Replica for BlockChain<crate::cluster::Class> {
             .await?;
 
         let classes: Map<Map<InstanceClass>> =
-            state.try_cast_into(|s| TCError::bad_request("invalid class version history", s))?;
+            state.try_cast_into(|s| TCError::invalid_value(s, "Class version history"))?;
 
         // TODO: verify equality of existing versions
         let latest_version = self.subject.latest(*txn.id()).await?;
@@ -113,7 +113,7 @@ impl Replica for BlockChain<crate::cluster::Library> {
             .await?;
 
         let library: Map<Map<Scalar>> =
-            state.try_cast_into(|s| TCError::bad_request("invalid Library version history", s))?;
+            state.try_cast_into(|s| TCError::invalid_value(s, "Library version history"))?;
 
         // TODO: verify equality of existing versions
         let latest_version = self.subject.latest(*txn.id()).await?;
@@ -147,7 +147,7 @@ impl Replica for BlockChain<crate::cluster::Service> {
             .await?;
 
         let library: Map<InstanceClass> =
-            state.try_cast_into(|s| TCError::bad_request("invalid Service version history", s))?;
+            state.try_cast_into(|s| TCError::invalid_value(s, "Service version history"))?;
 
         // TODO: verify equality of existing versions
         let latest_version = self.subject.latest(*txn.id()).await?;
@@ -175,8 +175,8 @@ impl Replica for BlockChain<CollectionBase> {
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         let chain = txn.get(source.append(CHAIN), Value::default()).await?;
         let chain: Self = chain.try_cast_into(|s| {
-            TCError::bad_request(
-                "blockchain expected to replicate a chain of blocks but found",
+            bad_request!(
+                "blockchain expected to replicate a chain of blocks but found {}",
                 s,
             )
         })?;

@@ -2,6 +2,7 @@ use std::fmt;
 use std::pin::Pin;
 
 use async_trait::async_trait;
+use destream::de::Error;
 use futures::future::{self, Future};
 use safecast::TryCastFrom;
 
@@ -174,7 +175,7 @@ impl<'a> Handler<'a> for ErrorHandler<'a> {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let message = TCString::try_cast_from(key, |v| {
-                    TCError::bad_request("cannot cast into error message string from", v)
+                    TCError::invalid_value(v, "an error message string")
                 })?;
 
                 if let Some(err_type) = error_type(self.code) {

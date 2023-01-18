@@ -5,6 +5,7 @@ use std::iter;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
+use destream::de::Error;
 use destream::{de, en};
 use futures::future::TryFutureExt;
 use futures::stream::{StreamExt, TryStreamExt};
@@ -60,10 +61,7 @@ impl Schema {
         self.shape.validate(debug_info)?;
 
         fn err_nonspecific(dtype: NumberType) -> TCResult<()> {
-            Err(TCError::bad_request(
-                "tensor requires a specific Number type, not",
-                dtype,
-            ))
+            Err(TCError::invalid_type(dtype, "a specific Number class"))
         }
 
         match self.dtype {

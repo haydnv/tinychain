@@ -1,8 +1,9 @@
 use bytes::Bytes;
+use destream::de::Error;
 use safecast::TryCastFrom;
 use uuid::Uuid;
 
-use tc_error::TCError;
+use tc_error::*;
 use tc_value::Value;
 use tcgeneric::{label, Label, PathSegment};
 
@@ -72,12 +73,9 @@ impl<'a> Handler<'a> for UuidHandler<'a> {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let uuid = if key.is_some() {
-                    Uuid::try_cast_from(key, |v| TCError::bad_request("invalid UUID", v))?
+                    Uuid::try_cast_from(key, |v| TCError::invalid_value(v, "a UUID"))?
                 } else {
-                    return Err(TCError::bad_request(
-                        "missing UUID to cast into",
-                        self.dtype,
-                    ));
+                    return Err(bad_request!("missing UUID to cast into {}", self.dtype));
                 };
 
                 let value = match self.dtype {

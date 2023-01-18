@@ -1,3 +1,4 @@
+use destream::de::Error;
 use futures::{TryFutureExt, TryStreamExt};
 use safecast::{Match, TryCastInto};
 
@@ -169,7 +170,7 @@ impl<'a> Handler<'a> for RangeHandler {
                     let stop = key.opt_cast_into().expect("range stop");
                     Ok(State::Stream(TCStream::range(0.into(), stop, 1.into())))
                 } else {
-                    Err(TCError::bad_request("invalid range", key))
+                    Err(TCError::invalid_value(key, "a range"))
                 }
             })
         }))

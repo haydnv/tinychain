@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 use async_trait::async_trait;
+use destream::de::Error;
 use destream::{de, en};
 use futures::try_join;
 use log::{debug, warn};
@@ -72,13 +73,13 @@ impl Refer for While {
         debug!("While::resolve {}", self);
 
         if self.cond.is_conditional() {
-            return Err(TCError::bad_request(
-                "While does not allow nested conditional",
+            return Err(bad_request!(
+                "While does not allow a nested conditional {}",
                 self.cond,
             ));
         } else if self.state.is_conditional() {
-            return Err(TCError::bad_request(
-                "While does not allow nested conditional",
+            return Err(bad_request!(
+                "While does not allow a nested conditional {}",
                 self.state,
             ));
         }
@@ -90,11 +91,11 @@ impl Refer for While {
         )?;
 
         let cond = Closure::try_cast_from(cond, |s| {
-            TCError::bad_request("while loop condition should be an Op or Closure, found", s)
+            TCError::invalid_type(s, "an Op or Closure for a While")
         })?;
 
         let closure = Closure::try_cast_from(closure, |s| {
-            TCError::bad_request("while loop requires an Op or Closure, found", s)
+            TCError::invalid_type(s, "an Op or Closure for a While")
         })?;
 
         debug!("While condition definition is {}", cond);
@@ -114,12 +115,7 @@ impl Refer for While {
                         warn!("While condition returned a nested {}", op_def);
                         cond = op_def.into()
                     }
-                    other => {
-                        return Err(TCError::bad_request(
-                            "invalid condition for While loop",
-                            other,
-                        ))
-                    }
+                    other => return Err(TCError::invalid_value(other, "a condition for a While")),
                 }
             };
 
@@ -127,8 +123,8 @@ impl Refer for While {
                 state = closure.clone().call(txn, state).await?;
 
                 if state.is_conditional() {
-                    return Err(TCError::bad_request(
-                        "conditional State is not allowed in a While loop",
+                    return Err(bad_request!(
+                        "conditional State {} is not allowed in a While loop",
                         state,
                     ));
                 }

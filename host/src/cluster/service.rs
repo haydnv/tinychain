@@ -5,6 +5,7 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use async_trait::async_trait;
+use destream::de::Error;
 use futures::future::{join_all, try_join_all, TryFutureExt};
 use futures::{join, try_join};
 use safecast::{as_type, AsType};
@@ -127,10 +128,10 @@ impl Persist<fs::Dir> for Version {
 
                         Ok(Attr::Chain(chain))
                     }
-                    other => Err(TCError::bad_request("invalid Service attribute", other)),
+                    other => Err(TCError::invalid_type(other, "a Service attribute")),
                 },
                 scalar if scalar.is_ref() => {
-                    Err(TCError::bad_request("invalid Service attribute", scalar))
+                    Err(TCError::invalid_value(scalar, "a Service attribute"))
                 }
                 scalar => Ok(Attr::Scalar(scalar)),
             }?;
@@ -168,10 +169,10 @@ impl Persist<fs::Dir> for Version {
 
                         Ok(Attr::Chain(chain))
                     }
-                    other => Err(TCError::bad_request("invalid Service attribute", other)),
+                    other => Err(TCError::invalid_type(other, "a Service attribute")),
                 },
                 scalar if scalar.is_ref() => {
-                    Err(TCError::bad_request("invalid Service attribute", scalar))
+                    Err(TCError::invalid_value(scalar, "a Service attribute"))
                 }
                 scalar => Ok(Attr::Scalar(scalar)),
             }?;
@@ -463,9 +464,9 @@ fn resolve_type<T: NativeClass>(subject: Subject) -> TCResult<T> {
             std::any::type_name::<T>(),
             link
         )),
-        subject => Err(TCError::bad_request(
-            format!("expected a {} but found", std::any::type_name::<T>()),
+        subject => Err(TCError::invalid_type(
             subject,
+            format!("a {}", std::any::type_name::<T>()),
         )),
     }
 }

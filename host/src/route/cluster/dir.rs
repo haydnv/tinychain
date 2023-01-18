@@ -132,7 +132,7 @@ where
 }
 
 pub(super) fn expect_version(version: State) -> TCResult<(Link, Map<Scalar>)> {
-    InstanceClass::try_cast_from(version, |v| TCError::bad_request("invalid Class", v))
+    InstanceClass::try_cast_from(version, |v| TCError::invalid_type(v, "a Class"))
         .map(|class| class.into_inner())
 }
 
@@ -156,7 +156,7 @@ pub(super) fn extract_classes(mut lib: Map<Scalar>) -> TCResult<(Map<Scalar>, Ma
         .filter_map(|name| lib.remove(&name).map(|dep| (name, dep)))
         .map(|(name, dep)| {
             InstanceClass::try_cast_from(dep, |s| {
-                TCError::bad_request("unable to resolve dependency", s)
+                bad_request!("unable to resolve dependency {}", s)
             })
             .map(|class| (name, class))
         })

@@ -252,10 +252,7 @@ where
         let mut contents = self.contents.write(txn_id).await?;
 
         if contents.contains_key(&name) {
-            return Err(TCError::bad_request(
-                "there is already a directory at",
-                name,
-            ));
+            return Err(bad_request!("there is already a directory at {}", name));
         }
 
         let mut cache = self.cache.write().await;
@@ -280,6 +277,7 @@ where
     DirEntry<T>: Clone,
 {
     /// Create a new item in this [`Dir`].
+    // TODO: make this method idempotent
     async fn create_item(
         &self,
         txn: &Txn,
@@ -294,7 +292,7 @@ where
         let mut contents = self.contents.write(txn_id).await?;
 
         if contents.contains_key(&name) {
-            return Err(TCError::bad_request("there is already a cluster at", name));
+            return Err(bad_request!("there is already a cluster at {}", name));
         }
 
         let store = {

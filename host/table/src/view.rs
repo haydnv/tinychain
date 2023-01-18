@@ -12,7 +12,7 @@ use tc_error::*;
 use tc_transact::fs::{Dir, File};
 use tc_transact::{Transaction, TxnId};
 use tc_value::Value;
-use tcgeneric::{Id, Instance, TCBoxTryStream};
+use tcgeneric::{Id, Instance, TCBoxTryStream, Tuple};
 
 use super::index::TableIndex;
 use super::{
@@ -96,9 +96,10 @@ impl<F: File<Key = NodeId, Block = Node>, D: Dir, Txn: Transaction<D>> IndexSlic
             slice.bounds = bounds;
             Ok(slice)
         } else {
-            Err(TCError::bad_request(
-                &format!("IndexSlice with bounds {} does not contain", self.bounds),
-                bounds,
+            Err(bad_request!(
+                "IndexSlice with bounds {} does not contain {}",
+                self.bounds,
+                bounds
             ))
         }
     }
@@ -172,9 +173,10 @@ where
         if self.schema.starts_with(order) {
             Ok(())
         } else {
-            Err(TCError::bad_request(
-                &format!("Index with schema {} does not support order", &self.schema),
-                Value::from_iter(order.to_vec()),
+            Err(bad_request!(
+                "index with schema {} does not support order {}",
+                &self.schema,
+                Tuple::<&Id>::from_iter(order)
             ))
         }
     }
@@ -691,12 +693,11 @@ where
             .cloned()
             .collect();
 
-        let mut unknown: HashSet<&Id> = selected.difference(&order_columns).collect();
+        let unknown: Tuple<&Id> = selected.difference(&order_columns).collect();
         if !unknown.is_empty() {
-            let unknown: Vec<String> = unknown.drain().map(|c| c.to_string()).collect();
-            return Err(TCError::bad_request(
-                "Tried to order by unselected columns",
-                unknown.join(", "),
+            return Err(bad_request!(
+                "tried to order by unselected columns {}",
+                unknown
             ));
         }
 

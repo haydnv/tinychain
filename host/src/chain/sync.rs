@@ -116,7 +116,7 @@ where
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
         let backup = txn.get(source, Value::default()).await?;
         let backup =
-            backup.try_cast_into(|backup| TCError::bad_request("not a valid backup", backup))?;
+            backup.try_cast_into(|backup| bad_request!("{} is not a valid backup", backup))?;
 
         self.subject.restore(*txn.id(), &backup).await?;
 

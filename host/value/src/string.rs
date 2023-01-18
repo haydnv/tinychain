@@ -41,7 +41,7 @@ impl TCString {
         Handlebars::new()
             .render_template(&self.0, &json!(data))
             .map(Self)
-            .map_err(|e| TCError::bad_request("error rendering template", e))
+            .map_err(|cause| bad_request!("template render error").consume(cause))
     }
 }
 

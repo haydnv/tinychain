@@ -139,7 +139,7 @@ impl History {
         T: Route + fmt::Display,
     {
         let err_divergent =
-            |block_id| TCError::bad_request("chain to replicate diverges at block", block_id);
+            |block_id| bad_request!("chain to replicate diverges at block {}", block_id);
 
         debug!("replicate chain history");
 
@@ -149,9 +149,10 @@ impl History {
         debug!("chain to replicate ends with block {}", *other_latest);
 
         if (*latest) > (*other_latest) {
-            return Err(TCError::bad_request(
-                "cannot replicate from chain with fewer blocks",
+            return Err(bad_request!(
+                "a Chain with {} blocks cannot replicate a Chain with {} blocks",
                 *latest,
+                *other_latest,
             ));
         }
 
@@ -346,7 +347,7 @@ impl Persist<fs::Dir> for History {
         //     if block.last_hash() == &last_hash {
         //         last_hash = block.last_hash().clone();
         //     } else {
-        //         return Err(internal!(
+        //         return Err(unexpected!(
         //             "block {} hash does not match previous block",
         //             latest
         //         ));
@@ -696,10 +697,7 @@ async fn parse_block_state(
                 let value = store.save_state(txn, value).await?;
                 parsed.push(Mutation::Put(key, value));
             } else {
-                return Err(TCError::bad_request(
-                    "unable to parse historical mutation",
-                    op,
-                ));
+                return Err(unexpected!("unable to parse historical mutation {}", op,));
             }
         }
 

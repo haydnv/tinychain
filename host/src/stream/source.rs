@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use destream::de::Error;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 use safecast::TryCastFrom;
@@ -122,7 +123,7 @@ impl Source for Filter {
             .map(|result| {
                 result.and_then(|(filter, state)| {
                     bool::try_cast_from(filter, |s| {
-                        TCError::bad_request("Stream::filter expects a boolean condition, not", s)
+                        TCError::invalid_type(s, "a boolean Stream filter condition")
                     })
                     .map(|filter| (filter, state))
                 })
@@ -167,7 +168,7 @@ impl Source for Flatten {
             .map(|result| {
                 result.and_then(|state| {
                     TCStream::try_cast_from(state, |s| {
-                        TCError::bad_request("Stream::flatten expects a Stream, not ", s)
+                        TCError::invalid_type(s, "a Stream of Streams to flatten")
                     })
                 })
             })

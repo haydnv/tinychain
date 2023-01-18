@@ -125,9 +125,7 @@ impl Store {
                 }
             },
             State::Scalar(value) => Ok(value),
-            other => {
-                other.try_cast_into(|s| TCError::bad_request("Chain does not support value", s))
-            }
+            other => other.try_cast_into(|s| bad_request!("Chain does not support value {}", s)),
         }
     }
 

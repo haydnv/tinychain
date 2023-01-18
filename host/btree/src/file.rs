@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use collate::Collate;
+use destream::de::Error;
 use destream::{de, en};
 use futures::future::{self, Future, TryFutureExt};
 use futures::join;
@@ -24,7 +25,7 @@ use tc_transact::fs::*;
 use tc_transact::lock::{TxnLock, TxnLockCommit};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
-use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream, Tuple};
+use tcgeneric::{Instance, TCBoxTryFuture, TCBoxTryStream};
 
 use super::{
     BTree, BTreeInstance, BTreeSlice, BTreeType, BTreeWrite, Key, NodeId, Range, RowSchema,
@@ -202,7 +203,7 @@ impl fmt::Display for Node {
         write!(
             f,
             "\tkeys: {}",
-            Tuple::<NodeKey>::from_iter(self.keys.iter().cloned())
+            tcgeneric::Tuple::<NodeKey>::from_iter(self.keys.iter().cloned())
         )?;
 
         write!(f, "\t {} children", self.children.len())
@@ -599,14 +600,14 @@ where
 
     fn validate_key(&self, key: Key) -> TCResult<Key> {
         if key.len() != self.inner.schema.len() {
-            return Err(TCError::bad_request("invalid key length", Tuple::from(key)));
+            return Err(TCError::invalid_length(key.len(), self.inner.schema.len()));
         }
 
         key.into_iter()
             .zip(&self.inner.schema)
             .map(|(val, col)| {
                 val.into_type(col.dtype)
-                    .ok_or_else(|| TCError::bad_request("invalid value for column", &col.name))
+                    .ok_or_else(|| bad_request!("invalid value for column {}", &col.name))
             })
             .collect()
     }
@@ -667,7 +668,7 @@ where
         #[cfg(debug_assertions)]
         debug!(
             "insert {} into BTree, root node {} has {} keys and {} children (order is {})",
-            <Tuple<Value> as std::iter::FromIterator<Value>>::from_iter(key.to_vec()),
+            <tcgeneric::Tuple<Value> as std::iter::FromIterator<Value>>::from_iter(key.to_vec()),
             *root_id,
             root.keys.len(),
             root.children.len(),
@@ -881,16 +882,16 @@ fn validate_schema(schema: &RowSchema) -> TCResult<usize> {
         if let Some(size) = col.dtype().size() {
             key_size += size;
             if col.max_len().is_some() {
-                return Err(TCError::bad_request(
-                    "Maximum length is not applicable to",
+                return Err(bad_request!(
+                    "maximum length is not applicable to a column of type {}",
                     col.dtype(),
                 ));
             }
         } else if let Some(size) = col.max_len() {
             key_size += size;
         } else {
-            return Err(TCError::bad_request(
-                "Type requires a maximum length",
+            return Err(bad_request!(
+                "column of type {} requires a maximum length",
                 col.dtype(),
             ));
         }

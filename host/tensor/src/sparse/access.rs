@@ -1694,8 +1694,8 @@ where
             if permutation.len() == self.ndim() {
                 permutation[self.rebase.axis()]
             } else {
-                return Err(TCError::bad_request(
-                    "invalid permutation",
+                return Err(bad_request!(
+                    "invalid permutation: {}",
                     permutation.iter().collect::<Tuple<&usize>>(),
                 ));
             }
@@ -2093,8 +2093,8 @@ where
 {
     pub fn new(source: A, permutation: Option<Vec<usize>>) -> TCResult<Self> {
         if !needs_transpose(&permutation) {
-            return Err(TCError::bad_request(
-                "sparse transpose got no axes to transpose",
+            return Err(bad_request!(
+                "sparse transpose got no axes to transpose: {}",
                 permutation
                     .expect("permutation")
                     .iter()

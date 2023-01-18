@@ -39,7 +39,7 @@ impl Source for Aggregate {
         let values = source.map(|r| {
             r.and_then(|state| {
                 Value::try_cast_from(state, |s| {
-                    TCError::bad_request("aggregate Stream requires a Value, not {}", s)
+                    bad_request!("to aggregate a Stream requires a Value, not {}", s)
                 })
             })
         });

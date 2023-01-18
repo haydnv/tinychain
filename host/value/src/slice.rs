@@ -1,7 +1,7 @@
-use async_hash::Hash;
 use std::fmt;
 use std::ops;
 
+use async_hash::Hash;
 use async_trait::async_trait;
 use collate::Collate;
 use destream::{de, en};
@@ -9,7 +9,6 @@ use futures::TryFutureExt;
 use safecast::{Match, TryCastFrom, TryCastInto};
 use sha2::digest::{Digest, Output};
 
-use tc_error::*;
 use tcgeneric::{label, Id, Label, Tuple};
 
 use super::{Value, ValueCollator};
@@ -300,9 +299,7 @@ impl de::FromStream for Range {
 
     async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
         let start = if let Ok(tuple) = Tuple::<Value>::from_stream(cxt, decoder).await {
-            tuple
-                .try_cast_into(|v| TCError::bad_request("invalid Range", v))
-                .map_err(de::Error::custom)
+            tuple.try_cast_into(|v| de::Error::invalid_value(v, "a Range"))
         } else {
             Value::from_stream(cxt, decoder)
                 .map_ok(|v| if v.is_none() { Bound::Un } else { Bound::In(v) })
@@ -310,9 +307,7 @@ impl de::FromStream for Range {
         }?;
 
         let end = if let Ok(tuple) = Tuple::<Value>::from_stream(cxt, decoder).await {
-            tuple
-                .try_cast_into(|v| TCError::bad_request("invalid Range", v))
-                .map_err(de::Error::custom)
+            tuple.try_cast_into(|v| de::Error::invalid_value(v, "a Range"))
         } else {
             Value::from_stream(cxt, decoder)
                 .map_ok(|v| if v.is_none() { Bound::Un } else { Bound::Ex(v) })

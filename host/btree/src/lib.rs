@@ -635,10 +635,7 @@ impl<'en> en::IntoStream<'en> for BTreeView<'en> {
 #[inline]
 fn validate_range(range: Range, schema: &[Column]) -> TCResult<Range> {
     if range.len() > schema.len() {
-        return Err(TCError::bad_request(
-            "too many columns in range",
-            range.len(),
-        ));
+        return Err(bad_request!("too many columns in range {}", range.len()));
     }
 
     let (input_prefix, start, end) = range.into_inner();

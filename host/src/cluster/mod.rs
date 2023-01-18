@@ -7,6 +7,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use destream::de::Error;
 use futures::future::{join_all, Future, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, info, trace, warn};
@@ -208,9 +209,9 @@ where
         }
 
         let led = self.led.write().await;
-        let leader = led.get(txn.id()).ok_or_else(|| {
-            TCError::bad_request(format!("{} does not own transaction", self), txn.id())
-        })?;
+        let leader = led
+            .get(txn.id())
+            .ok_or_else(|| bad_request!("{} does not own transaction {}", self, txn.id()))?;
 
         leader.mutate(participant).await;
         Ok(())
@@ -415,18 +416,17 @@ where
                 .await?;
 
             let replicas =
-                replicas.try_into_tuple(|s| TCError::bad_request("invalid replica set", s))?;
+                replicas.try_into_tuple(|s| TCError::invalid_type(s, "a replica set"))?;
 
             let replicas = replicas
                 .into_iter()
-                .map(|state| {
-                    state.try_cast_into(|s| TCError::bad_request("invalid replica host", s))
-                })
+                .map(|state| state.try_cast_into(|s| TCError::invalid_value(s, "a replica host")))
                 .collect::<TCResult<BTreeSet<LinkHost>>>()?;
 
             if !replicas.contains(&self.schema.host) {
-                return Err(TCError::bad_request(
-                    "failed to update cluster with new replica",
+                return Err(unexpected!(
+                    "failed to update {} with new replica {}",
+                    self,
                     &self.schema.host,
                 ));
             }

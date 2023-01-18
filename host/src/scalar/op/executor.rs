@@ -107,7 +107,7 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
                     state.requires(&mut deps);
 
                     if deps.contains(&id) {
-                        return Err(TCError::bad_request("circular dependency", id));
+                        return Err(bad_request!("{} has a circular dependency", id));
                     } else if deps.contains(&capture) {
                         return Err(bad_request!(
                             "circular dependency between {} and {}",
@@ -136,8 +136,8 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
             }
 
             if pending.is_empty() {
-                return Err(TCError::bad_request(
-                    "cannot resolve all dependencies of",
+                return Err(bad_request!(
+                    "cannot resolve all dependencies of {}",
                     capture,
                 ));
             }

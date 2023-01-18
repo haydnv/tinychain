@@ -260,7 +260,7 @@ impl IndexSchema {
         for (col_name, value) in row.into_iter() {
             let dtype = columns
                 .get(&col_name)
-                .ok_or(TCError::bad_request("No such column", &col_name))?;
+                .ok_or_else(|| TCError::not_found(&col_name))?;
 
             let value = dtype.try_cast(value)?;
             validated.insert(col_name, value);
@@ -277,24 +277,18 @@ impl IndexSchema {
         let extra: Vec<&Id> = actual.difference(&expected).collect();
 
         if !missing.is_empty() {
-            return Err(TCError::bad_request(
-                "Row is missing columns",
-                missing
-                    .into_iter()
-                    .map(|c| (*c).to_string())
-                    .collect::<Vec<String>>()
-                    .join(", "),
+            return Err(bad_request!(
+                "row {} is missing columns {}",
+                row,
+                Tuple::from(missing)
             ));
         }
 
         if !extra.is_empty() {
-            return Err(TCError::bad_request(
-                "Row contains unrecognized columns",
-                extra
-                    .into_iter()
-                    .map(|c| (*c).to_string())
-                    .collect::<Vec<String>>()
-                    .join(", "),
+            return Err(bad_request!(
+                "row {} contains unrecognized columns {}",
+                row,
+                Tuple::from(extra)
             ));
         }
 
@@ -307,21 +301,16 @@ impl IndexSchema {
         for column in self.columns() {
             let value = row
                 .remove(&column.name)
-                .ok_or_else(|| TCError::bad_request("missing value for column", &column.name))?;
+                .ok_or_else(|| TCError::not_found(&column.name))?;
 
             let value = column.dtype.try_cast(value)?;
             key.push(value);
         }
 
         if reject_extras && !row.is_empty() {
-            return Err(TCError::bad_request(
-                &format!(
-                    "unrecognized columns (`{}`) for schema",
-                    row.keys()
-                        .map(|c| c.to_string())
-                        .collect::<Vec<String>>()
-                        .join("`, `")
-                ),
+            return Err(bad_request!(
+                "unrecognized columns {} for schema {}",
+                row.keys().collect::<Tuple<&Id>>(),
                 self,
             ));
         }

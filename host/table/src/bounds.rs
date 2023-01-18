@@ -5,7 +5,6 @@ use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
 use collate::Collate;
-use log::debug;
 
 use tc_error::*;
 use tc_value::{Bound, Range, Value, ValueCollator, ValueType};
@@ -120,9 +119,9 @@ impl Bounds {
     /// Convert these `Bounds` into an equivalent [`tc_btree::Range`] according to the given schema.
     pub fn into_btree_range(mut self, columns: &[Column]) -> TCResult<tc_btree::Range> {
         let on_err = |bounds: &HashMap<Id, ColumnBound>| {
-            TCError::bad_request(
-                "extra columns in Table bounds",
-                Tuple::<&Id>::from_iter(bounds.keys()),
+            bad_request!(
+                "extra columns in Table bounds {}",
+                bounds.keys().collect::<Tuple<&Id>>()
             )
         };
 
@@ -155,8 +154,11 @@ impl Bounds {
         for (col_name, inner) in other.inner.into_iter() {
             if let Some(outer) = self.get(&col_name) {
                 if !outer.contains(&inner, collator) {
-                    debug!("{} does not contain {}", outer, inner);
-                    return Err(TCError::bad_request("Out of bounds", inner));
+                    return Err(bad_request!(
+                        "table bounds {} does not contain {} to merge",
+                        outer,
+                        inner
+                    ));
                 }
             }
 

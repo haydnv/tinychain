@@ -8,6 +8,7 @@ use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
 use async_trait::async_trait;
+use destream::de::Error;
 use futures::future::{join_all, FutureExt, TryFutureExt};
 use log::{debug, trace};
 use safecast::AsType;
@@ -580,7 +581,7 @@ where
             panic!("{} already has a block with ID {}", self.file, block_id);
 
             #[cfg(not(debug_assertions))]
-            return Err(TCError::bad_request("block already exists", block_id));
+            return Err(bad_request!("block {} already exists", block_id));
         }
 
         let txn_id = self.txn_id;
@@ -1219,7 +1220,7 @@ where
 {
     let i = name
         .rfind('.')
-        .ok_or_else(|| TCError::bad_request("invalid block name", name))?;
+        .ok_or_else(|| TCError::invalid_value(name, "a block name"))?;
 
     // make sure the name is valid unicode
     let name = &name[..i];
@@ -1227,7 +1228,7 @@ where
         .map_err(|cause| unexpected!("invalid block ID {}", name).consume(cause))?;
 
     name.parse()
-        .map_err(|cause| TCError::bad_request("invalid block name", cause))
+        .map_err(|cause| TCError::invalid_value(name, "a block name").consume(cause))
 }
 
 #[inline]

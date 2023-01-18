@@ -7,12 +7,12 @@ use async_hash::Hash;
 use async_trait::async_trait;
 use rand::Rng;
 
+use destream::de::Error;
 use destream::IntoStream;
 use sha2::digest::{Digest, Output};
+
 use tc_error::*;
 use tcgeneric::{Id, NetworkTime};
-
-const INVALID_ID: &str = "Invalid transaction ID";
 
 /// A zero-values [`TxnId`].
 pub const MIN_ID: TxnId = TxnId {
@@ -67,20 +67,26 @@ impl FromStr for TxnId {
     type Err = TCError;
 
     fn from_str(s: &str) -> TCResult<TxnId> {
-        let parts: Vec<&str> = s.split('-').collect();
-        if parts.len() == 2 {
-            let timestamp = parts[0]
-                .parse()
-                .map_err(|e| TCError::bad_request(INVALID_ID, e))?;
+        let i = s
+            .find('-')
+            .ok_or_else(|| TCError::invalid_value(s, "a transaction ID"))?;
 
-            let nonce = parts[1]
-                .parse()
-                .map_err(|e| TCError::bad_request(INVALID_ID, e))?;
-
-            Ok(TxnId { timestamp, nonce })
-        } else {
-            Err(TCError::bad_request(INVALID_ID, s))
+        if i == s.len() - 1 {
+            return Err(TCError::invalid_value(s, "a transaction ID"));
         }
+
+        let timestamp = &s[..i];
+        let nonce = &s[i + 1..];
+
+        let timestamp = timestamp
+            .parse()
+            .map_err(|cause| TCError::invalid_value(timestamp, "a timestamp").consume(cause))?;
+
+        let nonce = nonce
+            .parse()
+            .map_err(|cause| TCError::invalid_value(nonce, "a nonce").consume(cause))?;
+
+        Ok(TxnId { timestamp, nonce })
     }
 }
 

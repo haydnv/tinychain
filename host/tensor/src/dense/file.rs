@@ -631,7 +631,7 @@ where
 
         for i in 0..div_ceil(schema.shape.size(), PER_BLOCK as u64) {
             if !blocks.contains(i) {
-                return Err(TCError::bad_request("tensor is missing block", i));
+                return Err(unexpected!("tensor is missing block {}", i));
             }
         }
 
@@ -674,15 +674,17 @@ where
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         if self.schema.shape != backup.schema.shape {
-            return Err(TCError::bad_request(
-                "cannot restore a dense Tensor from a backup with a different shape",
+            return Err(bad_request!(
+                "cannot restore a dense Tensor with shape {} from a backup with a different shape {}",
+                self.shape(),
                 &backup.schema.shape,
             ));
         }
 
         if self.schema.dtype != backup.schema.dtype {
-            return Err(TCError::bad_request(
-                "cannot restore a dense Tensor from a backup with a different data type",
+            return Err(bad_request!(
+                "cannot restore a dense Tensor with data type {} from a backup with a different data type {}",
+                self.dtype(),
                 &backup.schema.dtype,
             ));
         }

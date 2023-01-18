@@ -1,3 +1,4 @@
+use destream::de::Error;
 use log::debug;
 use safecast::TryCastFrom;
 
@@ -69,7 +70,7 @@ impl<'a> Handler<'a> for LibraryHandler<'a> {
                     debug!("create new Library version {}", key);
 
                     let number = VersionNumber::try_cast_from(key, |v| {
-                        TCError::bad_request("invalid version number", v)
+                        TCError::invalid_value(v, "a version number")
                     })?;
 
                     let (link, version) = expect_version(value)?;
@@ -78,7 +79,7 @@ impl<'a> Handler<'a> for LibraryHandler<'a> {
                         let (host, mut path) = link.clone().into_inner();
 
                         let name = path.pop().ok_or_else(|| {
-                            TCError::bad_request("cluster link is missing a path", &link)
+                            bad_request!("cluster link {} is missing a path", &link)
                         })?;
 
                         let parent = (host, path).into();
@@ -152,7 +153,7 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
                 debug!("create new Library {} in {}", key, self.dir);
 
                 let name = PathSegment::try_cast_from(key, |v| {
-                    TCError::bad_request("invalid path segment for Library directory entry", v)
+                    TCError::invalid_value(v, "a path segment for a Library directory entry")
                 })?;
 
                 let (link, lib) = expect_version(value)?;
@@ -169,8 +170,8 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
                 let (version, classes) = extract_classes(lib)?;
 
                 if link.path().len() <= 1 {
-                    return Err(TCError::bad_request(
-                        "cannot create a new cluster at",
+                    return Err(bad_request!(
+                        "cannot create a new cluster at {}",
                         link.path(),
                     ));
                 }

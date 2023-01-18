@@ -108,7 +108,7 @@ impl crate::gateway::Client for Client {
         let txn = txn.subcontext_unique().await?;
         let view = value.into_view(txn).await?;
         let body = tbon::en::encode(view)
-            .map_err(|e| TCError::bad_request("unable to encode stream", e))?;
+            .map_err(|cause| bad_request!("unable to encode stream").consume(cause))?;
 
         let body = req
             .body(Body::wrap_stream(body.map_err(|cause| {
@@ -143,7 +143,7 @@ impl crate::gateway::Client for Client {
         let subcontext = txn.subcontext(label("_params").into()).await?;
         let params_view = params.clone().into_view(subcontext).await?;
         let body = tbon::en::encode(params_view)
-            .map_err(|e| TCError::bad_request("unable to encode stream", e))?;
+            .map_err(|cause| bad_request!("unable to encode stream").consume(cause))?;
 
         let body = req
             .body(Body::wrap_stream(body.map_err(|cause| {
@@ -159,11 +159,8 @@ impl crate::gateway::Client for Client {
 
         if response.status().is_success() {
             tbon::de::try_decode(txn, response.into_body())
-                .map_err(|e| {
-                    TCError::bad_request(
-                        format!("error decoding response from {}: {}", link, params),
-                        e,
-                    )
+                .map_err(|cause| {
+                    bad_gateway!("error decoding response from {}: {}", link, params).consume(cause)
                 })
                 .await
         } else {
@@ -204,7 +201,7 @@ fn build_url(link: &ToUrl<'_>, txn_id: &TxnId, key: &Value) -> TCResult<Url> {
 
     if key.is_some() {
         let key_json = serde_json::to_string(&key)
-            .map_err(|_| TCError::bad_request("unable to encode key", key))?;
+            .map_err(|cause| unexpected!("unable to encode key {}", key).consume(cause))?;
 
         url.query_pairs_mut().append_pair("key", &key_json);
     }

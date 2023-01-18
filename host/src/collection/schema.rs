@@ -2,6 +2,7 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use async_hash::Hash;
+use destream::de::Error;
 use destream::en;
 use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
@@ -106,11 +107,11 @@ impl CollectionSchema {
                 OpRef::Get((class, schema)) => {
                     let class = TCPathBuf::try_from(class)?;
                     let class = CollectionType::from_path(&class)
-                        .ok_or_else(|| TCError::bad_request("invalid Collection type", class))?;
+                        .ok_or_else(|| TCError::invalid_type(class, "a Collection class"))?;
 
                     fn expect_value(scalar: Scalar) -> TCResult<Value> {
                         Value::try_cast_from(scalar, |s| {
-                            TCError::bad_request("expected a Value for chain schema, not", s)
+                            TCError::invalid_type(s, "a Value for a Chain schema")
                         })
                     }
 
@@ -118,18 +119,16 @@ impl CollectionSchema {
                         CollectionType::BTree(_) => {
                             let schema = expect_value(schema)?;
 
-                            let schema = schema.try_cast_into(|s| {
-                                TCError::bad_request("invalid BTree schema", s)
-                            })?;
+                            let schema = schema
+                                .try_cast_into(|s| TCError::invalid_value(s, "a BTree schema"))?;
 
                             Ok(Self::BTree(schema))
                         }
                         CollectionType::Table(_) => {
                             let schema = expect_value(schema)?;
 
-                            let schema = schema.try_cast_into(|s| {
-                                TCError::bad_request("invalid Table schema", s)
-                            })?;
+                            let schema = schema
+                                .try_cast_into(|s| TCError::invalid_value(s, "a Table schema"))?;
 
                             Ok(Self::Table(schema))
                         }
@@ -137,9 +136,8 @@ impl CollectionSchema {
                         #[cfg(feature = "tensor")]
                         CollectionType::Tensor(tt) => {
                             let schema = expect_value(schema)?;
-                            let schema = schema.try_cast_into(|v| {
-                                TCError::bad_request("invalid Tensor schema", v)
-                            })?;
+                            let schema = schema
+                                .try_cast_into(|v| TCError::invalid_value(v, "a Tensor schema"))?;
 
                             match tt {
                                 TensorType::Dense => Ok(Self::Dense(schema)),
@@ -148,9 +146,9 @@ impl CollectionSchema {
                         }
                     }
                 }
-                other => Err(TCError::bad_request("invalid Collection schema", other)),
+                other => Err(TCError::invalid_value(other, "a Collection schema")),
             },
-            other => Err(TCError::bad_request("invalid Collection schema", other)),
+            other => Err(TCError::invalid_value(other, "a Collection schema")),
         }
     }
 }

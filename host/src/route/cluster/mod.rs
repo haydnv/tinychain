@@ -1,6 +1,7 @@
 use std::fmt;
 
 use bytes::Bytes;
+use destream::de::Error;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::*;
@@ -48,7 +49,7 @@ where
                 // TODO: remove this code and use the public key of the gateway instead
 
                 let key = TCPathBuf::try_cast_from(key, |v| {
-                    TCError::bad_request("invalid key specification", v)
+                    TCError::invalid_value(v, "a key specification")
                 })?;
 
                 if key == TCPathBuf::default() {
@@ -71,9 +72,8 @@ where
                 if key.is_none() {
                     // this is a notification of a new participant in the current transaction
 
-                    let participant = value.try_cast_into(|v| {
-                        TCError::bad_request("expected a participant Link but found", v)
-                    })?;
+                    let participant =
+                        value.try_cast_into(|v| TCError::invalid_value(v, "a participant Link"))?;
 
                     return self.cluster.mutate(&txn, participant).await;
                 }
@@ -82,7 +82,7 @@ where
 
                 let value = if InstanceClass::can_cast_from(&value) {
                     let class = InstanceClass::try_cast_from(value, |v| {
-                        TCError::bad_request("invalid class definition", v)
+                        TCError::invalid_type(v, "a Class")
                     })?;
 
                     let link = class.extends();
@@ -120,22 +120,19 @@ where
                 // TODO: authorize request using a scope
 
                 if !params.is_empty() {
-                    return Err(TCError::bad_request(
-                        "unrecognized commit parameters",
-                        params,
-                    ));
+                    return Err(bad_request!("unrecognized commit parameters {}", params));
                 }
 
                 if let Some(owner) = txn.owner() {
                     if owner.host() == Some(txn.host()) && owner.path() == self.cluster.path() {
-                        return Err(TCError::bad_request(
-                            "cluster received a commit message for itself",
+                        return Err(bad_request!(
+                            "{} received a commit message for itself",
                             self.cluster,
                         ));
                     }
                 } else {
-                    return Err(TCError::bad_request(
-                        "commit message for an ownerless transaction",
+                    return Err(bad_request!(
+                        "commit message for an ownerless transaction {}",
                         txn.id(),
                     ));
                 }
@@ -240,9 +237,8 @@ where
             Box::pin(async move {
                 key.expect_none()?;
 
-                let link = link.try_cast_into(|v| {
-                    TCError::bad_request("expected a Link to a Cluster, not", v)
-                })?;
+                let link =
+                    link.try_cast_into(|v| TCError::invalid_value(v, "a Link to a Cluster"))?;
 
                 self.cluster.add_replica(txn, link).await?;
 
@@ -298,7 +294,7 @@ where
         Some(Box::new(|txn, replicas| {
             Box::pin(async move {
                 let replicas = Tuple::<LinkHost>::try_cast_from(replicas, |v| {
-                    TCError::bad_request("expected a Link to a Cluster, not", v)
+                    TCError::invalid_value(v, "a Link to a Cluster")
                 })?;
 
                 self.cluster.remove_replicas(*txn.id(), &replicas).await
