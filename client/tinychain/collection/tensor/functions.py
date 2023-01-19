@@ -1,32 +1,9 @@
 from ...generic import gcs
 from ...scalar.number import Bool
-from ...scalar.ref import deref, is_literal, Post
-from ...uri import URI
+from ...scalar.ref import deref, is_literal
 
-from .base import NDArray, Tensor
+from .base import Tensor
 from .operator import Tile
-
-
-def einsum(format, tensors):
-    """
-    Return the Einstein summation of the given `tensors` according the the given `format` string.
-
-    Example: `einsum("ij,jk->ik", [a, b]) # multiply two matrices`
-
-    The tensor product is computed from left to right, so when using any `Sparse` tensors,
-    it's important to put the sparsest first in the list to avoid redundant broadcasting.
-    """
-
-    if not is_literal(format):
-        raise ValueError(f"einsum requires a literal format, not {format}")
-
-    for tensor in tensors:
-        if not isinstance(tensor, NDArray):
-            raise TypeError(f"einsum requires a tensor, not: {tensor}")
-
-    rtype = gcs(*[type(t) for t in tensors])
-    rtype = rtype if issubclass(rtype, Tensor) else Tensor
-    return rtype(form=Post(URI(Tensor, "einsum"), {"format": format, "tensors": tensors}))
 
 
 def split(tensor, num_or_size_splits, axis=0):
