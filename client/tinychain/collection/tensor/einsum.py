@@ -152,6 +152,4 @@ def einsum(f, tensors):
     dimensions = validate_args(f_inputs, tensors)
 
     op = outer_product(f_inputs, dimensions, tensors)
-    # assert is_literal(op.ndim), is_literal(op.shape)
-    # assert deref(op.shape) == tuple(dimensions.values())
     return contract(op, dimensions, f_output)
