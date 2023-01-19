@@ -38,7 +38,7 @@ impl<T> Map<T> {
 
     #[inline]
     /// Return an error if this [`Map`] is not empty.
-    pub fn expect_empty(&self) -> TCResult<()>
+    pub fn expect_empty(self) -> TCResult<()>
     where
         T: fmt::Display,
     {

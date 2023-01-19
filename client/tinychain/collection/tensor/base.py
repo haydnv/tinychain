@@ -34,8 +34,7 @@ class NDArray(Interface):
         return self.slice(bounds)
 
     def __matmul__(self, other):
-        from .functions import einsum
-        return einsum("...ij,...jk->ik", [self, other])
+        return self._post("matmul", {"r": other}, rtype=NDArray)
 
     def __setitem__(self, bounds, value):
         raise NotImplementedError("use Tensor.write instead")

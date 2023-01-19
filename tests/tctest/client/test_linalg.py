@@ -38,8 +38,8 @@ class LinearAlgebraTests(ClientTest):
         self.assertEqual(actual, expect_dense(x, tc.I32))
 
     def testMatmul(self):
-        l = np.random.random([2, 3, 4])
-        r = np.random.random([2, 4, 5])
+        l = np.random.random([3, 4])
+        r = np.random.random([4, 5])
 
         cxt = tc.Context()
         cxt.l = tc.tensor.Dense.load(l.shape, l.flatten().tolist(), tc.F32)

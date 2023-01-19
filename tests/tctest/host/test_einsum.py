@@ -20,6 +20,14 @@ class EinsumTests(HostTest):
         expected = expect_dense(np.arange(0, 6).reshape([2, 1, 3]))
         self.assertEqual(actual, expected)
 
+        cxt = tc.Context()
+        cxt.dense = tc.tensor.Dense.arange([2, 3], 0, 6)
+        cxt.result = cxt.dense.expand_dims(2)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = expect_dense(np.arange(0, 6).reshape([2, 3, 1]))
+        self.assertEqual(actual, expected)
+
     def testTranspose(self):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([3, 2], 0, 6)

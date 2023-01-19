@@ -20,7 +20,7 @@ name = "tinychain"
 path = "src/main.rs"
 
 [features]
-tensor = ["tc-math", "tc-tensor", "tc-transact/tensor"]
+tensor = ["tc-tensor", "tc-transact/tensor"]
 
 [dependencies]
 async-hash = "~0.3.1"
@@ -46,9 +46,8 @@ sha2 = "0.10"
 tbon = "~0.3.5"
 tc-btree = { path = "btree" }
 tc-error = { path = "error" }
-tc-math = { path = "math", optional = true}
 tc-tensor = { path = "tensor", optional = true }
-tc-transact = { path = "transact", features = ["tensor"] }
+tc-transact = { path = "transact" }
 tc-value = { path = "value" }
 tc-table = { path = "table" }
 tcgeneric = { path = "generic" }

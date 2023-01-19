@@ -936,6 +936,7 @@ where
 {
     pub fn new(source: B, axis: usize) -> TCResult<Self> {
         let rebase = transform::Expand::new(source.shape().clone(), axis)?;
+
         Ok(Self {
             source,
             rebase,
