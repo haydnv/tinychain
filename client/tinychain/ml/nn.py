@@ -178,7 +178,7 @@ class ConvLayer(Layer, Dynamic):
                 return f"Convolution({self.subject}, {self.args})"
 
             def forward(self):
-                return einsum("ij,jk->ik", [cxt.w_col, cxt.im2col_matrix_T])
+                return cxt.w_col @ cxt.im2col_matrix_T
 
             def backward(self, variable=None):
                 w_col = derivative_of(cxt.w_col, variable, keepdims=True)

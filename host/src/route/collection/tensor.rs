@@ -34,6 +34,7 @@ use super::{Handler, Route};
 
 const AXIS: Label = label("axis");
 const KEEPDIMS: Label = label("keepdims");
+const RIGHT: Label = label("r");
 const TENSOR: Label = label("tensor");
 const TENSORS: Label = label("tensors");
 
@@ -270,7 +271,7 @@ impl<'a> Handler<'a> for ConcatenateHandler {
                     0
                 };
 
-                if tensors[0].ndim() < axis {
+                if axis > tensors[0].ndim() {
                     return Err(bad_request!(
                         "axis {} is out of bounds for {}",
                         axis,
@@ -1078,7 +1079,7 @@ impl<'a> Handler<'a> for DualHandler {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
                 let l = self.tensor;
-                let r = params.remove(&label("r").into()).ok_or_else(|| {
+                let r = params.remove(&RIGHT.into()).ok_or_else(|| {
                     TCError::invalid_value(&params, "missing right-hand-side parameter r")
                 })?;
 
@@ -1158,7 +1159,7 @@ impl<'a> Handler<'a> for LogHandler {
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let r = params.or_default(&label("r").into())?;
+                let r = params.or_default(&RIGHT.into())?;
                 params.expect_empty()?;
 
                 let l = self.tensor;
@@ -1184,6 +1185,58 @@ impl<'a> Handler<'a> for LogHandler {
                 }?;
 
                 Ok(State::Collection(Collection::Tensor(log)))
+            })
+        }))
+    }
+}
+
+// TODO: delete this after implementing a custom Matrix type (separate from Tensor)
+struct MatMulHandler {
+    tensor: Tensor,
+}
+
+impl MatMulHandler {
+    fn new<T: Into<Tensor>>(tensor: T) -> Self {
+        Self {
+            tensor: tensor.into(),
+        }
+    }
+}
+
+impl<'a> Handler<'a> for MatMulHandler {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let right: Tensor = params.require(&RIGHT.into())?;
+                params.expect_empty()?;
+
+                if self.tensor.ndim() != 2 {
+                    return Err(TCError::invalid_value(self.tensor, "a matrix"));
+                }
+
+                if right.ndim() != 2 {
+                    return Err(TCError::invalid_value(right, "a matrix"));
+                }
+
+                if self.tensor.shape()[1] != right.shape()[0] {
+                    return Err(bad_request!(
+                        "invalid dimensions for matmul: {} @ {}",
+                        self.tensor.shape(),
+                        right.shape()
+                    ));
+                }
+
+                // ij,jk->ijk
+                let left = self.tensor.expand_dims(2)?;
+                let right = right.expand_dims(0)?;
+                let (left, right) = broadcast(left, right)?;
+                let op = left.mul(right)?;
+
+                // ijk -> uk
+                op.sum(1, false).map(State::from)
             })
         }))
     }
@@ -1829,6 +1882,7 @@ where
                 "div",
             ))),
             "log" => Some(Box::new(LogHandler::new(tensor))),
+            "matmul" => Some(Box::new(MatMulHandler::new(tensor))),
             "mul" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorMath::mul,
@@ -1966,19 +2020,17 @@ fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
 fn cast_axis(axis: Value, ndim: usize) -> TCResult<usize> {
     debug!("cast axis {} with ndim {}", axis, ndim);
 
-    let axis: Number = axis.try_cast_into(|v| TCError::invalid_value(v, "a Tensor axis"))?;
+    let axis = Number::try_cast_from(axis, |v| TCError::invalid_type(v, "a Tensor axis"))?;
 
-    if axis >= (ndim as u64).into() {
-        Err(bad_request!(
-            "axis {} is out of bounds for Tensor with {} dimensions",
-            axis,
-            ndim
-        ))
-    } else if axis >= 0.into() {
-        Ok(axis.cast_into())
-    } else {
-        Ok(ndim - usize::cast_from(axis.abs()))
+    match axis {
+        Number::UInt(axis) => Ok(axis.into()),
+        Number::Int(axis) if axis < 0.into() => {
+            Ok(Number::from(ndim as u64) - Number::Int(axis.abs()))
+        }
+        Number::Int(axis) => Ok(axis.into()),
+        other => Err(TCError::invalid_type(other, "a Tensor axis")),
     }
+    .map(|axis: Number| axis.cast_into())
 }
 
 fn cast_range(dim: u64, range: Range) -> TCResult<AxisBounds> {
