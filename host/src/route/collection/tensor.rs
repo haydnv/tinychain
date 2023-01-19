@@ -8,13 +8,11 @@ use safecast::*;
 
 use tc_btree::{Node, NodeId};
 use tc_error::*;
-use tc_math::*;
 use tc_tensor::*;
 use tc_transact::fs::{CopyFrom, Dir, Persist};
 use tc_transact::Transaction;
 use tc_value::{
-    Bound, FloatType, Number, NumberClass, NumberInstance, NumberType, Range, TCString, Value,
-    ValueType,
+    Bound, FloatType, Number, NumberClass, NumberInstance, NumberType, Range, Value, ValueType,
 };
 use tcgeneric::{label, Label, PathSegment, TCBoxTryFuture, Tuple};
 
@@ -553,26 +551,6 @@ impl<'a> Handler<'a> for LoadHandler {
                 } else {
                     Err(bad_request!("tensor elements must be a Tuple of Numbers or a Tuple of (Coord, Number) pairs, not {}", elements))
                 }
-            })
-        }))
-    }
-}
-
-struct EinsumHandler;
-
-impl<'a> Handler<'a> for EinsumHandler {
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, mut params| {
-            Box::pin(async move {
-                let format: TCString = params.require(&label("format").into())?;
-                let tensors: Vec<Tensor> = params.require(&TENSORS.into())?;
-
-                einsum(&format, tensors)
-                    .map(Collection::from)
-                    .map(State::from)
             })
         }))
     }
@@ -1939,7 +1917,6 @@ impl Route for Static {
             "sparse" => TensorType::Sparse.route(&path[1..]),
             "copy_from" if path.len() == 1 => Some(Box::new(CopyFromHandler)),
             "load" if path.len() == 1 => Some(Box::new(LoadHandler { class: None })),
-            "einsum" if path.len() == 1 => Some(Box::new(EinsumHandler)),
             "tile" if path.len() == 1 => Some(Box::new(TileHandler)),
             _ => None,
         }
