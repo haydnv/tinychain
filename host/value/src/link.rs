@@ -7,7 +7,7 @@ use std::iter;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
-use async_hash::Hash;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::Error;
 use destream::{de, en};
@@ -15,13 +15,11 @@ use number_general::Number;
 use safecast::{CastFrom, TryCastFrom};
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
-use sha2::digest::{Digest, Output};
 
-use crate::TCString;
 use tc_error::*;
 use tcgeneric::{Id, PathLabel, PathSegment, TCPathBuf};
 
-use super::Value;
+use super::{TCString, Value};
 
 /// The address portion of a [`Link`] (an IP address)
 #[derive(Debug, Hash, Eq, PartialEq)]

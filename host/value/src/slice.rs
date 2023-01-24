@@ -1,13 +1,12 @@
 use std::fmt;
 use std::ops;
 
-use async_hash::Hash;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use collate::Collate;
 use destream::{de, en};
 use futures::TryFutureExt;
 use safecast::{Match, TryCastFrom, TryCastInto};
-use sha2::digest::{Digest, Output};
 
 use tcgeneric::{label, Id, Label, Tuple};
 

@@ -102,7 +102,6 @@ pub struct Node {
     keys: Vec<NodeKey>,
     parent: Option<NodeId>,
     children: Vec<NodeId>,
-    rebalance: bool, // TODO: implement rebalancing to clear deleted values
 }
 
 impl Node {
@@ -112,7 +111,6 @@ impl Node {
             keys: vec![],
             parent,
             children: vec![],
-            rebalance: false,
         }
     }
 
@@ -142,12 +140,11 @@ impl de::FromStream for Node {
 
     async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
         de::FromStream::from_stream(cxt, decoder)
-            .map_ok(|(leaf, keys, parent, children, rebalance)| Self {
+            .map_ok(|(leaf, keys, parent, children)| Self {
                 leaf,
                 keys,
                 parent,
                 children,
-                rebalance,
             })
             .map_err(|e| de::Error::custom(format!("error decoding BTree node: {}", e)))
             .await
@@ -157,13 +154,7 @@ impl de::FromStream for Node {
 impl<'en> en::ToStream<'en> for Node {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         en::IntoStream::into_stream(
-            (
-                &self.leaf,
-                &self.keys,
-                &self.parent,
-                &self.children,
-                &self.rebalance,
-            ),
+            (&self.leaf, &self.keys, &self.parent, &self.children),
             encoder,
         )
     }
@@ -171,16 +162,7 @@ impl<'en> en::ToStream<'en> for Node {
 
 impl<'en> en::IntoStream<'en> for Node {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        en::IntoStream::into_stream(
-            (
-                self.leaf,
-                self.keys,
-                self.parent,
-                self.children,
-                self.rebalance,
-            ),
-            encoder,
-        )
+        en::IntoStream::into_stream((self.leaf, self.keys, self.parent, self.children), encoder)
     }
 }
 
@@ -267,12 +249,8 @@ where
                     node.keys[i].deleted = true;
                 }
 
-                node.rebalance = true;
-
                 Ok(())
             } else if r > l {
-                node.rebalance = true;
-
                 for i in l..r {
                     node.keys[i].deleted = true;
                 }

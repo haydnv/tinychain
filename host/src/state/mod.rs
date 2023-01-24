@@ -1314,10 +1314,6 @@ impl<'a> de::Visitor for StateVisitor {
         self.scalar.visit_string(s).map(State::Scalar)
     }
 
-    fn visit_byte_buf<E: de::Error>(self, buf: Vec<u8>) -> Result<Self::Value, E> {
-        self.scalar.visit_byte_buf(buf).map(State::Scalar)
-    }
-
     fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
         self.scalar.visit_unit().map(State::Scalar)
     }

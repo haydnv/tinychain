@@ -2,13 +2,12 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::str::FromStr;
 
-use async_hash::Hash;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::Error;
 use destream::{de, en};
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
-use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::Id;

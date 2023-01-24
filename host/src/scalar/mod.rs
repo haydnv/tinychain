@@ -14,7 +14,7 @@ use destream::en;
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use log::{debug, warn};
-use safecast::{as_type, AsType, Match, TryCastFrom, TryCastInto};
+use safecast::{as_type, Match, TryCastFrom, TryCastInto};
 use sha2::digest::Output;
 use sha2::Digest;
 
@@ -1121,10 +1121,6 @@ impl de::Visitor for ScalarVisitor {
 
     fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
         self.value.visit_string(value).map(Scalar::Value)
-    }
-
-    fn visit_byte_buf<E: de::Error>(self, buf: Vec<u8>) -> Result<Self::Value, E> {
-        self.value.visit_byte_buf(buf).map(Scalar::Value)
     }
 
     fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {

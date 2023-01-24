@@ -3,13 +3,12 @@
 use std::fmt;
 use std::str::FromStr;
 
-use async_hash::Hash;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use rand::Rng;
 
 use destream::de::Error;
 use destream::IntoStream;
-use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::{Id, NetworkTime};

@@ -7,7 +7,8 @@ use std::iter::FromIterator;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use async_hash::Hash;
+use async_hash::generic_array::GenericArray;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de;
@@ -19,8 +20,6 @@ use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, SerializeMap, Serializer};
-use sha2::digest::generic_array::GenericArray;
-use sha2::digest::{Digest, Output};
 use uuid::Uuid;
 
 use tc_error::*;
@@ -681,7 +680,7 @@ impl<'en> en::ToStream<'en> for Value {
         use en::EncodeMap;
 
         match self {
-            Self::Bytes(bytes) => encoder.encode_bytes(bytes),
+            Self::Bytes(bytes) => encoder.collect_bytes(bytes.iter().copied()),
             Self::Email(email) => {
                 let mut map = encoder.encode_map(Some(1))?;
                 map.encode_entry(self.class().path().to_string(), email.to_string())?;
@@ -718,7 +717,7 @@ impl<'en> en::IntoStream<'en> for Value {
         use en::EncodeMap;
 
         match self {
-            Self::Bytes(bytes) => encoder.encode_bytes(&bytes),
+            Self::Bytes(bytes) => encoder.encode_bytes(bytes),
             Self::Email(ref email) => {
                 let mut map = encoder.encode_map(Some(1))?;
                 map.encode_entry(self.class().path().to_string(), email.to_string())?;
@@ -1370,8 +1369,8 @@ impl ValueVisitor {
 
         return match class {
             VT::Bytes => {
-                let bytes = map.next_value(()).await?;
-                Ok(Value::Bytes(bytes))
+                let bytes: Vec<u8> = map.next_value(()).await?;
+                Ok(Value::Bytes(bytes.into()))
             }
             VT::Email => {
                 let email: String = map.next_value(()).await?;
@@ -1589,10 +1588,6 @@ impl destream::de::Visitor for ValueVisitor {
 
     fn visit_string<E: DestreamError>(self, s: String) -> Result<Self::Value, E> {
         Ok(Value::String(s.into()))
-    }
-
-    fn visit_byte_buf<E: DestreamError>(self, buf: Vec<u8>) -> Result<Self::Value, E> {
-        Ok(Value::Bytes(buf.into()))
     }
 
     fn visit_unit<E: DestreamError>(self) -> Result<Self::Value, E> {

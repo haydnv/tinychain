@@ -3,7 +3,7 @@ name = "tcgeneric"
 version = "0.6.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
-description = "Generic data types used internally by TinyChain. Unstable."
+description = "Generic data types used internally by TinyChain"
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/haydnv/tinychain.git"
@@ -11,12 +11,12 @@ repository = "https://github.com/haydnv/tinychain.git"
 categories = ["data-structures"]
 
 [dependencies]
-async-hash = "0.3"
+async-hash = "0.4"
 async-trait = "0.1"
-destream = "0.5"
+destream = "0.6"
 futures = "0.3"
 hex = "0.4"
-hr-id = { version = "~0.2.1", features=["all"] }
+hr-id = { version = "~0.3.1", features=["all"] }
 safecast = "0.1"
 serde = { version = "1.0", features = [] }
 sha2 = "0.10"

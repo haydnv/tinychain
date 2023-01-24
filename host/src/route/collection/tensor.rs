@@ -14,7 +14,7 @@ use tc_transact::Transaction;
 use tc_value::{
     Bound, FloatType, Number, NumberClass, NumberInstance, NumberType, Range, Value, ValueType,
 };
-use tcgeneric::{label, Label, PathSegment, TCBoxTryFuture, Tuple};
+use tcgeneric::{label, Id, Label, PathSegment, TCBoxTryFuture, Tuple};
 
 use crate::collection::{
     Collection, DenseTensor, DenseTensorFile, SparseTable, SparseTensor, Tensor,
@@ -1057,7 +1057,7 @@ impl<'a> Handler<'a> for DualHandler {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
                 let l = self.tensor;
-                let r = params.remove(&RIGHT.into()).ok_or_else(|| {
+                let r = params.remove::<Id>(&RIGHT.into()).ok_or_else(|| {
                     TCError::invalid_value(&params, "missing right-hand-side parameter r")
                 })?;
 
@@ -1292,7 +1292,7 @@ impl<'a> Handler<'a> for NormHandler {
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let axis = if params.contains_key(&AXIS.into()) {
+                let axis = if params.contains_key::<Id>(&AXIS.into()) {
                     let axis = params.require(&AXIS.into())?;
                     cast_axis(axis, self.tensor.ndim()).map(Some)?
                 } else {
@@ -1385,7 +1385,7 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let axis = if params.contains_key(&AXIS.into()) {
+                let axis = if params.contains_key::<Id>(&AXIS.into()) {
                     let axis = params.require(&AXIS.into())?;
                     cast_axis(axis, self.tensor.ndim()).map(Some)?
                 } else {

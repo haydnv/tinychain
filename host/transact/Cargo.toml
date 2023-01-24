@@ -15,11 +15,11 @@ categories = ["concurrency", "data-structures"]
 tensor = ["afarray"]
 
 [dependencies]
-afarray = { version = "~0.14.3", optional = true }
-async-hash = "0.3"
+afarray = { version = "0.15", optional = true }
+async-hash = "0.4"
 async-trait = "0.1"
 bytes = "1.0"
-destream = "0.5"
+destream = "0.6"
 futures = "0.3"
 hex = "0.4"
 log = { version = "0.4", features = [] }
@@ -27,7 +27,7 @@ num_cpus = "1.13"
 rand = "0.8"
 safecast = "~0.1.2"
 sha2 = "0.10"
-tbon = { version = "~0.3.4", features = ["tokio-io"] }
+tbon = { version = "0.4", features = ["tokio-io"] }
 tcgeneric = { path = "../generic" }
 tc-error = { path = "../error" }
 tc-value = { path = "../value" }

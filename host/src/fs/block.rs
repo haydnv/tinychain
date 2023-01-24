@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use destream::en;
 use futures::{TryFutureExt, TryStreamExt};
-use safecast::{as_type, AsType};
+use safecast::as_type;
 use tokio::fs;
 use tokio_util::io::StreamReader;
 
