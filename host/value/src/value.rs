@@ -7,20 +7,19 @@ use std::iter::FromIterator;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use async_hash::Hash;
+use async_hash::generic_array::GenericArray;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use bytes::Bytes;
-use destream::de;
 use destream::de::Error as DestreamError;
 use destream::de::Visitor as DestreamVisitor;
-use destream::en;
+use destream::{de, en};
 use email_address_parser::EmailAddress;
+use get_size::GetSize;
 use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, SerializeMap, Serializer};
-use sha2::digest::generic_array::GenericArray;
-use sha2::digest::{Digest, Output};
 use uuid::Uuid;
 
 use tc_error::*;
@@ -71,9 +70,11 @@ impl ValueType {
             Self::Bytes => match value {
                 Value::Bytes(bytes) => Ok(Value::Bytes(bytes)),
                 Value::Number(_) => Err(not_implemented!("cast into Bytes from Number")),
-                Value::String(s) => s
-                    .try_cast_into(|s| bad_request!("cannot cast into Bytes from {}", s))
-                    .map(Value::Bytes),
+                Value::String(s) => {
+                    Bytes::try_cast_from(s, |s| bad_request!("cannot cast into Bytes from {}", s))
+                        .map(Vec::from)
+                        .map(Value::Bytes)
+                }
                 other => Err(bad_request!("cannot cast into Bytes from {}", other)),
             },
             Self::Email => match value {
@@ -444,7 +445,7 @@ impl DestreamVisitor for ValueTypeVisitor {
 /// A generic value enum
 #[derive(Clone)]
 pub enum Value {
-    Bytes(Bytes),
+    Bytes(Vec<u8>),
     Email(EmailAddress),
     Link(Link),
     Id(Id),
@@ -453,6 +454,22 @@ pub enum Value {
     String(TCString),
     Tuple(Tuple<Self>),
     Version(Version),
+}
+
+impl GetSize for Value {
+    fn get_size(&self) -> usize {
+        match self {
+            Self::Bytes(bytes) => bytes.get_size(),
+            Self::Email(email) => email.get_local_part().get_size() + email.get_domain().get_size(),
+            Self::Link(link) => link.get_size(),
+            Self::Id(id) => id.get_size(),
+            Self::None => 0,
+            Self::Number(n) => n.get_size(),
+            Self::String(s) => s.get_size(),
+            Self::Tuple(t) => t.get_size(),
+            Self::Version(v) => v.get_size(),
+        }
+    }
 }
 
 impl Value {
@@ -681,7 +698,7 @@ impl<'en> en::ToStream<'en> for Value {
         use en::EncodeMap;
 
         match self {
-            Self::Bytes(bytes) => encoder.encode_bytes(bytes),
+            Self::Bytes(bytes) => encoder.collect_bytes(bytes.iter().copied()),
             Self::Email(email) => {
                 let mut map = encoder.encode_map(Some(1))?;
                 map.encode_entry(self.class().path().to_string(), email.to_string())?;
@@ -718,7 +735,7 @@ impl<'en> en::IntoStream<'en> for Value {
         use en::EncodeMap;
 
         match self {
-            Self::Bytes(bytes) => encoder.encode_bytes(&bytes),
+            Self::Bytes(bytes) => encoder.encode_bytes(bytes),
             Self::Email(ref email) => {
                 let mut map = encoder.encode_map(Some(1))?;
                 map.encode_entry(self.class().path().to_string(), email.to_string())?;
@@ -764,7 +781,7 @@ impl From<bool> for Value {
 
 impl From<Bytes> for Value {
     fn from(bytes: Bytes) -> Self {
-        Self::Bytes(bytes)
+        Self::Bytes(bytes.into())
     }
 }
 
@@ -913,7 +930,7 @@ impl TryCastFrom<Value> for Bytes {
 
     fn opt_cast_from(value: Value) -> Option<Bytes> {
         match value {
-            Value::Bytes(bytes) => Some(bytes),
+            Value::Bytes(bytes) => Some(bytes.into()),
             Value::Tuple(tuple) => Vec::<u8>::opt_cast_from(tuple).map(Bytes::from),
             Value::String(s) => Self::opt_cast_from(s),
             Value::None => Some(Bytes::new()),
@@ -1306,7 +1323,6 @@ impl ValueVisitor {
             VT::Bytes => {
                 let encoded = map.next_value::<&str>()?;
                 base64::decode(encoded)
-                    .map(Bytes::from)
                     .map(Value::Bytes)
                     .map_err(serde::de::Error::custom)
             }
@@ -1370,8 +1386,8 @@ impl ValueVisitor {
 
         return match class {
             VT::Bytes => {
-                let bytes = map.next_value(()).await?;
-                Ok(Value::Bytes(bytes))
+                let bytes: Vec<u8> = map.next_value(()).await?;
+                Ok(Value::Bytes(bytes.into()))
             }
             VT::Email => {
                 let email: String = map.next_value(()).await?;
@@ -1543,6 +1559,25 @@ impl destream::de::Visitor for ValueVisitor {
         EXPECTING
     }
 
+    async fn visit_array_u8<A: de::ArrayAccess<u8>>(
+        self,
+        mut array: A,
+    ) -> Result<Self::Value, A::Error> {
+        let mut bytes = Vec::new();
+        let mut buf = [0u8; 4_096];
+
+        loop {
+            let read = array.buffer(&mut buf).await?;
+            if read == 0 {
+                break;
+            } else {
+                bytes.extend_from_slice(&buf[..read]);
+            }
+        }
+
+        Ok(Value::Bytes(bytes))
+    }
+
     fn visit_bool<E: DestreamError>(self, b: bool) -> Result<Self::Value, E> {
         self.visit_number(b)
     }
@@ -1589,10 +1624,6 @@ impl destream::de::Visitor for ValueVisitor {
 
     fn visit_string<E: DestreamError>(self, s: String) -> Result<Self::Value, E> {
         Ok(Value::String(s.into()))
-    }
-
-    fn visit_byte_buf<E: DestreamError>(self, buf: Vec<u8>) -> Result<Self::Value, E> {
-        Ok(Value::Bytes(buf.into()))
     }
 
     fn visit_unit<E: DestreamError>(self) -> Result<Self::Value, E> {

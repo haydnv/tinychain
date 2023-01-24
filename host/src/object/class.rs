@@ -3,12 +3,12 @@
 use std::fmt;
 use std::ops::Deref;
 
-use async_hash::Hash;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
+use get_size::GetSize;
+use get_size_derive::*;
 use safecast::{CastFrom, TryCastFrom};
-use sha2::digest::Output;
-use sha2::Digest;
 use tc_transact::fs::BlockData;
 
 use tc_value::{Link, Value};
@@ -22,7 +22,7 @@ use super::ObjectType;
 const PATH: PathLabel = path_label(&["state", "class"]);
 
 /// A user-defined class.
-#[derive(Clone, Default, Eq, PartialEq)]
+#[derive(Clone, Default, Eq, PartialEq, GetSize)]
 pub struct InstanceClass {
     extends: Link,
     proto: Map<Scalar>,

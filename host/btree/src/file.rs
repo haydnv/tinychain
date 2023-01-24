@@ -17,6 +17,8 @@ use destream::{de, en};
 use futures::future::{self, Future, TryFutureExt};
 use futures::join;
 use futures::stream::{self, FuturesOrdered, FuturesUnordered, TryStreamExt};
+use get_size::GetSize;
+use get_size_derive::*;
 use log::{debug, trace};
 use uuid::Uuid;
 
@@ -35,10 +37,10 @@ type Selection<'a> = FuturesOrdered<
     Pin<Box<dyn Future<Output = TCResult<TCBoxTryStream<'a, Key>>> + Send + Unpin + 'a>>,
 >;
 
-const DEFAULT_BLOCK_SIZE: usize = 4_000;
+const DEFAULT_BLOCK_SIZE: usize = 4_096;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 struct NodeKey {
     deleted: bool,
     value: Vec<Value>,
@@ -102,7 +104,15 @@ pub struct Node {
     keys: Vec<NodeKey>,
     parent: Option<NodeId>,
     children: Vec<NodeId>,
-    rebalance: bool, // TODO: implement rebalancing to clear deleted values
+}
+
+impl GetSize for Node {
+    fn get_size(&self) -> usize {
+        const UUID_SIZE: usize = 16;
+        let parent_size = self.parent.map(|_| UUID_SIZE).unwrap_or_default();
+        let children_size = self.children.len() * UUID_SIZE;
+        self.leaf.get_size() + self.keys.get_size() + parent_size + children_size
+    }
 }
 
 impl Node {
@@ -112,7 +122,6 @@ impl Node {
             keys: vec![],
             parent,
             children: vec![],
-            rebalance: false,
         }
     }
 
@@ -142,12 +151,11 @@ impl de::FromStream for Node {
 
     async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
         de::FromStream::from_stream(cxt, decoder)
-            .map_ok(|(leaf, keys, parent, children, rebalance)| Self {
+            .map_ok(|(leaf, keys, parent, children)| Self {
                 leaf,
                 keys,
                 parent,
                 children,
-                rebalance,
             })
             .map_err(|e| de::Error::custom(format!("error decoding BTree node: {}", e)))
             .await
@@ -157,13 +165,7 @@ impl de::FromStream for Node {
 impl<'en> en::ToStream<'en> for Node {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         en::IntoStream::into_stream(
-            (
-                &self.leaf,
-                &self.keys,
-                &self.parent,
-                &self.children,
-                &self.rebalance,
-            ),
+            (&self.leaf, &self.keys, &self.parent, &self.children),
             encoder,
         )
     }
@@ -171,16 +173,7 @@ impl<'en> en::ToStream<'en> for Node {
 
 impl<'en> en::IntoStream<'en> for Node {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        en::IntoStream::into_stream(
-            (
-                self.leaf,
-                self.keys,
-                self.parent,
-                self.children,
-                self.rebalance,
-            ),
-            encoder,
-        )
+        en::IntoStream::into_stream((self.leaf, self.keys, self.parent, self.children), encoder)
     }
 }
 
@@ -267,12 +260,8 @@ where
                     node.keys[i].deleted = true;
                 }
 
-                node.rebalance = true;
-
                 Ok(())
             } else if r > l {
-                node.rebalance = true;
-
                 for i in l..r {
                     node.keys[i].deleted = true;
                 }
@@ -531,9 +520,7 @@ where
         );
 
         let new_node = Node::new(child.leaf, Some(node_id));
-        let (new_node_id, mut new_node) = file
-            .create_block_unique(new_node, DEFAULT_BLOCK_SIZE)
-            .await?;
+        let (new_node_id, mut new_node) = file.create_block_unique(new_node).await?;
 
         debug!("BTree::split_child created new node {}", new_node_id);
 
@@ -631,7 +618,7 @@ where
             file.truncate().await?;
 
             let node = Node::new(true, None);
-            let (new_root_id, _) = file.create_block_unique(node, DEFAULT_BLOCK_SIZE).await?;
+            let (new_root_id, _) = file.create_block_unique(node).await?;
             trace!("created new root block with ID {}", new_root_id);
             assert!(file.contains(&new_root_id));
             *root_id = new_root_id;
@@ -692,9 +679,7 @@ where
             let mut new_root = Node::new(false, None);
             new_root.children.push(old_root_id.clone());
 
-            let (new_root_id, new_root) = file
-                .create_block_unique(new_root, DEFAULT_BLOCK_SIZE)
-                .await?;
+            let (new_root_id, new_root) = file.create_block_unique(new_root).await?;
 
             trace!("created new root block with ID {}", new_root_id);
             assert!(file.contains(&new_root_id));
@@ -776,7 +761,7 @@ where
 
         let root: NodeId = Uuid::new_v4();
         let node = Node::new(true, None);
-        file.try_create_block(root.clone(), node, DEFAULT_BLOCK_SIZE)?;
+        file.try_create_block(root.clone(), node)?;
 
         assert!(file.contains(&root));
         trace!("created new BTreeFile with root ID {}", root);
@@ -896,8 +881,10 @@ fn validate_schema(schema: &RowSchema) -> TCResult<usize> {
             ));
         }
     }
+
     // each individual column requires 1-2 bytes of type data
     key_size += schema.len() * 2;
+
     // the "leaf" and "deleted" booleans each add two bytes to a key as-stored
     key_size += 4;
 

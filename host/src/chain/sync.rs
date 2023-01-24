@@ -8,6 +8,7 @@ use destream::{de, FromStream};
 use freqfs::{FileLock, FileWriteGuard};
 use futures::future::TryFutureExt;
 use futures::try_join;
+use get_size::GetSize;
 use log::{debug, trace};
 use safecast::{TryCastFrom, TryCastInto};
 use sha2::digest::Output;
@@ -64,8 +65,7 @@ impl<T> SyncChain<T> {
             }
         }
 
-        try_join!(self.pending.sync(false), self.committed.sync(false))
-            .expect("sync SyncChain blocks");
+        try_join!(self.pending.sync(), self.committed.sync()).expect("sync SyncChain blocks");
     }
 }
 
@@ -170,7 +170,7 @@ where
             trace!("mutations are out of the write-ahead log");
         }
 
-        self.committed.sync(false).await.expect("sync commit block");
+        self.committed.sync().await.expect("sync commit block");
 
         guard
     }
@@ -187,7 +187,7 @@ where
             pending.mutations.remove(txn_id);
         }
 
-        self.pending.sync(false).await.expect("sync pending block");
+        self.pending.sync().await.expect("sync pending block");
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -198,7 +198,7 @@ where
             pending.mutations.remove(txn_id);
         }
 
-        self.pending.sync(false).await.expect("sync pending block");
+        self.pending.sync().await.expect("sync pending block");
         self.subject.finalize(txn_id).await
     }
 }
@@ -229,13 +229,15 @@ where
             .map_err(fs::io_err)?;
 
         let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
+        let size_hint = block.get_size();
         let pending = blocks_dir
-            .create_file(PENDING.to_string(), block, Some(0))
+            .create_file(PENDING.to_string(), block, size_hint)
             .map_err(fs::io_err)?;
 
         let block = ChainBlock::new(null_hash().to_vec());
+        let size_hint = block.get_size();
         let committed = blocks_dir
-            .create_file(COMMITTED.to_string(), block, Some(0))
+            .create_file(COMMITTED.to_string(), block, size_hint)
             .map_err(fs::io_err)?;
 
         Ok(Self {
@@ -268,9 +270,9 @@ where
             file
         } else {
             let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
-
+            let size_hint = block.get_size();
             blocks_dir
-                .create_file(PENDING.to_string(), block, Some(0))
+                .create_file(PENDING.to_string(), block, size_hint)
                 .map_err(fs::io_err)?
         };
 
@@ -278,8 +280,9 @@ where
             file
         } else {
             let block = ChainBlock::new(null_hash().to_vec());
+            let size_hint = block.get_size();
             blocks_dir
-                .create_file(COMMITTED.to_string(), block, Some(0))
+                .create_file(COMMITTED.to_string(), block, size_hint)
                 .map_err(fs::io_err)?
         };
 
@@ -310,7 +313,7 @@ impl<T: Route + fmt::Display + Send + Sync> Recover for SyncChain<T> {
             committed.mutations.clear()
         }
 
-        self.committed.sync(false).map_err(fs::io_err).await
+        self.committed.sync().map_err(fs::io_err).await
     }
 }
 
@@ -357,20 +360,16 @@ where
         };
 
         let null_hash = null_hash();
+        let block = ChainBlock::new(null_hash.to_vec());
+        let size_hint = block.get_size();
         let committed = blocks_dir
-            .create_file(
-                COMMITTED.to_string(),
-                ChainBlock::new(null_hash.to_vec()),
-                Some(null_hash.len()),
-            )
+            .create_file(COMMITTED.to_string(), block, size_hint)
             .map_err(de::Error::custom)?;
 
+        let block = ChainBlock::with_txn(null_hash.to_vec(), *txn.id());
+        let size_hint = block.get_size();
         let pending = blocks_dir
-            .create_file(
-                PENDING.to_string(),
-                ChainBlock::with_txn(null_hash.to_vec(), *txn.id()),
-                Some(null_hash.len()),
-            )
+            .create_file(PENDING.to_string(), block, size_hint)
             .map_err(de::Error::custom)?;
 
         Ok(Self {

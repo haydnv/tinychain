@@ -8,6 +8,8 @@ use std::ops::{Deref, DerefMut};
 use async_trait::async_trait;
 use destream::de::{Decoder, Error, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
+use get_size::GetSize;
+use get_size_derive::*;
 use safecast::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -16,7 +18,7 @@ use tc_error::*;
 use super::{Id, Tuple};
 
 /// A generic map whose keys are [`Id`]s, based on [`BTreeMap`]
-#[derive(Clone)]
+#[derive(Clone, GetSize)]
 pub struct Map<T> {
     inner: BTreeMap<Id, T>,
 }

@@ -126,6 +126,8 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log_level))
         .init();
 
+    let gateway_config = config.gateway();
+
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
         .enable_time()
@@ -133,7 +135,6 @@ fn main() {
         .build()
         .expect("tokio runtime");
 
-    let gateway_config = config.gateway();
     let builder = runtime
         .block_on(Builder::load(
             config.cache_size,

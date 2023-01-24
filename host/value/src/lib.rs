@@ -4,7 +4,6 @@
 
 use std::cmp::Ordering;
 
-use bytes::Bytes;
 use collate::{Collate, Collator};
 pub use number_general::NumberCollator;
 
@@ -25,7 +24,7 @@ mod version;
 /// [`Collate`] support for [`Value`]
 #[derive(Default, Clone)]
 pub struct ValueCollator {
-    bytes: Collator<Bytes>,
+    bytes: Collator<Vec<u8>>,
     link: Collator<Link>,
     number: NumberCollator,
     string: StringCollator,

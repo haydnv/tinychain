@@ -11,6 +11,8 @@ use async_trait::async_trait;
 use destream::de::{self, Decoder, Error, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use futures::{try_join, TryFutureExt};
+use get_size::GetSize;
+use get_size_derive::*;
 use log::debug;
 use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
 use sha2::digest::{Digest, Output};
@@ -77,7 +79,7 @@ impl fmt::Display for OpRefType {
 }
 
 /// The subject of an op.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 pub enum Subject {
     Link(Link),
     Ref(IdRef, TCPathBuf),
@@ -316,7 +318,7 @@ pub type PostRef = (Subject, Map<Scalar>);
 pub type DeleteRef = (Subject, Scalar);
 
 /// A reference to an op.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 pub enum OpRef {
     Get(GetRef),
     Put(PutRef),

@@ -8,6 +8,8 @@ use async_trait::async_trait;
 use destream::de::Error;
 use destream::{de, en};
 use futures::try_join;
+use get_size::GetSize;
+use get_size_derive::*;
 use log::{debug, warn};
 use safecast::{Match, TryCastFrom, TryCastInto};
 use sha2::digest::{Digest, Output};
@@ -24,7 +26,7 @@ use crate::txn::Txn;
 use super::Refer;
 
 /// A while loop.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 pub struct While {
     cond: Scalar,
     closure: Scalar,

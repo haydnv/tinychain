@@ -46,7 +46,7 @@ impl Closure {
     /// Replace references to `$self` with the given `path`.
     pub fn dereference_self(self, path: &TCPathBuf) -> Self {
         let mut context = self.context;
-        context.remove(&SELF.into());
+        context.remove::<Id>(&SELF.into());
 
         let op = self.op.dereference_self(path);
 
@@ -84,7 +84,7 @@ impl Closure {
         };
 
         let mut context = self.context;
-        let subject = context.remove(&SELF.into());
+        let subject = context.remove::<Id>(&SELF.into());
 
         debug!("call Closure with state {} and args {}", context, args);
 

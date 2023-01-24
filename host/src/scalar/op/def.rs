@@ -8,6 +8,8 @@ use async_hash::Hash;
 use async_trait::async_trait;
 use destream::de::{Decoder, Error, FromStream, MapAccess, Visitor};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
+use get_size::GetSize;
+use get_size_derive::*;
 use log::debug;
 use sha2::digest::{Digest, Output};
 
@@ -89,7 +91,7 @@ pub type PostOp = Vec<(Id, Scalar)>;
 pub type DeleteOp = (Id, Vec<(Id, Scalar)>);
 
 /// A user-defined operation.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 pub enum OpDef {
     Get(GetOp),
     Put(PutOp),

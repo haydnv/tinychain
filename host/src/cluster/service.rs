@@ -297,7 +297,7 @@ impl DirItem for Service {
         )?;
 
         schemata
-            .create_block(number.clone(), schema.clone().into(), 0)
+            .create_block(number.clone(), schema.clone().into())
             .await?;
 
         let store = dir.create_store(number.clone().into());

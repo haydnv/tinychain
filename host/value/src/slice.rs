@@ -1,13 +1,14 @@
 use std::fmt;
 use std::ops;
 
-use async_hash::Hash;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use collate::Collate;
 use destream::{de, en};
 use futures::TryFutureExt;
+use get_size::GetSize;
+use get_size_derive::*;
 use safecast::{Match, TryCastFrom, TryCastInto};
-use sha2::digest::{Digest, Output};
 
 use tcgeneric::{label, Id, Label, Tuple};
 
@@ -20,7 +21,7 @@ pub const IN: Label = label("in");
 pub const EX: Label = label("ex");
 
 /// An optional inclusive or exclusive bound
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 pub enum Bound {
     In(Value),
     Ex(Value),
@@ -122,7 +123,7 @@ impl fmt::Display for Bound {
 }
 
 /// A range comprising a start and end [`Bound`]
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 pub struct Range {
     pub start: Bound,
     pub end: Bound,

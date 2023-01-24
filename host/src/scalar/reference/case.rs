@@ -6,6 +6,8 @@ use std::ops::Deref;
 
 use async_trait::async_trait;
 use destream::{de, en};
+use get_size::GetSize;
+use get_size_derive::*;
 use safecast::{Match, TryCastFrom};
 use sha2::digest::{Digest, Output};
 
@@ -21,7 +23,7 @@ use super::{Refer, TCRef};
 use crate::generic::{PathSegment, TCPathBuf};
 
 /// A switch-case flow control
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 pub struct Case {
     cond: TCRef,
     switch: Tuple<Scalar>,

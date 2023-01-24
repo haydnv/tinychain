@@ -9,6 +9,7 @@ use bytes::Bytes;
 use collate::{Collate, Collator};
 use destream::{de, en};
 use futures::TryFutureExt;
+use get_size::GetSize;
 use handlebars::Handlebars;
 use safecast::TryCastFrom;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -22,6 +23,12 @@ use super::{Link, Number};
 /// A TinyChain String
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct TCString(String);
+
+impl GetSize for TCString {
+    fn get_size(&self) -> usize {
+        self.0.get_size()
+    }
+}
 
 impl TCString {
     /// Render this string as a [`Handlebars`] template with the given `data`.

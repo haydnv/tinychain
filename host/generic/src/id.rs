@@ -10,6 +10,8 @@ use async_hash::Hash;
 use async_trait::async_trait;
 use destream::de::{self, Decoder, Error, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
+use get_size::GetSize;
+use get_size_derive::*;
 use safecast::TryCastFrom;
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
@@ -69,7 +71,7 @@ impl From<PathLabel> for TCPathBuf {
 }
 
 /// A TinyChain path.
-#[derive(Clone, Debug, Default, Hash, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Hash, Eq, PartialEq, GetSize)]
 pub struct TCPathBuf {
     segments: Vec<PathSegment>,
 }

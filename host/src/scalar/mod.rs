@@ -9,12 +9,14 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use destream::de::{self, Error};
-use destream::en;
+use destream::de::Error;
+use destream::{de, en};
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
+use get_size::GetSize;
+use get_size_derive::*;
 use log::{debug, warn};
-use safecast::{as_type, AsType, Match, TryCastFrom, TryCastInto};
+use safecast::{as_type, Match, TryCastFrom, TryCastInto};
 use sha2::digest::Output;
 use sha2::Digest;
 
@@ -126,6 +128,12 @@ impl fmt::Display for ScalarType {
 #[derive(Clone, Eq, PartialEq)]
 pub struct ClusterRef(TCPathBuf);
 
+impl GetSize for ClusterRef {
+    fn get_size(&self) -> usize {
+        self.0.get_size()
+    }
+}
+
 impl ClusterRef {
     /// Consume this reference and return its `TCPathBuf`
     pub fn into_path(self) -> TCPathBuf {
@@ -163,7 +171,7 @@ impl fmt::Display for ClusterRef {
 }
 
 /// A scalar value, i.e. an immutable state always held in main memory and never split into blocks.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 pub enum Scalar {
     Cluster(ClusterRef),
     Map(Map<Self>),
@@ -1075,6 +1083,13 @@ impl de::Visitor for ScalarVisitor {
         "a Scalar, e.g. \"foo\" or 123 or {\"$ref: [\"id\", \"$state\"]\"}"
     }
 
+    async fn visit_array_u8<A: de::ArrayAccess<u8>>(
+        self,
+        array: A,
+    ) -> Result<Self::Value, A::Error> {
+        self.value.visit_array_u8(array).map_ok(Scalar::Value).await
+    }
+
     fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
         self.value.visit_bool(value).map(Scalar::Value)
     }
@@ -1121,10 +1136,6 @@ impl de::Visitor for ScalarVisitor {
 
     fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
         self.value.visit_string(value).map(Scalar::Value)
-    }
-
-    fn visit_byte_buf<E: de::Error>(self, buf: Vec<u8>) -> Result<Self::Value, E> {
-        self.value.visit_byte_buf(buf).map(Scalar::Value)
     }
 
     fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {

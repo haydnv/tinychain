@@ -3,13 +3,14 @@
 use std::fmt;
 use std::str::FromStr;
 
-use async_hash::Hash;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
+use get_size::GetSize;
+use get_size_derive::*;
 use rand::Rng;
 
 use destream::de::Error;
 use destream::IntoStream;
-use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::{Id, NetworkTime};
@@ -21,7 +22,7 @@ pub const MIN_ID: TxnId = TxnId {
 };
 
 /// The unique ID of a transaction, used for identity and ordering.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, GetSize)]
 pub struct TxnId {
     timestamp: u64, // nanoseconds since Unix epoch
     nonce: u16,

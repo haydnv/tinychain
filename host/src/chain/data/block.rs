@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
 use futures::{future, TryFutureExt, TryStreamExt};
+use get_size::GetSize;
 use log::debug;
 use sha2::digest::{Digest, Output};
 use sha2::Sha256;
@@ -109,6 +110,18 @@ impl de::Visitor for MutationVisitor {
 pub struct ChainBlock {
     last_hash: Bytes,
     pub mutations: BTreeMap<TxnId, Vec<Mutation>>,
+}
+
+impl GetSize for ChainBlock {
+    fn get_size(&self) -> usize {
+        let size = self
+            .mutations
+            .iter()
+            .map(|txn| txn.get_size())
+            .sum::<usize>();
+
+        self.last_hash.len() + size
+    }
 }
 
 impl ChainBlock {

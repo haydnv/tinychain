@@ -2,10 +2,10 @@
 //!
 //! This library is part of TinyChain: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
 
+use async_hash::Output;
 use async_trait::async_trait;
 use destream::en;
-use sha2::digest::Output;
-use sha2::Sha256;
+use sha2::Sha256; // TODO: should this be exported by the async_hash crate?
 
 use tc_error::*;
 use tcgeneric::Id;
