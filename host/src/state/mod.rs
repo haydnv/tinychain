@@ -9,6 +9,7 @@ use async_hash::Hash;
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de::{self, Error};
+use destream::ArrayAccess;
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use log::debug;
@@ -1258,12 +1259,20 @@ impl StateVisitor {
     }
 }
 
+// TODO: guard against a DoS attack using an infinite request stream
 #[async_trait]
 impl<'a> de::Visitor for StateVisitor {
     type Value = State;
 
     fn expecting() -> &'static str {
         "a State, e.g. 1 or [2] or \"three\" or {\"/state/scalar/value/number/complex\": [3.14, -1.414]"
+    }
+
+    async fn visit_array_u8<A: ArrayAccess<u8>>(self, array: A) -> Result<Self::Value, A::Error> {
+        self.scalar
+            .visit_array_u8(array)
+            .map_ok(State::Scalar)
+            .await
     }
 
     fn visit_bool<E: de::Error>(self, b: bool) -> Result<Self::Value, E> {

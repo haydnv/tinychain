@@ -28,9 +28,9 @@ class Docker(tc.host.Local.Process):
         if "log_level" not in flags:
             flags["log_level"] = "debug"
 
-        self.client = docker.from_env()
-        self.container = None
         self._flags = flags
+        self.container = None
+        self.client = docker.from_env()
 
     def start(self, wait_time):
         """Build and run a Docker image from the local repository."""

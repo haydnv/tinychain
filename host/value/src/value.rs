@@ -11,10 +11,9 @@ use async_hash::generic_array::GenericArray;
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use bytes::Bytes;
-use destream::de;
 use destream::de::Error as DestreamError;
 use destream::de::Visitor as DestreamVisitor;
-use destream::en;
+use destream::{de, en};
 use email_address_parser::EmailAddress;
 use get_size::GetSize;
 use log::debug;
@@ -1558,6 +1557,25 @@ impl destream::de::Visitor for ValueVisitor {
 
     fn expecting() -> &'static str {
         EXPECTING
+    }
+
+    async fn visit_array_u8<A: de::ArrayAccess<u8>>(
+        self,
+        mut array: A,
+    ) -> Result<Self::Value, A::Error> {
+        let mut bytes = Vec::new();
+        let mut buf = [0u8; 4_096];
+
+        loop {
+            let read = array.buffer(&mut buf).await?;
+            if read == 0 {
+                break;
+            } else {
+                bytes.extend_from_slice(&buf[..read]);
+            }
+        }
+
+        Ok(Value::Bytes(bytes))
     }
 
     fn visit_bool<E: DestreamError>(self, b: bool) -> Result<Self::Value, E> {

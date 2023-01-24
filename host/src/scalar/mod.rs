@@ -9,8 +9,8 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use destream::de::{self, Error};
-use destream::en;
+use destream::de::Error;
+use destream::{de, en};
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use get_size::GetSize;
@@ -1081,6 +1081,10 @@ impl de::Visitor for ScalarVisitor {
 
     fn expecting() -> &'static str {
         "a Scalar, e.g. \"foo\" or 123 or {\"$ref: [\"id\", \"$state\"]\"}"
+    }
+
+    async fn visit_array_u8<A: de::ArrayAccess<u8>>(self, array: A) -> Result<Self::Value, A::Error> {
+        self.value.visit_array_u8(array).map_ok(Scalar::Value).await
     }
 
     fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
