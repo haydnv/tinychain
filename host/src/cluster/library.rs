@@ -172,7 +172,7 @@ impl DirItem for Library {
         } else {
             info!("create new library version {}", number);
             let version = Version::from(validate(schema)?);
-            file.create_block(number, version.clone(), 0)
+            file.create_block(number, version.clone())
                 .map_ok(|_| ())
                 .await?;
 

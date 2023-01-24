@@ -1083,7 +1083,10 @@ impl de::Visitor for ScalarVisitor {
         "a Scalar, e.g. \"foo\" or 123 or {\"$ref: [\"id\", \"$state\"]\"}"
     }
 
-    async fn visit_array_u8<A: de::ArrayAccess<u8>>(self, array: A) -> Result<Self::Value, A::Error> {
+    async fn visit_array_u8<A: de::ArrayAccess<u8>>(
+        self,
+        array: A,
+    ) -> Result<Self::Value, A::Error> {
         self.value.visit_array_u8(array).map_ok(Scalar::Value).await
     }
 

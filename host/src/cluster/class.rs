@@ -126,7 +126,7 @@ impl DirItem for Class {
         let mut blocks = file.write(txn_id).await?;
 
         for (name, class) in &schema {
-            blocks.create_block(name.clone(), class.clone(), 0).await?;
+            blocks.create_block(name.clone(), class.clone()).await?;
         }
 
         Ok(schema)

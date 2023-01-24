@@ -26,9 +26,6 @@ use crate::{coord_bounds, transform, Bounds, Coord, FloatType, Schema, Shape, Te
 use super::access::BlockListTranspose;
 use super::{array_err, div_ceil, DenseAccess, DenseAccessor, DenseWrite, MEBIBYTE, PER_BLOCK};
 
-/// The size of a dense tensor block on disk, in bytes (1 mebibyte + 5 bytes overhead).
-const BLOCK_SIZE: usize = MEBIBYTE + 5;
-
 /// A wrapper around a `DenseTensor` [`File`]
 #[derive(Clone)]
 pub struct BlockListFile<FD, FS, D, T> {
@@ -117,15 +114,11 @@ where
         let mut blocks = (0..num_blocks).map(move |id| (id, generator(PER_BLOCK)));
 
         while let Some((id, block)) = blocks.next() {
-            contents.try_create_block(id, block, PER_BLOCK * dtype.size())?;
+            contents.try_create_block(id, block)?;
         }
 
         if trailing_len > 0 {
-            contents.try_create_block(
-                num_blocks,
-                generator(trailing_len),
-                trailing_len * dtype.size(),
-            )?;
+            contents.try_create_block(num_blocks, generator(trailing_len))?;
         }
 
         Ok(Self::new(file, (shape, dtype).into()))
@@ -141,15 +134,13 @@ where
     ) -> TCResult<Self> {
         let mut file_lock = file.write(txn_id).await?;
 
-        let bytes_per_element = dtype.size();
         let mut i = 0u64;
         let mut size = 0u64;
+
         // TODO: can this be parallelized?
         while let Some(block) = blocks.try_next().await? {
             let len = block.len();
-            file_lock
-                .create_block(i.into(), block, len * bytes_per_element)
-                .await?;
+            file_lock.create_block(i.into(), block).await?;
             size += len as u64;
             i += 1;
         }
@@ -199,7 +190,7 @@ where
             size += chunk.len() as u64;
 
             let block = Array::from(chunk).cast_into(dtype);
-            file_lock.create_block(i, block, BLOCK_SIZE).await?;
+            file_lock.create_block(i, block).await?;
 
             i += 1;
         }
@@ -821,9 +812,11 @@ impl<'a, F: File<Key = u64, Block = Array>> BlockListVisitor<'a, F> {
                 break;
             } else {
                 let block = ArrayExt::from(&buf[..block_size]);
-                file.create_block(block_id.into(), block.into(), BLOCK_SIZE)
+
+                file.create_block(block_id.into(), block.into())
                     .map_err(de::Error::custom)
                     .await?;
+
                 size += block_size as u64;
                 block_id += 1;
             }
@@ -959,7 +952,8 @@ impl<'a, F: File<Key = u64, Block = Array>> ComplexBlockListVisitor<'a, F> {
                 let re = ArrayExt::<T>::from_iter(re.iter().cloned());
                 let im = ArrayExt::<T>::from_iter(im.iter().cloned());
                 let block = ArrayExt::from((re, im));
-                file.create_block(block_id.into(), block.into(), BLOCK_SIZE)
+
+                file.create_block(block_id.into(), block.into())
                     .map_err(de::Error::custom)
                     .await?;
 

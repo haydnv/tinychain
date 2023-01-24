@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
+use get_size::GetSize;
 
 use tc_error::*;
 use tcgeneric::PathSegment;
@@ -12,7 +13,7 @@ use tcgeneric::PathSegment;
 use super::{Transaction, TxnId};
 
 /// The data contained by a single block on the filesystem
-pub trait BlockData: Clone + Send + Sync + 'static {
+pub trait BlockData: GetSize + Clone + Send + Sync + 'static {
     fn ext() -> &'static str;
 }
 
@@ -130,7 +131,6 @@ pub trait FileWrite: FileRead {
         &mut self,
         name: <Self::File as File>::Key,
         initial_value: <Self::File as File>::Block,
-        size_hint: usize,
     ) -> TCResult<<Self::File as File>::BlockWrite>;
 
     /// Create a new block synchronously, if possible.
@@ -138,21 +138,18 @@ pub trait FileWrite: FileRead {
         &mut self,
         name: <Self::File as File>::Key,
         initial_value: <Self::File as File>::Block,
-        size_hint: usize,
     ) -> TCResult<<Self::File as File>::BlockWrite>;
 
     /// Create a new block with a unique random name.
     async fn create_block_unique(
         &mut self,
         initial_value: <Self::File as File>::Block,
-        size_hint: usize,
     ) -> TCResult<(<Self::File as File>::Key, <Self::File as File>::BlockWrite)>;
 
     /// Create a new block with a unique random name, synchronously if possible.
     fn try_create_block_unique(
         &mut self,
         initial_value: <Self::File as File>::Block,
-        size_hint: usize,
     ) -> TCResult<(<Self::File as File>::Key, <Self::File as File>::BlockWrite)>;
 
     /// Delete the block with the given `name`.

@@ -138,7 +138,9 @@ async fn cleanup(
     for txn_id in expired.into_iter() {
         if let Some(_active) = txn_pool.remove(&txn_id) {
             debug!("clean up txn {}", txn_id);
-            workspace.delete(txn_id.to_string());
+            workspace
+                .delete(txn_id.to_string())
+                .expect("delete txn workspace dir");
         }
     }
 }

@@ -181,14 +181,12 @@ where
             );
         }
 
-        let (size_hint, value) = {
+        let value = {
             let block_version = self
                 .file
                 .with_version_read(last_modified, |version| version.get_file(&name))
                 .await?
                 .expect("block prior value");
-
-            let size_hint = block_version.size_hint().await;
 
             let value = {
                 let value = block_version.read().map_err(io_err).await?;
@@ -201,9 +199,10 @@ where
                 self.txn_id
             );
 
-            (size_hint, value)
+            value
         };
 
+        let size_hint = value.get_size();
         let block = self
             .file
             .with_version_write(&self.txn_id, |mut version| {
@@ -258,10 +257,11 @@ where
             }
         };
 
+        let size_hint = value.get_size();
         let block = self
             .file
             .with_try_version_write(&self.txn_id, |mut version| {
-                version.create_file(name, value, None).map_err(io_err)
+                version.create_file(name, value, size_hint).map_err(io_err)
             })??;
 
         trace!(
@@ -438,7 +438,6 @@ where
             canon.get_file(&name).expect("canonical block")
         };
 
-        let size_hint = block_canon.size_hint().await;
         let value = {
             let value = block_canon.read().map_err(io_err).await?;
             B::clone(&*value)
@@ -450,6 +449,7 @@ where
             txn_id
         );
 
+        let size_hint = value.get_size();
         let block = self
             .file
             .with_version_write(&txn_id, |mut version| {
@@ -530,8 +530,9 @@ where
             txn_id
         );
 
+        let size_hint = value.get_size();
         let block = self.file.with_try_version_write(&txn_id, |mut version| {
-            version.create_file(name, value, None).map_err(io_err)
+            version.create_file(name, value, size_hint).map_err(io_err)
         })??;
 
         let cache = block.try_write().map_err(io_err)?;
@@ -568,13 +569,11 @@ impl<K: Ord + Clone + fmt::Display, B: BlockData> FileWriteGuard<K, B>
 where
     CacheBlock: AsType<B>,
 {
-    // TODO: make `size_hint` optional
     fn create_block_inner(
         &mut self,
         mut version: freqfs::DirWriteGuard<CacheBlock>,
         block_id: K,
         initial_value: B,
-        size_hint: usize,
     ) -> TCResult<BlockWriteGuard<K, B>> {
         if self.blocks.contains_key(&block_id) {
             #[cfg(debug_assertions)]
@@ -592,8 +591,9 @@ where
         let name = format!("{}.{}", block_id, B::ext());
         self.blocks.insert(block_id, lock);
 
+        let size_hint = initial_value.get_size();
         let block = version
-            .create_file(name, initial_value, Some(size_hint))
+            .create_file(name, initial_value, size_hint)
             .map_err(io_err)?;
 
         std::mem::drop(version);
@@ -626,33 +626,27 @@ where
         }
     }
 
-    // TODO: make `size_hint` an `Option` and use `DeepSizeOf` to calculate an initial estimate
     async fn create_block(
         &mut self,
         block_id: K,
         initial_value: B,
-        size_hint: usize,
     ) -> TCResult<BlockWriteGuard<K, B>> {
         let version = self.file.version_write(&self.txn_id).await?;
-        self.create_block_inner(version, block_id, initial_value, size_hint)
+        self.create_block_inner(version, block_id, initial_value)
     }
 
-    // TODO: make `size_hint` optional
     fn try_create_block(
         &mut self,
         block_id: <Self::File as tc_transact::fs::File>::Key,
         initial_value: <Self::File as tc_transact::fs::File>::Block,
-        size_hint: usize,
     ) -> TCResult<<Self::File as tc_transact::fs::File>::BlockWrite> {
         let version = self.file.try_version_write(&self.txn_id)?;
-        self.create_block_inner(version, block_id, initial_value, size_hint)
+        self.create_block_inner(version, block_id, initial_value)
     }
 
-    // TODO: make `size_hint` optional
     async fn create_block_unique(
         &mut self,
         initial_value: B,
-        size_hint: usize,
     ) -> TCResult<(K, BlockWriteGuard<K, B>)> {
         let uuid = Uuid::new_v4();
         let block_id: <Self::File as tc_transact::fs::File>::Key = uuid
@@ -660,16 +654,14 @@ where
             .parse()
             .map_err(|cause| unexpected!("invalid block id: {}", uuid).consume(cause))?;
 
-        self.create_block(block_id.clone(), initial_value, size_hint)
+        self.create_block(block_id.clone(), initial_value)
             .map_ok(move |block| (block_id, block))
             .await
     }
 
-    // TODO: make `size_hint` optional
     fn try_create_block_unique(
         &mut self,
         initial_value: <Self::File as tc_transact::fs::File>::Block,
-        size_hint: usize,
     ) -> TCResult<(
         <Self::File as tc_transact::fs::File>::Key,
         <Self::File as tc_transact::fs::File>::BlockWrite,
@@ -680,7 +672,7 @@ where
             .parse()
             .map_err(|cause| unexpected!("invalid block ID {}", uuid).consume(cause))?;
 
-        self.try_create_block(block_id.clone(), initial_value, size_hint)
+        self.try_create_block(block_id.clone(), initial_value)
             .map(move |block| (block_id, block))
     }
 
@@ -695,9 +687,11 @@ where
             // with the same block_id
             self.file
                 .with_version_write(&self.txn_id, |mut version| {
-                    version.delete(file_name::<_, K, B>(block_id.borrow()))
+                    version
+                        .delete(file_name::<_, K, B>(block_id.borrow()))
+                        .map_err(io_err)
                 })
-                .await?;
+                .await??;
         }
 
         self.blocks.remove(block_id.borrow());
@@ -721,13 +715,12 @@ where
         }
 
         for block_id in other.block_ids() {
-            // TODO: provide a better size hint
             let block = other.read_block(&block_id).map_ok(|b| (*b).clone()).await?;
             if self.contains(&block_id) {
                 let mut dest = self.write_block(&block_id).await?;
                 *dest = block;
             } else {
-                self.create_block(block_id, block, 0).await?;
+                self.create_block(block_id, block).await?;
             }
         }
 
@@ -747,7 +740,9 @@ where
 
         let block_ids = self.block_ids();
         for block_id in block_ids {
-            version.delete(file_name::<_, K, B>(&block_id));
+            version
+                .delete(file_name::<_, K, B>(&block_id))
+                .map_err(io_err)?;
         }
 
         self.blocks.clear();
@@ -835,16 +830,13 @@ where
                 ));
             }
 
-            let (size_hint, contents) = match block {
+            let contents = match block {
                 freqfs::DirEntry::File(block) => {
-                    let size_hint = block.size_hint().await;
-                    let contents = block
+                    block
                         .read()
                         .map_ok(|contents| B::clone(&*contents))
                         .map_err(io_err)
-                        .await?;
-
-                    (size_hint, contents)
+                        .await?
                 }
                 freqfs::DirEntry::Dir(_) => {
                     return Err(unexpected!(
@@ -864,6 +856,7 @@ where
                 TxnLock::new("block last commit ID", txn_id, txn_id),
             );
 
+            let size_hint = contents.get_size();
             version
                 .create_file(name.clone(), contents, size_hint)
                 .map_err(io_err)?;
@@ -1123,14 +1116,13 @@ where
                         *canon.write().await.expect("canonical block") = (*block).clone();
                         canon
                     } else {
-                        let size_hint = version.size_hint().await;
-
+                        let size_hint = (&*block).get_size();
                         canon
                             .create_file(name, (*block).clone(), size_hint)
                             .expect("new canonical block")
                     };
 
-                    canon.sync(true).await.expect("sync canonical block");
+                    canon.sync().await.expect("sync canonical block");
                     trace!("File::commit canonical block {}", block_id);
                 } else {
                     trace!(
@@ -1145,17 +1137,13 @@ where
                 let block_id = block_id(name).expect("block ID");
                 if !blocks.contains_key(&block_id) {
                     trace!("File::commit delete block {}", block_id);
-                    canon.delete(name.clone());
+                    canon.delete(name.clone()).expect("delete block");
                 }
             }
         }
 
         trace!("sync canonical file contents to disk...");
-        self.canon
-            .sync(false)
-            .await
-            .expect("sync file content to disk");
-
+        self.canon.sync().await.expect("sync canonical file");
         trace!("sync'd canonical file contents to disk");
         Some(blocks)
     }
@@ -1173,7 +1161,11 @@ where
 
             self.versions
                 .write()
-                .map(|mut version| version.delete(txn_id.to_string()))
+                .map(|mut version| {
+                    version
+                        .delete(txn_id.to_string())
+                        .expect("roll back file version")
+                })
                 .await;
         }
     }
@@ -1190,7 +1182,11 @@ where
 
             self.versions
                 .write()
-                .map(|mut version| version.delete(txn_id.to_string()))
+                .map(|mut version| {
+                    version
+                        .delete(txn_id.to_string())
+                        .expect("finalize file version")
+                })
                 .await;
         }
     }

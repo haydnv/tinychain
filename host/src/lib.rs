@@ -71,7 +71,7 @@ impl Builder {
         let cache =
             freqfs::Cache::<fs::CacheBlock>::new(cache_size.into(), Duration::from_secs(1), None);
 
-        let workspace = cache.clone().load(workspace).await.expect("workspace");
+        let workspace = cache.clone().load(workspace).expect("workspace");
 
         Self {
             cache,
@@ -123,13 +123,13 @@ impl Builder {
     async fn load_dir(&self, path: PathBuf, txn_id: transact::TxnId) -> fs::Dir {
         Self::maybe_create(&path);
 
-        self.cache
+        let cache = self
+            .cache
             .clone()
             .load(path)
             .map_err(fs::io_err)
-            .and_then(|cache| fs::Dir::load(cache, txn_id))
-            .await
-            .expect("store")
+            .expect("cache dir");
+        fs::Dir::load(cache, txn_id).await.expect("store")
     }
 
     async fn load_or_create<T>(

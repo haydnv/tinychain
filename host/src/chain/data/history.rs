@@ -9,6 +9,7 @@ use destream::{de, en};
 use freqfs::{DirLock, DirWriteGuard, FileLock, FileReadGuard, FileWriteGuard};
 use futures::stream::{self, StreamExt};
 use futures::{join, try_join, TryFutureExt, TryStreamExt};
+use get_size::GetSize;
 use log::{debug, error, trace};
 use safecast::*;
 use sha2::digest::generic_array::GenericArray;
@@ -218,12 +219,10 @@ impl History {
         for block_id in (*latest + 1)..(*other_latest + 1) {
             let source = other.read_block(block_id).await?;
 
+            let block = ChainBlock::new(last_hash.to_vec());
+            let size_hint = block.get_size();
             let dest = this_file
-                .create_file(
-                    block_name(block_id),
-                    ChainBlock::new(last_hash.to_vec()),
-                    Some(last_hash.len()),
-                )
+                .create_file(block_name(block_id), block, size_hint)
                 .map_err(fs::io_err)?;
 
             let mut dest: FileWriteGuard<_, ChainBlock> = dest.write().map_err(fs::io_err).await?;
@@ -277,7 +276,7 @@ impl History {
                 write_ahead.mutations.insert(txn_id, mutations);
             }
 
-            write_ahead.sync(false).await.expect("sync write-ahead log");
+            write_ahead.sync().await.expect("sync write-ahead log");
         }
     }
 }
@@ -438,12 +437,10 @@ fn create_block<I: fmt::Display>(
 ) -> TCResult<FileLock<CacheBlock>> {
     let last_hash = Bytes::from(null_hash().to_vec());
 
+    let block = ChainBlock::new(last_hash.clone());
+    let size_hint = block.get_size();
     cache
-        .create_file(
-            block_name(name),
-            ChainBlock::new(last_hash.clone()),
-            Some(last_hash.len()),
-        )
+        .create_file(block_name(name), block, size_hint)
         .map_err(fs::io_err)
 }
 
@@ -506,15 +503,13 @@ impl Transact for History {
 
                         let hash = latest_block.current_hash();
 
+                        let block = ChainBlock::new(hash.to_vec());
+                        let size_hint = block.get_size();
                         let new_block = file
-                            .create_file(
-                                block_name(*latest),
-                                ChainBlock::new(hash.to_vec()),
-                                Some(hash.len()),
-                            )
+                            .create_file(block_name(*latest), block, size_hint)
                             .expect("new chain block");
 
-                        new_block.sync(true).await.expect("sync new chain block");
+                        new_block.sync().await.expect("sync new chain block");
 
                         trace!("sync'd new ChainBlock to disk");
 
@@ -522,10 +517,7 @@ impl Transact for History {
                     }
                 }
 
-                latest_block
-                    .sync(false)
-                    .await
-                    .expect("sync latest chain block");
+                latest_block.sync().await.expect("sync latest chain block");
 
                 trace!("sync'd last ChainBlock to disk");
 
@@ -537,10 +529,9 @@ impl Transact for History {
 
         if needs_sync {
             write_ahead
-                .sync(false)
+                .sync()
                 .await
                 .expect("sync write-ahead log after commit");
-
             trace!("sync'd write-ahead block to disk");
         }
 
@@ -625,20 +616,16 @@ impl de::Visitor for HistoryVisitor {
 
         let mut file_lock = file.write().await;
 
+        let block = ChainBlock::new(null_hash.to_vec());
+        let size_hint = block.get_size();
         file_lock
-            .create_file(
-                block_name(PENDING),
-                ChainBlock::new(null_hash.to_vec()),
-                Some(null_hash.len()),
-            )
+            .create_file(block_name(PENDING), block, size_hint)
             .map_err(de::Error::custom)?;
 
+        let block = ChainBlock::new(null_hash.to_vec());
+        let size_hint = block.get_size();
         file_lock
-            .create_file(
-                block_name(WRITE_AHEAD),
-                ChainBlock::new(null_hash.to_vec()),
-                Some(null_hash.len()),
-            )
+            .create_file(block_name(WRITE_AHEAD), block, size_hint)
             .map_err(de::Error::custom)?;
 
         let subcontext = |i: u64| self.txn.subcontext(i.into()).map_err(de::Error::custom);
@@ -664,8 +651,9 @@ impl de::Visitor for HistoryVisitor {
             let block = ChainBlock::with_mutations(hash, mutations);
             last_hash = block.current_hash();
 
+            let size_hint = block.get_size();
             file_lock
-                .create_file(block_name(i), block, None)
+                .create_file(block_name(i), block, size_hint)
                 .map_err(de::Error::custom)?;
 
             i += 1;
