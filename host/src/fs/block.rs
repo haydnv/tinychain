@@ -6,6 +6,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use destream::en;
 use futures::{TryFutureExt, TryStreamExt};
+use get_size::GetSize;
+use get_size_derive::*;
 use safecast::as_type;
 use tokio::fs;
 use tokio_util::io::StreamReader;
@@ -21,7 +23,7 @@ use crate::object::InstanceClass;
 use super::file_ext;
 
 /// A cached filesystem block.
-#[derive(Clone)]
+#[derive(Clone, GetSize)]
 pub enum CacheBlock {
     BTree(Node),
     Chain(ChainBlock),

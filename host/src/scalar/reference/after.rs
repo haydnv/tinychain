@@ -6,6 +6,8 @@ use std::fmt;
 
 use async_trait::async_trait;
 use destream::{de, en};
+use get_size::GetSize;
+use get_size_derive::*;
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 use sha2::digest::{Digest, Output};
@@ -21,7 +23,7 @@ use crate::txn::Txn;
 use super::Refer;
 
 /// Struct to delay resolving another reference(s) until some preliminary reference is resolved.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 pub struct After {
     when: Scalar,
     then: Scalar,

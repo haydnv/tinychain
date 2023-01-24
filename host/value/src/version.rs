@@ -6,6 +6,8 @@ use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::Error;
 use destream::{de, en};
+use get_size::GetSize;
+use get_size_derive::*;
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 
@@ -13,7 +15,7 @@ use tc_error::*;
 use tcgeneric::Id;
 
 /// A semantic version with a major, minor, and patch number, e.g. "0.1.12"
-#[derive(Clone, Copy, Default, std::hash::Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Default, std::hash::Hash, Eq, PartialEq, GetSize)]
 pub struct Version {
     major: u32,
     minor: u32,

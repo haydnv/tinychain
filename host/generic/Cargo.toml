@@ -15,6 +15,8 @@ async-hash = "0.4"
 async-trait = "0.1"
 destream = "0.6"
 futures = "0.3"
+get-size = "0.1"
+get-size-derive = "0.1"
 hex = "0.4"
 hr-id = { version = "~0.3.1", features=["all"] }
 safecast = "0.1"

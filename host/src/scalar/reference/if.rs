@@ -7,6 +7,8 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::de::Error;
 use destream::{de, en};
+use get_size::GetSize;
+use get_size_derive::*;
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 use sha2::digest::{Digest, Output};
@@ -22,7 +24,7 @@ use crate::txn::Txn;
 use super::{Refer, TCRef};
 
 /// A conditional reference.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 pub struct IfRef {
     cond: TCRef,
     then: Scalar,

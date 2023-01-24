@@ -1,13 +1,15 @@
 //! Limits the execution scope of an inline `Op`.
 
-use async_hash::Hash;
 use std::collections::HashSet;
 use std::fmt;
 use std::ops::Deref;
 
+use async_hash::Hash;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
+use get_size::GetSize;
+use get_size_derive::*;
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 use sha2::digest::{Digest, Output};
@@ -25,7 +27,7 @@ use crate::value::Value;
 use super::Refer;
 
 /// A flow control operator which closes over the context of an [`OpDef`] to produce a [`Closure`].
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 pub struct With {
     capture: Tuple<Id>,
     op: OpDef,

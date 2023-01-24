@@ -8,6 +8,8 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use destream::de::{self, Error};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
+use get_size::GetSize;
+use get_size_derive::*;
 use log::debug;
 use safecast::TryCastFrom;
 use sha2::digest::{Digest, Output};
@@ -25,7 +27,7 @@ use super::Refer;
 const EMPTY_SLICE: &[usize] = &[];
 
 /// A reference to the [`State`] at a given [`Id`] within the same transaction context.
-#[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd, GetSize)]
 pub struct IdRef {
     to: Id,
 }

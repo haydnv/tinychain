@@ -16,6 +16,7 @@ use destream::de::Error as DestreamError;
 use destream::de::Visitor as DestreamVisitor;
 use destream::en;
 use email_address_parser::EmailAddress;
+use get_size::GetSize;
 use log::debug;
 use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
@@ -70,9 +71,11 @@ impl ValueType {
             Self::Bytes => match value {
                 Value::Bytes(bytes) => Ok(Value::Bytes(bytes)),
                 Value::Number(_) => Err(not_implemented!("cast into Bytes from Number")),
-                Value::String(s) => s
-                    .try_cast_into(|s| bad_request!("cannot cast into Bytes from {}", s))
-                    .map(Value::Bytes),
+                Value::String(s) => {
+                    Bytes::try_cast_from(s, |s| bad_request!("cannot cast into Bytes from {}", s))
+                        .map(Vec::from)
+                        .map(Value::Bytes)
+                }
                 other => Err(bad_request!("cannot cast into Bytes from {}", other)),
             },
             Self::Email => match value {
@@ -443,7 +446,7 @@ impl DestreamVisitor for ValueTypeVisitor {
 /// A generic value enum
 #[derive(Clone)]
 pub enum Value {
-    Bytes(Bytes),
+    Bytes(Vec<u8>),
     Email(EmailAddress),
     Link(Link),
     Id(Id),
@@ -452,6 +455,22 @@ pub enum Value {
     String(TCString),
     Tuple(Tuple<Self>),
     Version(Version),
+}
+
+impl GetSize for Value {
+    fn get_size(&self) -> usize {
+        match self {
+            Self::Bytes(bytes) => bytes.get_size(),
+            Self::Email(email) => email.get_local_part().get_size() + email.get_domain().get_size(),
+            Self::Link(link) => link.get_size(),
+            Self::Id(id) => id.get_size(),
+            Self::None => 0,
+            Self::Number(n) => n.get_size(),
+            Self::String(s) => s.get_size(),
+            Self::Tuple(t) => t.get_size(),
+            Self::Version(v) => v.get_size(),
+        }
+    }
 }
 
 impl Value {
@@ -763,7 +782,7 @@ impl From<bool> for Value {
 
 impl From<Bytes> for Value {
     fn from(bytes: Bytes) -> Self {
-        Self::Bytes(bytes)
+        Self::Bytes(bytes.into())
     }
 }
 
@@ -912,7 +931,7 @@ impl TryCastFrom<Value> for Bytes {
 
     fn opt_cast_from(value: Value) -> Option<Bytes> {
         match value {
-            Value::Bytes(bytes) => Some(bytes),
+            Value::Bytes(bytes) => Some(bytes.into()),
             Value::Tuple(tuple) => Vec::<u8>::opt_cast_from(tuple).map(Bytes::from),
             Value::String(s) => Self::opt_cast_from(s),
             Value::None => Some(Bytes::new()),
@@ -1305,7 +1324,6 @@ impl ValueVisitor {
             VT::Bytes => {
                 let encoded = map.next_value::<&str>()?;
                 base64::decode(encoded)
-                    .map(Bytes::from)
                     .map(Value::Bytes)
                     .map_err(serde::de::Error::custom)
             }

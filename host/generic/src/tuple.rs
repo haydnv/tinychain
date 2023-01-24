@@ -11,11 +11,13 @@ use std::ops::{Deref, DerefMut};
 use async_trait::async_trait;
 use destream::de::{Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
+use get_size::GetSize;
+use get_size_derive::*;
 use safecast::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A generic tuple type, based on [`Vec`]
-#[derive(Clone, Default, Eq, PartialEq)]
+#[derive(Clone, Default, Eq, PartialEq, GetSize)]
 pub struct Tuple<T> {
     inner: Vec<T>,
 }

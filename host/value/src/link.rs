@@ -11,6 +11,8 @@ use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::Error;
 use destream::{de, en};
+use get_size::GetSize;
+use get_size_derive::*;
 use number_general::Number;
 use safecast::{CastFrom, TryCastFrom};
 use serde::de::{Deserialize, Deserializer};
@@ -26,6 +28,15 @@ use super::{TCString, Value};
 pub enum LinkAddress {
     IPv4(Ipv4Addr),
     IPv6(Ipv6Addr),
+}
+
+impl GetSize for LinkAddress {
+    fn get_size(&self) -> usize {
+        match self {
+            Self::IPv4(_) => 4,
+            Self::IPv6(_) => 16,
+        }
+    }
 }
 
 impl Clone for LinkAddress {
@@ -107,7 +118,7 @@ impl PartialEq<IpAddr> for LinkAddress {
 }
 
 /// The protocol portion of a [`Link`] (e.g. "http")
-#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq, GetSize)]
 pub enum LinkProtocol {
     HTTP,
 }
@@ -131,7 +142,7 @@ impl fmt::Display for LinkProtocol {
 }
 
 /// The host portion of a [`Link`] (e.g. "http://127.0.0.1:8702")
-#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq, GetSize)]
 pub struct LinkHost {
     protocol: LinkProtocol,
     address: LinkAddress,
@@ -334,7 +345,7 @@ impl fmt::Display for LinkHost {
 }
 
 /// A link to a network resource.
-#[derive(Clone, Debug, Default, Hash, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Hash, Eq, PartialEq, GetSize)]
 pub struct Link {
     host: Option<LinkHost>,
     path: TCPathBuf,

@@ -13,6 +13,8 @@ use destream::de::{self, Error};
 use destream::en;
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
+use get_size::GetSize;
+use get_size_derive::*;
 use log::{debug, warn};
 use safecast::{as_type, Match, TryCastFrom, TryCastInto};
 use sha2::digest::Output;
@@ -126,6 +128,12 @@ impl fmt::Display for ScalarType {
 #[derive(Clone, Eq, PartialEq)]
 pub struct ClusterRef(TCPathBuf);
 
+impl GetSize for ClusterRef {
+    fn get_size(&self) -> usize {
+        self.0.get_size()
+    }
+}
+
 impl ClusterRef {
     /// Consume this reference and return its `TCPathBuf`
     pub fn into_path(self) -> TCPathBuf {
@@ -163,7 +171,7 @@ impl fmt::Display for ClusterRef {
 }
 
 /// A scalar value, i.e. an immutable state always held in main memory and never split into blocks.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 pub enum Scalar {
     Cluster(ClusterRef),
     Map(Map<Self>),

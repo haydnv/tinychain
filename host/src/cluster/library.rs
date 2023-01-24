@@ -6,6 +6,8 @@ use std::fmt;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
+use get_size::GetSize;
+use get_size_derive::*;
 use log::{error, info};
 use safecast::{AsType, TryCastFrom};
 
@@ -24,7 +26,7 @@ use crate::txn::Txn;
 use super::DirItem;
 
 /// A version of a [`Library`]
-#[derive(Clone)]
+#[derive(Clone, GetSize)]
 pub struct Version {
     lib: Map<Scalar>,
 }

@@ -10,6 +10,8 @@ use async_trait::async_trait;
 use destream::de::{self, Decoder, Error, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use futures::TryFutureExt;
+use get_size::GetSize;
+use get_size_derive::*;
 use log::debug;
 use safecast::TryCastFrom;
 use sha2::digest::{Digest, Output};
@@ -135,7 +137,7 @@ impl fmt::Display for RefType {
 }
 
 /// A reference to a `State`.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 pub enum TCRef {
     After(Box<After>),
     Case(Box<Case>),

@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use destream::de::Error;
 use safecast::TryCastFrom;
 use uuid::Uuid;
@@ -79,7 +78,7 @@ impl<'a> Handler<'a> for UuidHandler<'a> {
                 };
 
                 let value = match self.dtype {
-                    "bytes" => Value::Bytes(Bytes::copy_from_slice(uuid.as_bytes())),
+                    "bytes" => Value::Bytes(uuid.into_bytes().into()),
                     "id" => Value::Id(uuid.into()),
                     "string" => Value::String(uuid.to_string().into()),
                     other => {

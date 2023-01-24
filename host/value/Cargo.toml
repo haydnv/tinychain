@@ -20,10 +20,12 @@ collate = "~0.2.3"
 destream = "0.6"
 email-address-parser = "1.0"
 futures = "0.3"
+get-size = "0.1"
+get-size-derive = "0.1"
 handlebars = "4.3"
 hex = "0.4"
 log = { version = "0.4", features = [] }
-number-general = { version = "0.9", features=["hash", "serde", "stream"] }
+number-general = { version = "~0.9.1", features=["hash", "serde", "stream"] }
 safecast = "0.1"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0", features = [] }

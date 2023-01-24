@@ -17,6 +17,8 @@ use destream::{de, en};
 use futures::future::{self, Future, TryFutureExt};
 use futures::join;
 use futures::stream::{self, FuturesOrdered, FuturesUnordered, TryStreamExt};
+use get_size::GetSize;
+use get_size_derive::*;
 use log::{debug, trace};
 use uuid::Uuid;
 
@@ -38,7 +40,7 @@ type Selection<'a> = FuturesOrdered<
 const DEFAULT_BLOCK_SIZE: usize = 4_000;
 const BLOCK_ID_SIZE: usize = 128; // UUIDs are 128-bit
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, GetSize)]
 struct NodeKey {
     deleted: bool,
     value: Vec<Value>,
@@ -102,6 +104,15 @@ pub struct Node {
     keys: Vec<NodeKey>,
     parent: Option<NodeId>,
     children: Vec<NodeId>,
+}
+
+impl GetSize for Node {
+    fn get_size(&self) -> usize {
+        const UUID_SIZE: usize = 16;
+        let parent_size = self.parent.map(|_| UUID_SIZE).unwrap_or_default();
+        let children_size = self.children.len() * UUID_SIZE;
+        self.leaf.get_size() + self.keys.get_size() + parent_size + children_size
+    }
 }
 
 impl Node {
