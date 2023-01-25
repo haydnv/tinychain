@@ -137,10 +137,8 @@ async fn cleanup(
     let mut workspace = workspace.write().await;
     for txn_id in expired.into_iter() {
         if let Some(_active) = txn_pool.remove(&txn_id) {
-            debug!("clean up txn {}", txn_id);
-            workspace
-                .delete(txn_id.to_string())
-                .expect("delete txn workspace dir");
+            debug!("delete workspace for txn {}...", txn_id);
+            workspace.delete_and_sync(txn_id.to_string()).await.expect("finalize txn workspace");
         }
     }
 }

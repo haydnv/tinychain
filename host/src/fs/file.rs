@@ -685,13 +685,9 @@ where
 
             // keep the version directory in sync in case create_block is called later
             // with the same block_id
-            self.file
-                .with_version_write(&self.txn_id, |mut version| {
-                    version
-                        .delete(file_name::<_, K, B>(block_id.borrow()))
-                        .map_err(io_err)
-                })
-                .await??;
+            let mut version = self.file.version_write(&self.txn_id).await?;
+            let name = file_name::<_, K, B>(block_id.borrow());
+            version.delete(name).await;
         }
 
         self.blocks.remove(block_id.borrow());
@@ -738,11 +734,9 @@ where
     async fn truncate(&mut self) -> TCResult<()> {
         let mut version = self.file.version_write(&self.txn_id).await?;
 
-        let block_ids = self.block_ids();
-        for block_id in block_ids {
-            version
-                .delete(file_name::<_, K, B>(&block_id))
-                .map_err(io_err)?;
+        for block_id in self.block_ids() {
+            let name = file_name::<_, K, B>(&block_id);
+            version.delete(name).await;
         }
 
         self.blocks.clear();
@@ -1132,12 +1126,12 @@ where
                 }
             }
 
-            trace!("iterate over blocks modified in file version {}", txn_id);
+            trace!("commit blocks deleted in file version {}", txn_id);
             for (name, _) in version.iter() {
                 let block_id = block_id(name).expect("block ID");
                 if !blocks.contains_key(&block_id) {
                     trace!("File::commit delete block {}", block_id);
-                    canon.delete(name.clone()).expect("delete block");
+                    canon.delete(name.clone()).await;
                 }
             }
         }
@@ -1159,14 +1153,8 @@ where
             )
             .await;
 
-            self.versions
-                .write()
-                .map(|mut version| {
-                    version
-                        .delete(txn_id.to_string())
-                        .expect("roll back file version")
-                })
-                .await;
+            let mut versions = self.versions.write().await;
+            versions.delete(txn_id.to_string()).await;
         }
     }
 
@@ -1180,14 +1168,8 @@ where
 
             join_all(cleanups).await;
 
-            self.versions
-                .write()
-                .map(|mut version| {
-                    version
-                        .delete(txn_id.to_string())
-                        .expect("finalize file version")
-                })
-                .await;
+            let mut versions = self.versions.write().await;
+            versions.delete(txn_id.to_string()).await;
         }
     }
 }
