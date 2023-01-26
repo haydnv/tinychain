@@ -3,10 +3,10 @@
 use std::collections::hash_map::{Entry, HashMap};
 use std::convert::TryFrom;
 use std::sync::Arc;
-use std::time::Duration;
 
 use freqfs::DirLock;
 use futures::future::TryFutureExt;
+use futures::join;
 use log::{debug, trace};
 use tokio::sync::RwLock;
 
@@ -20,9 +20,6 @@ use crate::gateway::Gateway;
 use super::request::*;
 use super::{Active, Txn, TxnId};
 
-const GRACE: Duration = Duration::from_secs(3);
-const INTERVAL: Duration = Duration::from_millis(100);
-
 /// Server to keep track of the transactions currently active for this host.
 #[derive(Clone)]
 pub struct TxnServer {
@@ -33,9 +30,10 @@ pub struct TxnServer {
 impl TxnServer {
     /// Construct a new `TxnServer`.
     pub async fn new(workspace: DirLock<fs::CacheBlock>) -> Self {
-        let active = Arc::new(RwLock::new(HashMap::new()));
-        spawn_cleanup_thread(workspace.clone(), active.clone());
-        Self { active, workspace }
+        Self {
+            active: Arc::new(RwLock::new(HashMap::new())),
+            workspace,
+        }
     }
 
     /// Return the active `Txn` with the given [`TxnId`], or initiate a new [`Txn`].
@@ -90,6 +88,28 @@ impl TxnServer {
         .await?
     }
 
+    pub(crate) async fn finalize_expired(&self, gateway: &Gateway, now: NetworkTime) {
+        let (mut active, mut workspace) = join!(self.active.write(), self.workspace.write());
+
+        let expired = active
+            .iter()
+            .filter(|(_, active)| active.expires() <= &now)
+            .map(|(txn_id, _)| txn_id)
+            .copied()
+            .collect::<Vec<TxnId>>();
+
+        for txn_id in expired {
+            assert!(active.remove(&txn_id).is_some());
+
+            gateway.finalize(txn_id).await;
+
+            workspace
+                .delete_and_sync(txn_id.to_string())
+                .await
+                .expect("finalize txn workspace");
+        }
+    }
+
     async fn txn_dir(&self, txn_id: TxnId) -> TCResult<fs::Dir> {
         let mut workspace = self.workspace.write().await;
         let cache = workspace
@@ -97,48 +117,5 @@ impl TxnServer {
             .map_err(fs::io_err)?;
 
         Ok(fs::Dir::new(cache, txn_id))
-    }
-}
-
-fn spawn_cleanup_thread(
-    workspace: DirLock<fs::CacheBlock>,
-    active: Arc<RwLock<HashMap<TxnId, Arc<Active>>>>,
-) {
-    let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(
-        INTERVAL.as_millis() as u64,
-    ));
-
-    tokio::spawn(async move {
-        loop {
-            interval.tick().await;
-            cleanup(&workspace, &active).await;
-        }
-    });
-}
-
-async fn cleanup(
-    workspace: &DirLock<fs::CacheBlock>,
-    txn_pool: &RwLock<HashMap<TxnId, Arc<Active>>>,
-) {
-    let now = Gateway::time();
-    let mut txn_pool = txn_pool.write().await;
-    let expired: Vec<TxnId> = txn_pool
-        .iter()
-        .filter_map(|(txn_id, active)| {
-            if active.expires() + GRACE < now {
-                Some(txn_id)
-            } else {
-                None
-            }
-        })
-        .cloned()
-        .collect();
-
-    let mut workspace = workspace.write().await;
-    for txn_id in expired.into_iter() {
-        if let Some(_active) = txn_pool.remove(&txn_id) {
-            debug!("delete workspace for txn {}...", txn_id);
-            workspace.delete_and_sync(txn_id.to_string()).await.expect("finalize txn workspace");
-        }
     }
 }

@@ -75,29 +75,19 @@ impl Txn {
         }
     }
 
-    /// Return the current number of strong references to this `Txn`.
-    pub fn ref_count(&self) -> usize {
-        Arc::strong_count(&self.active)
+    /// Return this [`LinkHost`]
+    pub fn host(&self) -> &LinkHost {
+        self.gateway.host()
     }
 
-    /// Claim ownership of this transaction.
-    pub async fn claim(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
-        debug!(
-            "{} claims ownership of transaction {}",
-            cluster_path,
-            self.id()
-        );
+    /// Return a link to the given path on this host.
+    pub fn link(&self, path: TCPathBuf) -> Link {
+        self.gateway.link(path)
+    }
 
-        if actor.id().is_some() {
-            return Err(bad_request!("cluster ID must be None, not {}", actor.id()));
-        }
-
-        if self.owner().is_none() {
-            self.grant(actor, cluster_path, vec![self.active.scope().clone()])
-                .await
-        } else {
-            Err(forbidden!("tried to claim owned transaction {}", self.id()))
-        }
+    /// Return the [`Request`] which initiated this transaction on this host.
+    pub fn request(&self) -> &Request {
+        &self.request
     }
 
     /// Return a new `Txn` which grants the given [`Scope`]s to the given [`Actor`].
@@ -133,9 +123,24 @@ impl Txn {
         })
     }
 
-    /// Check if this transaction has a leader for the given cluster.
-    pub fn has_leader(&self, cluster_path: &[PathSegment]) -> bool {
-        self.leader(cluster_path).is_some()
+    /// Claim ownership of this transaction.
+    pub async fn claim(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
+        debug!(
+            "{} claims ownership of transaction {}",
+            cluster_path,
+            self.id()
+        );
+
+        if actor.id().is_some() {
+            return Err(bad_request!("cluster ID must be None, not {}", actor.id()));
+        }
+
+        if self.owner().is_none() {
+            self.grant(actor, cluster_path, vec![self.active.scope().clone()])
+                .await
+        } else {
+            Err(forbidden!("tried to claim owned transaction {}", self.id()))
+        }
     }
 
     /// Check if this transaction has an owner.
@@ -143,22 +148,45 @@ impl Txn {
         self.owner().is_some()
     }
 
-    /// Check if this host is leading the transaction for the specified cluster.
-    pub fn is_leader(&self, cluster_path: &[PathSegment]) -> bool {
-        if let Some(leader) = self.leader(cluster_path) {
-            if leader.host() == Some(self.gateway.host()) {
-                return cluster_path == leader.path().deref();
+    /// Check if the cluster at the specified path on this host is the owner of the transaction.
+    pub fn is_owner(&self, cluster_path: &[PathSegment]) -> bool {
+        if let Some(owner) = self.owner() {
+            if owner.host() == Some(self.gateway.host()) {
+                return cluster_path == owner.path().deref();
             }
         }
 
         false
     }
 
-    /// Check if the cluster at the specified path on this host is the owner of the transaction.
-    pub fn is_owner(&self, cluster_path: &[PathSegment]) -> bool {
-        if let Some(owner) = self.owner() {
-            if owner.host() == Some(self.gateway.host()) {
-                return cluster_path == owner.path().deref();
+    /// Return the owner of this transaction, if there is one.
+    pub fn owner(&self) -> Option<&Link> {
+        let active_scope = self.active.scope();
+
+        self.request
+            .scopes()
+            .iter()
+            .filter(|(_, actor_id, _)| *actor_id == &Value::None)
+            .filter_map(|(host, _actor_id, scopes)| {
+                if scopes.contains(active_scope) {
+                    Some(host)
+                } else {
+                    None
+                }
+            })
+            .fold(None, |_, host| Some(host))
+    }
+
+    /// Check if this transaction has a leader for the given cluster.
+    pub fn has_leader(&self, cluster_path: &[PathSegment]) -> bool {
+        self.leader(cluster_path).is_some()
+    }
+
+    /// Check if this host is leading the transaction for the specified cluster.
+    pub fn is_leader(&self, cluster_path: &[PathSegment]) -> bool {
+        if let Some(leader) = self.leader(cluster_path) {
+            if leader.host() == Some(self.gateway.host()) {
+                return cluster_path == leader.path().deref();
             }
         }
 
@@ -206,39 +234,6 @@ impl Txn {
                 }
             })
             .next()
-    }
-
-    /// Return the owner of this transaction, if there is one.
-    pub fn owner(&self) -> Option<&Link> {
-        let active_scope = self.active.scope();
-
-        self.request
-            .scopes()
-            .iter()
-            .filter(|(_, actor_id, _)| *actor_id == &Value::None)
-            .filter_map(|(host, _actor_id, scopes)| {
-                if scopes.contains(active_scope) {
-                    Some(host)
-                } else {
-                    None
-                }
-            })
-            .fold(None, |_, host| Some(host))
-    }
-
-    /// Return this [`LinkHost`]
-    pub fn host(&self) -> &LinkHost {
-        self.gateway.host()
-    }
-
-    /// Return a link to the given path on this host.
-    pub fn link(&self, path: TCPathBuf) -> Link {
-        self.gateway.link(path)
-    }
-
-    /// Return the [`Request`] which initiated this transaction on this host.
-    pub fn request(&self) -> &Request {
-        &self.request
     }
 
     /// Resolve a GET op within this transaction context.

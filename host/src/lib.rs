@@ -210,18 +210,12 @@ impl Builder {
         let txn_server = txn::TxnServer::new(self.workspace.clone()).await;
         let gateway = gateway::Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
 
-        let (class, library, service) = self
-            .load_userspace(txn_server.clone(), Arc::new(gateway))
-            .await;
+        let (class, library, service) = self.load_userspace(txn_server.clone(), gateway).await;
 
         let kernel =
             kernel::Kernel::with_userspace(class.clone(), library.clone(), service.clone());
 
-        let gateway = Arc::new(gateway::Gateway::new(
-            gateway_config,
-            kernel,
-            txn_server.clone(),
-        ));
+        let gateway = gateway::Gateway::new(gateway_config, kernel, txn_server.clone());
 
         (gateway, (class, library, service))
     }

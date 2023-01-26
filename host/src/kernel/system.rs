@@ -7,6 +7,7 @@ use log::debug;
 use safecast::TryCastFrom;
 
 use tc_error::*;
+use tc_transact::TxnId;
 use tc_value::{Link, Value};
 use tcgeneric::{Map, NativeClass, PathSegment, TCPath, TCPathBuf};
 
@@ -123,6 +124,10 @@ impl Dispatch for System {
         } else {
             Static.delete(txn, path, key).await
         }
+    }
+
+    async fn finalize(&self, _txn_id: TxnId) {
+        // no-op
     }
 }
 
