@@ -4,24 +4,24 @@ use std::fmt;
 use std::net::IpAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{Future, TryFutureExt};
 use log::debug;
+use tokio::time::Duration;
+use url::Url;
 
 use tc_error::*;
 use tc_value::{Link, LinkHost, LinkProtocol, Value};
 use tcgeneric::{NetworkTime, PathSegment, TCBoxTryFuture, TCPath, TCPathBuf};
-use url::Url;
 
-use crate::http;
 use crate::kernel::{Dispatch, Kernel};
 use crate::state::State;
 use crate::txn::*;
+use crate::{http, TokioError};
 
-type Error = Box<dyn std::error::Error + Send + Sync>;
+const INTERVAL: Duration = Duration::from_millis(100);
 
 /// Configuration for [`Gateway`].
 #[derive(Clone)]
@@ -139,12 +139,12 @@ pub trait Server {
 
 /// Responsible for handling inbound and outbound traffic over the network.
 pub struct Gateway {
+    actor: Actor,
     config: Config,
+    client: http::Client,
+    host: LinkHost,
     kernel: Kernel,
     txn_server: TxnServer,
-    host: LinkHost,
-    client: http::Client,
-    actor: Actor,
 }
 
 impl Gateway {
@@ -154,21 +154,25 @@ impl Gateway {
     }
 
     /// Initialize a new `Gateway`
-    pub fn new(config: Config, kernel: Kernel, txn_server: TxnServer) -> Self {
+    pub fn new(config: Config, kernel: Kernel, txn_server: TxnServer) -> Arc<Self> {
         let root = LinkHost::from((
             LinkProtocol::HTTP,
             config.addr.clone(),
             Some(config.http_port),
         ));
 
-        Self {
+        let gateway = Arc::new(Self {
             config,
             kernel,
             txn_server,
             host: root,
             client: http::Client::new(),
             actor: Actor::new(Link::default().into()),
-        }
+        });
+
+        spawn_cleanup_thread(gateway.clone());
+
+        gateway
     }
 
     /// Return the configured maximum request time-to-live (timeout duration).
@@ -297,20 +301,35 @@ impl Gateway {
     }
 
     /// Start this `Gateway`'s server
-    pub fn listen(self: Arc<Self>) -> Pin<Box<impl Future<Output = Result<(), Error>> + 'static>> {
-        Box::pin(self.http_listen())
-    }
-
-    fn http_listen(
+    pub fn listen(
         self: Arc<Self>,
-    ) -> std::pin::Pin<Box<impl futures::Future<Output = Result<(), Error>>>> {
+    ) -> Pin<Box<impl Future<Output = Result<(), TokioError>> + 'static>> {
         let port = self.config.http_port;
         let server = crate::http::HTTPServer::new(self);
         let listener = server.listen(port).map_err(|e| {
-            let e: Error = Box::new(e);
+            let e: TokioError = Box::new(e);
             e
         });
 
         Box::pin(listener)
     }
+
+    pub(crate) async fn finalize(&self, txn_id: TxnId) {
+        self.kernel.finalize(txn_id).await;
+    }
+}
+
+fn spawn_cleanup_thread(gateway: Arc<Gateway>) {
+    let mut interval = tokio::time::interval(INTERVAL);
+
+    tokio::spawn(async move {
+        loop {
+            interval.tick().await;
+
+            gateway
+                .txn_server
+                .finalize_expired(&gateway, Gateway::time())
+                .await;
+        }
+    });
 }

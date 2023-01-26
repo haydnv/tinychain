@@ -11,7 +11,6 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use futures::future::TryFutureExt;
 
@@ -23,7 +22,6 @@ pub use tc_tensor as tensor;
 pub use tc_transact as transact;
 pub use tc_value as value;
 pub use tcgeneric as generic;
-use tcgeneric::TCPathBuf;
 
 pub mod chain;
 pub mod closure;
@@ -68,8 +66,7 @@ impl Builder {
 
         Self::maybe_create(&workspace);
 
-        let cache =
-            freqfs::Cache::<fs::CacheBlock>::new(cache_size.into(), Duration::from_secs(1), None);
+        let cache = freqfs::Cache::<fs::CacheBlock>::new(cache_size.into(), None);
 
         let workspace = cache.clone().load(workspace).expect("workspace");
 
@@ -154,7 +151,7 @@ impl Builder {
             self.load_dir(path, txn_id).await
         };
 
-        let actor_id = TCPathBuf::default().into();
+        let actor_id = tcgeneric::TCPathBuf::default().into();
         let actor = if let Some(public_key) = &self.public_key {
             txn::Actor::with_public_key(actor_id, public_key)
                 .map(Arc::new)
@@ -213,18 +210,12 @@ impl Builder {
         let txn_server = txn::TxnServer::new(self.workspace.clone()).await;
         let gateway = gateway::Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
 
-        let (class, library, service) = self
-            .load_userspace(txn_server.clone(), Arc::new(gateway))
-            .await;
+        let (class, library, service) = self.load_userspace(txn_server.clone(), gateway).await;
 
         let kernel =
             kernel::Kernel::with_userspace(class.clone(), library.clone(), service.clone());
 
-        let gateway = Arc::new(gateway::Gateway::new(
-            gateway_config,
-            kernel,
-            txn_server.clone(),
-        ));
+        let gateway = gateway::Gateway::new(gateway_config, kernel, txn_server.clone());
 
         (gateway, (class, library, service))
     }

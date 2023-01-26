@@ -38,6 +38,19 @@ impl Hypothetical {
         }
     }
 
+    pub async fn finalize(&self, txn_id: TxnId) {
+        let mut participants = self.participants.write().await;
+        let expired = participants
+            .keys()
+            .take_while(|id| *id <= &txn_id)
+            .copied()
+            .collect::<Vec<_>>();
+
+        for txn_id in expired {
+            participants.remove(&txn_id);
+        }
+    }
+
     pub async fn execute(&self, txn: &Txn, data: State) -> TCResult<State> {
         let txn = txn.clone().claim(&self.actor, PATH.into()).await?;
         let context = Map::<State>::default();

@@ -4,10 +4,11 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures::future::Future;
+use futures::join;
 use log::{debug, info};
 
 use tc_error::*;
-use tc_transact::{Transact, Transaction};
+use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath};
 
@@ -56,6 +57,7 @@ impl UserSpace {
         }
     }
 
+    /// Return `true` if the path begins with the prefix of a service directory
     pub fn handles(&self, path: &[PathSegment]) -> bool {
         if path.is_empty() {
             return false;
@@ -133,9 +135,12 @@ where
             }
         }
     }
+
+    async fn finalize(&self, txn_id: TxnId) {
+        Transact::finalize(self, &txn_id).await
+    }
 }
 
-// TODO: consolidate redundant if..else clauses
 #[async_trait]
 impl Dispatch for UserSpace {
     async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
@@ -192,6 +197,15 @@ impl Dispatch for UserSpace {
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
+    }
+
+    async fn finalize(&self, txn_id: TxnId) {
+        join!(
+            self.hypothetical.finalize(txn_id),
+            Dispatch::finalize(&self.library, txn_id),
+            Dispatch::finalize(&self.class, txn_id),
+            Dispatch::finalize(&self.service, txn_id),
+        );
     }
 }
 
