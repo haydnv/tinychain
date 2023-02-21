@@ -1,7 +1,11 @@
 use safecast::CastInto;
 
+#[cfg(feature = "btree")]
 use tc_btree::BTreeInstance;
+
+#[cfg(feature = "table")]
 use tc_table::TableInstance;
+
 use tc_value::Value;
 use tcgeneric::{PathSegment, Tuple};
 
@@ -10,7 +14,10 @@ use crate::route::GetHandler;
 
 use super::{Handler, Route};
 
+#[cfg(feature = "btree")]
 mod btree;
+
+#[cfg(feature = "table")]
 mod table;
 
 #[cfg(feature = "tensor")]
@@ -19,10 +26,14 @@ mod tensor;
 impl Route for CollectionType {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match self {
+            #[cfg(feature = "btree")]
             Self::BTree(btt) => btt.route(path),
+            #[cfg(feature = "table")]
             Self::Table(tt) => tt.route(path),
             #[cfg(feature = "tensor")]
             Self::Tensor(tt) => tt.route(path),
+
+            _ => unimplemented!("no collection flags enabled")
         }
     }
 }
@@ -41,6 +52,7 @@ impl<'a> Handler<'a> for SchemaHandler<'a> {
                 key.expect_none()?;
 
                 let schema: Value = match self.collection {
+                    #[cfg(feature = "btree")]
                     Collection::BTree(btree) => btree
                         .schema()
                         .to_vec()
@@ -48,10 +60,13 @@ impl<'a> Handler<'a> for SchemaHandler<'a> {
                         .collect::<Tuple<Value>>()
                         .into(),
 
+                    #[cfg(feature = "table")]
                     Collection::Table(table) => table.schema().clone().cast_into(),
 
                     #[cfg(feature = "tensor")]
                     Collection::Tensor(tensor) => tensor.schema().clone().cast_into(),
+
+                    _ => unimplemented!("no collection flags enabled")
                 };
 
                 Ok(schema.into())
@@ -68,11 +83,15 @@ impl<'a> From<&'a Collection> for SchemaHandler<'a> {
 
 impl Route for Collection {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        let child_handler = match self {
+        let child_handler: Option<Box<dyn Handler<'a> + 'a>> = match self {
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => btree.route(path),
+            #[cfg(feature = "table")]
             Self::Table(table) => table.route(path),
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => tensor.route(path),
+
+            _ => unimplemented!("no collection flags enabled")
         };
 
         if child_handler.is_some() {
@@ -93,12 +112,18 @@ impl Route for Collection {
 impl Route for CollectionBase {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match self {
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => btree.route(path),
+            #[cfg(feature = "table")]
             Self::Table(table) => table.route(path),
             #[cfg(feature = "tensor")]
             Self::Dense(dense) => dense.route(path),
             #[cfg(feature = "tensor")]
             Self::Sparse(sparse) => sparse.route(path),
+
+            _ => unimplemented!(
+                "route a request to a collection when no collection flags are enabled"
+            ),
         }
     }
 }
@@ -112,7 +137,9 @@ impl Route for Static {
         }
 
         match path[0].as_str() {
+            #[cfg(feature = "btree")]
             "btree" => btree::Static.route(&path[1..]),
+            #[cfg(feature = "table")]
             "table" => table::Static.route(&path[1..]),
             #[cfg(feature = "tensor")]
             "tensor" => tensor::Static.route(&path[1..]),

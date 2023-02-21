@@ -4,8 +4,10 @@ use futures::future::{self, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 use safecast::TryCastFrom;
 
+#[cfg(feature = "btree")]
 use tc_btree::BTreeInstance;
 use tc_error::*;
+#[cfg(feature = "table")]
 use tc_table::TableStream;
 use tc_transact::Transaction;
 use tc_value::Value;
@@ -33,10 +35,12 @@ pub struct Collection {
 
 #[async_trait]
 impl Source for Collection {
+    #[allow(unused_variables)]
     async fn into_stream(self, txn: Txn) -> TCResult<TCBoxTryStream<'static, State>> {
         use crate::collection::Collection::*;
 
         match self.collection {
+            #[cfg(feature = "btree")]
             BTree(btree) => {
                 let keys = btree.keys(*txn.id()).await?;
                 let keys: TCBoxTryStream<'static, State> =
@@ -44,6 +48,8 @@ impl Source for Collection {
 
                 Ok(keys)
             }
+
+            #[cfg(feature = "table")]
             Table(table) => {
                 let rows = table.rows(*txn.id()).await?;
                 let rows: TCBoxTryStream<'static, State> =

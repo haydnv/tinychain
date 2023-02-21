@@ -6,8 +6,10 @@ use futures::future::TryFutureExt;
 use log::debug;
 use safecast::*;
 
+#[cfg(feature = "btree")]
 use tc_btree::BTreeInstance;
 use tc_error::*;
+#[cfg(feature = "table")]
 use tc_table::TableInstance;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorAccess;
@@ -16,9 +18,13 @@ use tc_transact::{AsyncHash, Transact, Transaction};
 use tc_value::Value;
 use tcgeneric::{Id, NativeClass};
 
-use crate::collection::{BTreeFile, BTreeType, Collection, CollectionType, TableIndex, TableType};
+#[cfg(feature = "btree")]
+use crate::collection::{BTreeFile, BTreeType};
+use crate::collection::{Collection, CollectionType};
 #[cfg(feature = "tensor")]
 use crate::collection::{DenseTensor, SparseTensor, Tensor, TensorType};
+#[cfg(feature = "table")]
+use crate::collection::{TableIndex, TableType};
 use crate::fs;
 use crate::scalar::{OpRef, Scalar, TCRef};
 use crate::state::State;
@@ -45,10 +51,13 @@ impl Store {
         let txn_id = *txn.id();
         let dir = self.dir.write(txn_id).await?;
 
+        // TODO: this should just be implemented for a Collection, not each possible type of Collection
+
         // TODO: it should be possible to lock the directory listing,
         // to combine the calls to `self.dir.contains` with `self.dir.create...`
         match state {
             State::Collection(collection) => match collection {
+                #[cfg(feature = "btree")]
                 Collection::BTree(btree) => {
                     let schema = btree.schema().to_vec();
                     let classpath = BTreeType::default().path();
@@ -68,6 +77,7 @@ impl Store {
                     .into())
                 }
 
+                #[cfg(feature = "table")]
                 Collection::Table(table) => {
                     let schema = table.schema().clone();
                     let classpath = TableType::default().path();
@@ -161,7 +171,9 @@ impl Store {
     ) -> TCResult<Collection> {
         debug!("resolve historical collection value of type {}", class);
 
+        // TODO: this should just be implemented for a Collection, not each possible type of Collection
         match class {
+            #[cfg(feature = "btree")]
             CollectionType::BTree(_) => {
                 fn schema_err<I: fmt::Display>(info: I) -> TCError {
                     unexpected!("invalid BTree schema for historical Chain state: {}", info)
@@ -177,6 +189,7 @@ impl Store {
                 BTreeFile::load(txn_id, schema, store).map(|btree| Collection::BTree(btree.into()))
             }
 
+            #[cfg(feature = "table")]
             CollectionType::Table(_) => {
                 fn schema_err<I: fmt::Display>(info: I) -> TCError {
                     unexpected!("invalid Table schema for historical Chain state: {}", info)

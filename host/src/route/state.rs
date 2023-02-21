@@ -155,11 +155,14 @@ impl Route for Static {
         }
 
         match path[0].as_str() {
+            #[cfg(any(feature = "btree", feature = "table", feature = "tensor"))]
             "collection" => collection::Static.route(&path[1..]),
+
             "scalar" => scalar::Static.route(&path[1..]),
             "map" => generic::MapStatic.route(&path[1..]),
             "stream" => stream::Static.route(&path[1..]),
             "tuple" => generic::TupleStatic.route(&path[1..]),
+
             _ => None,
         }
     }

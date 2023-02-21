@@ -12,6 +12,7 @@ use safecast::as_type;
 use tokio::fs;
 use tokio_util::io::StreamReader;
 
+#[cfg(any(feature = "btree", feature = "table"))]
 use tc_btree::Node;
 #[cfg(feature = "tensor")]
 use tc_tensor::Array;
@@ -25,6 +26,7 @@ use super::file_ext;
 /// A cached filesystem block.
 #[derive(Clone, GetSize)]
 pub enum CacheBlock {
+    #[cfg(any(feature = "btree", feature = "table"))]
     BTree(Node),
     Chain(ChainBlock),
     Class(InstanceClass),
@@ -66,6 +68,7 @@ impl freqfs::FileLoad for CacheBlock {
                     .await
             }
 
+            #[cfg(any(feature = "btree", feature = "table"))]
             Some("node") => {
                 tbon::de::read_from((), file)
                     .map_ok(Self::BTree)
@@ -87,6 +90,7 @@ impl freqfs::FileLoad for CacheBlock {
 
     async fn save(&self, file: &mut fs::File) -> Result<u64, io::Error> {
         match self {
+            #[cfg(any(feature = "btree", feature = "table"))]
             Self::BTree(node) => persist(node, file).await,
             Self::Chain(block) => persist(block, file).await,
             Self::Class(class) => persist(class, file).await,
@@ -97,6 +101,7 @@ impl freqfs::FileLoad for CacheBlock {
     }
 }
 
+#[cfg(any(feature = "btree", feature = "table"))]
 as_type!(CacheBlock, BTree, Node);
 as_type!(CacheBlock, Chain, ChainBlock);
 as_type!(CacheBlock, Class, InstanceClass);

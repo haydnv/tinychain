@@ -109,6 +109,7 @@ impl NativeClass for StateType {
     }
 }
 
+#[cfg(feature = "btree")]
 impl From<BTreeType> for StateType {
     fn from(btt: BTreeType) -> Self {
         CollectionType::BTree(btt).into()
@@ -145,6 +146,7 @@ impl From<ScalarType> for StateType {
     }
 }
 
+#[cfg(feature = "table")]
 impl From<TableType> for StateType {
     fn from(tt: TableType) -> Self {
         Self::Collection(tt.into())
@@ -489,6 +491,7 @@ impl From<()> for State {
     }
 }
 
+#[cfg(feature = "btree")]
 impl From<BTree> for State {
     fn from(btree: BTree) -> Self {
         Self::Collection(btree.into())
@@ -608,6 +611,7 @@ impl From<Scalar> for State {
     }
 }
 
+#[cfg(feature = "table")]
 impl From<Table> for State {
     fn from(table: Table) -> Self {
         Self::Collection(table.into())
