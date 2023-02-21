@@ -9,8 +9,10 @@ use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
 use sha2::digest::Output;
 use sha2::Sha256;
 
+#[cfg(feature = "btree")]
 use tc_btree::BTreeType;
 use tc_error::*;
+#[cfg(feature = "table")]
 use tc_table::TableType;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorType;
@@ -24,7 +26,9 @@ use super::PREFIX;
 /// The [`Class`] of a `Collection`.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CollectionType {
+    #[cfg(feature = "btree")]
     BTree(BTreeType),
+    #[cfg(feature = "table")]
     Table(TableType),
     #[cfg(feature = "tensor")]
     Tensor(TensorType),
@@ -38,7 +42,9 @@ impl NativeClass for CollectionType {
 
         if path.len() > 2 && &path[0..2] == &PREFIX[..] {
             match path[2].as_str() {
+                #[cfg(feature = "btree")]
                 "btree" => BTreeType::from_path(path).map(Self::BTree),
+                #[cfg(feature = "table")]
                 "table" => TableType::from_path(path).map(Self::Table),
                 #[cfg(feature = "tensor")]
                 "tensor" => TensorType::from_path(path).map(Self::Tensor),
@@ -51,20 +57,26 @@ impl NativeClass for CollectionType {
 
     fn path(&self) -> TCPathBuf {
         match self {
+            #[cfg(feature = "btree")]
             Self::BTree(btt) => btt.path(),
+            #[cfg(feature = "table")]
             Self::Table(tt) => tt.path(),
             #[cfg(feature = "tensor")]
             Self::Tensor(tt) => tt.path(),
+
+            _ => unimplemented!("no collection flags enabled")
         }
     }
 }
 
+#[cfg(feature = "btree")]
 impl From<BTreeType> for CollectionType {
     fn from(btt: BTreeType) -> Self {
         Self::BTree(btt)
     }
 }
 
+#[cfg(feature = "table")]
 impl From<TableType> for CollectionType {
     fn from(tt: TableType) -> Self {
         Self::Table(tt)
@@ -81,10 +93,14 @@ impl From<TensorType> for CollectionType {
 impl fmt::Display for CollectionType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            #[cfg(feature = "btree")]
             Self::BTree(btt) => fmt::Display::fmt(btt, f),
+            #[cfg(feature = "table")]
             Self::Table(tt) => fmt::Display::fmt(tt, f),
             #[cfg(feature = "tensor")]
             Self::Tensor(tt) => fmt::Display::fmt(tt, f),
+
+            _ => unimplemented!("no collection flags enabled")
         }
     }
 }
@@ -92,7 +108,9 @@ impl fmt::Display for CollectionType {
 /// The schema of a `Collection`.
 #[derive(Clone, Eq, PartialEq)]
 pub enum CollectionSchema {
+    #[cfg(feature = "btree")]
     BTree(tc_btree::RowSchema),
+    #[cfg(feature = "table")]
     Table(tc_table::TableSchema),
     #[cfg(feature = "tensor")]
     Dense(tc_tensor::Schema),
@@ -116,6 +134,7 @@ impl CollectionSchema {
                     }
 
                     match class {
+                        #[cfg(feature = "btree")]
                         CollectionType::BTree(_) => {
                             let schema = expect_value(schema)?;
 
@@ -124,6 +143,7 @@ impl CollectionSchema {
 
                             Ok(Self::BTree(schema))
                         }
+                        #[cfg(feature = "table")]
                         CollectionType::Table(_) => {
                             let schema = expect_value(schema)?;
 
@@ -164,12 +184,14 @@ impl<'en> en::IntoStream<'en> for CollectionSchema {
         use destream::en::EncodeMap;
 
         match self {
+            #[cfg(feature = "btree")]
             Self::BTree(schema) => {
                 let mut map = encoder.encode_map(Some(1))?;
                 map.encode_entry(BTreeType::default().path(), (schema,))?;
                 map.end()
             }
 
+            #[cfg(feature = "table")]
             Self::Table(schema) => {
                 let mut map = encoder.encode_map(Some(1))?;
                 map.encode_entry(TableType::default().path(), (schema,))?;
@@ -191,12 +213,14 @@ impl<'en> en::ToStream<'en> for CollectionSchema {
         use destream::en::EncodeMap;
 
         match self {
+            #[cfg(feature = "btree")]
             Self::BTree(schema) => {
                 let mut map = encoder.encode_map(Some(1))?;
                 map.encode_entry(BTreeType::default().path(), (schema,))?;
                 map.end()
             }
 
+            #[cfg(feature = "table")]
             Self::Table(schema) => {
                 let mut map = encoder.encode_map(Some(1))?;
                 map.encode_entry(TableType::default().path(), (schema,))?;
@@ -209,6 +233,8 @@ impl<'en> en::ToStream<'en> for CollectionSchema {
                 map.encode_entry(TensorType::Dense.path(), (schema,))?;
                 map.end()
             }
+
+            _ => unimplemented!("no collection flags enabled")
         }
     }
 }
@@ -216,7 +242,9 @@ impl<'en> en::ToStream<'en> for CollectionSchema {
 impl CastFrom<CollectionSchema> for TCRef {
     fn cast_from(schema: CollectionSchema) -> TCRef {
         let class: CollectionType = match schema {
+            #[cfg(feature = "btree")]
             CollectionSchema::BTree(_) => BTreeType::default().into(),
+            #[cfg(feature = "table")]
             CollectionSchema::Table(_) => TableType::default().into(),
             #[cfg(feature = "tensor")]
             CollectionSchema::Dense(_) => TensorType::Dense.into(),
@@ -224,15 +252,19 @@ impl CastFrom<CollectionSchema> for TCRef {
             CollectionSchema::Sparse(_) => TensorType::Sparse.into(),
         };
 
-        let schema = match schema {
+        let schema: Value = match schema {
+            #[cfg(feature = "btree")]
             CollectionSchema::BTree(schema) => {
                 Value::Tuple(schema.into_iter().map(Value::from).collect())
             }
+            #[cfg(feature = "table")]
             CollectionSchema::Table(schema) => schema.cast_into(),
             #[cfg(feature = "tensor")]
             CollectionSchema::Dense(schema) => schema.cast_into(),
             #[cfg(feature = "tensor")]
             CollectionSchema::Sparse(schema) => schema.cast_into(),
+
+            _ => unimplemented!("no collection flags enabled")
         };
 
         TCRef::Op(OpRef::Get((class.path().into(), schema.into())))
@@ -242,12 +274,16 @@ impl CastFrom<CollectionSchema> for TCRef {
 impl fmt::Display for CollectionSchema {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            #[cfg(feature = "btree")]
             Self::BTree(schema) => write!(f, "{:?}", schema),
+            #[cfg(feature = "table")]
             Self::Table(schema) => fmt::Display::fmt(schema, f),
             #[cfg(feature = "tensor")]
             Self::Dense(schema) => fmt::Display::fmt(schema, f),
             #[cfg(feature = "tensor")]
             Self::Sparse(schema) => fmt::Display::fmt(schema, f),
+
+            _ => unimplemented!("no collection flags enabled")
         }
     }
 }

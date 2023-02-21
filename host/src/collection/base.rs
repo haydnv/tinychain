@@ -8,8 +8,10 @@ use safecast::TryCastFrom;
 use sha2::digest::Output;
 use sha2::Sha256;
 
+#[cfg(feature = "btree")]
 use tc_btree::BTreeInstance;
 use tc_error::*;
+#[cfg(feature = "table")]
 use tc_table::TableInstance;
 #[cfg(feature = "tensor")]
 use tc_tensor::TensorPersist;
@@ -22,14 +24,20 @@ use crate::transact::TxnId;
 use crate::txn::Txn;
 
 use super::schema::{CollectionSchema as Schema, CollectionType};
-use super::{BTree, BTreeFile, Collection, CollectionView, Table, TableIndex};
+#[cfg(feature = "btree")]
+use super::{BTree, BTreeFile};
+use super::{Collection, CollectionView};
 #[cfg(feature = "tensor")]
 use super::{DenseTensor, DenseTensorFile, SparseTable, SparseTensor, Tensor, TensorType};
+#[cfg(feature = "table")]
+use super::{Table, TableIndex};
 
 /// The base type of a [`Collection`] which supports [`CopyFrom`], [`Persist`], and [`Transact`]
 #[derive(Clone)]
 pub enum CollectionBase {
+    #[cfg(feature = "btree")]
     BTree(BTreeFile),
+    #[cfg(feature = "table")]
     Table(TableIndex),
     #[cfg(feature = "tensor")]
     Dense(DenseTensor<DenseTensorFile>),
@@ -40,12 +48,15 @@ pub enum CollectionBase {
 impl CollectionBase {
     pub fn schema(&self) -> Schema {
         match self {
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => Schema::BTree(btree.schema().clone()),
+            #[cfg(feature = "table")]
             Self::Table(table) => Schema::Table(table.schema()),
             #[cfg(feature = "tensor")]
             Self::Dense(dense) => Schema::Dense(dense.schema()),
             #[cfg(feature = "tensor")]
             Self::Sparse(sparse) => Schema::Sparse(sparse.schema()),
+            _ => unimplemented!("collection schema with no collection flags enabled"),
         }
     }
 }
@@ -55,12 +66,15 @@ impl Instance for CollectionBase {
 
     fn class(&self) -> Self::Class {
         match self {
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => btree.class().into(),
+            #[cfg(feature = "table")]
             Self::Table(table) => table.class().into(),
             #[cfg(feature = "tensor")]
             Self::Dense(_dense) => TensorType::Dense.into(),
             #[cfg(feature = "tensor")]
             Self::Sparse(_sparse) => TensorType::Sparse.into(),
+            _ => unimplemented!("collection schema with no collection flags enabled"),
         }
     }
 }
@@ -80,9 +94,11 @@ impl Persist<fs::Dir> for CollectionBase {
 
     fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         match schema {
+            #[cfg(feature = "btree")]
             Schema::BTree(btree_schema) => {
                 BTreeFile::create(txn_id, btree_schema, store).map(Self::BTree)
             }
+            #[cfg(feature = "table")]
             Schema::Table(table_schema) => {
                 TableIndex::create(txn_id, table_schema, store).map(Self::Table)
             }
@@ -99,9 +115,11 @@ impl Persist<fs::Dir> for CollectionBase {
 
     fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
         match schema {
+            #[cfg(feature = "btree")]
             Schema::BTree(btree_schema) => {
                 BTreeFile::load(txn_id, btree_schema, store).map(Self::BTree)
             }
+            #[cfg(feature = "table")]
             Schema::Table(table_schema) => {
                 TableIndex::load(txn_id, table_schema, store).map(Self::Table)
             }
@@ -118,12 +136,16 @@ impl Persist<fs::Dir> for CollectionBase {
 
     fn dir(&self) -> <fs::Dir as Dir>::Inner {
         match self {
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => btree.dir(),
+            #[cfg(feature = "table")]
             Self::Table(table) => table.dir(),
             #[cfg(feature = "tensor")]
             Self::Dense(dense) => dense.dir(),
             #[cfg(feature = "tensor")]
             Self::Sparse(sparse) => sparse.dir(),
+
+            _ => unimplemented!("CollectionBase::dir when no collection flags are enabled")
         }
     }
 }
@@ -132,11 +154,13 @@ impl Persist<fs::Dir> for CollectionBase {
 impl CopyFrom<fs::Dir, Collection> for CollectionBase {
     async fn copy_from(txn: &Txn, store: fs::Store, instance: Collection) -> TCResult<Self> {
         match instance {
+            #[cfg(feature = "btree")]
             Collection::BTree(btree) => {
                 BTreeFile::copy_from(txn, store, btree)
                     .map_ok(Self::BTree)
                     .await
             }
+            #[cfg(feature = "table")]
             Collection::Table(table) => {
                 TableIndex::copy_from(txn, store, table)
                     .map_ok(Self::Table)
@@ -163,7 +187,9 @@ impl CopyFrom<fs::Dir, Collection> for CollectionBase {
 impl Restore<fs::Dir> for CollectionBase {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         match (self, backup) {
+            #[cfg(feature = "btree")]
             (Self::BTree(btree), Self::BTree(backup)) => btree.restore(txn_id, backup).await,
+            #[cfg(feature = "table")]
             (Self::Table(table), Self::Table(backup)) => table.restore(txn_id, backup).await,
             #[cfg(feature = "tensor")]
             (Self::Dense(tensor), Self::Dense(backup)) => tensor.restore(txn_id, backup).await,
@@ -179,7 +205,9 @@ impl Restore<fs::Dir> for CollectionBase {
 }
 
 pub enum CollectionCommit {
+    #[cfg(feature = "btree")]
     BTree(<BTreeFile as Transact>::Commit),
+    #[cfg(feature = "table")]
     Table(<TableIndex as Transact>::Commit),
     #[cfg(feature = "tensor")]
     Dense(<DenseTensor<DenseTensorFile> as Transact>::Commit),
@@ -193,34 +221,46 @@ impl Transact for CollectionBase {
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         match self {
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => btree.commit(txn_id).map(CollectionCommit::BTree).await,
+            #[cfg(feature = "table")]
             Self::Table(table) => table.commit(txn_id).map(CollectionCommit::Table).await,
             #[cfg(feature = "tensor")]
             Self::Dense(dense) => dense.commit(txn_id).map(CollectionCommit::Dense).await,
             #[cfg(feature = "tensor")]
             Self::Sparse(sparse) => sparse.commit(txn_id).map(CollectionCommit::Sparse).await,
+
+            _ => unimplemented!("commit a collection with no collection flags enabled")
         }
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
         match self {
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => btree.rollback(txn_id).await,
+            #[cfg(feature = "table")]
             Self::Table(table) => table.rollback(txn_id).await,
             #[cfg(feature = "tensor")]
             Self::Dense(dense) => dense.rollback(txn_id).await,
             #[cfg(feature = "tensor")]
             Self::Sparse(sparse) => sparse.rollback(txn_id).await,
+
+            _ => unimplemented!("roll back a collection with no collection flags enabled")
         }
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         match self {
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => btree.finalize(txn_id).await,
+            #[cfg(feature = "table")]
             Self::Table(table) => table.finalize(txn_id).await,
             #[cfg(feature = "tensor")]
             Self::Dense(dense) => dense.finalize(txn_id).await,
             #[cfg(feature = "tensor")]
             Self::Sparse(sparse) => sparse.finalize(txn_id).await,
+
+            _ => unimplemented!("finalize a collection with no collection flags enabled")
         }
     }
 }
@@ -243,6 +283,7 @@ impl CollectionVisitor {
         debug!("deserialize Collection");
 
         match class {
+            #[cfg(feature = "btree")]
             CollectionType::BTree(_) => {
                 let file = self
                     .txn
@@ -257,6 +298,7 @@ impl CollectionVisitor {
                     .await
             }
 
+            #[cfg(feature = "table")]
             CollectionType::Table(_) => {
                 access
                     .next_value(self.txn)
@@ -322,12 +364,16 @@ impl<'en> IntoView<'en, fs::Dir> for CollectionBase {
 impl fmt::Display for CollectionBase {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => fmt::Display::fmt(btree, f),
+            #[cfg(feature = "table")]
             Self::Table(table) => fmt::Display::fmt(table, f),
             #[cfg(feature = "tensor")]
             Self::Dense(dense) => fmt::Display::fmt(dense, f),
             #[cfg(feature = "tensor")]
             Self::Sparse(sparse) => fmt::Display::fmt(sparse, f),
+
+            _ => unimplemented!("no collection flags enabled")
         }
     }
 }
@@ -335,7 +381,9 @@ impl fmt::Display for CollectionBase {
 impl TryCastFrom<Collection> for CollectionBase {
     fn can_cast_from(collection: &Collection) -> bool {
         match collection {
+            #[cfg(feature = "btree")]
             Collection::BTree(BTree::File(_)) => true,
+            #[cfg(feature = "table")]
             Collection::Table(Table::Table(_)) => true,
             #[cfg(feature = "tensor")]
             Collection::Tensor(tensor) => match tensor {
@@ -348,7 +396,9 @@ impl TryCastFrom<Collection> for CollectionBase {
 
     fn opt_cast_from(collection: Collection) -> Option<Self> {
         match collection {
+            #[cfg(feature = "btree")]
             Collection::BTree(BTree::File(btree)) => Some(Self::BTree(btree)),
+            #[cfg(feature = "table")]
             Collection::Table(Table::Table(table)) => Some(Self::Table(table)),
             #[cfg(feature = "tensor")]
             Collection::Tensor(tensor) => match tensor {
@@ -363,12 +413,16 @@ impl TryCastFrom<Collection> for CollectionBase {
 impl From<CollectionBase> for Collection {
     fn from(collection: CollectionBase) -> Self {
         match collection {
+            #[cfg(feature = "btree")]
             CollectionBase::BTree(btree) => Self::BTree(btree.into()),
+            #[cfg(feature = "table")]
             CollectionBase::Table(table) => Self::Table(table.into()),
             #[cfg(feature = "tensor")]
             CollectionBase::Dense(dense) => Self::Tensor(dense.into()),
             #[cfg(feature = "tensor")]
             CollectionBase::Sparse(sparse) => Self::Tensor(sparse.into()),
+
+            _ => unimplemented!("no collection flags enabled")
         }
     }
 }

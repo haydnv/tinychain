@@ -13,6 +13,7 @@ use log::debug;
 use safecast::{as_type, AsType};
 use uuid::Uuid;
 
+#[cfg(any(feature = "btree", feature = "table"))]
 use tc_btree::{Node, NodeId};
 use tc_error::*;
 #[cfg(feature = "tensor")]
@@ -32,7 +33,9 @@ use super::{io_err, CacheBlock, File};
 
 /// The type of entry in a [`Dir`]
 pub enum EntryType {
+    #[cfg(any(feature = "btree", feature = "table"))]
     BTree,
+
     Chain,
     Class,
     Library,
@@ -45,7 +48,9 @@ pub enum EntryType {
 impl EntryType {
     fn from_ext(ext: &str) -> Option<Self> {
         match ext {
+            #[cfg(any(feature = "btree", feature = "table"))]
             "btree" => Some(Self::BTree),
+
             "chain" => Some(Self::Chain),
             "class" => Some(Self::Class),
             "lib" => Some(Self::Library),
@@ -60,7 +65,9 @@ impl EntryType {
 
     fn ext(&self) -> &'static str {
         match self {
+            #[cfg(any(feature = "btree", feature = "table"))]
             Self::BTree => "btree",
+
             Self::Chain => "chain",
             Self::Class => "class",
             Self::Library => "lib",
@@ -88,6 +95,7 @@ macro_rules! file_ext {
     };
 }
 
+#[cfg(any(feature = "btree", feature = "table"))]
 file_ext!(NodeId, Node, BTree);
 file_ext!(Id, ChainBlock, Chain);
 file_ext!(Id, InstanceClass, Class);
@@ -99,6 +107,7 @@ file_ext!(u64, Array, Tensor);
 /// A file in a directory
 #[derive(Clone)]
 pub enum FileEntry {
+    #[cfg(any(feature = "btree", feature = "table"))]
     BTree(File<NodeId, Node>),
     Chain(File<Id, ChainBlock>),
     Class(File<Id, InstanceClass>),
@@ -116,7 +125,9 @@ impl FileEntry {
         txn_id: TxnId,
     ) -> TCResult<Self> {
         match class {
+            #[cfg(any(feature = "btree", feature = "table"))]
             EntryType::BTree => File::load(cache, txn_id).map_ok(Self::BTree).await,
+
             EntryType::Chain => File::load(cache, txn_id).map_ok(Self::Chain).await,
             EntryType::Class => File::load(cache, txn_id).map_ok(Self::Class).await,
             EntryType::Library => File::load(cache, txn_id).map_ok(Self::Library).await,
@@ -128,6 +139,7 @@ impl FileEntry {
     }
 }
 
+#[cfg(any(feature = "btree", feature = "table"))]
 as_type!(FileEntry, BTree, File<NodeId, Node>);
 as_type!(FileEntry, Chain, File<Id, ChainBlock>);
 as_type!(FileEntry, Class, File<Id, InstanceClass>);
@@ -139,7 +151,9 @@ as_type!(FileEntry, Tensor, File<u64, Array>);
 impl fmt::Display for FileEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            #[cfg(any(feature = "btree", feature = "table"))]
             Self::BTree(btree) => fmt::Display::fmt(btree, f),
+
             Self::Chain(chain) => fmt::Display::fmt(chain, f),
             Self::Class(class) => fmt::Display::fmt(class, f),
             Self::Library(library) => fmt::Display::fmt(library, f),
@@ -260,11 +274,14 @@ impl fs::Store for Store {
         match entry {
             DirEntry::Dir(dir) => dir.is_empty(txn_id),
             DirEntry::File(file) => match file {
+                #[cfg(any(feature = "btree", feature = "table"))]
                 FileEntry::BTree(file) => file.is_empty(txn_id),
+
                 FileEntry::Chain(file) => file.is_empty(txn_id),
                 FileEntry::Class(file) => file.is_empty(txn_id),
                 FileEntry::Library(file) => file.is_empty(txn_id),
                 FileEntry::Service(file) => file.is_empty(txn_id),
+
                 #[cfg(feature = "tensor")]
                 FileEntry::Tensor(file) => file.is_empty(txn_id),
             },
@@ -672,7 +689,9 @@ impl Transact for Dir {
             let commit: TCBoxFuture<()> = match entry {
                 DirEntry::Dir(dir) => Box::pin(dir.commit(txn_id).map(|_| ())),
                 DirEntry::File(file) => match file {
+                    #[cfg(any(feature = "btree", feature = "table"))]
                     FileEntry::BTree(file) => Box::pin(file.commit(txn_id).map(|_| ())),
+
                     FileEntry::Chain(file) => Box::pin(file.commit(txn_id).map(|_| ())),
                     FileEntry::Class(file) => Box::pin(file.commit(txn_id).map(|_| ())),
                     FileEntry::Library(file) => Box::pin(file.commit(txn_id).map(|_| ())),
@@ -697,7 +716,9 @@ impl Transact for Dir {
             let rollbacks = listing.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.rollback(txn_id),
                 DirEntry::File(file) => match file {
+                    #[cfg(any(feature = "btree", feature = "table"))]
                     FileEntry::BTree(file) => file.rollback(txn_id),
+
                     FileEntry::Chain(file) => file.rollback(txn_id),
                     FileEntry::Class(file) => file.rollback(txn_id),
                     FileEntry::Library(file) => file.rollback(txn_id),
@@ -716,7 +737,9 @@ impl Transact for Dir {
             let cleanups = listing.values().map(|entry| match entry {
                 DirEntry::Dir(dir) => dir.finalize(txn_id),
                 DirEntry::File(file) => match file {
+                    #[cfg(any(feature = "btree", feature = "table"))]
                     FileEntry::BTree(file) => file.finalize(txn_id),
+
                     FileEntry::Chain(file) => file.finalize(txn_id),
                     FileEntry::Class(file) => file.finalize(txn_id),
                     FileEntry::Library(file) => file.finalize(txn_id),

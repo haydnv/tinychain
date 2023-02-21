@@ -14,8 +14,10 @@ use std::sync::Arc;
 
 use futures::future::TryFutureExt;
 
+#[cfg(feature = "btree")]
 pub use tc_btree as btree;
 pub use tc_error::*;
+#[cfg(feature = "table")]
 pub use tc_table as table;
 #[cfg(feature = "tensor")]
 pub use tc_tensor as tensor;
