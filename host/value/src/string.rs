@@ -176,7 +176,7 @@ impl fmt::Display for TCString {
 }
 
 /// A [`Collator`] for [`TCString`] values.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Eq, PartialEq)]
 pub struct StringCollator {
     collator: Collator<String>,
 }
@@ -184,7 +184,7 @@ pub struct StringCollator {
 impl Collate for StringCollator {
     type Value = TCString;
 
-    fn compare(&self, left: &Self::Value, right: &Self::Value) -> Ordering {
-        self.collator.compare(&left.0, &right.0)
+    fn cmp(&self, left: &Self::Value, right: &Self::Value) -> Ordering {
+        self.collator.cmp(&left.0, &right.0)
     }
 }
