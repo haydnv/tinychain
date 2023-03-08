@@ -1,6 +1,6 @@
 [package]
 name = "tcgeneric"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "Generic data types used internally by TinyChain"
@@ -13,14 +13,14 @@ categories = ["data-structures"]
 [dependencies]
 async-hash = "0.4"
 async-trait = "0.1"
-destream = "0.6"
+destream = { path = "../../../destream" }
+ds-ext = { path = "../../../ds-ext", features = ["serialize", "stream"] }
 futures = "0.3"
 get-size = "0.1"
 get-size-derive = "0.1"
 hex = "0.4"
-hr-id = { version = "~0.3.1", features=["all"] }
-safecast = "0.1"
+safecast = { path = "../../../safecast" }
 serde = { version = "1.0", features = [] }
 sha2 = "0.10"
 tc-error = { path = "../error" }
-uuid = "1.1"
+#uuid = "1.1"

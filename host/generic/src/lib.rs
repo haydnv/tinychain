@@ -14,7 +14,12 @@ pub use map::*;
 pub use time::*;
 pub use tuple::*;
 
-mod id;
+mod id {
+    pub use ds_ext::link::{
+        label, Id, Label, Path as TCPath, PathBuf as TCPathBuf, PathLabel, PathSegment,
+    };
+}
+
 mod map;
 mod time;
 mod tuple;
