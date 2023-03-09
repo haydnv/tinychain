@@ -1,6 +1,6 @@
 [package]
 name = "tc-transact"
-version = "0.16.0"
+version = "0.17.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "Traits and locking utilities for a TinyChain transaction."
@@ -11,27 +11,25 @@ repository = "https://github.com/haydnv/tinychain.git"
 keywords = ["tinychain", "transaction", "executor"]
 categories = ["concurrency", "data-structures"]
 
-[features]
-tensor = ["afarray"]
-
 [dependencies]
-afarray = { version = "0.15", optional = true }
 async-hash = "0.4"
 async-trait = "0.1"
-bytes = "1.0"
-destream = "0.6"
+#bytes = "1.0"
+destream = { path = "../../../destream" }
 futures = "0.3"
+freqfs = { path = "../../../freqfs" }
 get-size = "0.1"
 get-size-derive = "0.1"
-hex = "0.4"
-log = { version = "0.4", features = [] }
-num_cpus = "1.13"
+#hex = "0.4"
+#log = { version = "0.4", features = [] }
+#num_cpus = "1.13"
 rand = "0.8"
-safecast = "~0.1.2"
+#safecast = "~0.1.2"
 sha2 = "0.10"
-tbon = { version = "0.4", features = ["tokio-io"] }
+#tbon = { path = "../../../tbon", features = ["tokio-io"] }
 tcgeneric = { path = "../generic" }
 tc-error = { path = "../error" }
 tc-value = { path = "../value" }
-tokio = { version = "1.24", features = ["sync"] }
-txn_lock = { version = "~0.5.1", features = ["logging"] }
+tokio = { version = "1.25", features = ["sync"] }
+txfs = { path = "../../../txfs" }
+txn_lock = { path = "../../../txn_lock", features = ["logging"] }
