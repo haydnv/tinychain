@@ -10,11 +10,6 @@ use tcgeneric::Id;
 
 use super::{TCResult, Transaction, TxnId};
 
-/// The data contained by a single block on the filesystem
-pub trait BlockData: GetSize + Clone + Send + Sync + 'static {
-    fn ext() -> &'static str;
-}
-
 /// A read lock on a block in a [`File`]
 pub type BlockRead<FE, B> = txfs::FileVersionRead<TxnId, FE, B>;
 
@@ -45,8 +40,9 @@ impl<FE: FileLoad + GetSize + Clone> Dir<FE> {
     }
 
     /// Create a new [`File`] with the given `name` at `txn_id`.
-    pub async fn create_file<B: BlockData>(&self, txn_id: TxnId, name: Id) -> TCResult<File<FE, B>>
+    pub async fn create_file<B>(&self, txn_id: TxnId, name: Id) -> TCResult<File<FE, B>>
     where
+        B: GetSize + Clone,
         FE: AsType<B>,
     {
         self.inner
@@ -75,8 +71,9 @@ impl<FE: FileLoad + GetSize + Clone> Dir<FE> {
     }
 
     /// Get the [`File`] with the given `name` at `txn_id`, or return a "not found" error.
-    pub async fn get_file<B: BlockData>(&self, txn_id: TxnId, name: &Id) -> TCResult<File<FE, B>>
+    pub async fn get_file<B>(&self, txn_id: TxnId, name: &Id) -> TCResult<File<FE, B>>
     where
+        B: GetSize + Clone,
         FE: AsType<B>,
     {
         if let Some(blocks) = self.inner.get_dir(txn_id, name.as_str()).await? {
@@ -98,7 +95,7 @@ pub struct File<FE, B> {
     phantom: PhantomData<B>,
 }
 
-impl<FE: FileLoad + GetSize + AsType<B> + Clone, B: BlockData> File<FE, B> {
+impl<FE: FileLoad + GetSize + AsType<B> + Clone, B: GetSize + Clone> File<FE, B> {
     fn new(inner: txfs::Dir<TxnId, FE>) -> Self {
         Self {
             inner,
