@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use freqfs::FileLoad;
+use freqfs::{FileLoad, FileSave};
 use futures::TryFutureExt;
 use get_size::GetSize;
 use safecast::AsType;
@@ -21,7 +21,7 @@ pub struct Dir<FE> {
     inner: txfs::Dir<TxnId, FE>,
 }
 
-impl<FE: FileLoad + GetSize + Clone> Dir<FE> {
+impl<FE: Clone + Send + Sync + 'static> Dir<FE> {
     /// Check whether this [`Dir`] has an entry with the given `name` at `txn_id`.
     pub async fn contains(&self, txn_id: TxnId, name: &Id) -> TCResult<bool> {
         self.inner
@@ -95,14 +95,20 @@ pub struct File<FE, B> {
     phantom: PhantomData<B>,
 }
 
-impl<FE: FileLoad + GetSize + AsType<B> + Clone, B: GetSize + Clone> File<FE, B> {
+impl<FE, B> File<FE, B> {
     fn new(inner: txfs::Dir<TxnId, FE>) -> Self {
         Self {
             inner,
             phantom: PhantomData,
         }
     }
+}
 
+impl<FE, B> File<FE, B>
+where
+    FE: for<'a> FileSave<'a> + AsType<B> + Clone + Send + Sync,
+    B: FileLoad + GetSize + Clone,
+{
     /// Create a new block at `txn_id` with the given `name` and `contents`.
     pub async fn create_block(
         &self,
@@ -145,7 +151,7 @@ impl<FE: FileLoad + GetSize + AsType<B> + Clone, B: GetSize + Clone> File<FE, B>
 
 /// Defines how to load a persistent data structure from the filesystem.
 #[async_trait]
-pub trait Persist<FE: FileLoad + GetSize + Clone>: Sized {
+pub trait Persist<FE: Clone + Send + Sync + 'static>: Sized {
     type Txn: Transaction<FE>;
     type Schema: Clone + Send + Sync;
 
@@ -171,7 +177,7 @@ pub trait Persist<FE: FileLoad + GetSize + Clone>: Sized {
 
 /// Copy a base state from another instance, possibly a view.
 #[async_trait]
-pub trait CopyFrom<FE: FileLoad + GetSize + Clone, I>: Persist<FE> {
+pub trait CopyFrom<FE: Clone + Send + Sync + 'static, I>: Persist<FE> {
     /// Copy a new instance of `Self` from an existing instance.
     async fn copy_from(
         txn: &<Self as Persist<FE>>::Txn,
@@ -182,7 +188,7 @@ pub trait CopyFrom<FE: FileLoad + GetSize + Clone, I>: Persist<FE> {
 
 /// Restore a persistent state from a backup.
 #[async_trait]
-pub trait Restore<FE: FileLoad + GetSize + Clone>: Persist<FE> {
+pub trait Restore<FE: Clone + Send + Sync + 'static>: Persist<FE> {
     /// Restore this persistent state from a backup.
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()>;
 }
