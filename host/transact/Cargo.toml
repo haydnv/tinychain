@@ -24,7 +24,7 @@ get-size-derive = "0.1"
 #log = { version = "0.4", features = [] }
 #num_cpus = "1.13"
 rand = "0.8"
-#safecast = "~0.1.2"
+safecast = { path = "../../../safecast" }
 sha2 = "0.10"
 #tbon = { path = "../../../tbon", features = ["tokio-io"] }
 tcgeneric = { path = "../generic" }

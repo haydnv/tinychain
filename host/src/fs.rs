@@ -21,7 +21,11 @@ use crate::chain::ChainBlock;
 use crate::cluster::library;
 use crate::object::InstanceClass;
 
-use super::file_ext;
+/// A transactional file
+pub type Dir = tc_transact::fs::Dir<CacheBlock>;
+
+/// A transactional file
+pub type Block = tc_transact::fs::File<CacheBlock>;
 
 /// A cached filesystem block.
 #[derive(Clone, GetSize)]
@@ -123,4 +127,9 @@ async fn persist<'en, T: en::ToStream<'en>>(
     );
 
     tokio::io::copy(&mut reader, file).await
+}
+
+#[inline]
+fn file_ext(path: &'_ Path) -> Option<&'_ str> {
+    path.extension().and_then(|ext| ext.to_str())
 }

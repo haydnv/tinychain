@@ -1,5 +1,6 @@
 //! A transaction ID
 
+use std::cmp::Ordering;
 use std::fmt;
 use std::str::FromStr;
 
@@ -104,6 +105,16 @@ impl Ord for TxnId {
 impl PartialOrd for TxnId {
     fn partial_cmp(&self, other: &TxnId) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl freqfs::Name for TxnId {
+    fn partial_cmp(&self, other: &String) -> Option<Ordering> {
+        if let Ok(other) = Self::from_str(other) {
+            Some(self.cmp(&other))
+        } else {
+            None
+        }
     }
 }
 

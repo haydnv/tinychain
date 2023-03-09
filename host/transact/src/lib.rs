@@ -11,65 +11,8 @@ use sha2::Sha256; // TODO: should this be exported by the async_hash crate?
 use tc_error::*;
 use tcgeneric::Id;
 
+pub mod fs;
 mod id;
-
-pub mod fs {
-    use async_trait::async_trait;
-    use freqfs::FileLoad;
-
-    use super::{TCResult, Transaction, TxnId};
-
-    /// A transactional directory
-    pub type Dir<FE> = txfs::Dir<TxnId, FE>;
-
-    /// Defines how to load a persistent data structure from the filesystem.
-    #[async_trait]
-    pub trait Persist<FE: FileLoad>: Sized {
-        type Txn: Transaction<FE>;
-        type Schema: Clone + Send + Sync;
-
-        /// Create a new instance of [`Self`] from an empty `Store`.
-        async fn create(txn_id: TxnId, schema: Self::Schema, store: Dir<FE>) -> TCResult<Self>;
-
-        /// Load a saved instance of [`Self`] from persistent storage.
-        /// Should only be invoked at startup time.
-        async fn load(txn_id: TxnId, schema: Self::Schema, store: Dir<FE>) -> TCResult<Self>;
-
-        /// Load a saved instance of [`Self`] from persistent storage if present, or create a new one.
-        async fn load_or_create(
-            txn_id: TxnId,
-            schema: Self::Schema,
-            store: Dir<FE>,
-        ) -> TCResult<Self> {
-            if store.is_empty(txn_id).await? {
-                Self::create(txn_id, schema, store).await
-            } else {
-                Self::load(txn_id, schema, store).await
-            }
-        }
-
-        /// Access the filesystem directory backing this persistent data structure.
-        fn dir(&self) -> &freqfs::DirLock<FE>;
-    }
-
-    /// Copy a base state from another instance, possibly a view.
-    #[async_trait]
-    pub trait CopyFrom<FE: FileLoad, I>: Persist<FE> {
-        /// Copy a new instance of `Self` from an existing instance.
-        async fn copy_from(
-            txn: &<Self as Persist<FE>>::Txn,
-            store: Dir<FE>,
-            instance: I,
-        ) -> TCResult<Self>;
-    }
-
-    /// Restore a persistent state from a backup.
-    #[async_trait]
-    pub trait Restore<FE: FileLoad>: Persist<FE> {
-        /// Restore this persistent state from a backup.
-        async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()>;
-    }
-}
 
 pub mod lock {
     use super::TxnId;
