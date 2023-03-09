@@ -1,19 +1,66 @@
+use std::fmt;
+
 use async_trait::async_trait;
 
 use tc_error::*;
 use tc_transact::TxnId;
 use tc_value::Value;
-use tcgeneric::{Instance, TCBoxTryStream};
+use tcgeneric::{
+    path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryStream, TCPathBuf,
+};
 
 pub use schema::Schema;
 
 mod schema;
+
+const PREFIX: PathLabel = path_label(&["state", "collection", "btree"]);
 
 /// A key in a B+Tree
 pub type Key = b_tree::Key<Value>;
 
 /// A range in a B+Tree
 pub type Range = b_tree::Range<Value>;
+/// The [`Class`] of a [`BTree`].
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum BTreeType {
+    File,
+    Slice,
+}
+
+impl Class for BTreeType {}
+
+impl NativeClass for BTreeType {
+    // These functions are only used for serialization,
+    // and there's no way to transmit a BTreeSlice.
+
+    fn from_path(path: &[PathSegment]) -> Option<Self> {
+        if &path[..] == &PREFIX[..] {
+            Some(Self::File)
+        } else {
+            None
+        }
+    }
+
+    fn path(&self) -> TCPathBuf {
+        PREFIX.into()
+    }
+}
+
+impl Default for BTreeType {
+    fn default() -> Self {
+        Self::File
+    }
+}
+
+impl fmt::Display for BTreeType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::File => f.write_str("type BTree"),
+            Self::Slice => f.write_str("type BTreeSlice"),
+        }
+    }
+}
 
 /// A slice of a B+Tree
 #[async_trait]

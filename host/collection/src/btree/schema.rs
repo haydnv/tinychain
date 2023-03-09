@@ -8,6 +8,7 @@ use tc_value::{NumberType, Value, ValueType};
 use tcgeneric::{Id, NativeClass};
 
 /// The schema of a B+Tree
+#[derive(Clone, Eq, PartialEq)]
 pub struct Schema {
     columns: Vec<Column>,
 }
