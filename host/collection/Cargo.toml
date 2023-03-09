@@ -1,5 +1,5 @@
 [package]
-name = "collection"
+name = "tc-collection"
 version = "0.1.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
