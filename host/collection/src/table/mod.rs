@@ -1,3 +1,5 @@
+//! A [`Table`], an ordered collection of [`Row`]s which supports `BTree`-based indexing
+
 use std::fmt;
 
 use async_trait::async_trait;
@@ -16,10 +18,10 @@ mod schema;
 /// A range of a table
 pub type Range = b_table::Range<Id, Value>;
 
-/// The key of a row in a table.
+/// The key of a row in a table
 pub type Key = Vec<Value>;
 
-/// The values of a row in a table.
+/// The values of a row in a table
 pub type Values = Vec<Value>;
 
 /// A row in a table
@@ -27,7 +29,7 @@ pub type Row = Vec<Value>;
 
 const PATH: PathLabel = path_label(&["state", "collection", "table"]);
 
-/// The [`Class`] of a [`Table`].
+/// The [`Class`] of a [`Table`]
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub enum TableType {
     Table,

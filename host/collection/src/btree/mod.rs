@@ -1,3 +1,5 @@
+//! A [`BTree`], an ordered transaction-aware collection of [`Key`]s
+
 use std::fmt;
 
 use async_trait::async_trait;
