@@ -1,0 +1,22 @@
+[package]
+name = "collection"
+version = "0.1.0"
+authors = ["code@tinychain.net"]
+edition = "2021"
+description = "TinyChain's collection types"
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/haydnv/tinychain.git"
+
+keywords = ["tinychain", "btree", "table", "tensor", "collection"]
+categories = ["database", "database-implementations", "data-structures"]
+
+[dependencies]
+async-trait = "0.1"
+b-tree = { path = "../../../b-tree" }
+destream = { path = "../../../destream" }
+safecast = { path = "../../../safecast" }
+tc-error = { path = "../error" }
+tc-transact = { path = "../transact" }
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }
