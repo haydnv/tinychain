@@ -1,6 +1,11 @@
 use std::fmt;
 use std::marker::PhantomData;
 
+use async_trait::async_trait;
+use destream::en;
+
+use tc_error::*;
+use tc_transact::{IntoView, Transaction};
 use tcgeneric::{path_label, Class, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
 use btree::BTreeType;
@@ -84,4 +89,39 @@ impl fmt::Debug for CollectionType {
 #[derive(Clone)]
 pub struct Collection<T, FE> {
     phantom: PhantomData<(T, FE)>,
+}
+
+#[async_trait]
+impl<'en, T, FE> IntoView<'en, FE> for Collection<T, FE>
+where
+    T: Transaction<FE>,
+    FE: Send + Sync,
+    Self: 'en,
+{
+    type Txn = T;
+    type View = CollectionView<'en, T, FE>;
+
+    async fn into_view(self, _txn: Self::Txn) -> TCResult<Self::View> {
+        todo!()
+    }
+}
+
+impl<T, FE> fmt::Debug for Collection<T, FE> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a Collection")
+    }
+}
+
+/// A view of a [`Collection`] within a single `Transaction`, used for serialization.
+pub struct CollectionView<'en, T, FE> {
+    phantom: PhantomData<&'en (T, FE)>,
+}
+
+impl<'en, T, FE> en::IntoStream<'en> for CollectionView<'en, T, FE>
+where
+    Self: 'en,
+{
+    fn into_stream<E: en::Encoder<'en>>(self, _encoder: E) -> Result<E::Ok, E::Error> {
+        todo!()
+    }
 }

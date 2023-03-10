@@ -1,10 +1,12 @@
+use std::fmt;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
 
+use crate::CollectionView;
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Persist, Restore};
-use tc_transact::{Transaction, TxnId};
+use tc_transact::{IntoView, Transaction, TxnId};
 use tcgeneric::ThreadSafe;
 
 use super::{Collection, Schema};
@@ -47,5 +49,26 @@ where
 impl<T: Transaction<FE>, FE: ThreadSafe> Restore<FE> for CollectionBase<T, FE> {
     async fn restore(&self, _txn_id: TxnId, _backup: &Self) -> TCResult<()> {
         todo!()
+    }
+}
+
+#[async_trait]
+impl<'en, T, FE> IntoView<'en, FE> for CollectionBase<T, FE>
+where
+    T: Transaction<FE>,
+    FE: Send + Sync,
+    Self: 'en,
+{
+    type Txn = T;
+    type View = CollectionView<'en, T, FE>;
+
+    async fn into_view(self, _txn: Self::Txn) -> TCResult<Self::View> {
+        todo!()
+    }
+}
+
+impl<T, FE> fmt::Debug for CollectionBase<T, FE> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a Collection")
     }
 }
