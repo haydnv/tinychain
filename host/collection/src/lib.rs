@@ -2,7 +2,8 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
-use destream::en;
+use destream::{de, en};
+use futures::TryFutureExt;
 
 use tc_error::*;
 use tc_transact::{IntoView, Transaction};
@@ -19,7 +20,7 @@ pub mod btree;
 pub mod table;
 pub mod tensor;
 
-pub use base::CollectionBase;
+pub use base::{CollectionBase, CollectionVisitor};
 pub use schema::Schema;
 
 /// The prefix of the absolute path to [`Collection`] data types
@@ -91,6 +92,12 @@ pub struct Collection<T, FE> {
     phantom: PhantomData<(T, FE)>,
 }
 
+impl<T, FE> From<CollectionBase<T, FE>> for Collection<T, FE> {
+    fn from(_base: CollectionBase<T, FE>) -> Self {
+        todo!()
+    }
+}
+
 #[async_trait]
 impl<'en, T, FE> IntoView<'en, FE> for Collection<T, FE>
 where
@@ -103,6 +110,25 @@ where
 
     async fn into_view(self, _txn: Self::Txn) -> TCResult<Self::View> {
         todo!()
+    }
+}
+
+#[async_trait]
+impl<T, FE> de::FromStream for Collection<T, FE>
+where
+    T: Transaction<FE>,
+    FE: Send + Sync,
+{
+    type Context = T;
+
+    async fn from_stream<D: de::Decoder>(
+        txn: Self::Context,
+        decoder: &mut D,
+    ) -> Result<Self, D::Error> {
+        decoder
+            .decode_map(CollectionVisitor::new(txn))
+            .map_ok(Self::from)
+            .await
     }
 }
 
