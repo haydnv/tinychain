@@ -12,10 +12,12 @@ keywords = ["tinychain", "btree", "table", "tensor", "collection"]
 categories = ["database", "database-implementations", "data-structures"]
 
 [dependencies]
+async-hash = "0.4"
 async-trait = "0.1"
 b-table = { path = "../../../b-table" }
 b-tree = { path = "../../../b-tree" }
 destream = { path = "../../../destream" }
+futures = "0.3"
 safecast = { path = "../../../safecast" }
 tc-error = { path = "../error" }
 tc-transact = { path = "../transact" }

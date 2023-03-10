@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 
 use tc_error::*;
@@ -55,7 +56,13 @@ impl Default for BTreeType {
     }
 }
 
-impl fmt::Display for BTreeType {
+impl<D: Digest> Hash<D> for BTreeType {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(&self.path())
+    }
+}
+
+impl fmt::Debug for BTreeType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::File => f.write_str("type BTree"),

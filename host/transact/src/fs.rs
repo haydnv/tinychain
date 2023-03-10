@@ -6,9 +6,12 @@ use safecast::AsType;
 use std::marker::PhantomData;
 
 use tc_error::*;
-use tcgeneric::Id;
+use tcgeneric::{Id, ThreadSafe};
 
 use super::{TCResult, Transaction, TxnId};
+
+/// The underlying filesystem directory type backing a [`Dir`]
+pub type Inner<FE> = freqfs::DirLock<FE>;
 
 /// A read lock on a block in a [`File`]
 pub type BlockRead<FE, B> = txfs::FileVersionRead<TxnId, FE, B>;
@@ -21,7 +24,7 @@ pub struct Dir<FE> {
     inner: txfs::Dir<TxnId, FE>,
 }
 
-impl<FE: Clone + Send + Sync + 'static> Dir<FE> {
+impl<FE: ThreadSafe> Dir<FE> {
     /// Check whether this [`Dir`] has an entry with the given `name` at `txn_id`.
     pub async fn contains(&self, txn_id: TxnId, name: &Id) -> TCResult<bool> {
         self.inner
@@ -151,7 +154,7 @@ where
 
 /// Defines how to load a persistent data structure from the filesystem.
 #[async_trait]
-pub trait Persist<FE: Clone + Send + Sync + 'static>: Sized {
+pub trait Persist<FE: ThreadSafe>: Sized {
     type Txn: Transaction<FE>;
     type Schema: Clone + Send + Sync;
 
@@ -172,12 +175,12 @@ pub trait Persist<FE: Clone + Send + Sync + 'static>: Sized {
     }
 
     /// Access the filesystem directory backing this persistent data structure.
-    fn dir(&self) -> &freqfs::DirLock<FE>;
+    fn dir(&self) -> &Inner<FE>;
 }
 
 /// Copy a base state from another instance, possibly a view.
 #[async_trait]
-pub trait CopyFrom<FE: Clone + Send + Sync + 'static, I>: Persist<FE> {
+pub trait CopyFrom<FE: ThreadSafe, I>: Persist<FE> {
     /// Copy a new instance of `Self` from an existing instance.
     async fn copy_from(
         txn: &<Self as Persist<FE>>::Txn,
@@ -188,7 +191,7 @@ pub trait CopyFrom<FE: Clone + Send + Sync + 'static, I>: Persist<FE> {
 
 /// Restore a persistent state from a backup.
 #[async_trait]
-pub trait Restore<FE: Clone + Send + Sync + 'static>: Persist<FE> {
+pub trait Restore<FE: ThreadSafe>: Persist<FE> {
     /// Restore this persistent state from a backup.
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()>;
 }

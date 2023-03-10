@@ -59,7 +59,7 @@ impl Default for TableType {
     }
 }
 
-impl fmt::Display for TableType {
+impl fmt::Debug for TableType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Table => write!(f, "type Table"),

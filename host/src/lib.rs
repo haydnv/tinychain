@@ -14,13 +14,8 @@ use std::sync::Arc;
 
 use futures::future::TryFutureExt;
 
-#[cfg(feature = "btree")]
-pub use tc_btree as btree;
+pub use tc_collection as collection;
 pub use tc_error::*;
-#[cfg(feature = "table")]
-pub use tc_table as table;
-#[cfg(feature = "tensor")]
-pub use tc_tensor as tensor;
 pub use tc_transact as transact;
 pub use tc_value as value;
 pub use tcgeneric as generic;
@@ -28,7 +23,6 @@ pub use tcgeneric as generic;
 pub mod chain;
 pub mod closure;
 pub mod cluster;
-pub mod collection;
 pub mod fs;
 pub mod gateway;
 pub mod kernel;

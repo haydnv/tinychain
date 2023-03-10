@@ -1,5 +1,9 @@
 use std::{fmt, iter, ops};
 
+use async_hash::{Digest, Hash, Output};
+use async_trait::async_trait;
+use destream::{de, en};
+use futures::TryFutureExt;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -187,7 +191,7 @@ impl Range {
     pub fn to_shape(&self, source_shape: &Shape) -> TCResult<Shape> {
         if source_shape.len() < self.len() {
             return Err(bad_request!(
-                "invalid range {} for shape {}",
+                "invalid range {:?} for shape {:?}",
                 self,
                 source_shape
             ));
@@ -336,23 +340,6 @@ impl fmt::Debug for Range {
     }
 }
 
-impl fmt::Display for Range {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("[")?;
-
-        let len = self.axes.len();
-        for i in 0..self.axes.len() {
-            write!(f, "{}", self.axes[i])?;
-
-            if i < (len - 1) {
-                f.write_str(", ")?;
-            }
-        }
-
-        f.write_str("]")
-    }
-}
-
 /// The shape of a `Tensor`
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct Shape(Vec<u64>);
@@ -424,7 +411,7 @@ impl Shape {
     pub fn validate(&self, debug_info: &'static str) -> TCResult<()> {
         if self.0.is_empty() {
             return Err(bad_request!(
-                "error in {}: invalid tensor shape {}",
+                "error in {}: invalid tensor shape {:?}",
                 debug_info,
                 self
             ));
@@ -442,7 +429,7 @@ impl Shape {
                 size = m;
             } else {
                 return Err(bad_request!(
-                    "error in {}: tensor shape {} exceeds the maximum allowed size of 2^64",
+                    "error in {}: tensor shape {:?} exceeds the maximum allowed size of 2^64",
                     debug_info,
                     self
                 ));
@@ -456,7 +443,7 @@ impl Shape {
     pub fn validate_axes(&self, axes: &[usize]) -> TCResult<()> {
         match axes.iter().max() {
             Some(max) if max > &self.len() => {
-                Err(bad_request!("shape {} has no axis {}", self, max))
+                Err(bad_request!("shape {:?} has no axis {}", self, max))
             }
             _ => Ok(()),
         }
@@ -468,7 +455,7 @@ impl Shape {
             Ok(())
         } else {
             Err(bad_request!(
-                "Tensor of shape {} does not contain range {}",
+                "Tensor of shape {:?} does not contain range {:?}",
                 self,
                 range
             ))
@@ -480,9 +467,9 @@ impl Shape {
         for (axis, index) in coord.iter().enumerate() {
             if index >= &self[axis] {
                 return Err(bad_request!(
-                    "Tensor of shape {} does not contain {}",
+                    "Tensor of shape {:?} does not contain {:?}",
                     self,
-                    Value::from_iter(coord.to_vec())
+                    coord
                 ));
             }
         }
@@ -502,6 +489,19 @@ impl ops::Deref for Shape {
 impl ops::DerefMut for Shape {
     fn deref_mut(&'_ mut self) -> &'_ mut Vec<u64> {
         &mut self.0
+    }
+}
+
+impl<D: Digest> Hash<D> for Shape {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(self.0)
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a Shape {
+    fn hash(self) -> Output<D> {
+        // TODO: remove this call to to_vec
+        Hash::<D>::hash(self.0.to_vec())
     }
 }
 
@@ -529,22 +529,31 @@ impl TryCastFrom<Value> for Shape {
     }
 }
 
-impl fmt::Display for Shape {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "[{}]",
-            self.0
-                .iter()
-                .map(|dim| format!("{}", dim))
-                .collect::<Vec<String>>()
-                .join(", ")
-        )
+#[async_trait]
+impl de::FromStream for Shape {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
+        de::FromStream::from_stream(cxt, decoder)
+            .map_ok(|shape| Self(shape))
+            .await
+    }
+}
+
+impl<'en> en::IntoStream<'en> for Shape {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        self.0.into_stream(encoder)
+    }
+}
+
+impl<'en> en::ToStream<'en> for Shape {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        self.0.to_stream(encoder)
     }
 }
 
 impl fmt::Debug for Shape {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
+        write!(f, "{:?}", self.0)
     }
 }

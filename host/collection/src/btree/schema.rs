@@ -1,5 +1,6 @@
 use std::fmt;
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
 use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
@@ -11,6 +12,36 @@ use tcgeneric::{Id, NativeClass};
 #[derive(Clone, Eq, PartialEq)]
 pub struct Schema {
     columns: Vec<Column>,
+}
+
+impl<D: Digest> Hash<D> for Schema {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(self.columns)
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a Schema {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash(&self.columns)
+    }
+}
+
+impl<'en> en::IntoStream<'en> for Schema {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        self.columns.into_stream(encoder)
+    }
+}
+
+impl<'en> en::ToStream<'en> for Schema {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        self.columns.to_stream(encoder)
+    }
+}
+
+impl fmt::Debug for Schema {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[{:?}]", self.columns)
+    }
 }
 
 /// A `Column` used in the schema of a [`BTree`].
@@ -38,6 +69,26 @@ impl Column {
     #[inline]
     pub fn max_len(&'_ self) -> &'_ Option<usize> {
         &self.max_len
+    }
+}
+
+impl<D: Digest> Hash<D> for Column {
+    fn hash(self) -> Output<D> {
+        if let Some(max_len) = self.max_len {
+            Hash::<D>::hash((self.name, self.dtype.path(), max_len))
+        } else {
+            Hash::<D>::hash((self.name, self.dtype.path()))
+        }
+    }
+}
+
+impl<'a, D: Digest> Hash<D> for &'a Column {
+    fn hash(self) -> Output<D> {
+        if let Some(max_len) = self.max_len {
+            Hash::<D>::hash((&self.name, self.dtype.path(), max_len))
+        } else {
+            Hash::<D>::hash((&self.name, self.dtype.path()))
+        }
     }
 }
 
@@ -190,15 +241,6 @@ impl<'a> From<&'a Column> for (&'a Id, ValueType) {
 }
 
 impl fmt::Debug for Column {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.max_len {
-            Some(max_len) => write!(f, "{}: {}({})", self.name, self.dtype, max_len),
-            None => write!(f, "{}: {}", self.name, self.dtype),
-        }
-    }
-}
-
-impl fmt::Display for Column {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.max_len {
             Some(max_len) => write!(f, "{}: {}({})", self.name, self.dtype, max_len),

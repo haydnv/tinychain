@@ -1,11 +1,13 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
 use std::fmt;
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
+use destream::{de, en};
 
 use tc_error::*;
 use tc_transact::{Transaction, TxnId};
-use tc_value::{Number, NumberType};
+use tc_value::{Number, NumberType, ValueType};
 use tcgeneric::{
     label, path_label, Class, NativeClass, PathLabel, PathSegment, TCBoxTryFuture, TCPathBuf,
 };
@@ -16,6 +18,56 @@ mod range;
 
 /// A [`Tensor`] coordinate
 pub type Coord = Vec<u64>;
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct Schema {
+    dtype: NumberType,
+    shape: Shape,
+}
+
+impl<'a, D: Digest> Hash<D> for &'a Schema {
+    fn hash(self) -> Output<D> {
+        Hash::<D>::hash((&self.shape, ValueType::from(self.dtype).path()))
+    }
+}
+
+impl fmt::Debug for Schema {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "tensor of type {:?} with shape {:?}",
+            self.dtype, self.shape
+        )
+    }
+}
+
+#[async_trait]
+impl de::FromStream for Schema {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
+        let (classpath, shape): (TCPathBuf, Shape) =
+            de::FromStream::from_stream(cxt, decoder).await?;
+
+        if let Some(ValueType::Number(dtype)) = ValueType::from_path(&classpath) {
+            Ok(Self { shape, dtype })
+        } else {
+            Err(de::Error::invalid_value("a Number type", classpath))
+        }
+    }
+}
+
+impl<'en> en::IntoStream<'en> for Schema {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        en::IntoStream::into_stream((ValueType::from(self.dtype).path(), self.shape), encoder)
+    }
+}
+
+impl<'en> en::ToStream<'en> for Schema {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        en::IntoStream::into_stream((ValueType::from(self.dtype).path(), &self.shape), encoder)
+    }
+}
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
@@ -49,7 +101,7 @@ impl NativeClass for TensorType {
     }
 }
 
-impl fmt::Display for TensorType {
+impl fmt::Debug for TensorType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("type Tensor")
     }
