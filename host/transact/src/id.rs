@@ -10,7 +10,6 @@ use get_size::GetSize;
 use get_size_derive::*;
 use rand::Rng;
 
-use destream::de::Error;
 use destream::IntoStream;
 
 use tc_error::*;
@@ -71,10 +70,10 @@ impl FromStr for TxnId {
     fn from_str(s: &str) -> TCResult<TxnId> {
         let i = s
             .find('-')
-            .ok_or_else(|| TCError::invalid_value(s, "a transaction ID"))?;
+            .ok_or_else(|| TCError::unexpected(s, "a transaction ID"))?;
 
         if i == s.len() - 1 {
-            return Err(TCError::invalid_value(s, "a transaction ID"));
+            return Err(TCError::unexpected(s, "a transaction ID"));
         }
 
         let timestamp = &s[..i];
@@ -82,11 +81,11 @@ impl FromStr for TxnId {
 
         let timestamp = timestamp
             .parse()
-            .map_err(|cause| TCError::invalid_value(timestamp, "a timestamp").consume(cause))?;
+            .map_err(|cause| TCError::unexpected(timestamp, "a timestamp").consume(cause))?;
 
         let nonce = nonce
             .parse()
-            .map_err(|cause| TCError::invalid_value(nonce, "a nonce").consume(cause))?;
+            .map_err(|cause| TCError::unexpected(nonce, "a nonce").consume(cause))?;
 
         Ok(TxnId { timestamp, nonce })
     }

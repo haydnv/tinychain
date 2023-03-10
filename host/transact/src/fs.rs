@@ -1,15 +1,19 @@
-use async_trait::async_trait;
-use freqfs::{FileLoad, FileSave};
-use futures::TryFutureExt;
-use get_size::GetSize;
-use safecast::AsType;
 use std::fmt;
 use std::marker::PhantomData;
+
+use async_trait::async_trait;
+use freqfs::{FileLoad, FileSave};
+use futures::future::TryFutureExt;
+use futures::stream::{self, Stream};
+use get_size::GetSize;
+use safecast::AsType;
 
 use tc_error::*;
 use tcgeneric::{Id, ThreadSafe};
 
 use super::{TCResult, Transact, Transaction, TxnId};
+
+pub use txfs::Key;
 
 /// The underlying filesystem directory type backing a [`Dir`]
 pub type Inner<FE> = freqfs::DirLock<FE>;
@@ -20,12 +24,36 @@ pub type BlockRead<FE, B> = txfs::FileVersionRead<TxnId, FE, B>;
 /// A write lock on a block in a [`File`]
 pub type BlockWrite<FE, B> = txfs::FileVersionWrite<TxnId, FE, B>;
 
+/// An entry in a [`Dir`]
+pub type DirEntry<FE> = txfs::DirEntry<TxnId, FE>;
+
 /// A transactional directory
 pub struct Dir<FE> {
     inner: txfs::Dir<TxnId, FE>,
 }
 
+impl<FE> Clone for Dir<FE> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 impl<FE: ThreadSafe> Dir<FE> {
+    /// Load a transactional [`Dir`] from the filesystem cache
+    pub async fn load(txn_id: TxnId, canon: freqfs::DirLock<FE>) -> TCResult<Self> {
+        txfs::Dir::load(txn_id, canon)
+            .map_ok(|inner| Self { inner })
+            .map_err(TCError::from)
+            .await
+    }
+
+    /// Destructure this [`Dir`] into its underlying [`freqfs::DirLock`].
+    pub fn into_inner(self) -> Inner<FE> {
+        self.inner.into_inner()
+    }
+
     /// Check whether this [`Dir`] has an entry with the given `name` at `txn_id`.
     pub async fn contains(&self, txn_id: TxnId, name: &Id) -> TCResult<bool> {
         self.inner
@@ -55,6 +83,11 @@ impl<FE: ThreadSafe> Dir<FE> {
             .map_ok(File::new)
             .map_err(TCError::from)
             .await
+    }
+
+    /// Iterate over the names of the [`File`]s in this [`Dir`] at `txn_id`.
+    pub async fn file_names(&self, txn_id: TxnId) -> TCResult<impl Iterator<Item = Key>> {
+        self.inner.file_names(txn_id).map_err(TCError::from).await
     }
 
     /// Get the sub-[`Dir`] with the given `name` at `txn_id`, or return a "not found" error.
@@ -119,6 +152,12 @@ pub struct File<FE, N, B> {
     block: PhantomData<B>,
 }
 
+impl<FE, N, B> Clone for File<FE, N, B> {
+    fn clone(&self) -> Self {
+        Self::new(self.inner.clone())
+    }
+}
+
 impl<FE, N, B> File<FE, N, B> {
     fn new(inner: txfs::Dir<TxnId, FE>) -> Self {
         Self {
@@ -166,6 +205,15 @@ where
             .delete(txn_id, name.to_string())
             .map_err(TCError::from)
             .await
+    }
+
+    /// Iterate over the blocks in this [`File`].
+    pub async fn iter(
+        &self,
+        _txn_id: TxnId,
+    ) -> TCResult<impl Stream<Item = TCResult<(txfs::Key, BlockRead<FE, B>)>>> {
+        // TODO
+        Ok(stream::empty::<TCResult<(txfs::Key, BlockRead<FE, B>)>>())
     }
 
     /// Lock the block at `name` for reading at `txn_id`.
@@ -230,7 +278,7 @@ pub trait Persist<FE: ThreadSafe>: Sized {
     }
 
     /// Access the filesystem directory backing this persistent data structure.
-    fn dir(&self) -> &Inner<FE>;
+    fn dir(&self) -> Inner<FE>;
 }
 
 /// Copy a base state from another instance, possibly a view.

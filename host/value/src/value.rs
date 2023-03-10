@@ -1,7 +1,7 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
-use std::ops::Deref;
+use std::ops::{Bound, Deref};
 use std::str::FromStr;
 
 use async_hash::generic_array::GenericArray;
@@ -66,7 +66,7 @@ impl Value {
         if self.is_none() {
             Ok(())
         } else {
-            Err(TCError::invalid_value(self, Value::None))
+            Err(TCError::unexpected(self, "none"))
         }
     }
 
@@ -466,7 +466,7 @@ impl TryFrom<Value> for bool {
             Value::Id(id) if &id == "false" => Ok(false),
             Value::String(s) if &s == "true" => Ok(true),
             Value::String(s) if &s == "false" => Ok(false),
-            other => Err(TCError::invalid_value(other, "a boolean")),
+            other => Err(TCError::unexpected(other, "a boolean")),
         }
     }
 }
@@ -481,14 +481,14 @@ impl TryFrom<Value> for Number {
             Value::Id(id) => id
                 .as_str()
                 .parse()
-                .map_err(|cause| TCError::invalid_value(id, " a Number").consume(cause)),
+                .map_err(|cause| TCError::unexpected(id, " a Number").consume(cause)),
 
             Value::String(s) => s
                 .as_str()
                 .parse()
-                .map_err(|cause| TCError::invalid_value(s, " a Number").consume(cause)),
+                .map_err(|cause| TCError::unexpected(s, " a Number").consume(cause)),
 
-            other => Err(TCError::invalid_type(other, "a Number")),
+            other => Err(TCError::unexpected(other, "a Number")),
         }
     }
 }
@@ -499,8 +499,18 @@ impl TryFrom<Value> for Tuple<Value> {
     fn try_from(value: Value) -> TCResult<Self> {
         match value {
             Value::Tuple(tuple) => Ok(tuple),
-            other => Err(TCError::invalid_type(other, "a Tuple")),
+            other => Err(TCError::unexpected(other, "a Tuple")),
         }
+    }
+}
+
+impl TryCastFrom<Value> for Bound<Value> {
+    fn can_cast_from(_value: &Value) -> bool {
+        todo!()
+    }
+
+    fn opt_cast_from(_value: Value) -> Option<Bound<Value>> {
+        todo!()
     }
 }
 
@@ -569,6 +579,24 @@ impl TryCastFrom<Value> for Id {
             },
             Value::String(s) => Self::opt_cast_from(s),
             Value::Version(version) => Self::opt_cast_from(version.to_string()),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<Value> for Host {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Link(link) => link.host().is_some() && link.path().is_empty(),
+            Value::String(s) => s.parse::<Host>().is_ok(),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Link(link) if link.path().is_empty() => link.into_host(),
+            Value::String(s) => s.parse().ok(),
             _ => None,
         }
     }
@@ -985,7 +1013,10 @@ impl ValueVisitor {
             return if map.is_empty() {
                 Ok(Value::Link(class.path().into()))
             } else {
-                Err(de::Error::invalid_value(map, "a Value class"))
+                Err(de::Error::invalid_value(
+                    format!("{:?}", map),
+                    "a Value class",
+                ))
             };
         }
 

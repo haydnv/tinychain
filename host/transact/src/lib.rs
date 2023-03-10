@@ -21,11 +21,20 @@ pub mod lock {
     /// A transactional read-write lock on a scalar value
     pub type TxnLock<T> = txn_lock::scalar::TxnLock<TxnId, T>;
 
+    /// A read guard on a committed transactional version
+    pub type TxnLockVersionGuard<T> = txn_lock::scalar::TxnLockVersionGuard<TxnId, T>;
+
     /// A transactional read-write lock on a key-value map
     pub type TxnMapLock<K, V> = txn_lock::map::TxnMapLock<TxnId, K, V>;
 
+    /// A read guard on a committed transactional version of a set
+    pub type TxnMapLockVersionGuard<K, V> = txn_lock::map::TxnMapLockVersionGuard<TxnId, K, V>;
+
     /// A transactional read-write lock on a set of values
     pub type TxnSetLock<T> = txn_lock::set::TxnSetLock<TxnId, T>;
+
+    /// A read guard on a committed transactional version of a set
+    pub type TxnSetLockVersionGuard<T> = txn_lock::set::TxnSetLockVersionGuard<TxnId, T>;
 }
 
 pub use id::{TxnId, MIN_ID};

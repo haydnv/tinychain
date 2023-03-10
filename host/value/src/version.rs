@@ -4,7 +4,6 @@ use std::str::FromStr;
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
-use destream::de::Error;
 use destream::{de, en};
 use get_size::GetSize;
 use get_size_derive::*;
@@ -74,14 +73,14 @@ impl FromStr for Version {
 
     fn from_str(s: &str) -> TCResult<Self> {
         if s.find('.').is_none() {
-            return Err(TCError::invalid_value(s, "a version number"));
+            return Err(TCError::unexpected(s, "a version number"));
         }
 
         let mut parts = s.split('.');
 
         let major = if let Some(major) = parts.next() {
             major.parse().map_err(|cause| {
-                TCError::invalid_value(major, "a major version number").consume(cause)
+                TCError::unexpected(major, "a major version number").consume(cause)
             })?
         } else {
             return Err(bad_request!(
@@ -92,7 +91,7 @@ impl FromStr for Version {
 
         let minor = if let Some(minor) = parts.next() {
             minor.parse().map_err(|cause| {
-                TCError::invalid_value(minor, "a minor version number").consume(cause)
+                TCError::unexpected(minor, "a minor version number").consume(cause)
             })?
         } else {
             return Err(bad_request!(
@@ -104,7 +103,7 @@ impl FromStr for Version {
         let patch = if let Some(patch) = parts.next() {
             patch
                 .parse()
-                .map_err(|cause| TCError::invalid_value(patch, "a patch number").consume(cause))?
+                .map_err(|cause| TCError::unexpected(patch, "a patch number").consume(cause))?
         } else {
             return Err(bad_request!("{} is missing missing a patch number", s));
         };

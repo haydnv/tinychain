@@ -332,7 +332,7 @@ impl TryFrom<ValueType> for NumberType {
     fn try_from(vt: ValueType) -> TCResult<NumberType> {
         match vt {
             ValueType::Number(nt) => Ok(nt),
-            other => Err(TCError::invalid_type(other, "a Number class")),
+            other => Err(TCError::unexpected(other, "a Number class")),
         }
     }
 }
@@ -416,7 +416,10 @@ impl DestreamVisitor for ValueTypeVisitor {
                 if map.is_empty() {
                     self.visit_path(path)
                 } else {
-                    Err(DestreamError::invalid_value(map, "empty map"))
+                    Err(DestreamError::invalid_value(
+                        format!("{:?}", map),
+                        "empty map",
+                    ))
                 }
             } else {
                 Err(de::Error::custom("invalid Value class"))

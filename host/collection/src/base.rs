@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 
 use async_trait::async_trait;
 use destream::de;
+use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Persist, Restore};
@@ -30,7 +31,7 @@ impl<T: Transaction<FE>, FE: ThreadSafe> Persist<FE> for CollectionBase<T, FE> {
         todo!()
     }
 
-    fn dir(&self) -> &tc_transact::fs::Inner<FE> {
+    fn dir(&self) -> tc_transact::fs::Inner<FE> {
         todo!()
     }
 }
@@ -49,6 +50,16 @@ where
 #[async_trait]
 impl<T: Transaction<FE>, FE: ThreadSafe> Restore<FE> for CollectionBase<T, FE> {
     async fn restore(&self, _txn_id: TxnId, _backup: &Self) -> TCResult<()> {
+        todo!()
+    }
+}
+
+impl<T, FE> TryCastFrom<Collection<T, FE>> for CollectionBase<T, FE> {
+    fn can_cast_from(value: &Collection<T, FE>) -> bool {
+        todo!()
+    }
+
+    fn opt_cast_from(value: Collection<T, FE>) -> Option<Self> {
         todo!()
     }
 }

@@ -158,13 +158,23 @@ impl TCError {
         Self::new(ErrorKind::Conflict, locator)
     }
 
+    pub fn unexpected<V: fmt::Debug>(value: V, expected: &str) -> Self {
+        Self::new(
+            ErrorKind::BadRequest,
+            format!("invalid value {value:?}: expected {expected}"),
+        )
+    }
+
     /// Error to indicate that the requested resource exists but does not support the request method
-    pub fn method_not_allowed<M: fmt::Display, S: fmt::Display, P: fmt::Display>(
+    pub fn method_not_allowed<M: fmt::Debug, S: fmt::Debug, P: fmt::Display>(
         method: M,
         subject: S,
         path: P,
     ) -> Self {
-        let message = format!("{} endpoint {} does not support {}", subject, path, method);
+        let message = format!(
+            "{:?} endpoint {} does not support {:?}",
+            subject, path, method
+        );
 
         #[cfg(debug_assertions)]
         panic!("{}", message);
@@ -189,18 +199,9 @@ impl TCError {
     }
 
     /// Construct a new error with the given `cause`
-    pub fn consume<I: fmt::Display>(mut self, cause: I) -> Self {
-        self.data.stack.push(cause.to_string());
+    pub fn consume<I: fmt::Debug>(mut self, cause: I) -> Self {
+        self.data.stack.push(format!("{:?}", cause));
         self
-    }
-}
-
-impl destream::de::Error for TCError {
-    fn custom<T: fmt::Display>(msg: T) -> Self {
-        Self {
-            kind: ErrorKind::BadRequest,
-            data: msg.to_string().into(),
-        }
     }
 }
 
