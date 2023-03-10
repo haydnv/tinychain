@@ -20,7 +20,7 @@ name = "tinychain"
 path = "src/main.rs"
 
 [features]
-collection = ["tc-collection"]
+collection = []
 
 [dependencies]
 async-hash = "0.4"
@@ -30,7 +30,7 @@ clap = { version = "4.0", features = ["derive"] }
 destream = { path = "../../destream" }
 destream_json = { path = "../../destream_json", features = ["tokio-io"] }
 env_logger = "0.10"
-freqfs = { path = "../../freqfs" }
+freqfs = { path = "../../freqfs", features = ["stream"] }
 futures = "0.3"
 get-size = "0.1"
 get-size-derive = "0.1"
@@ -44,9 +44,9 @@ rjwt = "~0.4.1"
 safecast = { path = "../../safecast" }
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
-sha2 = "0.10"
+#sha2 = "0.10"
 tbon = { path = "../../tbon" }
-tc-collection = { path = "collection", optional = true }
+tc-collection = { path = "collection" }
 tc-error = { path = "error" }
 tc-transact = { path = "transact" }
 tc-value = { path = "value" }

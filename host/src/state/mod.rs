@@ -1,11 +1,11 @@
 //! A TinyChain [`State`]
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::str::FromStr;
 
-use async_hash::Hash;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de::{self, Error};
@@ -13,13 +13,12 @@ use destream::ArrayAccess;
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use log::debug;
-use safecast::{CastFrom, CastInto, TryCastFrom};
-use sha2::digest::{Digest, Output};
-use sha2::Sha256;
+use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
 
+use tc_collection::CollectionVisitor;
 use tc_error::*;
-use tc_transact::{AsyncHash, Transaction};
-use tc_value::{Float, Link, LinkHost, Number, NumberType, TCString, Value, ValueType};
+use tc_transact::{AsyncHash, Sha256, Transaction};
+use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
 use crate::chain::{BlockChain, Chain, ChainType, ChainVisitor};
@@ -172,20 +171,20 @@ impl TryFrom<StateType> for ScalarType {
     fn try_from(st: StateType) -> TCResult<Self> {
         match st {
             StateType::Scalar(st) => Ok(st),
-            other => Err(TCError::invalid_type(other, "a Scalar class")),
+            other => Err(TCError::unexpected(other, "a Scalar class")),
         }
     }
 }
 
-impl fmt::Display for StateType {
+impl fmt::Debug for StateType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Chain(ct) => fmt::Display::fmt(ct, f),
-            Self::Collection(ct) => fmt::Display::fmt(ct, f),
+            Self::Chain(ct) => fmt::Debug::fmt(ct, f),
+            Self::Collection(ct) => fmt::Debug::fmt(ct, f),
             Self::Closure => f.write_str("closure"),
             Self::Map => f.write_str("Map<Id, State>"),
-            Self::Object(ot) => fmt::Display::fmt(ot, f),
-            Self::Scalar(st) => fmt::Display::fmt(st, f),
+            Self::Object(ot) => fmt::Debug::fmt(ot, f),
+            Self::Scalar(st) => fmt::Debug::fmt(st, f),
             Self::Stream => f.write_str("Stream"),
             Self::Tuple => f.write_str("Tuple<State>"),
         }
@@ -377,7 +376,7 @@ impl Refer for State {
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
     ) -> TCResult<Self> {
-        debug!("State::resolve {}", self);
+        debug!("State::resolve {:?}", self);
 
         match self {
             Self::Map(map) => {
@@ -435,7 +434,7 @@ impl Instance for State {
 }
 
 #[async_trait]
-impl AsyncHash<crate::fs::Dir> for State {
+impl AsyncHash<crate::fs::CacheBlock> for State {
     type Txn = Txn;
 
     async fn hash(self, txn: &Txn) -> TCResult<Output<Sha256>> {
@@ -534,8 +533,8 @@ impl From<InstanceClass> for State {
     }
 }
 
-impl From<LinkHost> for State {
-    fn from(host: LinkHost) -> Self {
+impl From<Host> for State {
+    fn from(host: Host) -> Self {
         Self::Scalar(Scalar::from(host))
     }
 }
@@ -754,7 +753,7 @@ impl TryFrom<State> for bool {
     fn try_from(state: State) -> Result<Self, Self::Error> {
         match state {
             State::Scalar(scalar) => scalar.try_into(),
-            other => Err(TCError::invalid_type(other, "a boolean")),
+            other => Err(TCError::unexpected(other, "a boolean")),
         }
     }
 }
@@ -765,7 +764,7 @@ impl TryFrom<State> for Collection {
     fn try_from(state: State) -> TCResult<Collection> {
         match state {
             State::Collection(collection) => Ok(collection),
-            other => Err(TCError::invalid_type(other, "a Collection")),
+            other => Err(TCError::unexpected(other, "a Collection")),
         }
     }
 }
@@ -789,7 +788,7 @@ impl TryFrom<State> for Scalar {
                 .collect::<TCResult<Tuple<Scalar>>>()
                 .map(Scalar::Tuple),
 
-            other => Err(TCError::invalid_type(other, "a Scalar")),
+            other => Err(TCError::unexpected(other, "a Scalar")),
         }
     }
 }
@@ -806,7 +805,7 @@ impl TryFrom<State> for Map<Scalar> {
 
             State::Scalar(Scalar::Map(map)) => Ok(map),
 
-            other => Err(TCError::invalid_type(other, "a Map")),
+            other => Err(TCError::unexpected(other, "a Map")),
         }
     }
 }
@@ -823,7 +822,7 @@ impl TryFrom<State> for Map<State> {
                 .map(|(id, scalar)| (id, State::Scalar(scalar)))
                 .collect()),
 
-            other => Err(TCError::invalid_type(other, "a Map")),
+            other => Err(TCError::unexpected(other, "a Map")),
         }
     }
 }
@@ -841,7 +840,7 @@ impl TryFrom<State> for Value {
                 .collect::<TCResult<Tuple<Value>>>()
                 .map(Value::Tuple),
 
-            other => Err(TCError::invalid_type(other, "a Value")),
+            other => Err(TCError::unexpected(other, "a Value")),
         }
     }
 }
@@ -909,24 +908,6 @@ impl TryCastFrom<State> for CollectionBase {
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
             State::Collection(collection) => CollectionBase::opt_cast_from(collection),
-            _ => None,
-        }
-    }
-}
-
-impl<T: Clone + TryCastFrom<State>> TryCastFrom<State> for Map<T> {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Map(map) => BTreeMap::<Id, T>::can_cast_from(map),
-            State::Tuple(tuple) => Map::<T>::can_cast_from(tuple),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Map(map) => BTreeMap::<Id, T>::opt_cast_from(map).map(Map::from),
-            State::Tuple(tuple) => Map::<T>::opt_cast_from(tuple),
             _ => None,
         }
     }
@@ -1051,10 +1032,46 @@ impl TryCastFrom<State> for InstanceClass {
     }
 }
 
+impl<T: TryCastFrom<State>> TryCastFrom<State> for Map<T> {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Map(map) => map.values().all(T::can_cast_from),
+            State::Tuple(tuple) => tuple.iter().all(|item| item.matches::<(Id, State)>()),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Map(map) => {
+                let mut dest = Map::new();
+
+                for (key, value) in map {
+                    let value = T::opt_cast_from(value)?;
+                    dest.insert(key, value);
+                }
+
+                Some(dest)
+            }
+            State::Tuple(tuple) => {
+                let mut dest = Map::new();
+
+                for item in tuple {
+                    let (key, value): (Id, T) = item.opt_cast_into()?;
+                    dest.insert(key, value);
+                }
+
+                Some(dest)
+            }
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<State> for Scalar {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            State::Map(map) => BTreeMap::<Id, Scalar>::can_cast_from(map),
+            State::Map(map) => map.values().all(Scalar::can_cast_from),
             State::Object(object) => Self::can_cast_from(object),
             State::Scalar(_) => true,
             State::Tuple(tuple) => Vec::<Scalar>::can_cast_from(tuple),
@@ -1064,9 +1081,16 @@ impl TryCastFrom<State> for Scalar {
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
-            State::Map(map) => BTreeMap::<Id, Scalar>::opt_cast_from(map)
-                .map(Map::from)
-                .map(Scalar::Map),
+            State::Map(map) => {
+                let mut dest = Map::new();
+
+                for (key, state) in map.into_iter() {
+                    let scalar = Scalar::opt_cast_from(state)?;
+                    dest.insert(key, scalar);
+                }
+
+                Some(Scalar::Map(dest))
+            }
 
             State::Object(object) => Self::opt_cast_from(object),
 
@@ -1165,7 +1189,7 @@ from_scalar!(Bytes);
 from_scalar!(Float);
 from_scalar!(Id);
 from_scalar!(IdRef);
-from_scalar!(LinkHost);
+from_scalar!(Host);
 from_scalar!(Number);
 from_scalar!(OpDef);
 from_scalar!(OpRef);
@@ -1190,21 +1214,6 @@ impl fmt::Debug for State {
     }
 }
 
-impl fmt::Display for State {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Chain(chain) => fmt::Display::fmt(chain, f),
-            Self::Closure(closure) => fmt::Display::fmt(closure, f),
-            Self::Collection(collection) => fmt::Display::fmt(collection, f),
-            Self::Map(map) => fmt::Display::fmt(map, f),
-            Self::Object(object) => fmt::Display::fmt(object, f),
-            Self::Scalar(scalar) => fmt::Display::fmt(scalar, f),
-            Self::Stream(_) => f.write_str("Stream"),
-            Self::Tuple(tuple) => fmt::Display::fmt(tuple, f),
-        }
-    }
-}
-
 struct StateVisitor {
     txn: Txn,
     scalar: ScalarVisitor,
@@ -1216,7 +1225,7 @@ impl StateVisitor {
         class: StateType,
         access: &mut A,
     ) -> Result<State, A::Error> {
-        debug!("decode instance of {}", class);
+        debug!("decode instance of {:?}", class);
 
         match class {
             StateType::Chain(ct) => {
@@ -1344,7 +1353,7 @@ impl<'a> de::Visitor for StateVisitor {
                     debug!("is {} a classpath?", path);
 
                     if let Some(class) = StateType::from_path(&path) {
-                        debug!("deserialize instance of {}...", class);
+                        debug!("deserialize instance of {:?}...", class);
                         return self.visit_map_value(class, &mut access).await;
                     } else {
                         debug!("not a classpath: {}", path);
@@ -1354,11 +1363,11 @@ impl<'a> de::Visitor for StateVisitor {
 
             if let Ok(subject) = reference::Subject::from_str(&key) {
                 let params = access.next_value(()).await?;
-                debug!("deserialize Scalar from key {} and value {}", key, params);
+                debug!("deserialize Scalar from key {} and value {:?}", key, params);
                 return ScalarVisitor::visit_subject(subject, params).map(State::Scalar);
             }
 
-            let mut map = BTreeMap::new();
+            let mut map = Map::new();
 
             let id = Id::from_str(&key).map_err(de::Error::custom)?;
             let txn = self
@@ -1381,7 +1390,7 @@ impl<'a> de::Visitor for StateVisitor {
                 map.insert(id, state);
             }
 
-            Ok(State::Map(map.into()))
+            Ok(State::Map(map))
         } else {
             Ok(State::Map(Map::default()))
         }

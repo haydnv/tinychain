@@ -1,14 +1,15 @@
 use std::fmt;
 use std::marker::PhantomData;
 
+use async_hash::Output;
 use async_trait::async_trait;
 use destream::de;
 use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Persist, Restore};
-use tc_transact::{IntoView, Transaction, TxnId};
-use tcgeneric::{NativeClass, TCPathBuf, ThreadSafe};
+use tc_transact::{AsyncHash, IntoView, Sha256, Transact, Transaction, TxnId};
+use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
 
 use super::tensor::TensorType;
 use super::{Collection, CollectionType, CollectionView, Schema};
@@ -16,6 +17,54 @@ use super::{Collection, CollectionType, CollectionView, Schema};
 #[derive(Clone)]
 pub struct CollectionBase<T, FE> {
     phantom: PhantomData<(T, FE)>,
+}
+
+impl<T, FE> CollectionBase<T, FE> {
+    fn schema(&self) -> Schema {
+        todo!()
+    }
+}
+
+impl<T, FE> Instance for CollectionBase<T, FE>
+where
+    T: Transaction<FE>,
+    FE: Send + Sync,
+{
+    type Class = CollectionType;
+
+    fn class(&self) -> CollectionType {
+        todo!()
+    }
+}
+
+#[async_trait]
+impl<T, FE> Transact for CollectionBase<T, FE> where T: Transaction<FE>, FE: Send + Sync {
+    type Commit = ();
+
+    async fn commit(&self, _txn_id: TxnId) -> Self::Commit {
+        todo!()
+    }
+
+    async fn rollback(&self, _txn_id: &TxnId) {
+        todo!()
+    }
+
+    async fn finalize(&self, _txn_id: &TxnId) {
+        todo!()
+    }
+}
+
+#[async_trait]
+impl<T, FE> AsyncHash<FE> for CollectionBase<T, FE>
+where
+    T: Transaction<FE>,
+    FE: Send + Sync,
+{
+    type Txn = T;
+
+    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+        Collection::from(self).hash(txn).await
+    }
 }
 
 #[async_trait]
@@ -55,11 +104,11 @@ impl<T: Transaction<FE>, FE: ThreadSafe> Restore<FE> for CollectionBase<T, FE> {
 }
 
 impl<T, FE> TryCastFrom<Collection<T, FE>> for CollectionBase<T, FE> {
-    fn can_cast_from(value: &Collection<T, FE>) -> bool {
+    fn can_cast_from(_value: &Collection<T, FE>) -> bool {
         todo!()
     }
 
-    fn opt_cast_from(value: Collection<T, FE>) -> Option<Self> {
+    fn opt_cast_from(_value: Collection<T, FE>) -> Option<Self> {
         todo!()
     }
 }

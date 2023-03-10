@@ -4,6 +4,7 @@ use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
+use futures::TryFutureExt;
 
 use tc_error::*;
 use tc_transact::fs::*;
@@ -12,6 +13,7 @@ use tc_value::Version as VersionNumber;
 use tcgeneric::{Id, Map};
 
 use crate::fs;
+use crate::fs::CacheBlock;
 use crate::object::InstanceClass;
 use crate::state::State;
 use crate::txn::Txn;
@@ -30,15 +32,13 @@ impl Version {
     }
 
     async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
-        let file = self.classes.read(txn_id).await?;
+        todo!()
 
-        let mut classes = Map::new();
-        for block_id in file.block_ids() {
-            let class = file.read_block(&block_id).await?;
-            classes.insert(block_id.into(), class.clone().into());
-        }
-
-        Ok(State::Map(classes))
+        // let mut classes = Map::new();
+        // for (block_id, class) in self.classes.iter(txn_id) {
+        //     classes.insert(block_id.into(), class.clone().into());
+        // }
+        // Ok(State::Map(classes))
     }
 
     pub async fn get_class(
@@ -46,12 +46,11 @@ impl Version {
         txn_id: TxnId,
         name: &Id,
     ) -> TCResult<impl Deref<Target = InstanceClass>> {
-        let file = self.classes.read(txn_id).await?;
-        file.read_block(name).await
+        self.classes.read_block(txn_id, name).await
     }
 }
 
-impl fmt::Display for Version {
+impl fmt::Debug for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a set of classes")
     }
@@ -65,46 +64,41 @@ pub struct Class {
 
 impl Class {
     pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
-        let dir = self.dir.read(txn_id).await?;
-        if dir.is_empty() {
+        if self.dir.is_empty(txn_id).await? {
             Ok(None)
         } else {
-            let zero = VersionNumber::default().into();
-            dir.file_names()
-                .fold(&zero, Ord::max)
-                .as_str()
-                .parse()
-                .map(Some)
+            // let zero = VersionNumber::default().into();
+            // let file_names = self.dir.file_names(txn_id).await?;
+            //
+            // file_names.fold(&zero, Ord::max).as_str().parse().map(Some)
+            todo!()
         }
     }
 
     pub async fn get_version(&self, txn_id: TxnId, number: &VersionNumber) -> TCResult<Version> {
-        let dir = self.dir.read(txn_id).await?;
-        if let Some(file) = dir.get_file(&number.clone().into())? {
-            Ok(Version::with_file(file))
-        } else {
-            Err(TCError::not_found(number))
-        }
+        self.dir
+            .get_file(txn_id, &number.clone().into())
+            .map_ok(|file| Version::with_file(file))
+            .await
     }
 
     pub async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
-        let dir = self.dir.read(txn_id).await?;
+        todo!()
+        // let mut versions = Map::new();
+        // for (number, file) in self.dir.iter(txn_id).await? {
+        // let file = match file {
+        //     fs::DirEntry::File(fs::FileEntry::Class(file)) => Ok(file.clone()),
+        //     other => Err(unexpected!(
+        //         "class directory contains invalid file: {}",
+        //         other
+        //     )),
+        // }?;
+        //
+        // let version = Version::with_file(file).to_state(txn_id).await?;
+        // versions.insert(number.clone(), version);
+        // }
 
-        let mut versions = Map::new();
-        for (number, file) in dir.iter() {
-            let file = match file {
-                fs::DirEntry::File(fs::FileEntry::Class(file)) => Ok(file.clone()),
-                other => Err(unexpected!(
-                    "class directory contains invalid file: {}",
-                    other
-                )),
-            }?;
-
-            let version = Version::with_file(file).to_state(txn_id).await?;
-            versions.insert(number.clone(), version);
-        }
-
-        Ok(State::Map(versions))
+        // Ok(State::Map(versions))
     }
 }
 
@@ -121,12 +115,12 @@ impl DirItem for Class {
     ) -> TCResult<Map<InstanceClass>> {
         let txn_id = *txn.id();
 
-        let mut dir = self.dir.write(txn_id).await?;
-        let file = dir.create_file(number.into())?;
-        let mut blocks = file.write(txn_id).await?;
+        let blocks = self.dir.create_file(txn_id, number.into()).await?;
 
         for (name, class) in &schema {
-            blocks.create_block(name.clone(), class.clone()).await?;
+            blocks
+                .create_block(txn_id, name.clone(), class.clone())
+                .await?;
         }
 
         Ok(schema)
@@ -150,15 +144,13 @@ impl Transact for Class {
     }
 }
 
-impl Persist<fs::Dir> for Class {
+#[async_trait]
+impl Persist<CacheBlock> for Class {
     type Txn = Txn;
     type Schema = ();
 
-    fn create(txn_id: TxnId, _schema: (), store: fs::Store) -> TCResult<Self> {
-        let dir = fs::Dir::try_from(store)?;
-        let contents = dir.try_write(txn_id)?;
-
-        if contents.is_empty() {
+    async fn create(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+        if dir.is_empty(txn_id).await? {
             Ok(Self { dir })
         } else {
             Err(bad_request!(
@@ -167,16 +159,16 @@ impl Persist<fs::Dir> for Class {
         }
     }
 
-    fn load(_txn_id: TxnId, _schema: (), store: fs::Store) -> TCResult<Self> {
-        fs::Dir::try_from(store).map(|dir| Self { dir })
+    async fn load(_txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+        Ok(Self { dir })
     }
 
-    fn dir(&self) -> <fs::Dir as Dir>::Inner {
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
         self.dir.clone().into_inner()
     }
 }
 
-impl fmt::Display for Class {
+impl fmt::Debug for Class {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("a versioned set of classes")
     }

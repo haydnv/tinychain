@@ -33,7 +33,7 @@ impl Route for service::Version {
             },
             None => {
                 trace!(
-                    "{} has no attr {} (attrs are {})",
+                    "{:?} has no attr {} (attrs are {})",
                     self,
                     &path[0],
                     self.attrs().collect::<Tuple<&Id>>()
@@ -66,11 +66,11 @@ impl<'a> ServiceHandler<'a> {
                 debug!("create new Service version {}", key);
 
                 let number = VersionNumber::try_cast_from(key, |v| {
-                    TCError::invalid_value(v, "a version number")
+                    TCError::unexpected(v, "a version number")
                 })?;
 
                 let class =
-                    InstanceClass::try_cast_from(value, |v| TCError::invalid_type(v, "a Class"))?;
+                    InstanceClass::try_cast_from(value, |v| TCError::unexpected(v, "a Class"))?;
 
                 let (link, version) = class.into_inner();
 
@@ -216,10 +216,10 @@ impl<'a> Handler<'a> for DirHandler<'a, Service> {
     {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                debug!("create new Service {} in {}", key, self.dir);
+                debug!("create new Service {} in {:?}", key, self.dir);
 
                 let name = PathSegment::try_cast_from(key, |v| {
-                    TCError::invalid_value(v, "a path segment for a Service directory entry")
+                    TCError::unexpected(v, "a path segment for a Service directory entry")
                 })?;
 
                 let (link, service) = expect_version(value)?;

@@ -24,8 +24,11 @@ use crate::object::InstanceClass;
 /// A transactional directory
 pub type Dir = tc_transact::fs::Dir<CacheBlock>;
 
+/// An entry in a transactional directory
+pub type DirEntry = tc_transact::fs::DirEntry<CacheBlock>;
+
 /// A transactional file
-pub type File<B> = tc_transact::fs::File<CacheBlock, B>;
+pub type File<N, B> = tc_transact::fs::File<CacheBlock, N, B>;
 
 /// A cached filesystem block.
 #[derive(Clone, GetSize)]
@@ -40,8 +43,8 @@ pub enum CacheBlock {
 }
 
 #[async_trait]
-impl freqfs::FileSave for CacheBlock {
-    async fn save(&self, file: &mut fs::File) -> Result<u64, io::Error> {
+impl<'en> freqfs::FileSave<'en> for CacheBlock {
+    async fn save(&'en self, file: &mut fs::File) -> Result<u64, io::Error> {
         match self {
             #[cfg(feature = "collection")]
             Self::BTree(node) => persist(node, file).await,

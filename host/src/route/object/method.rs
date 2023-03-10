@@ -28,7 +28,7 @@ impl<'a, T: Instance> GetMethod<'a, T> {
     }
 }
 
-impl<'a, T: ToState + Instance + Route + fmt::Display + 'a> GetMethod<'a, T> {
+impl<'a, T: ToState + Instance + Route + fmt::Debug + 'a> GetMethod<'a, T> {
     async fn call(self, txn: &Txn, key: Value) -> TCResult<State> {
         let (key_name, op_def) = self.method;
 
@@ -38,13 +38,13 @@ impl<'a, T: ToState + Instance + Route + fmt::Display + 'a> GetMethod<'a, T> {
         match call_method(txn, self.subject, context, op_def).await {
             Ok(state) => Ok(state),
             Err(cause) => {
-                Err(cause.consume(format!("in call to GET {} /{}", self.subject, self.name)))
+                Err(cause.consume(format!("in call to GET {:?} /{}", self.subject, self.name)))
             }
         }
     }
 }
 
-impl<'a, T: ToState + Instance + Route + fmt::Display + 'a> Handler<'a> for GetMethod<'a, T> {
+impl<'a, T: ToState + Instance + Route + fmt::Debug + 'a> Handler<'a> for GetMethod<'a, T> {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -69,7 +69,7 @@ impl<'a, T: Instance> PutMethod<'a, T> {
     }
 }
 
-impl<'a, T: ToState + Instance + Route + fmt::Display + 'a> PutMethod<'a, T> {
+impl<'a, T: ToState + Instance + Route + fmt::Debug + 'a> PutMethod<'a, T> {
     async fn call(self, txn: &Txn, key: Value, value: State) -> TCResult<()> {
         let (key_name, value_name, op_def) = self.method;
 
@@ -80,13 +80,13 @@ impl<'a, T: ToState + Instance + Route + fmt::Display + 'a> PutMethod<'a, T> {
         match call_method(txn, self.subject, context, op_def).await {
             Ok(_) => Ok(()),
             Err(cause) => {
-                Err(cause.consume(format!("in call to PUT {} /{}", self.subject, self.name)))
+                Err(cause.consume(format!("in call to PUT {:?} /{}", self.subject, self.name)))
             }
         }
     }
 }
 
-impl<'a, T: ToState + Instance + Route + fmt::Display + 'a> Handler<'a> for PutMethod<'a, T> {
+impl<'a, T: ToState + Instance + Route + fmt::Debug + 'a> Handler<'a> for PutMethod<'a, T> {
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
     where
         'b: 'a,
@@ -113,18 +113,18 @@ impl<'a, T: Instance> PostMethod<'a, T> {
     }
 }
 
-impl<'a, T: ToState + Instance + Route + fmt::Display + 'a> PostMethod<'a, T> {
+impl<'a, T: ToState + Instance + Route + fmt::Debug + 'a> PostMethod<'a, T> {
     async fn call(self, txn: &Txn, params: Map<State>) -> TCResult<State> {
         match call_method(txn, self.subject, params, self.method).await {
             Ok(state) => Ok(state),
             Err(cause) => {
-                Err(cause.consume(format!("in call to POST {} /{}", self.subject, self.name)))
+                Err(cause.consume(format!("in call to POST {:?} /{}", self.subject, self.name)))
             }
         }
     }
 }
 
-impl<'a, T: ToState + Instance + Route + fmt::Display + 'a> Handler<'a> for PostMethod<'a, T> {
+impl<'a, T: ToState + Instance + Route + fmt::Debug + 'a> Handler<'a> for PostMethod<'a, T> {
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
     where
         'b: 'a,
@@ -151,7 +151,7 @@ impl<'a, T: Instance> DeleteMethod<'a, T> {
     }
 }
 
-impl<'a, T: ToState + Instance + Route + fmt::Display + 'a> DeleteMethod<'a, T> {
+impl<'a, T: ToState + Instance + Route + fmt::Debug + 'a> DeleteMethod<'a, T> {
     async fn call(self, txn: &Txn, key: Value) -> TCResult<()> {
         let (key_name, op_def) = self.method;
 
@@ -160,14 +160,15 @@ impl<'a, T: ToState + Instance + Route + fmt::Display + 'a> DeleteMethod<'a, T> 
 
         match call_method(txn, self.subject, context, op_def).await {
             Ok(_) => Ok(()),
-            Err(cause) => {
-                Err(cause.consume(format!("in call to DELETE {} /{}", self.subject, self.name)))
-            }
+            Err(cause) => Err(cause.consume(format!(
+                "in call to DELETE {:?} /{}",
+                self.subject, self.name
+            ))),
         }
     }
 }
 
-impl<'a, T: ToState + Instance + Route + fmt::Display + 'a> Handler<'a> for DeleteMethod<'a, T> {
+impl<'a, T: ToState + Instance + Route + fmt::Debug + 'a> Handler<'a> for DeleteMethod<'a, T> {
     fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
     where
         'b: 'a,
@@ -184,26 +185,26 @@ pub fn route_attr<'a, T>(
     path: &'a [PathSegment],
 ) -> Option<Box<dyn Handler<'a> + 'a>>
 where
-    T: ToState + Instance + Route + fmt::Display + 'a,
+    T: ToState + Instance + Route + fmt::Debug + 'a,
 {
     match attr {
         Scalar::Op(OpDef::Get(get_op)) if path.is_empty() => {
-            debug!("call GET method with subject {}", subject);
+            debug!("call GET method with subject {:?}", subject);
 
             Some(Box::new(GetMethod::new(subject, name, get_op.clone())))
         }
         Scalar::Op(OpDef::Put(put_op)) if path.is_empty() => {
-            debug!("call PUT method with subject {}", subject);
+            debug!("call PUT method with subject {:?}", subject);
 
             Some(Box::new(PutMethod::new(subject, name, put_op.clone())))
         }
         Scalar::Op(OpDef::Post(post_op)) if path.is_empty() => {
-            debug!("call POST method with subject {}", subject);
+            debug!("call POST method with subject {:?}", subject);
 
             Some(Box::new(PostMethod::new(subject, name, post_op.clone())))
         }
         Scalar::Op(OpDef::Delete(delete_op)) if path.is_empty() => {
-            debug!("call DELETE method with subject {}", subject);
+            debug!("call DELETE method with subject {:?}", subject);
 
             Some(Box::new(DeleteMethod::new(
                 subject,
@@ -215,7 +216,7 @@ where
     }
 }
 
-async fn call_method<T: ToState + Route + Instance + fmt::Display>(
+async fn call_method<T: ToState + Route + Instance + fmt::Debug>(
     txn: &Txn,
     subject: &T,
     context: Map<State>,
@@ -224,7 +225,7 @@ async fn call_method<T: ToState + Route + Instance + fmt::Display>(
     debug!(
         "call method with form {}",
         form.iter()
-            .map(|(id, s)| format!("{}: {}", id, s))
+            .map(|(id, s)| format!("{}: {:?}", id, s))
             .collect::<Vec<String>>()
             .join("\n")
     );

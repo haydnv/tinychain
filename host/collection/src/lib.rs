@@ -1,13 +1,14 @@
 use std::fmt;
 use std::marker::PhantomData;
 
+use async_hash::{Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
 
 use tc_error::*;
-use tc_transact::{IntoView, Transaction};
-use tcgeneric::{path_label, Class, NativeClass, PathLabel, PathSegment, TCPathBuf};
+use tc_transact::{AsyncHash, IntoView, Sha256, Transaction};
+use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
 use btree::BTreeType;
 use table::TableType;
@@ -90,6 +91,44 @@ impl fmt::Debug for CollectionType {
 #[derive(Clone)]
 pub struct Collection<T, FE> {
     phantom: PhantomData<(T, FE)>,
+}
+
+impl<T, FE> Collection<T, FE> {
+    fn schema(&self) -> Schema {
+        todo!()
+    }
+}
+
+impl<T, FE> Instance for Collection<T, FE>
+where
+    T: Transaction<FE>,
+    FE: Send + Sync,
+{
+    type Class = CollectionType;
+
+    fn class(&self) -> CollectionType {
+        todo!()
+    }
+}
+
+#[async_trait]
+impl<T, FE> AsyncHash<FE> for Collection<T, FE>
+where
+    T: Transaction<FE>,
+    FE: Send + Sync,
+{
+    type Txn = T;
+
+    async fn hash(self, _txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+        let _schema_hash = Hash::<Sha256>::hash(self.schema());
+
+        let _contents_hash = todo!();
+
+        // let mut hasher = Sha256::new();
+        // hasher.update(schema_hash);
+        // hasher.update(contents_hash);
+        // Ok(hasher.finalize())
+    }
 }
 
 impl<T, FE> From<CollectionBase<T, FE>> for Collection<T, FE> {

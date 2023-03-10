@@ -32,7 +32,7 @@ pub enum StateView<'en> {
 }
 
 #[async_trait]
-impl<'en> IntoView<'en, fs::Dir> for State {
+impl<'en> IntoView<'en, fs::CacheBlock> for State {
     type Txn = Txn;
     type View = StateView<'en>;
 

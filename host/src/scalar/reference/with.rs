@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::ops::Deref;
 
-use async_hash::Hash;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
@@ -12,9 +12,9 @@ use get_size::GetSize;
 use get_size_derive::*;
 use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
-use sha2::digest::{Digest, Output};
 
 use tc_error::*;
+use tc_value::Value;
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf, Tuple};
 
 use crate::closure::Closure;
@@ -22,7 +22,6 @@ use crate::route::Public;
 use crate::scalar::{OpDef, Scalar, Scope, SELF};
 use crate::state::{State, ToState};
 use crate::txn::Txn;
-use crate::value::Value;
 
 use super::Refer;
 
@@ -84,7 +83,7 @@ impl Refer for With {
             .into_iter()
             .map(|id| {
                 context.resolve_id(&id).map(|state| {
-                    debug!("closure captured {}: {}", id, state);
+                    debug!("closure captured {}: {:?}", id, state);
                     (id, state)
                 })
             })
@@ -165,11 +164,5 @@ impl<'en> en::ToStream<'en> for With {
 impl fmt::Debug for With {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "with {:?}: {:?}", self.capture, self.op)
-    }
-}
-
-impl fmt::Display for With {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "with {}: {}", self.capture, self.op)
     }
 }

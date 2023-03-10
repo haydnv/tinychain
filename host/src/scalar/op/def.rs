@@ -4,14 +4,13 @@ use std::fmt;
 use std::iter;
 use std::str::FromStr;
 
-use async_hash::Hash;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::{Decoder, Error, FromStream, MapAccess, Visitor};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use get_size::GetSize;
 use get_size_derive::*;
 use log::debug;
-use sha2::digest::{Digest, Output};
 
 use tcgeneric::*;
 
@@ -22,7 +21,7 @@ use crate::state::State;
 const PREFIX: PathLabel = path_label(&["state", "scalar", "op"]);
 
 /// The [`Class`] of a user-defined [`OpDef`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpDefType {
     Get,
     Put,
@@ -67,7 +66,7 @@ impl NativeClass for OpDefType {
     }
 }
 
-impl fmt::Display for OpDefType {
+impl fmt::Debug for OpDefType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Get => write!(f, "GET Op definition"),
@@ -421,12 +420,6 @@ impl<'en> IntoStream<'en> for OpDef {
 
 impl fmt::Debug for OpDef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
-    }
-}
-
-impl fmt::Display for OpDef {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Get(_) => write!(f, "GET Op"),
             Self::Put(_) => write!(f, "PUT Op"),
@@ -451,7 +444,7 @@ fn dereference_self(form: Vec<(Id, Scalar)>, path: &TCPathBuf) -> Vec<(Id, Scala
                     Scalar::Ref(Box::new(tc_ref))
                 }
                 scalar => {
-                    debug!("dereference Op form {}: {}", id, scalar);
+                    debug!("dereference Op form {}: {:?}", id, scalar);
                     scalar.dereference_self(path)
                 }
             };

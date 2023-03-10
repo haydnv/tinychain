@@ -19,14 +19,14 @@ use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, TCPathBuf};
 
 use crate::chain::{Chain, ChainType, Recover};
 use crate::cluster::{DirItem, Replica};
-use crate::collection::{CollectionBase, CollectionSchema};
+use crate::collection::{CollectionBase, Schema as CollectionSchema};
 use crate::fs;
+use crate::fs::CacheBlock;
 use crate::object::{InstanceClass, ObjectType};
 use crate::scalar::value::Link;
 use crate::scalar::{OpRef, Refer, Scalar, Subject, TCRef};
 use crate::state::{State, ToState};
-use crate::transact::TxnId;
-use crate::txn::Txn;
+use crate::txn::{Txn, TxnId};
 
 pub(super) const SCHEMA: Label = label("schemata");
 
@@ -40,11 +40,11 @@ pub enum Attr {
 as_type!(Attr, Chain, Chain<CollectionBase>);
 as_type!(Attr, Scalar, Scalar);
 
-impl fmt::Display for Attr {
+impl fmt::Debug for Attr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Chain(chain) => fmt::Display::fmt(chain, f),
-            Self::Scalar(scalar) => fmt::Display::fmt(scalar, f),
+            Self::Chain(chain) => fmt::Debug::fmt(chain, f),
+            Self::Scalar(scalar) => fmt::Debug::fmt(scalar, f),
         }
     }
 }
@@ -100,13 +100,12 @@ impl Replica for Version {
     }
 }
 
-impl Persist<fs::Dir> for Version {
+#[async_trait]
+impl Persist<CacheBlock> for Version {
     type Txn = Txn;
     type Schema = InstanceClass;
 
-    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let dir = fs::Dir::try_from(store)?;
-
+    async fn create(txn_id: TxnId, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
         let (link, proto) = schema.into_inner();
 
         let mut attrs = Map::new();
@@ -118,20 +117,22 @@ impl Persist<fs::Dir> for Version {
                         let chain_type = resolve_type::<ChainType>(chain_type)?;
 
                         let schema = TCRef::try_from(collection)?;
-                        let schema = CollectionSchema::from_scalar(schema)?;
+                        let schema = if let TCRef::Op(OpRef::Get((classpath, schema))) = schema {
+                            todo!()
+                        } else {
+                            Err(bad_request!("invalid collection schema: {:?}", schema))
+                        }?;
 
-                        let store = dir
-                            .try_write(txn_id)
-                            .map(|lock| lock.create_store(name.clone()))?;
+                        let store = dir.create_dir(txn_id, name.clone()).await?;
 
-                        let chain = Chain::create(txn_id, (chain_type, schema), store)?;
+                        let chain = Chain::create(txn_id, (chain_type, schema), store).await?;
 
                         Ok(Attr::Chain(chain))
                     }
-                    other => Err(TCError::invalid_type(other, "a Service attribute")),
+                    other => Err(TCError::unexpected(other, "a Service attribute")),
                 },
                 scalar if scalar.is_ref() => {
-                    Err(TCError::invalid_value(scalar, "a Service attribute"))
+                    Err(TCError::unexpected(scalar, "a Service attribute"))
                 }
                 scalar => Ok(Attr::Scalar(scalar)),
             }?;
@@ -145,9 +146,7 @@ impl Persist<fs::Dir> for Version {
         })
     }
 
-    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let dir = fs::Dir::try_from(store)?;
-
+    async fn load(txn_id: TxnId, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
         let (link, proto) = schema.into_inner();
 
         let mut attrs = Map::new();
@@ -159,20 +158,22 @@ impl Persist<fs::Dir> for Version {
                         let chain_type = resolve_type::<ChainType>(chain_type)?;
 
                         let schema = TCRef::try_from(collection)?;
-                        let schema = CollectionSchema::from_scalar(schema)?;
+                        let schema = if let TCRef::Op(OpRef::Get((classpath, schema))) = schema {
+                            todo!()
+                        } else {
+                            Err(bad_request!("invalid collection schema: {:?}", schema))
+                        }?;
 
-                        let store = dir
-                            .try_write(txn_id)
-                            .map(|lock| lock.get_or_create_store(name.clone()))?;
+                        let store = dir.get_or_create_dir(txn_id, name.clone()).await?;
 
-                        let chain = Chain::load(txn_id, (chain_type, schema), store)?;
+                        let chain = Chain::load(txn_id, (chain_type, schema), store).await?;
 
                         Ok(Attr::Chain(chain))
                     }
-                    other => Err(TCError::invalid_type(other, "a Service attribute")),
+                    other => Err(TCError::unexpected(other, "a Service attribute")),
                 },
                 scalar if scalar.is_ref() => {
-                    Err(TCError::invalid_value(scalar, "a Service attribute"))
+                    Err(TCError::unexpected(scalar, "a Service attribute"))
                 }
                 scalar => Ok(Attr::Scalar(scalar)),
             }?;
@@ -186,7 +187,7 @@ impl Persist<fs::Dir> for Version {
         })
     }
 
-    fn dir(&self) -> <fs::Dir as Dir>::Inner {
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
         unimplemented!("cluster::service::Version::dir")
     }
 }
@@ -241,7 +242,7 @@ impl Recover for Version {
     }
 }
 
-impl fmt::Display for Version {
+impl fmt::Debug for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a hosted Service")
     }
@@ -266,10 +267,10 @@ impl Service {
     }
 
     pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
-        self.schema
-            .read(txn_id)
-            .map_ok(|file| file.block_ids().iter().last().cloned())
-            .await
+        let block_ids = self.schema.block_ids(txn_id).await?;
+        Ok(block_ids
+            .last()
+            .map(|id| id.as_str().parse().expect("version number")))
     }
 }
 
@@ -289,38 +290,35 @@ impl DirItem for Service {
         let proto = validate(&link, &number, proto)?;
         let schema = InstanceClass::extend(link, proto);
 
-        let txn_id = *txn.id();
-        let (dir, mut schemata, mut versions) = try_join!(
-            self.dir.write(txn_id),
-            self.schema.write(txn_id),
-            self.versions.write(txn_id).map_err(TCError::from),
-        )?;
-
-        schemata
-            .create_block(number.clone(), schema.clone().into())
-            .await?;
-
-        let store = dir.create_store(number.clone().into());
-        let version = Version::create(txn_id, schema, store)?;
-
-        versions.insert(number, version.clone());
-
-        Ok(version)
+        // let txn_id = *txn.id();
+        // let (dir, mut schemata, mut versions) = try_join!(
+        //     self.dir.write(txn_id),
+        //     self.schema.write(txn_id),
+        //     self.versions.write(txn_id).map_err(TCError::from),
+        // )?;
+        //
+        // schemata
+        //     .create_block(number.clone(), schema.clone().into())
+        //     .await?;
+        //
+        // let store = dir.create_dir(number.clone().into());
+        // let version = Version::create(txn_id, schema, store).await?;
+        //
+        // versions.insert(number, version.clone());
+        //
+        // Ok(version)
+        todo!()
     }
 }
 
 #[async_trait]
 impl Replica for Service {
     async fn state(&self, txn_id: TxnId) -> TCResult<State> {
-        let mut map = Map::new();
+        // let mut map = Map::new();
 
-        let schema = self.schema.read(txn_id).await?;
-        for number in schema.block_ids() {
-            let version = schema.read_block(&number).await?;
-            map.insert(number.into(), InstanceClass::clone(&*version).into());
-        }
+        todo!()
 
-        Ok(State::Map(map))
+        // Ok(State::Map(map))
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
@@ -342,31 +340,31 @@ impl Transact for Service {
     type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
-        let (_schema, versions) = join!(self.schema.commit(txn_id), self.versions.commit(txn_id));
+        let versions = self.versions.read_and_commit(txn_id).await;
 
-        if let Some(versions) = versions {
-            join_all(versions.iter().map(|(_name, version)| async move {
-                version.commit(txn_id).await;
-            }))
-            .await;
-        }
+        join_all(versions.iter().map(|(_name, version)| async move {
+            version.commit(txn_id).await;
+        }))
+        .await;
+
+        self.schema.commit(txn_id).await;
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        if let Some(versions) = self.versions.rollback(txn_id).await {
-            join_all(
-                versions
-                    .iter()
-                    .map(|(_, version)| async move { version.rollback(txn_id).await }),
-            )
-            .await;
-        }
+        let versions = self.versions.read_and_rollback(*txn_id).await;
+
+        join_all(
+            versions
+                .iter()
+                .map(|(_, version)| async move { version.rollback(txn_id).await }),
+        )
+        .await;
 
         self.schema.rollback(txn_id).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        if let Some(versions) = self.versions.finalize(txn_id).await {
+        if let Some(versions) = self.versions.read_and_finalize(*txn_id) {
             join_all(
                 versions
                     .iter()
@@ -389,20 +387,19 @@ impl Recover for Service {
     }
 }
 
-impl Persist<fs::Dir> for Service {
+#[async_trait]
+impl Persist<CacheBlock> for Service {
     type Txn = Txn;
     type Schema = ();
 
-    fn create(txn_id: TxnId, _schema: (), store: fs::Store) -> TCResult<Self> {
-        let dir = fs::Dir::try_from(store)?;
-        let mut contents = dir.try_write(txn_id)?;
-        if contents.is_empty() {
-            let schema = contents.create_file(SCHEMA.into())?;
+    async fn create(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+        if dir.is_empty(txn_id).await? {
+            let schema = dir.create_file(txn_id, SCHEMA.into()).await?;
 
             Ok(Self {
                 dir,
                 schema,
-                versions: TxnLock::new("service", txn_id, BTreeMap::new()),
+                versions: TxnLock::new(BTreeMap::new()),
             })
         } else {
             Err(bad_request!(
@@ -411,45 +408,33 @@ impl Persist<fs::Dir> for Service {
         }
     }
 
-    fn load(txn_id: TxnId, _schema: (), store: fs::Store) -> TCResult<Self> {
-        let dir = fs::Dir::try_from(store)?;
-        let (schema, mut versions) = {
-            let dir = dir.try_read(txn_id)?;
-            let schema: fs::File<VersionNumber, InstanceClass> = dir
-                .get_file(&SCHEMA.into())?
-                .ok_or_else(|| unexpected!("service missing schema file"))?;
+    async fn load(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+        // let schema = dir.get_file(txn_id, &SCHEMA.into()).await?;
+        // let mut versions = BTreeMap::new();
+        //
+        // for (number, schema) in schema.iter(txn_id).await? {
+        //     // `get_or_create_store` here in case of a service with no persistent data
+        //     let store = dir.get_or_create_dir(txn_id, number.clone().into()).await?;
+        //     // let version = Version::load(txn_id, schema.clone(), store)?;
+        //     todo!()
+        //     // versions.insert(number.clone(), version);
+        // }
+        //
+        // Ok(Self {
+        //     dir,
+        //     schema,
+        //     versions: TxnLock::new(versions),
+        // })
 
-            (schema, BTreeMap::new())
-        };
-
-        let version_schema = schema.try_read(txn_id)?;
-        for number in version_schema.block_ids() {
-            let schema = version_schema
-                .try_read_block(number)
-                .map_err(|cause| unexpected!("a Service schema is not present in the cache--consider increasing the cache size").consume(cause))?;
-
-            // `get_or_create_store` here in case of a service with no persistent data
-            let store = dir
-                .try_write(txn_id)
-                .map(|dir| dir.get_or_create_store(number.clone().into()))?;
-
-            let version = Version::load(txn_id, schema.clone(), store)?;
-            versions.insert(number.clone(), version);
-        }
-
-        Ok(Self {
-            dir,
-            schema,
-            versions: TxnLock::new("service", txn_id, versions),
-        })
+        todo!()
     }
 
-    fn dir(&self) -> <fs::Dir as Dir>::Inner {
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
         self.dir.clone().into_inner()
     }
 }
 
-impl fmt::Display for Service {
+impl fmt::Debug for Service {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a versioned hosted Service")
     }
@@ -459,14 +444,17 @@ fn resolve_type<T: NativeClass>(subject: Subject) -> TCResult<T> {
     match subject {
         Subject::Link(link) if link.host().is_none() => T::from_path(link.path())
             .ok_or_else(|| bad_request!("{} is not a {}", link.path(), std::any::type_name::<T>())),
+
         Subject::Link(link) => Err(not_implemented!(
             "support for a user-defined Class of {} in a Service: {}",
             std::any::type_name::<T>(),
             link
         )),
-        subject => Err(TCError::invalid_type(
+
+        subject => Err(bad_request!(
+            "{} is not a {}",
             subject,
-            format!("a {}", std::any::type_name::<T>()),
+            std::any::type_name::<T>()
         )),
     }
 }
@@ -490,7 +478,7 @@ fn validate(
                     // make sure not to duplicate requests to other clusters
                     if provider.is_inter_service_write(version_link.path()) {
                         return Err(bad_request!(
-                            "replicated op {} may not perform inter-service writes: {}",
+                            "replicated op {} may not perform inter-service writes: {:?}",
                             id,
                             provider
                         ));

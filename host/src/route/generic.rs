@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::fmt;
 use std::iter::Cloned;
-use std::ops::Deref;
+use std::ops::{Bound, Deref, RangeBounds};
 use std::str::FromStr;
 
 use destream::de::Error;
@@ -12,7 +12,7 @@ use log::debug;
 use safecast::*;
 
 use tc_error::*;
-use tc_value::{Bound, Number, Range, Value};
+use tc_value::{Number, Value};
 use tcgeneric::{label, Id, Instance, Map, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::closure::Closure;
@@ -27,7 +27,7 @@ struct AppendHandler<'a, T: Clone> {
 
 impl<'a, T> Handler<'a> for AppendHandler<'a, T>
 where
-    T: fmt::Display + Clone + Send + Sync,
+    T: fmt::Debug + Clone + Send + Sync,
     State: From<T>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
@@ -37,15 +37,14 @@ where
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 if self.tuple.is_empty() {
-                    let key = Tuple::<Value>::try_cast_from(key, |v| {
-                        TCError::invalid_type(v, "a Tuple")
-                    })?;
+                    let key =
+                        Tuple::<Value>::try_cast_from(key, |v| TCError::unexpected(v, "a Tuple"))?;
 
                     return Ok(Value::Tuple(key).into());
                 }
 
                 let suffix =
-                    Tuple::<Value>::try_cast_from(key, |v| TCError::invalid_value(v, "a Tuple"))?;
+                    Tuple::<Value>::try_cast_from(key, |v| TCError::unexpected(v, "a Tuple"))?;
 
                 let items = self.tuple.iter().cloned().map(State::from);
                 let items = items.chain(suffix.into_iter().map(Scalar::Value).map(State::Scalar));
@@ -129,7 +128,7 @@ struct MapCopyHandler<'a, T> {
 
 impl<'a, T> Handler<'a> for MapCopyHandler<'a, T>
 where
-    T: Route + Clone + Send + fmt::Display + 'a,
+    T: Route + Clone + Send + fmt::Debug + 'a,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -149,7 +148,7 @@ where
                     })
                     .collect();
 
-                let mut copy = BTreeMap::new();
+                let mut copy = Map::new();
                 while let Some((key, item)) = copies.try_next().await? {
                     copy.insert(key.clone(), item);
                 }
@@ -170,7 +169,7 @@ struct MapEqHandler<T> {
     map: Map<T>,
 }
 
-impl<'a, T: fmt::Display + Send + Sync + 'a> Handler<'a> for MapEqHandler<T>
+impl<'a, T: fmt::Debug + Send + Sync + 'a> Handler<'a> for MapEqHandler<T>
 where
     State: From<T>,
 {
@@ -198,9 +197,9 @@ where
 
                         let this = State::from(this);
                         let this =
-                            Value::try_cast_from(this, |s| TCError::invalid_type(s, "a Value"))?;
+                            Value::try_cast_from(this, |s| TCError::unexpected(s, "a Value"))?;
                         let that =
-                            Value::try_cast_from(that, |s| TCError::invalid_type(s, "a Value"))?;
+                            Value::try_cast_from(that, |s| TCError::unexpected(s, "a Value"))?;
 
                         Ok(this == that)
                     })
@@ -222,7 +221,7 @@ struct EqTupleHandler<T> {
     tuple: Tuple<T>,
 }
 
-impl<'a, T: fmt::Display + Send + Sync + 'a> Handler<'a> for EqTupleHandler<T>
+impl<'a, T: fmt::Debug + Send + Sync + 'a> Handler<'a> for EqTupleHandler<T>
 where
     State: From<T>,
 {
@@ -246,9 +245,9 @@ where
                     .map(|(this, that)| {
                         let this = State::from(this);
                         let this =
-                            Value::try_cast_from(this, |s| TCError::invalid_type(s, "a Value"))?;
+                            Value::try_cast_from(this, |s| TCError::unexpected(s, "a Value"))?;
                         let that =
-                            Value::try_cast_from(that, |s| TCError::invalid_type(s, "a Value"))?;
+                            Value::try_cast_from(that, |s| TCError::unexpected(s, "a Value"))?;
                         Ok(this == that)
                     })
                     .collect::<TCResult<Vec<bool>>>()?;
@@ -289,7 +288,7 @@ where
                 if key.is_none() {
                     Ok(State::from(self.map.clone()))
                 } else {
-                    let key = Id::try_cast_from(key, |v| TCError::invalid_type(v, "an Id"))?;
+                    let key = Id::try_cast_from(key, |v| TCError::unexpected(v, "an Id"))?;
                     self.map.get(&key).cloned().map(State::from).ok_or_else(|| {
                         let msg = format!(
                             "{} in Map with keys {}",
@@ -305,17 +304,17 @@ where
     }
 }
 
-impl<T: Instance + Route + Clone + fmt::Display> Route for Map<T>
+impl<T: Instance + Route + Clone + fmt::Debug> Route for Map<T>
 where
     State: From<Map<T>>,
     State: From<T>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        debug!("{} route {}", self, TCPath::from(path));
+        debug!("{:?} route {}", self, TCPath::from(path));
 
         if !path.is_empty() {
             debug!(
-                "{} contains {}? {}",
+                "{:?} contains {}? {}",
                 self,
                 path[0],
                 self.contains_key(&path[0])
@@ -325,7 +324,7 @@ where
         if path.is_empty() {
             Some(Box::new(MapHandler { map: self }))
         } else if let Some(state) = self.deref().get(&path[0]) {
-            debug!("member {} route {}", state, TCPath::from(&path[1..]));
+            debug!("member {:?} route {}", state, TCPath::from(&path[1..]));
             state.route(&path[1..])
         } else if path.len() == 1 {
             match path[0].as_str() {
@@ -348,7 +347,7 @@ struct TupleCopyHandler<'a, T> {
 
 impl<'a, T> Handler<'a> for TupleCopyHandler<'a, T>
 where
-    T: Route + Clone + Send + fmt::Display + 'a,
+    T: Route + Clone + Send + fmt::Debug + 'a,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -482,8 +481,9 @@ where
 
                 match key {
                     Value::None => Ok(State::from(self.tuple.clone())),
-                    Value::Tuple(range) if range.matches::<(Bound, Bound)>() => {
-                        let range = Range::opt_cast_from(range).expect("range");
+                    Value::Tuple(range) if range.matches::<(Bound<Value>, Bound<Value>)>() => {
+                        let range: (Bound<Value>, Bound<Value>) =
+                            range.opt_cast_into().expect("range");
                         let (start, end) = cast_range(range, len)?;
                         let slice = self.tuple[start..end]
                             .iter()
@@ -504,7 +504,7 @@ where
                             .map(State::from)
                             .ok_or_else(|| TCError::not_found(format!("no such index: {}", i)))
                     }
-                    other => Err(TCError::invalid_value(other, "a tuple index")),
+                    other => Err(TCError::unexpected(other, "a tuple index")),
                 }
             })
         }))
@@ -562,7 +562,7 @@ impl<'a, T: Clone> From<&'a Tuple<T>> for ZipHandler<'a, T> {
 
 impl<T> Route for Tuple<T>
 where
-    T: Instance + Route + Clone + fmt::Display,
+    T: Instance + Route + Clone + fmt::Debug,
     State: From<Tuple<T>>,
     State: From<T>,
 {
@@ -599,15 +599,15 @@ where
 }
 
 #[inline]
-fn cast_range(range: Range, len: i64) -> TCResult<(usize, usize)> {
+fn cast_range(range: (Bound<Value>, Bound<Value>), len: i64) -> TCResult<(usize, usize)> {
     #[inline]
     fn as_i64(v: Value) -> i64 {
         let n = Number::opt_cast_from(v).expect("start index");
         n.cast_into()
     }
 
-    let start = match range.start {
-        Bound::In(v) if v.matches::<Number>() => {
+    let start = match range.0 {
+        Bound::Included(v) if v.matches::<Number>() => {
             let start = as_i64(v);
             if start < 0 {
                 len + start
@@ -615,22 +615,22 @@ fn cast_range(range: Range, len: i64) -> TCResult<(usize, usize)> {
                 start
             }
         }
-        Bound::Ex(v) if v.matches::<Number>() => {
+        Bound::Excluded(v) if v.matches::<Number>() => {
             let start = as_i64(v);
             let start = if start < 0 { len + start } else { start };
             start + 1
         }
-        Bound::Un => 0,
-        other => return Err(bad_request!("invalid start index {} for Tuple", other)),
+        Bound::Unbounded => 0,
+        other => return Err(bad_request!("invalid start index {:?} for Tuple", other)),
     };
 
-    let end = match range.end {
-        Bound::In(v) if v.matches::<Number>() => {
+    let end = match range.1 {
+        Bound::Included(v) if v.matches::<Number>() => {
             let end = as_i64(v);
             let end = if end < 0 { len + end } else { end };
             end + 1
         }
-        Bound::Ex(v) if v.matches::<Number>() => {
+        Bound::Excluded(v) if v.matches::<Number>() => {
             let end = as_i64(v);
             if end < 0 {
                 len + end
@@ -638,8 +638,8 @@ fn cast_range(range: Range, len: i64) -> TCResult<(usize, usize)> {
                 end
             }
         }
-        Bound::Un => len,
-        other => return Err(bad_request!("invalid end index {} for Tuple", other)),
+        Bound::Unbounded => len,
+        other => return Err(bad_request!("invalid end index {:?} for Tuple", other)),
     };
 
     if start >= len {
@@ -673,9 +673,8 @@ impl<'a> Handler<'a> for CreateMapHandler {
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                let value = Tuple::<(Id, Value)>::try_cast_from(key, |v| {
-                    TCError::invalid_type(v, "a Map")
-                })?;
+                let value =
+                    Tuple::<(Id, Value)>::try_cast_from(key, |v| TCError::unexpected(v, "a Map"))?;
 
                 let map = value
                     .into_iter()
@@ -739,7 +738,7 @@ impl<'a> Handler<'a> for CreateRangeHandler {
                     let stop: usize = key.opt_cast_into().expect("range stop");
                     Ok(State::Tuple((0..stop).into_iter().collect()))
                 } else {
-                    Err(TCError::invalid_value(key, "a range"))
+                    Err(TCError::unexpected(key, "a range"))
                 }
             })
         }))

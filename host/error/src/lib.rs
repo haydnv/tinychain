@@ -6,6 +6,7 @@ use std::convert::Infallible;
 use std::{fmt, io};
 
 use destream::en;
+use ds_ext::link::ParseError;
 
 /// A result of type `T`, or a [`TCError`]
 pub type TCResult<T> = Result<T, TCError>;
@@ -206,6 +207,15 @@ impl TCError {
 }
 
 impl std::error::Error for TCError {}
+
+impl From<ParseError> for TCError {
+    fn from(err: ParseError) -> Self {
+        Self {
+            kind: ErrorKind::BadRequest,
+            data: err.into(),
+        }
+    }
+}
 
 impl From<txn_lock::Error> for TCError {
     fn from(err: txn_lock::Error) -> Self {

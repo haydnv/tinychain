@@ -4,6 +4,7 @@ use tc_value::{TCString, Value};
 use tcgeneric::{Map, PathSegment};
 
 use crate::route::{GetHandler, Handler, PostHandler, Route};
+use crate::scalar::Scalar;
 use crate::state::State;
 
 struct RenderHandler<'a> {
@@ -37,7 +38,14 @@ impl<'a> Handler<'a> for RenderHandler<'a> {
             Box::pin(async move {
                 let params = params
                     .into_iter()
-                    .map(|(id, state)| (id, Value::String(state.to_string().into())))
+                    .map(|(id, state)| {
+                        let as_string = match state {
+                            State::Scalar(Scalar::Value(value)) => value.to_string(),
+                            other => format!("{:?}", other),
+                        };
+
+                        (id, Value::String(as_string.into()))
+                    })
                     .collect::<Map<Value>>();
 
                 self.template

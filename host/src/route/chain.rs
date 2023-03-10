@@ -10,6 +10,7 @@ use tcgeneric::{PathSegment, TCPath};
 use crate::chain::{BlockChain, Chain, ChainInstance, ChainType};
 use crate::cluster::Replica;
 use crate::fs;
+use crate::fs::CacheBlock;
 use crate::txn::Txn;
 
 use super::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
@@ -37,7 +38,7 @@ impl<'a, C, T> AppendHandler<'a, C, T> {
 impl<'a, C, T> Handler<'a> for AppendHandler<'a, C, T>
 where
     C: ChainInstance<T> + Send + Sync + 'a,
-    T: Route + fmt::Display + 'a,
+    T: Route + fmt::Debug + 'a,
     Chain<T>: ChainInstance<T>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
@@ -56,7 +57,7 @@ where
             Some(handler) => match handler.put() {
                 Some(put_handler) => Some(Box::new(|txn, key, value| {
                     Box::pin(async move {
-                        debug!("Chain::put {} <- {}", key, value);
+                        debug!("Chain::put {} <- {:?}", key, value);
 
                         self.chain
                             .append_put(txn, key.clone(), value.clone())
@@ -136,7 +137,7 @@ where
 
 impl<T> Route for Chain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Route + Clone + fmt::Display + Send + Sync,
+    T: Persist<CacheBlock, Txn = Txn> + Route + Clone + fmt::Debug + Send + Sync,
     Self: ChainInstance<T> + Replica,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -154,7 +155,7 @@ where
 
 impl<T> Route for BlockChain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Route + Clone + fmt::Display + Send + Sync,
+    T: Persist<CacheBlock, Txn = Txn> + Route + Clone + fmt::Debug + Send + Sync,
     Self: ChainInstance<T> + Replica,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {

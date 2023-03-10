@@ -1,10 +1,10 @@
 //! Reference another [`State`] in the same [`Txn`] context.
 
-use async_hash::Hash;
 use std::collections::HashSet;
 use std::fmt;
 use std::str::FromStr;
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::{self, Error};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
@@ -12,7 +12,6 @@ use get_size::GetSize;
 use get_size_derive::*;
 use log::debug;
 use safecast::TryCastFrom;
-use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::{Id, Instance, Label, PathSegment, TCPathBuf};
@@ -110,12 +109,12 @@ impl FromStr for IdRef {
     #[inline]
     fn from_str(to: &str) -> TCResult<Self> {
         if !to.starts_with('$') || to.len() < 2 {
-            Err(TCError::invalid_value(to, "a reference to an ID"))
+            Err(TCError::unexpected(to, "a reference to an ID"))
         } else {
             to[1..]
                 .parse()
                 .map(|to| Self { to })
-                .map_err(|cause| TCError::invalid_value(to, "a reference to an ID").consume(cause))
+                .map_err(|cause| TCError::unexpected(to, "a reference to an ID").consume(cause))
         }
     }
 }

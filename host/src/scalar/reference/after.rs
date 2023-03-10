@@ -1,16 +1,15 @@
 //! Delay resolving a `TCRef` until a given dependency is resolved.
 
-use async_hash::Hash;
 use std::collections::HashSet;
 use std::fmt;
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
 use get_size::GetSize;
 use get_size_derive::*;
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
-use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::{Id, Instance, PathSegment, TCPathBuf};
@@ -64,10 +63,10 @@ impl Refer for After {
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
     ) -> TCResult<State> {
-        debug!("After::resolve {} from context ()", self);
+        debug!("After::resolve {:?} from context ()", self);
         if self.when.is_conditional() {
             return Err(bad_request!(
-                "After does not allow a conditional clause {}",
+                "After does not allow a conditional clause {:?}",
                 self.when,
             ));
         }
@@ -122,11 +121,5 @@ impl<'en> en::ToStream<'en> for After {
 impl fmt::Debug for After {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "after {:?} then {:?}", self.when, self.then)
-    }
-}
-
-impl fmt::Display for After {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "after {} then {}", self.when, self.then)
     }
 }

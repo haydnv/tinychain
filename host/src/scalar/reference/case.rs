@@ -1,18 +1,17 @@
-use async_hash::Hash;
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
 use get_size::GetSize;
 use get_size_derive::*;
 use safecast::{Match, TryCastFrom};
-use sha2::digest::{Digest, Output};
 
 use tc_error::*;
-use tcgeneric::{Id, Instance, Tuple};
+use tcgeneric::{Id, Instance, PathSegment, TCPathBuf, Tuple};
 
 use crate::route::Public;
 use crate::scalar::{Scalar, Scope, Value};
@@ -20,7 +19,6 @@ use crate::state::{State, ToState};
 use crate::txn::Txn;
 
 use super::{Refer, TCRef};
-use crate::generic::{PathSegment, TCPathBuf};
 
 /// A switch-case flow control
 #[derive(Clone, Eq, PartialEq, GetSize)]
@@ -101,7 +99,7 @@ impl Refer for Case {
 
         if self.cond.is_conditional() {
             return Err(bad_request!(
-                "Case does not allow a nested conditional {}",
+                "Case does not allow a nested conditional {:?}",
                 self.cond,
             ));
         }
@@ -109,7 +107,7 @@ impl Refer for Case {
         for switch in self.switch.iter() {
             if switch.is_conditional() {
                 return Err(bad_request!(
-                    "Case does not allow a nested conditional {}",
+                    "Case does not allow a nested conditional {:?}",
                     switch,
                 ));
             }
@@ -194,11 +192,5 @@ impl<'en> en::ToStream<'en> for Case {
 impl fmt::Debug for Case {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "switch ({:?})...", self.cond)
-    }
-}
-
-impl fmt::Display for Case {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "switch ({})...", self.cond)
     }
 }

@@ -13,13 +13,12 @@ use tokio::sync::RwLock;
 use tc_error::*;
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Link, Value};
-use tcgeneric::{path_label, Id, Map, PathLabel};
+use tcgeneric::{path_label, Id, Map, PathLabel, PathSegment};
 
 use crate::scalar::{Executor, Refer, Scope};
 use crate::state::State;
 use crate::txn::{Actor, Txn};
 
-use crate::generic::PathSegment;
 use crate::route::{DeleteHandler, GetHandler, Handler, PutHandler, Route};
 
 pub const PATH: PathLabel = path_label(&["transact", "hypothetical"]);
@@ -120,7 +119,7 @@ impl<'a> Handler<'a> for &'a Hypothetical {
                 }
 
                 let participant = value.try_cast_into(|v| {
-                    TCError::invalid_value(v, "a Link to a transaction participant")
+                    TCError::unexpected(v, "a Link to a transaction participant")
                 })?;
 
                 let mut participants = self.participants.write().await;
@@ -166,7 +165,7 @@ impl Route for Hypothetical {
     }
 }
 
-impl fmt::Display for Hypothetical {
+impl fmt::Debug for Hypothetical {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a hypothetical transaction handler")
     }

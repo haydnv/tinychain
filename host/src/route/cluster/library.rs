@@ -70,7 +70,7 @@ impl<'a> Handler<'a> for LibraryHandler<'a> {
                     debug!("create new Library version {}", key);
 
                     let number = VersionNumber::try_cast_from(key, |v| {
-                        TCError::invalid_value(v, "a version number")
+                        TCError::unexpected(v, "a version number")
                     })?;
 
                     let (link, version) = expect_version(value)?;
@@ -150,10 +150,10 @@ impl<'a> Handler<'a> for DirHandler<'a, Library> {
     {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                debug!("create new Library {} in {}", key, self.dir);
+                debug!("create new Library {} in {:?}", key, self.dir);
 
                 let name = PathSegment::try_cast_from(key, |v| {
-                    TCError::invalid_value(v, "a path segment for a Library directory entry")
+                    TCError::unexpected(v, "a path segment for a Library directory entry")
                 })?;
 
                 let (link, lib) = expect_version(value)?;

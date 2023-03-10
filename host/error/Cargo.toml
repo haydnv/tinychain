@@ -13,6 +13,7 @@ categories = ["rust-patterns"]
 
 [dependencies]
 destream = { path = "../../../destream" }
+ds-ext = { path = "../../../ds-ext" }
 log = { version = "0.4", features = ["release_max_level_info"] }
 serde = "1.0"
 txn_lock = { path = "../../../txn_lock" }

@@ -1,7 +1,9 @@
+use std::ops::Bound;
+
 use log::debug;
 
 use tc_error::bad_request;
-use tc_value::{Bound, Range, Value};
+use tc_value::Value;
 use tcgeneric::PathSegment;
 
 use crate::scalar::{Scalar, ScalarType};
@@ -23,12 +25,12 @@ impl<'a> Handler<'a> for CastHandler {
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                debug!("cast {} into {}", key, self.class);
+                debug!("cast {} into {:?}", key, self.class);
 
                 Scalar::Value(key)
                     .into_type(self.class)
                     .map(State::Scalar)
-                    .ok_or_else(|| bad_request!("cannot cast into {}", self.class))
+                    .ok_or_else(|| bad_request!("cannot cast into {:?}", self.class))
             })
         }))
     }
@@ -37,28 +39,6 @@ impl<'a> Handler<'a> for CastHandler {
 impl Route for ScalarType {
     fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         None
-    }
-}
-
-impl Route for Range {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        if path.is_empty() {
-            None
-        } else {
-            match path[0].as_str() {
-                "start" => match &self.start {
-                    Bound::In(value) => value.route(&path[1..]),
-                    Bound::Ex(value) => value.route(&path[1..]),
-                    Bound::Un => Value::None.route(&path[1..]),
-                },
-                "end" => match &self.end {
-                    Bound::In(value) => value.route(&path[1..]),
-                    Bound::Ex(value) => value.route(&path[1..]),
-                    Bound::Un => Value::None.route(&path[1..]),
-                },
-                _ => None,
-            }
-        }
     }
 }
 
@@ -72,7 +52,25 @@ impl Route for Scalar {
             Self::Cluster(cluster) => cluster.route(path),
             Self::Map(map) => map.route(path),
             Self::Op(op_def) if path.is_empty() => Some(Box::new(op_def.clone())),
-            Self::Range(range) => range.route(path),
+            Self::Range((start, end)) => {
+                if path.is_empty() {
+                    None
+                } else {
+                    match path[0].as_str() {
+                        "start" => match start {
+                            Bound::Included(value) => value.route(&path[1..]),
+                            Bound::Excluded(value) => value.route(&path[1..]),
+                            Bound::Unbounded => Value::None.route(&path[1..]),
+                        },
+                        "end" => match end {
+                            Bound::Included(value) => value.route(&path[1..]),
+                            Bound::Excluded(value) => value.route(&path[1..]),
+                            Bound::Unbounded => Value::None.route(&path[1..]),
+                        },
+                        _ => None,
+                    }
+                }
+            }
             Self::Ref(_) => None,
             Self::Value(value) => value.route(path),
             Self::Tuple(tuple) => tuple.route(path),

@@ -1,25 +1,23 @@
 //! An [`OpDef`] which closes over zero or more [`State`]s
 
-use async_hash::Hash;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::{self, Error};
 use futures::future::TryFutureExt;
 use futures::stream::{FuturesUnordered, TryStreamExt};
 use log::debug;
 use safecast::{CastInto, TryCastInto};
-use sha2::digest::{Digest, Output};
-use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::{AsyncHash, IntoView};
+use tc_transact::{AsyncHash, IntoView, Sha256};
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf, Tuple};
 
 use crate::fs;
-use crate::fs::Dir;
+use crate::fs::CacheBlock;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler};
 use crate::scalar::{Executor, OpDef, OpDefType, OpRef, Scalar, SELF};
 use crate::state::{State, StateView};
@@ -86,11 +84,12 @@ impl Closure {
         let mut context = self.context;
         let subject = context.remove::<Id>(&SELF.into());
 
-        debug!("call Closure with state {} and args {}", context, args);
+        debug!("call Closure with state {:?} and args {:?}", context, args);
 
         match self.op {
             OpDef::Get((key_name, op_def)) => {
-                let key = args.try_cast_into(|s| TCError::invalid_type(s, "a Value"))?;
+                let key = args.try_cast_into(|s| TCError::unexpected(s, "a Value"))?;
+
                 context.insert(key_name, key);
 
                 Executor::with_context(txn, subject.as_ref(), context, op_def)
@@ -99,7 +98,7 @@ impl Closure {
             }
             OpDef::Put((key_name, value_name, op_def)) => {
                 let (key, value) =
-                    args.try_cast_into(|s| TCError::invalid_value(s, "arguments for PUT Op"))?;
+                    args.try_cast_into(|s| TCError::unexpected(s, "arguments for PUT Op"))?;
 
                 context.insert(key_name, key);
                 context.insert(value_name, value);
@@ -117,7 +116,7 @@ impl Closure {
                     .await
             }
             OpDef::Delete((key_name, op_def)) => {
-                let key = args.try_cast_into(|s| TCError::invalid_type(s, "a Value"))?;
+                let key = args.try_cast_into(|s| TCError::unexpected(s, "a Value"))?;
                 context.insert(key_name, key);
 
                 Executor::with_context(txn, subject.as_ref(), context, op_def)
@@ -186,7 +185,7 @@ impl<'a> Handler<'a> for Closure {
 }
 
 #[async_trait]
-impl AsyncHash<Dir> for Closure {
+impl AsyncHash<fs::CacheBlock> for Closure {
     type Txn = Txn;
 
     async fn hash(self, txn: &Txn) -> TCResult<Output<Sha256>> {
@@ -200,7 +199,7 @@ impl AsyncHash<Dir> for Closure {
 }
 
 #[async_trait]
-impl<'en> IntoView<'en, fs::Dir> for Closure {
+impl<'en> IntoView<'en, CacheBlock> for Closure {
     type Txn = Txn;
     type View = (HashMap<Id, StateView<'en>>, OpDef);
 
@@ -244,13 +243,6 @@ impl fmt::Debug for Closure {
     }
 }
 
-impl fmt::Display for Closure {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let context: Tuple<&Id> = self.context.keys().collect();
-        write!(f, "closure over {}: {}", context, self.op)
-    }
-}
-
 struct ClosureVisitor {
     txn: Txn,
 }
@@ -266,7 +258,10 @@ impl de::Visitor for ClosureVisitor {
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
         let context = match seq.next_element(self.txn).await? {
             Some(State::Map(context)) => Ok(context),
-            Some(other) => Err(de::Error::invalid_type(other, "a Closure context")),
+            Some(other) => Err(de::Error::invalid_type(
+                format!("{other:?}"),
+                "a Closure context",
+            )),
             None => Err(de::Error::invalid_length(0, "a Closure context and Op")),
         }?;
 

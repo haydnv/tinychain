@@ -1,12 +1,12 @@
 //! Resolve a reference to an op.
 
-use async_hash::Hash;
 use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::Deref;
 use std::str::FromStr;
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::{self, Decoder, Error, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
@@ -15,7 +15,6 @@ use get_size::GetSize;
 use get_size_derive::*;
 use log::debug;
 use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
-use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::*;
@@ -30,7 +29,7 @@ use super::{IdRef, Refer, TCRef};
 const PREFIX: PathLabel = path_label(&["state", "scalar", "ref", "op"]);
 
 /// The [`Class`] of an [`OpRef`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub enum OpRefType {
     Get,
     Put,
@@ -67,7 +66,7 @@ impl NativeClass for OpRefType {
     }
 }
 
-impl fmt::Display for OpRefType {
+impl fmt::Debug for OpRefType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Get => write!(f, "GET"),
@@ -150,7 +149,7 @@ impl FromStr for Subject {
                 Ok(Self::Ref(id_ref, TCPathBuf::default()))
             }
         } else {
-            Link::from_str(s).map(Self::Link)
+            Link::from_str(s).map(Self::Link).map_err(TCError::from)
         }
     }
 }
@@ -269,7 +268,7 @@ impl TryFrom<Subject> for Link {
     fn try_from(subject: Subject) -> TCResult<Self> {
         match subject {
             Subject::Link(link) => Ok(link),
-            other => Err(TCError::invalid_value(other, "a Link")),
+            other => Err(TCError::unexpected(other, "a Link")),
         }
     }
 }
@@ -280,7 +279,7 @@ impl TryFrom<Subject> for TCPathBuf {
     fn try_from(subject: Subject) -> TCResult<Self> {
         match subject {
             Subject::Link(link) if link.host().is_none() => Ok(link.into_path()),
-            other => Err(TCError::invalid_value(other, "a Path")),
+            other => Err(TCError::unexpected(other, "a Path")),
         }
     }
 }
@@ -447,14 +446,14 @@ impl Refer for OpRef {
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
     ) -> TCResult<State> {
-        debug!("OpRef::resolve {} from context {:?}", self, context);
+        debug!("OpRef::resolve {:?} from context {:?}", self, context);
 
         #[inline]
         fn invalid_key<'a, T>(subject: &'a T) -> impl FnOnce(&State) -> TCError + 'a
         where
-            T: fmt::Display + 'a,
+            T: fmt::Debug + 'a,
         {
-            move |v| bad_request!("{} is not a valid key for {}", v, subject)
+            move |v| bad_request!("{:?} is not a valid key for {:?}", v, subject)
         }
 
         match self {
@@ -565,7 +564,7 @@ impl OpRefVisitor {
     }
 
     pub fn visit_ref_value<E: de::Error>(subject: Subject, params: Scalar) -> Result<OpRef, E> {
-        debug!("OpRefVisitor::visit_ref_value {} {}", subject, params);
+        debug!("OpRefVisitor::visit_ref_value {} {:?}", subject, params);
 
         match params {
             Scalar::Map(params) => Ok(OpRef::Post((subject, params))),
@@ -582,12 +581,12 @@ impl OpRefVisitor {
 
                     if let StateType::Chain(ct) = class {
                         return Err(E::custom(format!(
-                            "{} {}: {} {}",
+                            "{} {:?}: {:?} {}",
                             ERR_IMMUTABLE, ct, tuple, HINT
                         )));
                     } else if let StateType::Collection(ct) = class {
                         return Err(E::custom(format!(
-                            "{} {}: {} {}",
+                            "{} {:?}: {:?} {}",
                             ERR_IMMUTABLE, ct, tuple, HINT
                         )));
                     }
@@ -597,8 +596,9 @@ impl OpRefVisitor {
                 let key = tuple.pop().unwrap();
 
                 if subject == Subject::Link(OpRefType::Delete.path().into()) {
-                    let subject =
-                        key.try_cast_into(|k| E::invalid_type(k, "a Link or Id reference"))?;
+                    let subject = key.try_cast_into(|k| {
+                        E::invalid_type(format!("{k:?}"), "a Link or Id reference")
+                    })?;
 
                     Ok(OpRef::Delete((subject, value)))
                 } else {
@@ -610,7 +610,11 @@ impl OpRefVisitor {
                     "invalid parameters for method call on {:?}: {:?}",
                     subject, other
                 );
-                Err(de::Error::invalid_value(other, "OpRef parameters"))
+
+                Err(de::Error::invalid_value(
+                    format!("{other:?}"),
+                    "OpRef parameters",
+                ))
             }
         }
     }
@@ -690,21 +694,15 @@ impl<'en> IntoStream<'en> for OpRef {
 
 impl fmt::Debug for OpRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
-    }
-}
-
-impl fmt::Display for OpRef {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let class = self.class();
 
         match self {
-            OpRef::Get((link, key)) => write!(f, "{} {}?key={}", class, link, key),
+            OpRef::Get((link, key)) => write!(f, "{:?} {}?key={:?}", class, link, key),
             OpRef::Put((path, key, value)) => {
-                write!(f, "{} {}?key={} <- {}", class, path, key, value)
+                write!(f, "{:?} {}?key={:?} <- {:?}", class, path, key, value)
             }
-            OpRef::Post((path, params)) => write!(f, "{} {}({})", class, path, params),
-            OpRef::Delete((link, key)) => write!(f, "{} {}?key={}", class, link, key),
+            OpRef::Post((path, params)) => write!(f, "{:?} {}({:?})", class, path, params),
+            OpRef::Delete((link, key)) => write!(f, "{:?} {}?key={:?}", class, link, key),
         }
     }
 }

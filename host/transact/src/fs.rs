@@ -166,6 +166,11 @@ impl<FE, N, B> File<FE, N, B> {
             block: PhantomData,
         }
     }
+
+    /// Destructure this [`File`] into its underlying [`freqfs::DirLock`].
+    pub fn into_inner(self) -> Inner<FE> {
+        self.inner.into_inner()
+    }
 }
 
 // TODO: there should be a way to avoid calling name.to_string() on every lookup

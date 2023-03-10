@@ -52,16 +52,13 @@ impl TxnServer {
         match active.entry(txn_id) {
             Entry::Occupied(entry) => {
                 trace!("txn {} is already known", txn_id);
-                let active = entry.get();
-                let dir = active.workspace.create_dir_unique(txn_id).await?;
-                Ok(Txn::new(active.clone(), gateway, dir, request))
+                Ok(Txn::new(entry.get().clone(), gateway, request))
             }
             Entry::Vacant(entry) => {
                 trace!("creating new workspace for txn {}...", txn_id);
                 let workspace = self.txn_dir(txn_id).await?;
-                let dir = workspace.create_dir_unique(txn_id).await?;
-                let active = Arc::new(Active::new(&txn_id, workspace, expires));
-                let txn = Txn::new(active.clone(), gateway, dir, request);
+                let active = Arc::new(Active::new(&txn_id, workspace.clone(), expires));
+                let txn = Txn::new(active.clone(), gateway, request);
                 entry.insert(active);
                 Ok(txn)
             }
@@ -103,19 +100,21 @@ impl TxnServer {
 
             gateway.finalize(txn_id).await;
 
-            workspace
-                .delete_and_sync(txn_id.to_string())
-                .await
-                .expect("finalize txn workspace");
+            if let Some(workspace) = workspace.get_dir(&txn_id) {
+                workspace
+                    .write()
+                    .await
+                    .truncate_and_sync()
+                    .await
+                    .expect("finalize txn workspace");
+            }
         }
     }
 
-    async fn txn_dir(&self, txn_id: TxnId) -> TCResult<fs::Dir> {
+    async fn txn_dir(&self, txn_id: TxnId) -> TCResult<DirLock<fs::CacheBlock>> {
         let mut workspace = self.workspace.write().await;
-        let cache = workspace
+        workspace
             .create_dir(txn_id.to_string())
-            .map_err(fs::io_err)?;
-
-        Ok(fs::Dir::new(cache, txn_id))
+            .map_err(TCError::from)
     }
 }

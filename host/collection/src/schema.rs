@@ -18,6 +18,12 @@ pub enum Schema {
     Sparse(TensorSchema),
 }
 
+impl<D: Digest> Hash<D> for Schema {
+    fn hash(self) -> Output<D> {
+        async_hash::Hash::<D>::hash(&self)
+    }
+}
+
 impl<'a, D: Digest> Hash<D> for &'a Schema {
     fn hash(self) -> Output<D> {
         match self {

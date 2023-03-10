@@ -5,7 +5,7 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
 
-use async_hash::Hash;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::{self, Decoder, Error, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
@@ -14,7 +14,6 @@ use get_size::GetSize;
 use get_size_derive::*;
 use log::debug;
 use safecast::TryCastFrom;
-use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::*;
@@ -75,7 +74,7 @@ pub trait Refer {
 }
 
 /// The [`Class`] of a [`TCRef`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum RefType {
     After,
     Case,
@@ -122,14 +121,14 @@ impl NativeClass for RefType {
     }
 }
 
-impl fmt::Display for RefType {
+impl fmt::Debug for RefType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::After => f.write_str("After"),
             Self::Case => f.write_str("Case"),
             Self::Id => f.write_str("Id"),
             Self::If => f.write_str("If"),
-            Self::Op(ort) => fmt::Display::fmt(ort, f),
+            Self::Op(ort) => fmt::Debug::fmt(ort, f),
             Self::While => f.write_str("While"),
             Self::With => f.write_str("With"),
         }
@@ -261,7 +260,7 @@ impl Refer for TCRef {
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
     ) -> TCResult<State> {
-        debug!("TCRef::resolve {}", self);
+        debug!("TCRef::resolve {:?}", self);
 
         match self {
             Self::After(after) => after.resolve(context, txn).await,
@@ -295,7 +294,7 @@ impl TryFrom<TCRef> for OpRef {
     fn try_from(tc_ref: TCRef) -> TCResult<Self> {
         match tc_ref {
             TCRef::Op(op_ref) => Ok(op_ref),
-            other => Err(TCError::invalid_type(other, "an OpRef")),
+            other => Err(TCError::unexpected(other, "an OpRef")),
         }
     }
 }
@@ -420,7 +419,7 @@ impl de::Visitor for RefVisitor {
         if let Subject::Link(link) = &subject {
             if link.host().is_none() {
                 if let Some(class) = RefType::from_path(link.path()) {
-                    debug!("RefVisitor visiting instance of {}...", class);
+                    debug!("RefVisitor visiting instance of {:?}...", class);
                     return Self::visit_map_value(class, &mut access).await;
                 }
             }
@@ -502,20 +501,6 @@ impl fmt::Debug for TCRef {
             Self::Op(op_ref) => fmt::Debug::fmt(op_ref, f),
             Self::While(while_ref) => fmt::Debug::fmt(while_ref, f),
             Self::With(with) => fmt::Debug::fmt(with, f),
-        }
-    }
-}
-
-impl fmt::Display for TCRef {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::After(after) => fmt::Display::fmt(after, f),
-            Self::Case(case) => fmt::Display::fmt(case, f),
-            Self::Id(id_ref) => fmt::Display::fmt(id_ref, f),
-            Self::If(if_ref) => fmt::Display::fmt(if_ref, f),
-            Self::Op(op_ref) => fmt::Display::fmt(op_ref, f),
-            Self::While(while_ref) => fmt::Display::fmt(while_ref, f),
-            Self::With(with) => fmt::Display::fmt(with, f),
         }
     }
 }

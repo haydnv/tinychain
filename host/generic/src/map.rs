@@ -5,7 +5,7 @@ use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
-use destream::de::{Decoder, Error, FromStream};
+use destream::de::{Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
 use ds_ext::OrdHashMap;
 use get_size::GetSize;
@@ -42,12 +42,12 @@ impl<T> Map<T> {
     /// Return an error if this [`Map`] is not empty.
     pub fn expect_empty(self) -> TCResult<()>
     where
-        T: fmt::Display,
+        T: fmt::Debug,
     {
         if self.is_empty() {
             Ok(())
         } else {
-            Err(TCError::invalid_length(0, "no parameters").consume(self))
+            Err(TCError::unexpected(self, "no parameters"))
         }
     }
 
@@ -62,10 +62,10 @@ impl<T> Map<T> {
     where
         P: TryCastFrom<T>,
         D: FnOnce() -> P,
-        T: fmt::Display,
+        T: fmt::Debug,
     {
         if let Some(param) = self.remove(name) {
-            P::try_cast_from(param, |p| TCError::invalid_value(p, name))
+            P::try_cast_from(param, |p| TCError::unexpected(p, name.as_str()))
         } else {
             Ok((default)())
         }
@@ -76,11 +76,11 @@ impl<T> Map<T> {
     pub fn or_default<P>(&mut self, name: &Id) -> TCResult<P>
     where
         P: Default + TryCastFrom<T>,
-        T: fmt::Display,
+        T: fmt::Debug,
     {
         if let Some(param) = self.remove(name) {
             P::try_cast_from(param, |p| {
-                TCError::invalid_value(p, std::any::type_name::<P>())
+                TCError::unexpected(p, std::any::type_name::<P>())
             })
         } else {
             Ok(P::default())
@@ -92,11 +92,11 @@ impl<T> Map<T> {
     pub fn require<P>(&mut self, name: &Id) -> TCResult<P>
     where
         P: TryCastFrom<T>,
-        T: fmt::Display,
+        T: fmt::Debug,
     {
         let param = self.remove(name).ok_or_else(|| TCError::not_found(name))?;
 
-        P::try_cast_from(param, |p| TCError::invalid_value(p, name))
+        P::try_cast_from(param, |p| TCError::unexpected(p, name.as_str()))
     }
 }
 
@@ -261,36 +261,20 @@ impl<F, T: TryCastFrom<F>> TryCastFrom<Map<F>> for OrdHashMap<Id, T> {
 
 impl<T: fmt::Debug> fmt::Debug for Map<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.is_empty() {
-            return f.write_str("{}");
+        f.write_str("{")?;
+
+        let mut i = 0;
+        let last = self.len() - 1;
+
+        for (k, v) in self {
+            write!(f, "\t{}: {:?}", k, v)?;
+
+            if i < last {
+                f.write_str(",\n")?;
+                i += 1;
+            }
         }
 
-        write!(
-            f,
-            "{{\n{}\n}}",
-            self.inner
-                .iter()
-                .map(|(k, v)| format!("\t{}: {:?}", k, v))
-                .collect::<Vec<String>>()
-                .join(",\n")
-        )
-    }
-}
-
-impl<T: fmt::Display> fmt::Display for Map<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.is_empty() {
-            return f.write_str("{}");
-        }
-
-        write!(
-            f,
-            "{{ {} }}",
-            self.inner
-                .iter()
-                .map(|(k, v)| format!("{}: {}", k, v))
-                .collect::<Vec<String>>()
-                .join(", ")
-        )
+        f.write_str("}")
     }
 }

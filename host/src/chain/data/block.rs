@@ -2,19 +2,16 @@ use std::collections::btree_map::{BTreeMap, Entry};
 use std::fmt;
 use std::iter::FromIterator;
 
-use async_hash::Hash;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
 use futures::{future, TryFutureExt, TryStreamExt};
 use get_size::GetSize;
 use log::debug;
-use sha2::digest::{Digest, Output};
-use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::fs::BlockData;
-use tc_transact::TxnId;
+use tc_transact::{Sha256, TxnId};
 use tc_value::Value;
 use tcgeneric::Tuple;
 
@@ -69,15 +66,6 @@ impl fmt::Debug for Mutation {
         match self {
             Self::Delete(key) => write!(f, "DELETE {:?}", key),
             Self::Put(key, value) => write!(f, "PUT {:?} <- {:?}", key, value),
-        }
-    }
-}
-
-impl fmt::Display for Mutation {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Delete(key) => write!(f, "DELETE {}", key),
-            Self::Put(key, value) => write!(f, "PUT {} <- {}", key, value),
         }
     }
 }
@@ -196,7 +184,7 @@ impl ChainBlock {
 
     /// Append a PUT op to the this `ChainBlock`
     pub fn append_put(&mut self, txn_id: TxnId, key: Value, value: Scalar) {
-        debug!("ChainBlock::append_put {} <- {}", key, value);
+        debug!("ChainBlock::append_put {} <- {:?}", key, value);
         self.append(txn_id, Mutation::Put(key, value))
     }
 
@@ -220,12 +208,6 @@ impl ChainBlock {
             .map_err(|cause| unexpected!("TBON encoding error").consume(cause))
             .try_fold(0, |size, chunk| future::ready(Ok(size + chunk.len())))
             .await
-    }
-}
-
-impl BlockData for ChainBlock {
-    fn ext() -> &'static str {
-        "chain_block"
     }
 }
 
@@ -256,6 +238,7 @@ impl<'en> en::ToStream<'en> for ChainBlock {
     }
 }
 
+#[cfg(debug_assertions)]
 impl fmt::Debug for ChainBlock {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "chain block:")?;
@@ -275,7 +258,8 @@ impl fmt::Debug for ChainBlock {
     }
 }
 
-impl fmt::Display for ChainBlock {
+#[cfg(not(debug_assertions))]
+impl fmt::Debug for ChainBlock {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,

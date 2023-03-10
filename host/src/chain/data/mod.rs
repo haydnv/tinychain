@@ -24,7 +24,7 @@ pub(super) async fn replay_all<T>(
     store: &Store,
 ) -> TCResult<()>
 where
-    T: Route + fmt::Display,
+    T: Route + fmt::Debug,
 {
     for op in mutations {
         replay(subject, txn, &store, op)
@@ -37,7 +37,7 @@ where
 
 async fn replay<T>(subject: &T, txn: &Txn, store: &Store, mutation: &Mutation) -> TCResult<()>
 where
-    T: Route + fmt::Display,
+    T: Route + fmt::Debug,
 {
     match mutation {
         Mutation::Delete(key) => subject.delete(txn, &[], key.clone()).await,

@@ -16,8 +16,7 @@ pub use tuple::*;
 
 mod id {
     pub use ds_ext::link::{
-        label, Id, Label,
-        path_label, Path as TCPath, PathBuf as TCPathBuf, PathLabel, PathSegment,
+        label, path_label, Id, Label, Path as TCPath, PathBuf as TCPathBuf, PathLabel, PathSegment,
     };
 }
 

@@ -33,7 +33,7 @@ impl Route for CollectionType {
             #[cfg(feature = "collection")]
             Self::Tensor(tt) => tt.route(path),
 
-            _ => unimplemented!("no collection flags enabled")
+            _ => unimplemented!("no collection flags enabled"),
         }
     }
 }
@@ -66,7 +66,7 @@ impl<'a> Handler<'a> for SchemaHandler<'a> {
                     #[cfg(feature = "collection")]
                     Collection::Tensor(tensor) => tensor.schema().clone().cast_into(),
 
-                    _ => unimplemented!("no collection flags enabled")
+                    _ => unimplemented!("no collection flags enabled"),
                 };
 
                 Ok(schema.into())
@@ -91,7 +91,7 @@ impl Route for Collection {
             #[cfg(feature = "collection")]
             Self::Tensor(tensor) => tensor.route(path),
 
-            _ => unimplemented!("no collection flags enabled")
+            _ => unimplemented!("no collection flags enabled"),
         };
 
         if child_handler.is_some() {

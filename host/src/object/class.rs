@@ -9,7 +9,6 @@ use destream::{de, en};
 use get_size::GetSize;
 use get_size_derive::*;
 use safecast::{CastFrom, TryCastFrom};
-use tc_transact::fs::BlockData;
 
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, NativeClass, PathLabel};
@@ -84,12 +83,6 @@ impl tcgeneric::Instance for InstanceClass {
 
     fn class(&self) -> ObjectType {
         ObjectType::Class
-    }
-}
-
-impl BlockData for InstanceClass {
-    fn ext() -> &'static str {
-        "class"
     }
 }
 
@@ -280,13 +273,7 @@ impl<'en> en::IntoStream<'en> for InstanceClass {
 
 impl fmt::Debug for InstanceClass {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
-    }
-}
-
-impl fmt::Display for InstanceClass {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("Class")
+        f.write_str("a Class")
     }
 }
 
@@ -304,7 +291,7 @@ impl de::Visitor for InstanceClassVisitor {
         if let Some(extends) = access.next_key::<Link>(()).await? {
             log::debug!("Class extends {}", extends);
             let proto = access.next_value(()).await?;
-            log::debug!("prototype is {}", proto);
+            log::debug!("prototype is {:?}", proto);
             return Ok(InstanceClass::extend(extends, proto));
         } else {
             Err(de::Error::invalid_length(0, 1))

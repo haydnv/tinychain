@@ -1,9 +1,9 @@
 //! Resolve a reference conditionally.
 
-use async_hash::Hash;
 use std::collections::HashSet;
 use std::fmt;
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::Error;
 use destream::{de, en};
@@ -11,7 +11,6 @@ use get_size::GetSize;
 use get_size_derive::*;
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
-use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::{Id, Instance, PathSegment, TCPathBuf};
@@ -68,17 +67,17 @@ impl Refer for IfRef {
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
     ) -> TCResult<State> {
-        debug!("If::resolve {}", self);
+        debug!("If::resolve {:?}", self);
 
         if self.cond.is_conditional() {
             return Err(bad_request!(
-                "If does not allow a nested conditional {}",
+                "If does not allow a nested conditional {:?}",
                 self.cond,
             ));
         }
 
         let cond = self.cond.resolve(context, txn).await?;
-        debug!("If condition is {}", cond);
+        debug!("If condition is {:?}", cond);
 
         if let State::Scalar(Scalar::Value(Value::Number(Number::Bool(b)))) = cond {
             if b.into() {
@@ -87,7 +86,7 @@ impl Refer for IfRef {
                 Ok(self.or_else.into())
             }
         } else {
-            Err(TCError::invalid_value(cond, "a boolean condition"))
+            Err(TCError::unexpected(cond, "a boolean condition"))
         }
     }
 }
@@ -145,16 +144,6 @@ impl fmt::Debug for IfRef {
         write!(
             f,
             "if {:?} then {:?} else {:?}",
-            self.cond, self.then, self.or_else
-        )
-    }
-}
-
-impl fmt::Display for IfRef {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "if {} then {} else {}",
             self.cond, self.then, self.or_else
         )
     }
