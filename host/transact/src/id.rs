@@ -108,6 +108,26 @@ impl PartialOrd for TxnId {
     }
 }
 
+impl PartialEq<str> for TxnId {
+    fn eq(&self, other: &str) -> bool {
+        if let Ok(other) = Self::from_str(other) {
+            self == &other
+        } else {
+            false
+        }
+    }
+}
+
+impl PartialOrd<str> for TxnId {
+    fn partial_cmp(&self, other: &str) -> Option<Ordering> {
+        if let Ok(other) = Self::from_str(other) {
+            self.partial_cmp(&other)
+        } else {
+            None
+        }
+    }
+}
+
 impl freqfs::Name for TxnId {
     fn partial_cmp(&self, other: &String) -> Option<Ordering> {
         if let Ok(other) = Self::from_str(other) {

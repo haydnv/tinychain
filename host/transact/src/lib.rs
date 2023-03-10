@@ -6,7 +6,8 @@ use async_hash::Output;
 use async_trait::async_trait;
 use destream::en;
 use freqfs::DirLock;
-use sha2::Sha256; // TODO: should this be exported by the async_hash crate?
+
+pub use sha2::Sha256; // TODO: should this be exported by the async_hash crate?
 
 use tc_error::*;
 use tcgeneric::Id;
@@ -17,7 +18,14 @@ mod id;
 pub mod lock {
     use super::TxnId;
 
+    /// A transactional read-write lock on a scalar value
     pub type TxnLock<T> = txn_lock::scalar::TxnLock<TxnId, T>;
+
+    /// A transactional read-write lock on a key-value map
+    pub type TxnMapLock<K, V> = txn_lock::map::TxnMapLock<TxnId, K, V>;
+
+    /// A transactional read-write lock on a set of values
+    pub type TxnSetLock<T> = txn_lock::set::TxnSetLock<TxnId, T>;
 }
 
 pub use id::{TxnId, MIN_ID};

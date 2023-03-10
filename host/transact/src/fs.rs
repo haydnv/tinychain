@@ -3,12 +3,13 @@ use freqfs::{FileLoad, FileSave};
 use futures::TryFutureExt;
 use get_size::GetSize;
 use safecast::AsType;
+use std::fmt;
 use std::marker::PhantomData;
 
 use tc_error::*;
 use tcgeneric::{Id, ThreadSafe};
 
-use super::{TCResult, Transaction, TxnId};
+use super::{TCResult, Transact, Transaction, TxnId};
 
 /// The underlying filesystem directory type backing a [`Dir`]
 pub type Inner<FE> = freqfs::DirLock<FE>;
@@ -43,9 +44,10 @@ impl<FE: ThreadSafe> Dir<FE> {
     }
 
     /// Create a new [`File`] with the given `name` at `txn_id`.
-    pub async fn create_file<B>(&self, txn_id: TxnId, name: Id) -> TCResult<File<FE, B>>
+    pub async fn create_file<N, B>(&self, txn_id: TxnId, name: Id) -> TCResult<File<FE, N, B>>
     where
         B: GetSize + Clone,
+        N: fmt::Display,
         FE: AsType<B>,
     {
         self.inner
@@ -74,9 +76,10 @@ impl<FE: ThreadSafe> Dir<FE> {
     }
 
     /// Get the [`File`] with the given `name` at `txn_id`, or return a "not found" error.
-    pub async fn get_file<B>(&self, txn_id: TxnId, name: &Id) -> TCResult<File<FE, B>>
+    pub async fn get_file<N, B>(&self, txn_id: TxnId, name: &Id) -> TCResult<File<FE, N, B>>
     where
         B: GetSize + Clone,
+        N: fmt::Display,
         FE: AsType<B>,
     {
         if let Some(blocks) = self.inner.get_dir(txn_id, name.as_str()).await? {
@@ -92,63 +95,115 @@ impl<FE: ThreadSafe> Dir<FE> {
     }
 }
 
-/// A transactional file
-pub struct File<FE, B> {
-    inner: txfs::Dir<TxnId, FE>,
-    phantom: PhantomData<B>,
+#[async_trait]
+impl<FE: ThreadSafe + for<'a> FileSave<'a>> Transact for Dir<FE> {
+    type Commit = ();
+
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
+        self.inner.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.inner.rollback(*txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.inner.finalize(*txn_id).await
+    }
 }
 
-impl<FE, B> File<FE, B> {
+/// A transactional file
+pub struct File<FE, N, B> {
+    inner: txfs::Dir<TxnId, FE>,
+    name: PhantomData<N>,
+    block: PhantomData<B>,
+}
+
+impl<FE, N, B> File<FE, N, B> {
     fn new(inner: txfs::Dir<TxnId, FE>) -> Self {
         Self {
             inner,
-            phantom: PhantomData,
+            name: PhantomData,
+            block: PhantomData,
         }
     }
 }
 
-impl<FE, B> File<FE, B>
+// TODO: there should be a way to avoid calling name.to_string() on every lookup
+impl<FE, N, B> File<FE, N, B>
 where
     FE: for<'a> FileSave<'a> + AsType<B> + Clone + Send + Sync,
+    N: fmt::Display,
     B: FileLoad + GetSize + Clone,
 {
+    /// Construct an iterator over the name of each block in this [`File`] at `txn_id`.
+    pub async fn block_ids(&self, txn_id: TxnId) -> TCResult<impl Iterator<Item = Id>> {
+        self.inner
+            .file_names(txn_id)
+            .map_ok(|names| names.map(|name| name.parse().expect("block ID")))
+            .map_err(TCError::from)
+            .await
+    }
+
     /// Create a new block at `txn_id` with the given `name` and `contents`.
     pub async fn create_block(
         &self,
         txn_id: TxnId,
-        name: Id,
+        name: N,
         contents: B,
     ) -> TCResult<BlockWrite<FE, B>> {
         let block = self
             .inner
-            .create_file(txn_id, name.into(), contents)
+            .create_file(txn_id, name.to_string(), contents)
             .await?;
 
         block.into_write(txn_id).map_err(TCError::from).await
     }
 
     /// Delete the block with the given `name` at `txn_id` and return `true` if it was present.
-    pub async fn delete_block(&self, txn_id: TxnId, name: Id) -> TCResult<bool> {
+    pub async fn delete_block(&self, txn_id: TxnId, name: &N) -> TCResult<bool> {
         self.inner
-            .delete(txn_id, name.into())
+            .delete(txn_id, name.to_string())
             .map_err(TCError::from)
             .await
     }
 
     /// Lock the block at `name` for reading at `txn_id`.
-    pub async fn read_block(&self, txn_id: TxnId, name: &Id) -> TCResult<BlockRead<FE, B>> {
+    pub async fn read_block(&self, txn_id: TxnId, name: &N) -> TCResult<BlockRead<FE, B>> {
         self.inner
-            .read_file(txn_id, name.as_str())
+            .read_file(txn_id, &name.to_string())
             .map_err(TCError::from)
             .await
     }
 
     /// Lock the block at `name` for writing at `txn_id`.
-    pub async fn write_block(&self, txn_id: TxnId, name: Id) -> TCResult<BlockWrite<FE, B>> {
+    pub async fn write_block(&self, txn_id: TxnId, name: &N) -> TCResult<BlockWrite<FE, B>> {
         self.inner
-            .write_file(txn_id, name.as_str())
+            .write_file(txn_id, &name.to_string())
             .map_err(TCError::from)
             .await
+    }
+}
+
+#[async_trait]
+impl<FE, N, B> Transact for File<FE, N, B>
+where
+    FE: for<'a> FileSave<'a> + AsType<B> + Clone + Send + Sync,
+    B: FileLoad + GetSize + Clone,
+    Self: Send + Sync,
+{
+    type Commit = ();
+
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
+        self.inner.commit(txn_id).await
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        self.inner.rollback(*txn_id).await
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        self.inner.finalize(*txn_id).await
     }
 }
 
