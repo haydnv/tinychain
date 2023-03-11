@@ -20,6 +20,7 @@ destream = { path = "../../../destream" }
 ds-ext = { path = "../../../ds-ext" }
 futures = "0.3"
 freqfs = { path = "../../../freqfs" }
+num_cpus = "1.15"
 safecast = { path = "../../../safecast" }
 tc-error = { path = "../error" }
 tc-transact = { path = "../transact" }

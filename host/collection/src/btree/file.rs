@@ -6,7 +6,8 @@ use async_trait::async_trait;
 use destream::de;
 use ds_ext::link::{label, Label};
 use ds_ext::{OrdHashMap, OrdHashSet};
-use freqfs::{DirLock, FileLoad};
+use freqfs::{DirLock, DirWriteGuard, FileLoad};
+use futures::{join, try_join, TryStreamExt};
 use safecast::AsType;
 use tokio::sync::RwLock;
 
@@ -21,22 +22,84 @@ use super::slice::BTreeSlice;
 use super::{BTreeInstance, BTreeType, Key, Node, Range};
 
 const CANON: Label = label("canon");
+const DELETES: Label = label("deletes");
+const INSERTS: Label = label("inserts");
 const VERSIONS: Label = label("versions");
 
-type Canon<FE> = b_tree::BTreeLock<Schema, ValueCollator, FE>;
-type Semaphore = tc_transact::lock::Semaphore<ValueCollator, Range>;
+type Version<FE> = b_tree::BTreeLock<Schema, ValueCollator, FE>;
+type VersionReadGuard<FE> = b_tree::BTreeReadGuard<Schema, ValueCollator, FE>;
+type VersionWriteGuard<FE> = b_tree::BTreeWriteGuard<Schema, ValueCollator, FE>;
+type Semaphore = tc_transact::lock::Semaphore<b_tree::Collator<ValueCollator>, Range>;
 
 struct Delta<FE> {
-    deletes: Canon<FE>,
-    inserts: Canon<FE>,
+    deletes: Version<FE>,
+    inserts: Version<FE>,
+}
+
+impl<FE> Clone for Delta<FE> {
+    fn clone(&self) -> Self {
+        Self {
+            deletes: self.deletes.clone(),
+            inserts: self.inserts.clone(),
+        }
+    }
+}
+
+impl<FE> Delta<FE>
+where
+    FE: AsType<Node> + Send + Sync,
+{
+    fn create(
+        schema: Schema,
+        collator: ValueCollator,
+        mut dir: DirWriteGuard<FE>,
+    ) -> TCResult<Self> {
+        let deletes = dir.create_dir(DELETES.to_string())?;
+        let inserts = dir.create_dir(INSERTS.to_string())?;
+
+        Ok(Self {
+            deletes: Version::create(schema.clone(), collator.clone(), deletes)?,
+            inserts: Version::create(schema, collator, inserts)?,
+        })
+    }
+
+    async fn write(&self) -> (VersionWriteGuard<FE>, VersionWriteGuard<FE>) {
+        join!(self.inserts.write(), self.deletes.write())
+    }
 }
 
 struct State<FE> {
-    canon: Canon<FE>,
+    canon: Version<FE>,
     commits: OrdHashSet<TxnId>,
     deltas: OrdHashMap<TxnId, Delta<FE>>,
     pending: OrdHashMap<TxnId, Delta<FE>>,
     versions: DirLock<FE>,
+    finalized: Option<TxnId>,
+}
+
+impl<FE> State<FE>
+where
+    FE: AsType<Node> + Send + Sync,
+{
+    async fn pending_version(&mut self, txn_id: TxnId) -> TCResult<Delta<FE>> {
+        if let Some(version) = self.pending.get(&txn_id) {
+            debug_assert!(!self.commits.contains(&txn_id));
+            Ok(version.clone())
+        } else if self.commits.contains(&txn_id) {
+            Err(conflict!("{} has already been committed", txn_id))
+        } else if self.finalized.as_ref() > Some(&txn_id) {
+            Err(conflict!("{} has already been finalized", txn_id))
+        } else {
+            let collator = self.canon.collator().inner().clone();
+
+            let mut versions = self.versions.write().await;
+            let dir = versions.create_dir(txn_id.to_string())?;
+            let version = Delta::create(self.canon.schema().clone(), collator, dir.try_write()?)?;
+
+            self.pending.insert(txn_id, version.clone());
+            Ok(version)
+        }
+    }
 }
 
 /// A B+Tree which supports concurrent transactional access
@@ -61,13 +124,9 @@ impl<Txn, FE> Clone for BTreeFile<Txn, FE> {
 }
 
 impl<Txn, FE> BTreeFile<Txn, FE> {
-    fn new(
-        collator: ValueCollator,
-        schema: Schema,
-        dir: DirLock<FE>,
-        canon: Canon<FE>,
-        versions: DirLock<FE>,
-    ) -> Self {
+    fn new(schema: Schema, dir: DirLock<FE>, canon: Version<FE>, versions: DirLock<FE>) -> Self {
+        let semaphore = Semaphore::new(canon.collator().clone());
+
         Self {
             dir,
             schema: Arc::new(schema),
@@ -77,8 +136,9 @@ impl<Txn, FE> BTreeFile<Txn, FE> {
                 deltas: OrdHashMap::new(),
                 pending: OrdHashMap::new(),
                 versions,
+                finalized: None,
             })),
-            semaphore: Semaphore::new(Arc::new(collator)),
+            semaphore,
             phantom: PhantomData,
         }
     }
@@ -131,14 +191,45 @@ where
 impl<Txn, FE> BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
 {
-    async fn delete(&self, range: Range) -> TCResult<()> {
-        Err(not_implemented!("BTreeFile::delete"))
+    async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
+        let permit = self.semaphore.write(txn_id, range.clone()).await?;
+
+        let delta = {
+            let mut state = self.state.write().await;
+            state.pending_version(txn_id).await?
+        };
+
+        let (mut inserts, mut deletes) = delta.write().await;
+
+        let deleted = self.clone().slice(range, false)?;
+        let mut deleted = deleted.keys(txn_id).await?;
+
+        // there's not much point in trying to parallelize this
+        while let Some(key) = deleted.try_next().await? {
+            try_join!(inserts.delete(key.clone().into()), deletes.insert(key))?;
+        }
+
+        Ok(())
     }
 
-    async fn upsert(&self, key: Key) -> TCResult<()> {
-        Err(not_implemented!("BTreeFile::upsert"))
+    async fn upsert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+        let permit = self
+            .semaphore
+            .write(txn_id, Range::from_prefix(key.clone()))
+            .await?;
+
+        let delta = {
+            let mut state = self.state.write().await;
+            state.pending_version(txn_id).await?
+        };
+
+        let (mut inserts, mut deletes) = delta.write().await;
+
+        try_join!(inserts.insert(key.clone()), deletes.delete(key))?;
+
+        Ok(())
     }
 }
 
@@ -181,11 +272,11 @@ where
             let mut dir = dir.write().await;
             let versions = dir.create_dir(VERSIONS.to_string())?;
             let canon = dir.create_dir(CANON.to_string())?;
-            let canon = Canon::create(schema.clone(), collator.clone(), canon)?;
+            let canon = Version::create(schema.clone(), collator, canon)?;
             (canon, versions)
         };
 
-        Ok(Self::new(collator, schema, dir, canon, versions))
+        Ok(Self::new(schema, dir, canon, versions))
     }
 
     async fn load(_txn_id: TxnId, schema: Self::Schema, store: Dir<FE>) -> TCResult<Self> {
@@ -196,11 +287,11 @@ where
             let mut dir = dir.write().await;
             let versions = dir.get_or_create_dir(VERSIONS.to_string())?;
             let canon = dir.get_or_create_dir(CANON.to_string())?;
-            let canon = Canon::load(schema.clone(), collator.clone(), canon.clone())?;
+            let canon = Version::load(schema.clone(), collator.clone(), canon)?;
             (canon, versions)
         };
 
-        Ok(Self::new(collator, schema, dir, canon, versions))
+        Ok(Self::new(schema, dir, canon, versions))
     }
 
     fn dir(&self) -> Inner<FE> {
