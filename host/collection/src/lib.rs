@@ -5,12 +5,13 @@ use async_hash::{Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
+use safecast::{as_type, AsType};
 
 use tc_error::*;
 use tc_transact::{AsyncHash, IntoView, Sha256, Transaction};
 use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
-use btree::BTreeType;
+pub use btree::{BTree, BTreeInstance, BTreeType, Node};
 use table::TableType;
 use tensor::TensorType;
 
@@ -60,23 +61,9 @@ impl NativeClass for CollectionType {
     }
 }
 
-impl From<BTreeType> for CollectionType {
-    fn from(btt: BTreeType) -> Self {
-        Self::BTree(btt)
-    }
-}
-
-impl From<TableType> for CollectionType {
-    fn from(tt: TableType) -> Self {
-        Self::Table(tt)
-    }
-}
-
-impl From<TensorType> for CollectionType {
-    fn from(tt: TensorType) -> Self {
-        Self::Tensor(tt)
-    }
-}
+as_type!(CollectionType, BTree, BTreeType);
+as_type!(CollectionType, Table, TableType);
+as_type!(CollectionType, Tensor, TensorType);
 
 impl fmt::Debug for CollectionType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -89,13 +76,21 @@ impl fmt::Debug for CollectionType {
 }
 
 #[derive(Clone)]
-pub struct Collection<T, FE> {
-    phantom: PhantomData<(T, FE)>,
+pub enum Collection<Txn, FE> {
+    BTree(BTree<Txn, FE>),
 }
 
-impl<T, FE> Collection<T, FE> {
+as_type!(Collection<Txn, FE>, BTree, BTree<Txn, FE>);
+
+impl<Txn, FE> Collection<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + Send + Sync,
+{
     fn schema(&self) -> Schema {
-        todo!()
+        match self {
+            Self::BTree(btree) => btree.schema().clone().into(),
+        }
     }
 }
 
@@ -107,7 +102,9 @@ where
     type Class = CollectionType;
 
     fn class(&self) -> CollectionType {
-        todo!()
+        match self {
+            Self::BTree(btree) => btree.class().into(),
+        }
     }
 }
 
@@ -115,7 +112,7 @@ where
 impl<T, FE> AsyncHash<FE> for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: Send + Sync,
+    FE: AsType<Node> + Send + Sync,
 {
     type Txn = T;
 
@@ -131,9 +128,11 @@ where
     }
 }
 
-impl<T, FE> From<CollectionBase<T, FE>> for Collection<T, FE> {
-    fn from(_base: CollectionBase<T, FE>) -> Self {
-        todo!()
+impl<Txn, FE> From<CollectionBase<Txn, FE>> for Collection<Txn, FE> {
+    fn from(base: CollectionBase<Txn, FE>) -> Self {
+        match base {
+            CollectionBase::BTree(btree) => Self::BTree(btree.into()),
+        }
     }
 }
 
@@ -145,7 +144,7 @@ where
     Self: 'en,
 {
     type Txn = T;
-    type View = CollectionView<'en, T, FE>;
+    type View = CollectionView<'en>;
 
     async fn into_view(self, _txn: Self::Txn) -> TCResult<Self::View> {
         todo!()
@@ -178,15 +177,14 @@ impl<T, FE> fmt::Debug for Collection<T, FE> {
 }
 
 /// A view of a [`Collection`] within a single `Transaction`, used for serialization.
-pub struct CollectionView<'en, T, FE> {
-    phantom: PhantomData<&'en (T, FE)>,
+pub enum CollectionView<'en> {
+    BTree(btree::BTreeView<'en>),
 }
 
-impl<'en, T, FE> en::IntoStream<'en> for CollectionView<'en, T, FE>
-where
-    Self: 'en,
-{
-    fn into_stream<E: en::Encoder<'en>>(self, _encoder: E) -> Result<E::Ok, E::Error> {
-        todo!()
+impl<'en> en::IntoStream<'en> for CollectionView<'en> {
+    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        match self {
+            Self::BTree(btree) => btree.into_stream(encoder),
+        }
     }
 }

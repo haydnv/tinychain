@@ -2,6 +2,7 @@ use std::fmt;
 
 use async_hash::{Digest, Hash, Output};
 use destream::en;
+use safecast::as_type;
 
 use tcgeneric::NativeClass;
 
@@ -17,6 +18,9 @@ pub enum Schema {
     Dense(TensorSchema),
     Sparse(TensorSchema),
 }
+
+as_type!(Schema, BTree, BTreeSchema);
+as_type!(Schema, Table, TableSchema);
 
 impl<D: Digest> Hash<D> for Schema {
     fn hash(self) -> Output<D> {

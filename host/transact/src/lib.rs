@@ -18,6 +18,11 @@ mod id;
 pub mod lock {
     use super::TxnId;
 
+    pub use txn_lock::semaphore::{PermitRead, PermitWrite};
+
+    /// A semaphore used to gate access to a transactional resource
+    pub type Semaphore<C, R> = txn_lock::semaphore::Semaphore<TxnId, C, R>;
+
     /// A transactional read-write lock on a scalar value
     pub type TxnLock<T> = txn_lock::scalar::TxnLock<TxnId, T>;
 

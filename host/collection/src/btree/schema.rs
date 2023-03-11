@@ -9,6 +9,8 @@ use tc_error::{bad_request, TCError, TCResult};
 use tc_value::{NumberType, Value, ValueType};
 use tcgeneric::{Id, NativeClass};
 
+use super::Key;
+
 const MEGA: usize = 1_000_000;
 const MIN_ORDER: usize = 4;
 const TERA: usize = 1_000_000_000_000;
@@ -90,7 +92,7 @@ impl b_tree::Schema for Schema {
         self.order
     }
 
-    fn validate(&self, key: Vec<Self::Value>) -> TCResult<Vec<Self::Value>> {
+    fn validate(&self, key: Key) -> TCResult<Key> {
         if key.len() != self.len() {
             return Err(bad_request!(
                 "BTree expected a key of length {}, not {}",

@@ -17,7 +17,9 @@ async-trait = "0.1"
 b-table = { path = "../../../b-table" }
 b-tree = { path = "../../../b-tree" }
 destream = { path = "../../../destream" }
+ds-ext = { path = "../../../ds-ext" }
 futures = "0.3"
+freqfs = { path = "../../../freqfs" }
 safecast = { path = "../../../safecast" }
 tc-error = { path = "../error" }
 tc-transact = { path = "../transact" }
