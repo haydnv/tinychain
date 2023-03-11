@@ -5,13 +5,108 @@ use async_trait::async_trait;
 use destream::{de, en};
 use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
 
+use tc_error::{bad_request, TCError, TCResult};
 use tc_value::{NumberType, Value, ValueType};
 use tcgeneric::{Id, NativeClass};
+
+const MEGA: usize = 1_000_000;
+const MIN_ORDER: usize = 4;
+const TERA: usize = 1_000_000_000_000;
+const UUID_SIZE: usize = 16;
 
 /// The schema of a B+Tree
 #[derive(Clone, Eq, PartialEq)]
 pub struct Schema {
     columns: Vec<Column>,
+    block_size: usize,
+    order: usize,
+}
+
+impl Schema {
+    /// Construct a new B+Tree schema with the given `columns`.
+    pub fn new(columns: Vec<Column>) -> TCResult<Self> {
+        let mut key_size = 0;
+        for col in &columns {
+            if let Some(size) = col.dtype().size() {
+                key_size += size;
+
+                if col.max_len().is_some() {
+                    return Err(bad_request!(
+                        "maximum length is not applicable to a column of type {}",
+                        col.dtype(),
+                    ));
+                }
+            } else if let Some(size) = col.max_len() {
+                key_size += size;
+            } else {
+                return Err(bad_request!(
+                    "column of type {} requires a maximum length",
+                    col.dtype(),
+                ));
+            }
+        }
+
+        fn index_size(order: usize, key_size: usize, data_size: usize) -> usize {
+            let num_keys = data_size / key_size;
+            let num_leaves = num_keys / order;
+
+            let mut num_index_nodes = num_leaves / order;
+            let mut index_size = num_leaves * (key_size + UUID_SIZE);
+            while num_leaves > order {
+                num_index_nodes /= order;
+                index_size += num_index_nodes * (key_size + UUID_SIZE);
+            }
+
+            index_size
+        }
+
+        // calculate the minimum order such that 1TB of leaf data on disk needs 100MB of index data
+        let mut order = MIN_ORDER;
+        while index_size(order, key_size, TERA) > 100 * MEGA {
+            order += 1;
+        }
+
+        Ok(Self {
+            order,
+            block_size: order * key_size,
+            columns,
+        })
+    }
+}
+
+impl b_tree::Schema for Schema {
+    type Error = TCError;
+    type Value = Value;
+
+    fn block_size(&self) -> usize {
+        self.block_size
+    }
+
+    fn len(&self) -> usize {
+        self.columns.len()
+    }
+
+    fn order(&self) -> usize {
+        self.order
+    }
+
+    fn validate(&self, key: Vec<Self::Value>) -> TCResult<Vec<Self::Value>> {
+        if key.len() != self.len() {
+            return Err(bad_request!(
+                "BTree expected a key of length {}, not {}",
+                self.len(),
+                key.len()
+            ));
+        }
+
+        key.into_iter()
+            .zip(&self.columns)
+            .map(|(val, col)| {
+                val.into_type(col.dtype)
+                    .ok_or_else(|| bad_request!("invalid value for column {}", &col.name))
+            })
+            .collect()
+    }
 }
 
 impl<D: Digest> Hash<D> for Schema {
