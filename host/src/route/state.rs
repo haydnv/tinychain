@@ -37,7 +37,7 @@ impl<'a> Handler<'a> for ClassHandler {
                 let mut proto = Map::new();
                 for (id, member) in params.into_iter() {
                     let member = member.try_cast_into(|s| {
-                        TCError::invalid_value(s, "an attribute in an object prototype")
+                        TCError::unexpected(s, "an attribute in an object prototype")
                     })?;
 
                     proto.insert(id, member);
@@ -65,7 +65,7 @@ impl<'a> Handler<'a> for HashHandler {
 
                 self.state
                     .hash(txn)
-                    .map_ok(Id::from_hash)
+                    .map_ok(Id::from)
                     .map_ok(Value::from)
                     .map_ok(State::from)
                     .await
@@ -110,7 +110,11 @@ impl Route for StateType {
 
 impl Route for State {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
-        debug!("instance of {} route {}", self.class(), TCPath::from(path));
+        debug!(
+            "instance of {:?} route {}",
+            self.class(),
+            TCPath::from(path)
+        );
 
         if let Some(handler) = match self {
             Self::Chain(chain) => chain.route(path),

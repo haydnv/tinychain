@@ -2,18 +2,17 @@
 
 use std::fmt;
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
 use safecast::{TryCastFrom, TryCastInto};
-use sha2::digest::Output;
-use sha2::Sha256;
 
 use tc_error::*;
-use tc_transact::{AsyncHash, IntoView};
+use tc_transact::{AsyncHash, IntoView, Sha256};
 use tc_value::Value;
 use tcgeneric::{label, path_label, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
-use crate::fs::Dir;
+use crate::fs::CacheBlock;
 use crate::scalar::Scalar;
 use crate::state::State;
 use crate::txn::Txn;
@@ -58,7 +57,7 @@ impl NativeClass for ObjectType {
     }
 }
 
-impl fmt::Display for ObjectType {
+impl fmt::Debug for ObjectType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Class => f.write_str("user-defined Class"),
@@ -86,13 +85,13 @@ impl tcgeneric::Instance for Object {
 }
 
 #[async_trait]
-impl AsyncHash<Dir> for Object {
+impl AsyncHash<CacheBlock> for Object {
     type Txn = Txn;
 
     async fn hash(self, _txn: &Self::Txn) -> TCResult<Output<Sha256>> {
         match self {
             Self::Class(class) => Ok(async_hash::Hash::<Sha256>::hash(class)),
-            Self::Instance(instance) => Err(bad_request!("cannot hash {}", instance)),
+            Self::Instance(instance) => Err(bad_request!("cannot hash {:?}", instance)),
         }
     }
 }
@@ -142,7 +141,7 @@ impl TryCastFrom<Object> for Value {
 }
 
 #[async_trait]
-impl<'en> IntoView<'en, Dir> for Object {
+impl<'en> IntoView<'en, CacheBlock> for Object {
     type Txn = Txn;
     type View = ObjectView;
 
@@ -160,16 +159,6 @@ impl fmt::Debug for Object {
         match self {
             Self::Class(ict) => fmt::Debug::fmt(ict, f),
             Self::Instance(ic) => fmt::Debug::fmt(ic, f),
-        }
-    }
-}
-
-#[async_trait]
-impl fmt::Display for Object {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Class(ict) => fmt::Display::fmt(ict, f),
-            Self::Instance(ic) => fmt::Display::fmt(ic, f),
         }
     }
 }
@@ -208,8 +197,9 @@ impl ObjectVisitor {
     ) -> Result<Object, Err> {
         match class {
             ObjectType::Class => {
-                let class =
-                    state.try_cast_into(|s| de::Error::invalid_value(s, "a Class definition"))?;
+                let class = state.try_cast_into(|s| {
+                    de::Error::invalid_value(format!("{s:?}"), "a Class definition")
+                })?;
 
                 Ok(Object::Class(class))
             }

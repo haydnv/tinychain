@@ -28,7 +28,7 @@ where
     {
         Some(Box::new(|_txn, value| {
             Box::pin(async move {
-                let value = value.try_cast_into(|v| TCError::invalid_type(v, "a Number"))?;
+                let value = value.try_cast_into(|v| TCError::unexpected(v, "a Number"))?;
                 (self.op)(value).map(Value::Number).map(State::from)
             })
         }))
@@ -75,7 +75,7 @@ impl<'a> Handler<'a> for Log {
                     Ok(self.n.ln())
                 } else {
                     let base: Number =
-                        value.try_cast_into(|v| TCError::invalid_type(v, "a Number"))?;
+                        value.try_cast_into(|v| TCError::unexpected(v, "a Number"))?;
 
                     if base.class().is_complex() {
                         Err(bad_request!("invalid base {} for log", base))

@@ -160,7 +160,8 @@ impl crate::gateway::Client for Client {
         if response.status().is_success() {
             tbon::de::try_decode(txn, response.into_body())
                 .map_err(|cause| {
-                    bad_gateway!("error decoding response from {}: {}", link, params).consume(cause)
+                    bad_gateway!("error decoding response from {}: {:?}", link, params)
+                        .consume(cause)
                 })
                 .await
         } else {

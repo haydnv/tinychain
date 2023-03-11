@@ -6,14 +6,15 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use freqfs::DirLock;
 use futures::future::TryFutureExt;
 use log::debug;
 use safecast::{CastFrom, CastInto};
 
 use tc_error::*;
-use tc_transact::fs::{Dir, DirCreate};
+use tc_transact::fs::Dir;
 use tc_transact::Transaction;
-use tc_value::{Link, LinkHost, Value};
+use tc_value::{Host, Link, Value};
 use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf, Tuple};
 
 use crate::fs;
@@ -29,13 +30,13 @@ mod request;
 mod server;
 
 struct Active {
-    workspace: fs::Dir,
+    workspace: DirLock<fs::CacheBlock>,
     expires: NetworkTime,
     scope: Scope,
 }
 
 impl Active {
-    fn new(txn_id: &TxnId, workspace: fs::Dir, expires: NetworkTime) -> Self {
+    fn new(txn_id: &TxnId, workspace: DirLock<fs::CacheBlock>, expires: NetworkTime) -> Self {
         let scope = TCPathBuf::from(txn_id.to_id());
 
         Self {
@@ -60,12 +61,13 @@ pub struct Txn {
     active: Arc<Active>,
     gateway: Arc<Gateway>,
     request: Arc<Request>,
-    dir: fs::Dir,
+    dir: DirLock<fs::CacheBlock>,
 }
 
 impl Txn {
-    fn new(active: Arc<Active>, gateway: Arc<Gateway>, dir: fs::Dir, request: Request) -> Self {
+    fn new(active: Arc<Active>, gateway: Arc<Gateway>, request: Request) -> Self {
         let request = Arc::new(request);
+        let dir = active.workspace.clone();
 
         Self {
             active,
@@ -75,8 +77,8 @@ impl Txn {
         }
     }
 
-    /// Return this [`LinkHost`]
-    pub fn host(&self) -> &LinkHost {
+    /// Return this [`Host`]
+    pub fn host(&self) -> &Host {
         self.gateway.host()
     }
 
@@ -281,21 +283,21 @@ impl Txn {
 }
 
 #[async_trait]
-impl Transaction<fs::Dir> for Txn {
+impl Transaction<fs::CacheBlock> for Txn {
     #[inline]
     fn id(&'_ self) -> &'_ TxnId {
         self.request.txn_id()
     }
 
-    fn context(&'_ self) -> &'_ fs::Dir {
+    fn context(&'_ self) -> &'_ tc_transact::fs::Inner<fs::CacheBlock> {
         &self.dir
     }
 
     // TODO: accept a ToOwned<Id>
     async fn subcontext(&self, id: Id) -> TCResult<Self> {
         let dir = {
-            let mut dir = self.dir.write(*self.request.txn_id()).await?;
-            dir.create_dir(id)?
+            let mut dir = self.dir.write().await;
+            dir.create_dir(id.to_string())?
         };
 
         Ok(Txn {
@@ -307,15 +309,14 @@ impl Transaction<fs::Dir> for Txn {
     }
 
     async fn subcontext_unique(&self) -> TCResult<Self> {
-        self.dir
-            .create_dir_unique(*self.id())
-            .map_ok(|dir| Self {
-                active: self.active.clone(),
-                gateway: self.gateway.clone(),
-                request: self.request.clone(),
-                dir,
-            })
-            .await
+        let (_, subcontext) = self.dir.write().await.create_dir_unique()?;
+
+        Ok(Self {
+            active: self.active.clone(),
+            gateway: self.gateway.clone(),
+            request: self.request.clone(),
+            dir: subcontext,
+        })
     }
 }
 

@@ -18,7 +18,7 @@ struct CopyHandler<'a, T> {
 
 impl<'a, T> Handler<'a> for CopyHandler<'a, T>
 where
-    T: Instance + fmt::Display + 'a,
+    T: Instance + fmt::Debug + 'a,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -26,7 +26,7 @@ where
     {
         Some(Box::new(move |_txn, _key| {
             Box::pin(future::ready(Err(not_implemented!(
-                "{} has no /copy method",
+                "{:?} has no /copy method",
                 self.instance
             ))))
         }))
@@ -39,13 +39,13 @@ impl<'a, T> From<&'a T> for CopyHandler<'a, T> {
     }
 }
 
-impl<T: ToState + Instance + Route + fmt::Display> Route for InstanceExt<T>
+impl<T: ToState + Instance + Route + fmt::Debug> Route for InstanceExt<T>
 where
     Self: ToState,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         debug!(
-            "{} with members {} route {} (parent is {} {})",
+            "{:?} with members {:?} route {} (parent is {} {:?})",
             self,
             self.members(),
             TCPath::from(path),
@@ -54,7 +54,7 @@ where
         );
 
         if path.is_empty() {
-            debug!("routing to parent: {}", self.parent());
+            debug!("routing to parent: {:?}", self.parent());
 
             if let Some(handler) = self.parent().route(path) {
                 Some(handler)
@@ -62,15 +62,11 @@ where
                 info!("tried to copy an object with no /copy method implemented");
                 Some(Box::new(CopyHandler::from(self)))
             } else {
-                debug!(
-                    "instance {} has no handler for {}",
-                    self,
-                    TCPath::from(path)
-                );
+                debug!("{:?} has no handler for {}", self, TCPath::from(path));
                 None
             }
         } else if let Some(attr) = self.members().get(&path[0]) {
-            debug!("{} found in {} members: {:?}", &path[0], self, attr);
+            debug!("{} found in {:?} members: {:?}", &path[0], self, attr);
 
             if let State::Scalar(attr) = attr {
                 route_attr(self, &path[0], attr, &path[1..])
@@ -88,7 +84,7 @@ where
             attr.route(&path[1..])
         } else {
             debug!(
-                "not found in {}: {} (while resolving {})",
+                "not found in {:?}: {} (while resolving {})",
                 self,
                 &path[0],
                 TCPath::from(path)

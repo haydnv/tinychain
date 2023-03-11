@@ -3,16 +3,15 @@
 use std::fmt;
 use std::marker::PhantomData;
 
+use async_hash::generic_array::GenericArray;
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
-use sha2::digest::generic_array::GenericArray;
-use sha2::digest::Output;
-use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Persist};
-use tc_transact::{AsyncHash, IntoView, Transact, TxnId};
+use tc_transact::{AsyncHash, IntoView, Sha256, Transact, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
 
@@ -22,6 +21,7 @@ use crate::route::Route;
 use crate::state::State;
 use crate::txn::Txn;
 
+use crate::fs::CacheBlock;
 pub use block::BlockChain;
 pub(crate) use block::HISTORY;
 pub use data::ChainBlock;
@@ -95,12 +95,6 @@ impl NativeClass for ChainType {
 
 impl fmt::Debug for ChainType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
-    }
-}
-
-impl fmt::Display for ChainType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match self {
             Self::Block => "type BlockChain",
             Self::Sync => "type SyncChain",
@@ -134,7 +128,7 @@ where
 #[async_trait]
 impl<T> ChainInstance<T> for Chain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Route + fmt::Display,
+    T: Persist<CacheBlock, Txn = Txn> + Route + fmt::Debug,
 {
     async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
         match self {
@@ -181,7 +175,7 @@ where
 }
 
 #[async_trait]
-impl<T: AsyncHash<fs::Dir, Txn = Txn> + Send + Sync> AsyncHash<fs::Dir> for Chain<T> {
+impl<T: AsyncHash<CacheBlock, Txn = Txn> + Send + Sync> AsyncHash<CacheBlock> for Chain<T> {
     type Txn = Txn;
 
     async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
@@ -223,7 +217,7 @@ where
 }
 
 #[async_trait]
-impl<T: Route + fmt::Display> Recover for Chain<T> {
+impl<T: Route + fmt::Debug> Recover for Chain<T> {
     async fn recover(&self, txn: &Txn) -> TCResult<()> {
         match self {
             Self::Block(chain) => chain.recover(txn).await,
@@ -232,30 +226,48 @@ impl<T: Route + fmt::Display> Recover for Chain<T> {
     }
 }
 
-impl<T> Persist<fs::Dir> for Chain<T>
+#[async_trait]
+impl<T> Persist<CacheBlock> for Chain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Route + fmt::Display,
+    T: Persist<CacheBlock, Txn = Txn> + Route + fmt::Debug,
 {
     type Txn = Txn;
     type Schema = (ChainType, T::Schema);
 
-    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
         let (class, schema) = schema;
+
         match class {
-            ChainType::Block => BlockChain::create(txn_id, schema, store).map(Self::Block),
-            ChainType::Sync => SyncChain::create(txn_id, schema, store).map(Self::Sync),
+            ChainType::Block => {
+                BlockChain::create(txn_id, schema, store)
+                    .map_ok(Self::Block)
+                    .await
+            }
+            ChainType::Sync => {
+                SyncChain::create(txn_id, schema, store)
+                    .map_ok(Self::Sync)
+                    .await
+            }
         }
     }
 
-    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
         let (class, schema) = schema;
         match class {
-            ChainType::Block => BlockChain::load(txn_id, schema, store).map(Self::Block),
-            ChainType::Sync => SyncChain::load(txn_id, schema, store).map(Self::Sync),
+            ChainType::Block => {
+                BlockChain::load(txn_id, schema, store)
+                    .map_ok(Self::Block)
+                    .await
+            }
+            ChainType::Sync => {
+                SyncChain::load(txn_id, schema, store)
+                    .map_ok(Self::Sync)
+                    .await
+            }
         }
     }
 
-    fn dir(&self) -> <fs::Dir as Dir>::Inner {
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
         match self {
             Self::Block(chain) => chain.dir(),
             Self::Sync(chain) => chain.dir(),
@@ -264,13 +276,13 @@ where
 }
 
 #[async_trait]
-impl<T> CopyFrom<fs::Dir, Chain<T>> for Chain<T>
+impl<T> CopyFrom<CacheBlock, Chain<T>> for Chain<T>
 where
-    T: Persist<fs::Dir, Txn = Txn> + Route + fmt::Display,
+    T: Persist<CacheBlock, Txn = Txn> + Route + fmt::Debug,
 {
     async fn copy_from(
-        txn: &<Self as Persist<fs::Dir>>::Txn,
-        store: fs::Store,
+        txn: &<Self as Persist<CacheBlock>>::Txn,
+        store: fs::Dir,
         instance: Chain<T>,
     ) -> TCResult<Self> {
         match instance {
@@ -295,19 +307,10 @@ where
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "instance of {} with subject type {}",
+            "instance of {:?} with subject type {}",
             self.class(),
             std::any::type_name::<T>()
         )
-    }
-}
-
-impl<T> fmt::Display for Chain<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Block(chain) => fmt::Display::fmt(chain, f),
-            Self::Sync(chain) => fmt::Display::fmt(chain, f),
-        }
     }
 }
 
@@ -348,13 +351,14 @@ where
 }
 
 #[async_trait]
-impl<'en, T> IntoView<'en, fs::Dir> for Chain<T>
+impl<'en, T> IntoView<'en, CacheBlock> for Chain<T>
 where
-    T: IntoView<'en, fs::Dir, Txn = Txn> + 'en,
+    T: IntoView<'en, CacheBlock, Txn = Txn> + 'en,
     Chain<T>: Instance<Class = ChainType>,
-    BlockChain<T>:
-        IntoView<'en, fs::Dir, View = (T::View, data::HistoryView<'en>), Txn = Txn> + Send + Sync,
-    SyncChain<T>: IntoView<'en, fs::Dir, View = T::View, Txn = Txn> + Send + Sync,
+    BlockChain<T>: IntoView<'en, CacheBlock, View = (T::View, data::HistoryView<'en>), Txn = Txn>
+        + Send
+        + Sync,
+    SyncChain<T>: IntoView<'en, CacheBlock, View = T::View, Txn = Txn> + Send + Sync,
 {
     type Txn = Txn;
     type View = ChainView<'en, T::View>;
@@ -388,7 +392,7 @@ impl<T> ChainVisitor<T> {
 
 impl<T> ChainVisitor<T>
 where
-    T: Route + de::FromStream<Context = Txn> + fmt::Display,
+    T: Route + de::FromStream<Context = Txn> + fmt::Debug,
 {
     pub(crate) async fn visit_map_value<A: de::MapAccess>(
         self,
@@ -411,7 +415,7 @@ where
 #[async_trait]
 impl<T> de::Visitor for ChainVisitor<T>
 where
-    T: Route + de::FromStream<Context = Txn> + fmt::Display,
+    T: Route + de::FromStream<Context = Txn> + fmt::Debug,
 {
     type Value = Chain<T>;
 
@@ -434,7 +438,7 @@ where
 #[async_trait]
 impl<T> de::FromStream for Chain<T>
 where
-    T: Route + de::FromStream<Context = Txn> + fmt::Display,
+    T: Route + de::FromStream<Context = Txn> + fmt::Debug,
 {
     type Context = Txn;
 

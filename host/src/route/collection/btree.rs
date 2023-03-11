@@ -38,7 +38,7 @@ impl<'a> Handler<'a> for CopyHandler {
             Box::pin(async move {
                 let schema: Value = params.require(&label("schema").into())?;
                 let schema = tc_btree::RowSchema::try_cast_from(schema, |v| {
-                    TCError::invalid_value(v, "a BTree schema")
+                    TCError::unexpected(v, "a BTree schema")
                 })?;
 
                 let source: TCStream = params.require(&label("source").into())?;
@@ -52,12 +52,12 @@ impl<'a> Handler<'a> for CopyHandler {
                 let keys = source.into_stream(txn.clone()).await?;
                 keys.map(|r| {
                     r.and_then(|state| {
-                        Value::try_cast_from(state, |s| TCError::invalid_type(s, "a BTree key"))
+                        Value::try_cast_from(state, |s| TCError::unexpected(s, "a BTree key"))
                     })
                 })
                 .map(|r| {
                     r.and_then(|value| {
-                        value.try_cast_into(|v| TCError::invalid_value(v, "a BTree key"))
+                        value.try_cast_into(|v| TCError::unexpected(v, "a BTree key"))
                     })
                 })
                 .map_ok(|key| btree.insert(txn_id, key))
@@ -81,7 +81,7 @@ impl<'a> Handler<'a> for CreateHandler {
         Some(Box::new(|txn, value| {
             Box::pin(async move {
                 let schema = tc_btree::RowSchema::try_cast_from(value, |v| {
-                    TCError::invalid_value(v, "a BTree schema")
+                    TCError::unexpected(v, "a BTree schema")
                 })?;
 
                 let store = txn.context().create_store_unique(*txn.id()).await?;
@@ -132,12 +132,11 @@ where
                     self.btree.try_insert_from(*txn.id(), keys).await
                 } else if value.matches::<Value>() {
                     let value = Value::opt_cast_from(value).expect("value");
-                    let value =
-                        value.try_cast_into(|v| TCError::invalid_value(v, "a BTree key"))?;
+                    let value = value.try_cast_into(|v| TCError::unexpected(v, "a BTree key"))?;
 
                     self.btree.insert(*txn.id(), value).await
                 } else {
-                    Err(TCError::invalid_value(value, "a BTree key"))
+                    Err(TCError::unexpected(value, "a BTree key"))
                 }
             })
         }))
@@ -369,7 +368,7 @@ fn cast_into_range(scalar: Scalar) -> TCResult<Range> {
     };
 
     let mut prefix: Vec<Value> =
-        scalar.try_cast_into(|s| TCError::invalid_value(s, "invalid BTree range"))?;
+        scalar.try_cast_into(|s| TCError::unexpected(s, "invalid BTree range"))?;
 
     if !prefix.is_empty() && tc_value::Range::can_cast_from(prefix.last().unwrap()) {
         let range = tc_value::Range::opt_cast_from(prefix.pop().unwrap()).unwrap();

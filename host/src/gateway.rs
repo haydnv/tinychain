@@ -13,7 +13,7 @@ use tokio::time::Duration;
 use url::Url;
 
 use tc_error::*;
-use tc_value::{Link, LinkHost, LinkProtocol, Value};
+use tc_value::{Host, Link, Protocol, Value};
 use tcgeneric::{NetworkTime, PathSegment, TCBoxTryFuture, TCPath, TCPathBuf};
 
 use crate::kernel::{Dispatch, Kernel};
@@ -32,9 +32,9 @@ pub struct Config {
 }
 
 impl Config {
-    /// Construct the [`LinkHost`] of a [`Gateway`]
-    pub fn host(&self) -> LinkHost {
-        (self.addr, self.http_port).into()
+    /// Construct the [`Host``] of a [`Gateway`]
+    pub fn host(&self) -> Host {
+        (Protocol::HTTP, self.addr.clone().into(), self.http_port).into()
     }
 }
 
@@ -47,8 +47,8 @@ pub enum ToUrl<'a> {
 }
 
 impl<'a> ToUrl<'a> {
-    /// Borrow the [`LinkHost`] component of this link, if any.
-    pub fn host(&self) -> Option<&LinkHost> {
+    /// Borrow the [`Host`] component of this link, if any.
+    pub fn host(&self) -> Option<&Host> {
         match self {
             Self::Link(link) => link.host(),
             Self::LinkRef(link) => link.host(),
@@ -142,7 +142,7 @@ pub struct Gateway {
     actor: Actor,
     config: Config,
     client: http::Client,
-    host: LinkHost,
+    host: Host,
     kernel: Kernel,
     txn_server: TxnServer,
 }
@@ -155,11 +155,7 @@ impl Gateway {
 
     /// Initialize a new `Gateway`
     pub fn new(config: Config, kernel: Kernel, txn_server: TxnServer) -> Arc<Self> {
-        let root = LinkHost::from((
-            LinkProtocol::HTTP,
-            config.addr.clone(),
-            Some(config.http_port),
-        ));
+        let root = Host::from((Protocol::HTTP, config.addr.clone().into(), config.http_port));
 
         let gateway = Arc::new(Self {
             config,
@@ -181,7 +177,7 @@ impl Gateway {
     }
 
     /// Return the network address of this `Gateway`
-    pub fn host(&self) -> &LinkHost {
+    pub fn host(&self) -> &Host {
         &self.host
     }
 
@@ -257,7 +253,7 @@ impl Gateway {
         value: State,
     ) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
-            debug!("PUT {}: {} <- {}", link, key, value);
+            debug!("PUT {}: {} <- {:?}", link, key, value);
 
             match link.host() {
                 None => self.kernel.put(txn, link.path(), key, value).await,
@@ -271,7 +267,7 @@ impl Gateway {
 
     /// Execute the POST op at `link` with the `params`
     pub async fn post(&self, txn: &Txn, link: ToUrl<'_>, params: State) -> TCResult<State> {
-        debug!("POST to {} with params {}", link, params);
+        debug!("POST to {} with params {:?}", link, params);
 
         match link.host() {
             None => self.kernel.post(txn, link.path(), params).await,

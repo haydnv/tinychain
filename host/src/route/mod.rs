@@ -84,7 +84,7 @@ pub trait Public {
 }
 
 #[async_trait]
-impl<T: Route + fmt::Display> Public for T {
+impl<T: Route + fmt::Debug> Public for T {
     async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         let handler = self
             .route(path)
@@ -174,9 +174,8 @@ impl<'a> Handler<'a> for ErrorHandler<'a> {
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                let message = TCString::try_cast_from(key, |v| {
-                    TCError::invalid_value(v, "an error message string")
-                })?;
+                let message =
+                    TCString::try_cast_from(key, |v| TCError::unexpected(v, "an error message"))?;
 
                 if let Some(err_type) = error_type(self.code) {
                     Err(TCError::new(err_type, message.to_string()))
@@ -241,7 +240,7 @@ struct MethodNotAllowedHandler<'a, T> {
     subject: &'a T,
 }
 
-impl<'a, T: Clone + Send + Sync + fmt::Display> Handler<'a> for MethodNotAllowedHandler<'a, T> {
+impl<'a, T: Clone + Send + Sync + fmt::Debug> Handler<'a> for MethodNotAllowedHandler<'a, T> {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -305,7 +304,7 @@ struct SelfHandler<'a, T> {
     subject: &'a T,
 }
 
-impl<'a, T: Clone + Send + Sync + fmt::Display> Handler<'a> for SelfHandler<'a, T>
+impl<'a, T: Clone + Send + Sync + fmt::Debug> Handler<'a> for SelfHandler<'a, T>
 where
     State: From<T>,
 {
@@ -319,7 +318,7 @@ where
                     Ok(self.subject.clone().into())
                 } else {
                     Err(TCError::not_found(format!(
-                        "attribute {} of {}",
+                        "attribute {} of {:?}",
                         key, self.subject
                     )))
                 }
@@ -338,7 +337,7 @@ struct SelfHandlerOwned<T> {
     subject: T,
 }
 
-impl<'a, T: Send + Sync + fmt::Display + 'a> Handler<'a> for SelfHandlerOwned<T>
+impl<'a, T: Send + Sync + fmt::Debug + 'a> Handler<'a> for SelfHandlerOwned<T>
 where
     State: From<T>,
 {
@@ -352,7 +351,7 @@ where
                     Ok(self.subject.into())
                 } else {
                     Err(TCError::not_found(format!(
-                        "attribute {} of {}",
+                        "attribute {} of {:?}",
                         key, self.subject
                     )))
                 }
@@ -390,7 +389,7 @@ impl Route for Static {
     }
 }
 
-impl fmt::Display for Static {
+impl fmt::Debug for Static {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("static context")
     }

@@ -88,12 +88,12 @@ impl<T: tcgeneric::Instance> Deref for InstanceExt<T> {
     }
 }
 
-impl<T: tcgeneric::Instance + fmt::Display> TryCastFrom<InstanceExt<T>> for Scalar
+impl<T: tcgeneric::Instance + fmt::Debug> TryCastFrom<InstanceExt<T>> for Scalar
 where
     Scalar: TryCastFrom<T>,
 {
     fn can_cast_from(instance: &InstanceExt<T>) -> bool {
-        debug!("Scalar::can_cast_from {}?", instance);
+        debug!("Scalar::can_cast_from {:?}?", instance);
         Self::can_cast_from(&(*instance).parent)
     }
 
@@ -102,12 +102,12 @@ where
     }
 }
 
-impl<T: tcgeneric::Instance + fmt::Display> TryCastFrom<InstanceExt<T>> for Value
+impl<T: tcgeneric::Instance + fmt::Debug> TryCastFrom<InstanceExt<T>> for Value
 where
     Value: TryCastFrom<T>,
 {
     fn can_cast_from(instance: &InstanceExt<T>) -> bool {
-        debug!("Value::can_cast_from {}?", instance);
+        debug!("Value::can_cast_from {:?}?", instance);
         Self::can_cast_from(&(*instance).parent)
     }
 
@@ -134,11 +134,5 @@ impl<T: tcgeneric::Instance + ToState> ToState for InstanceExt<T> {
 impl<T: tcgeneric::Instance + fmt::Debug> fmt::Debug for InstanceExt<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?} instance", tcgeneric::Instance::class(self))
-    }
-}
-
-impl<T: tcgeneric::Instance + fmt::Display> fmt::Display for InstanceExt<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} instance", tcgeneric::Instance::class(self))
     }
 }

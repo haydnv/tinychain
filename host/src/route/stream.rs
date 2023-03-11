@@ -4,9 +4,8 @@ use safecast::{Match, TryCastInto};
 
 use tc_error::TCError;
 use tc_value::Number;
-use tcgeneric::TCPathBuf;
+use tcgeneric::{label, PathSegment, TCPathBuf};
 
-use crate::generic::{label, PathSegment};
 use crate::route::{GetHandler, Handler, PostHandler, Public, Route};
 use crate::state::State;
 use crate::stream::{Source, TCStream};
@@ -170,7 +169,7 @@ impl<'a> Handler<'a> for RangeHandler {
                     let stop = key.opt_cast_into().expect("range stop");
                     Ok(State::Stream(TCStream::range(0.into(), stop, 1.into())))
                 } else {
-                    Err(TCError::invalid_value(key, "a range"))
+                    Err(TCError::unexpected(key, "a range"))
                 }
             })
         }))

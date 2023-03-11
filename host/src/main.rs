@@ -3,11 +3,10 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use clap::Parser;
-use destream::de::Error;
 use tokio::time::Duration;
 
 use tc_error::*;
-use tc_value::LinkHost;
+use tc_value::Host;
 
 use tinychain::*;
 
@@ -17,7 +16,7 @@ fn data_size(flag: &str) -> TCResult<usize> {
     }
 
     let size = usize::from_str_radix(&flag[0..flag.len() - 1], 10)
-        .map_err(|_| TCError::invalid_value(flag, "a data size"))?;
+        .map_err(|_| TCError::unexpected(flag, "a data size"))?;
 
     if flag.ends_with('K') {
         Ok(size * 1000)
@@ -26,7 +25,7 @@ fn data_size(flag: &str) -> TCResult<usize> {
     } else if flag.ends_with('G') {
         Ok(size * 1_000_000_000)
     } else {
-        Err(TCError::invalid_value(
+        Err(TCError::unexpected(
             &flag[flag.len() - 1..],
             "a data size suffix",
         ))
@@ -36,7 +35,7 @@ fn data_size(flag: &str) -> TCResult<usize> {
 fn duration(flag: &str) -> TCResult<Duration> {
     u64::from_str(flag)
         .map(Duration::from_secs)
-        .map_err(|_| TCError::invalid_value(flag, "a duration"))
+        .map_err(|_| TCError::unexpected(flag, "a duration"))
 }
 
 #[derive(Clone, Parser)]
@@ -84,7 +83,7 @@ struct Config {
     pub public_key: Option<String>,
 
     #[arg(long, help = "a link to the cluster to replicate from on startup")]
-    pub replicate: Option<LinkHost>,
+    pub replicate: Option<Host>,
 
     #[arg(
         long = "request_ttl",

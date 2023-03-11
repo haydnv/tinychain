@@ -1,12 +1,12 @@
 //! Immutable values which always reside entirely in memory
 
-use async_hash::Hash;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::ops::{Deref, DerefMut};
+use std::ops::{Bound, Deref, DerefMut};
 use std::str::FromStr;
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de::Error;
@@ -17,11 +17,10 @@ use get_size::GetSize;
 use get_size_derive::*;
 use log::{debug, warn};
 use safecast::{as_type, Match, TryCastFrom, TryCastInto};
-use sha2::digest::Output;
-use sha2::Digest;
 
 use tc_error::*;
-use tc_value::{Float, Link, LinkHost, Number, Range, TCString, Value, ValueType};
+use tc_transact::Sha256;
+use tc_value::{Float, Host, Link, Number, TCString, Value, ValueType};
 use tcgeneric::*;
 
 use crate::closure::Closure;
@@ -43,7 +42,7 @@ const PREFIX: PathLabel = path_label(&["state", "scalar"]);
 pub const SELF: Label = label("self");
 
 /// The [`Class`] of a [`Scalar`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ScalarType {
     Cluster,
     Map,
@@ -110,15 +109,15 @@ impl From<ValueType> for ScalarType {
     }
 }
 
-impl fmt::Display for ScalarType {
+impl fmt::Debug for ScalarType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Cluster => f.write_str("Cluster reference"),
             Self::Map => f.write_str("Map<Scalar>"),
-            Self::Op(odt) => fmt::Display::fmt(odt, f),
+            Self::Op(odt) => fmt::Debug::fmt(odt, f),
             Self::Range => f.write_str("Range"),
-            Self::Ref(rt) => fmt::Display::fmt(rt, f),
-            Self::Value(vt) => fmt::Display::fmt(vt, f),
+            Self::Ref(rt) => fmt::Debug::fmt(rt, f),
+            Self::Value(vt) => fmt::Debug::fmt(vt, f),
             Self::Tuple => f.write_str("Tuple<Scalar>"),
         }
     }
@@ -171,12 +170,12 @@ impl fmt::Display for ClusterRef {
 }
 
 /// A scalar value, i.e. an immutable state always held in main memory and never split into blocks.
-#[derive(Clone, Eq, PartialEq, GetSize)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Scalar {
     Cluster(ClusterRef),
     Map(Map<Self>),
     Op(OpDef),
-    Range(Range),
+    Range((Bound<Value>, Bound<Value>)),
     Ref(Box<TCRef>),
     Tuple(Tuple<Self>),
     Value(Value),
@@ -185,7 +184,7 @@ pub enum Scalar {
 as_type!(Scalar, Cluster, ClusterRef);
 as_type!(Scalar, Map, Map<Scalar>);
 as_type!(Scalar, Op, OpDef);
-as_type!(Scalar, Range, Range);
+as_type!(Scalar, Range, (Bound<Value>, Bound<Value>));
 as_type!(Scalar, Ref, Box<TCRef>);
 as_type!(Scalar, Tuple, Tuple<Scalar>);
 as_type!(Scalar, Value, Value);
@@ -230,7 +229,7 @@ impl Scalar {
 
     /// Cast this `Scalar` into the specified [`ScalarType`], if possible.
     pub fn into_type(self, class: ScalarType) -> Option<Self> {
-        debug!("cast into {} from {}: {}", class, self.class(), self);
+        debug!("cast into {:?} from {:?}: {:?}", class, self.class(), self);
 
         if self.class() == class {
             return Some(self);
@@ -283,10 +282,10 @@ impl Scalar {
                     .map(Scalar::Ref),
 
                 RT::Op(ort) => {
-                    debug!("cast into op ref from {}", self);
+                    debug!("cast into op ref from {:?}", self);
 
                     if ort == ORT::Delete && self.matches::<(Scalar, Scalar)>() {
-                        debug!("cast into DELETE ref from {}", self);
+                        debug!("cast into DELETE ref from {:?}", self);
 
                         let (subject, key): (Scalar, Scalar) = self.opt_cast_into().unwrap();
                         let delete_ref: Option<(Subject, Scalar)> = match subject {
@@ -296,18 +295,18 @@ impl Scalar {
                                     Some((subject, key))
                                 }
                                 other => {
-                                    debug!("invalid DELETE subject: {}", other);
+                                    debug!("invalid DELETE subject: {:?}", other);
                                     None
                                 }
                             },
                             other => {
-                                debug!("invalid DELETE subject: {}", other);
+                                debug!("invalid DELETE subject: {:?}", other);
                                 None
                             }
                         };
 
                         if let Some((subject, key)) = &delete_ref {
-                            debug!("DELETE ref is {}: {}", subject, key);
+                            debug!("DELETE ref is {}: {:?}", subject, key);
                         } else {
                             debug!("could not cast into DELETE ref");
                         }
@@ -315,21 +314,13 @@ impl Scalar {
                         delete_ref.map(OpRef::Delete).map(TCRef::Op).map(Self::from)
                     } else if self.matches::<Tuple<Scalar>>() {
                         let tuple: Tuple<Scalar> = self.opt_cast_into().unwrap();
-                        debug!("cast into {} from tuple {}", ort, tuple);
+                        debug!("cast into {:?} from tuple {:?}", ort, tuple);
 
                         let op_ref = match ort {
                             ORT::Get => tuple.opt_cast_into().map(OpRef::Get),
                             ORT::Put => tuple.opt_cast_into().map(OpRef::Put),
                             ORT::Post => {
-                                debug!("subject is {} (a {})", &tuple[0], tuple[0].class());
-                                debug!(
-                                    "subject: {}",
-                                    Subject::opt_cast_from(tuple[0].clone()).unwrap()
-                                );
-                                debug!(
-                                    "params: {}",
-                                    Map::<State>::opt_cast_from(tuple[1].clone()).unwrap()
-                                );
+                                debug!("subject is {:?} (a {:?})", &tuple[0], tuple[0].class());
                                 tuple.opt_cast_into().map(OpRef::Post)
                             }
                             ORT::Delete => tuple.opt_cast_into().map(OpRef::Delete),
@@ -337,7 +328,7 @@ impl Scalar {
 
                         op_ref.map(TCRef::Op).map(Self::from)
                     } else {
-                        debug!("cannot cast into {} (not a tuple)", ort);
+                        debug!("cannot cast into {:?} (not a tuple)", ort);
                         None
                     }
                 }
@@ -390,6 +381,12 @@ impl Instance for Scalar {
             Self::Tuple(_) => ST::Tuple,
             Self::Value(value) => ST::Value(value.class()),
         }
+    }
+}
+
+impl GetSize for Scalar {
+    fn get_size(&self) -> usize {
+        todo!()
     }
 }
 
@@ -555,17 +552,11 @@ impl<'a, D: Digest> Hash<D> for &'a Scalar {
             Scalar::Cluster(cluster_ref) => Hash::<D>::hash(cluster_ref),
             Scalar::Map(map) => Hash::<D>::hash(map.deref()),
             Scalar::Op(op) => Hash::<D>::hash(op),
-            Scalar::Range(range) => Hash::<D>::hash(range),
+            Scalar::Range(range) => todo!(),
             Scalar::Ref(tc_ref) => Hash::<D>::hash(tc_ref.deref()),
             Scalar::Tuple(tuple) => Hash::<D>::hash(tuple.deref()),
             Scalar::Value(value) => Hash::<D>::hash(value),
         }
-    }
-}
-
-impl tc_transact::fs::BlockData for Scalar {
-    fn ext() -> &'static str {
-        "scalar"
     }
 }
 
@@ -581,8 +572,8 @@ impl From<IdRef> for Scalar {
     }
 }
 
-impl From<LinkHost> for Scalar {
-    fn from(host: LinkHost) -> Self {
+impl From<Host> for Scalar {
+    fn from(host: Host) -> Self {
         Value::from(host).into()
     }
 }
@@ -653,7 +644,7 @@ impl TryFrom<Scalar> for bool {
     fn try_from(scalar: Scalar) -> Result<Self, Self::Error> {
         match scalar {
             Scalar::Value(value) => value.try_into(),
-            other => Err(TCError::invalid_value(other, "a boolean")),
+            other => Err(TCError::unexpected(other, "a boolean")),
         }
     }
 }
@@ -664,18 +655,18 @@ impl TryFrom<Scalar> for Map<Scalar> {
     fn try_from(scalar: Scalar) -> TCResult<Map<Scalar>> {
         match scalar {
             Scalar::Map(map) => Ok(map),
-            other => Err(TCError::invalid_type(other, "a Map")),
+            other => Err(TCError::unexpected(other, "a Map")),
         }
     }
 }
 
-impl TryFrom<Scalar> for Range {
+impl TryFrom<Scalar> for (Bound<Value>, Bound<Value>) {
     type Error = TCError;
 
-    fn try_from(scalar: Scalar) -> TCResult<Range> {
+    fn try_from(scalar: Scalar) -> TCResult<(Bound<Value>, Bound<Value>)> {
         match scalar {
             Scalar::Range(range) => Ok(range),
-            other => Err(TCError::invalid_value(other, "a Range")),
+            other => Err(TCError::unexpected(other, "a Range")),
         }
     }
 }
@@ -686,7 +677,7 @@ impl TryFrom<Scalar> for TCRef {
     fn try_from(scalar: Scalar) -> Result<Self, Self::Error> {
         match scalar {
             Scalar::Ref(tc_ref) => Ok(*tc_ref),
-            other => Err(TCError::invalid_value(other, "a reference")),
+            other => Err(TCError::unexpected(other, "a reference")),
         }
     }
 }
@@ -697,8 +688,18 @@ impl TryFrom<Scalar> for Value {
     fn try_from(scalar: Scalar) -> TCResult<Value> {
         match scalar {
             Scalar::Value(value) => Ok(value),
-            other => Err(TCError::invalid_type(other, "a Value")),
+            other => Err(TCError::unexpected(other, "a Value")),
         }
+    }
+}
+
+impl TryCastFrom<Scalar> for (Bound<Value>, Bound<Value>) {
+    fn can_cast_from(_scalar: &Scalar) -> bool {
+        todo!()
+    }
+
+    fn opt_cast_from(_scalar: Scalar) -> Option<Self> {
+        todo!()
     }
 }
 
@@ -797,7 +798,7 @@ impl TryCastFrom<Scalar> for IdRef {
 impl<T: Clone + TryCastFrom<Scalar>> TryCastFrom<Scalar> for Map<T> {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
-            Scalar::Map(map) => BTreeMap::<Id, T>::can_cast_from(map),
+            Scalar::Map(map) => map.values().all(T::can_cast_from),
             Scalar::Tuple(tuple) => Vec::<(Id, T)>::can_cast_from(tuple),
             _ => false,
         }
@@ -805,7 +806,14 @@ impl<T: Clone + TryCastFrom<Scalar>> TryCastFrom<Scalar> for Map<T> {
 
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         match scalar {
-            Scalar::Map(map) => BTreeMap::<Id, T>::opt_cast_from(map).map(Map::from),
+            Scalar::Map(map) => {
+                let mut dest = Map::new();
+                for (key, value) in map.into_iter() {
+                    let value = T::opt_cast_from(value)?;
+                    dest.insert(key, value);
+                }
+                Some(dest)
+            }
             Scalar::Tuple(tuple) => {
                 if let Some(entries) = Vec::<(Id, T)>::opt_cast_from(tuple) {
                     Some(entries.into_iter().collect())
@@ -893,9 +901,8 @@ macro_rules! from_value {
 from_value!(Bytes);
 from_value!(Float);
 from_value!(Link);
-from_value!(LinkHost);
+from_value!(Host);
 from_value!(Number);
-from_value!(Range);
 from_value!(TCPathBuf);
 from_value!(TCString);
 from_value!(bool);
@@ -999,7 +1006,7 @@ impl<T1: TryCastFrom<Scalar>, T2: TryCastFrom<Scalar>> TryCastFrom<Scalar> for (
 
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         debug!(
-            "cast from {} into {}?",
+            "cast from {:?} into {}?",
             scalar,
             std::any::type_name::<Self>()
         );
@@ -1047,7 +1054,7 @@ impl ScalarVisitor {
         } else if let Some(scalar) = scalar.clone().into_type(class) {
             return Ok(scalar);
         } else {
-            debug!("cannot cast into {} from {}", class, scalar);
+            debug!("cannot cast into {:?} from {:?}", class, scalar);
         }
 
         let subject = Link::from(class.path()).into();
@@ -1156,7 +1163,7 @@ impl de::Visitor for ScalarVisitor {
         if key.starts_with('/') {
             if let Ok(path) = TCPathBuf::from_str(&key) {
                 if let Some(class) = ScalarType::from_path(&path) {
-                    debug!("decode instance of {}", class);
+                    debug!("decode instance of {:?}", class);
                     return Self::visit_map_value(class, &mut access).await;
                 } else {
                     debug!("not a scalar classpath: {}", path);
@@ -1169,7 +1176,7 @@ impl de::Visitor for ScalarVisitor {
             return Self::visit_subject(subject, params);
         }
 
-        let mut map = BTreeMap::new();
+        let mut map = Map::new();
         let key = Id::from_str(&key).map_err(de::Error::custom)?;
         let value = access.next_value(()).await?;
         map.insert(key, value);
@@ -1212,7 +1219,10 @@ impl<'en> en::ToStream<'en> for Scalar {
             Scalar::Cluster(ClusterRef(path)) => single_entry(self.class().path(), path, e),
             Scalar::Map(map) => map.to_stream(e),
             Scalar::Op(op_def) => op_def.to_stream(e),
-            Scalar::Range(range) => single_entry(self.class().path(), range, e),
+            Scalar::Range(range) => {
+                todo!()
+                // single_entry(self.class().path(), range, e)
+            }
             Scalar::Ref(tc_ref) => tc_ref.to_stream(e),
             Scalar::Tuple(tuple) => tuple.to_stream(e),
             Scalar::Value(value) => value.to_stream(e),
@@ -1228,7 +1238,10 @@ impl<'en> en::IntoStream<'en> for Scalar {
             Scalar::Cluster(ClusterRef(path)) => single_entry(classpath, path, e),
             Scalar::Map(map) => map.into_inner().into_stream(e),
             Scalar::Op(op_def) => op_def.into_stream(e),
-            Scalar::Range(range) => single_entry(classpath, range, e),
+            Scalar::Range(range) => {
+                todo!()
+                //single_entry(classpath, range, e)
+            }
             Scalar::Ref(tc_ref) => tc_ref.into_stream(e),
             Scalar::Tuple(tuple) => tuple.into_inner().into_stream(e),
             Scalar::Value(value) => value.into_stream(e),
@@ -1250,20 +1263,6 @@ impl fmt::Debug for Scalar {
     }
 }
 
-impl fmt::Display for Scalar {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Scalar::Cluster(cluster) => fmt::Display::fmt(cluster, f),
-            Scalar::Map(map) => fmt::Display::fmt(map, f),
-            Scalar::Op(op) => fmt::Display::fmt(op, f),
-            Scalar::Range(range) => fmt::Display::fmt(range, f),
-            Scalar::Ref(tc_ref) => fmt::Display::fmt(tc_ref, f),
-            Scalar::Tuple(tuple) => fmt::Display::fmt(tuple, f),
-            Scalar::Value(value) => fmt::Display::fmt(value, f),
-        }
-    }
-}
-
 /// The execution scope of a [`Scalar`], such as an [`OpDef`] or [`TCRef`]
 pub struct Scope<'a, T> {
     subject: Option<&'a T>,
@@ -1277,7 +1276,7 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
     ) -> Self {
         let data = data.into_iter().map(|(id, s)| (id, s.into())).collect();
 
-        debug!("new execution scope: {}", data);
+        debug!("new execution scope: {:?}", data);
         Self { subject, data }
     }
 
@@ -1292,7 +1291,7 @@ impl<'a, T: ToState + Instance + Public> Scope<'a, T> {
             .chain(data.into_iter().map(|(id, s)| (id, s.into())))
             .collect();
 
-        debug!("new execution scope: {}", data);
+        debug!("new execution scope: {:?}", data);
         Self { subject, data }
     }
 

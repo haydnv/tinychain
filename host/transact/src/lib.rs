@@ -5,34 +5,45 @@
 use async_hash::Output;
 use async_trait::async_trait;
 use destream::en;
-use sha2::Sha256; // TODO: should this be exported by the async_hash crate?
+use freqfs::DirLock;
+
+pub use sha2::Sha256; // TODO: should this be exported by the async_hash crate?
 
 use tc_error::*;
 use tcgeneric::Id;
 
-mod id;
-
 pub mod fs;
+mod id;
 
 pub mod lock {
     use super::TxnId;
 
-    pub use txn_lock::{
-        Error as TxnLockError, TxnLockFinalize, TxnLockReadGuard, TxnLockReadGuardExclusive,
-        TxnLockRollback, TxnLockWriteGuard,
-    };
+    /// A transactional read-write lock on a scalar value
+    pub type TxnLock<T> = txn_lock::scalar::TxnLock<TxnId, T>;
 
-    pub type TxnLock<T> = txn_lock::TxnLock<TxnId, T>;
-    pub type TxnLockCommit<T> = txn_lock::TxnLockCommit<TxnId, T>;
+    /// A read guard on a committed transactional version
+    pub type TxnLockVersionGuard<T> = txn_lock::scalar::TxnLockVersionGuard<TxnId, T>;
+
+    /// A transactional read-write lock on a key-value map
+    pub type TxnMapLock<K, V> = txn_lock::map::TxnMapLock<TxnId, K, V>;
+
+    /// A read guard on a committed transactional version of a set
+    pub type TxnMapLockVersionGuard<K, V> = txn_lock::map::TxnMapLockVersionGuard<TxnId, K, V>;
+
+    /// A transactional read-write lock on a set of values
+    pub type TxnSetLock<T> = txn_lock::set::TxnSetLock<TxnId, T>;
+
+    /// A read guard on a committed transactional version of a set
+    pub type TxnSetLockVersionGuard<T> = txn_lock::set::TxnSetLockVersionGuard<TxnId, T>;
 }
 
 pub use id::{TxnId, MIN_ID};
 
 /// Defines a method to compute the hash of this state as of a given [`TxnId`]
 #[async_trait]
-pub trait AsyncHash<D: fs::Dir> {
+pub trait AsyncHash<FE> {
     /// The type of [`Transaction`] which this state supports
-    type Txn: Transaction<D>;
+    type Txn: Transaction<FE>;
 
     /// Compute the hash of this state as of a given [`TxnId`]
     async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>>;
@@ -40,9 +51,9 @@ pub trait AsyncHash<D: fs::Dir> {
 
 /// Access a view which can be encoded with [`en::IntoStream`].
 #[async_trait]
-pub trait IntoView<'en, D: fs::Dir> {
+pub trait IntoView<'en, FE> {
     /// The type of [`Transaction`] which this state supports
-    type Txn: Transaction<D>;
+    type Txn: Transaction<FE>;
 
     /// The type of encodable view returned by `into_view`
     type View: en::IntoStream<'en> + Sized + 'en;
@@ -69,16 +80,17 @@ pub trait Transact {
 
 /// Common transaction context properties.
 #[async_trait]
-pub trait Transaction<D: fs::Dir>: Clone + Sized + Send + Sync + 'static {
+pub trait Transaction<FE>: Clone + Sized + Send + Sync + 'static {
     /// The [`TxnId`] of this transaction context.
     fn id(&'_ self) -> &'_ TxnId;
 
-    /// Borrow the [`fs::Dir`] of this transaction context.
-    fn context(&'_ self) -> &'_ D;
+    /// Allows locking the filesystem directory of this transaction context,
+    /// e.g. to cache un-committed state or to compute an intermediate result.
+    fn context(&'_ self) -> &'_ DirLock<FE>;
 
-    /// Return a transaction subcontext with its own [`fs::Dir`].
+    /// Create a new transaction context with the given `id`.
     async fn subcontext(&self, id: Id) -> TCResult<Self>;
 
-    /// Return a transaction subcontext with its own unique [`fs::Dir`].
+    /// Create a new transaction subcontext with its own unique [`Dir`].
     async fn subcontext_unique(&self) -> TCResult<Self>;
 }

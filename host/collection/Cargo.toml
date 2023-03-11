@@ -1,25 +1,24 @@
 [package]
-name = "tc-table"
-version = "0.7.0"
+name = "tc-collection"
+version = "0.1.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
-description = "TinyChain's Table collection type"
+description = "TinyChain's collection types"
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/haydnv/tinychain.git"
 
-keywords = ["tinychain", "table", "collection"]
+keywords = ["tinychain", "btree", "table", "tensor", "collection"]
 categories = ["database", "database-implementations", "data-structures"]
 
 [dependencies]
+async-hash = "0.4"
 async-trait = "0.1"
-collate = "~0.2.3"
-destream = "0.6"
+b-table = { path = "../../../b-table" }
+b-tree = { path = "../../../b-tree" }
+destream = { path = "../../../destream" }
 futures = "0.3"
-log = { version = "0.4", features = ["release_max_level_warn"] }
-num_cpus = "1.13"
-safecast = "0.1"
-tc-btree = { path = "../btree" }
+safecast = { path = "../../../safecast" }
 tc-error = { path = "../error" }
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }

@@ -72,7 +72,7 @@ impl<'a> Handler<'a> for UuidHandler<'a> {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let uuid = if key.is_some() {
-                    Uuid::try_cast_from(key, |v| TCError::invalid_value(v, "a UUID"))?
+                    Uuid::try_cast_from(key, |v| TCError::unexpected(v, "a UUID"))?
                 } else {
                     return Err(bad_request!("missing UUID to cast into {}", self.dtype));
                 };

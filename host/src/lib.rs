@@ -14,16 +14,8 @@ use std::sync::Arc;
 
 use futures::future::TryFutureExt;
 
-#[cfg(feature = "btree")]
-pub use tc_btree as btree;
+use crate::fs::CacheBlock;
 pub use tc_error::*;
-#[cfg(feature = "table")]
-pub use tc_table as table;
-#[cfg(feature = "tensor")]
-pub use tc_tensor as tensor;
-pub use tc_transact as transact;
-pub use tc_value as value;
-pub use tcgeneric as generic;
 
 pub mod chain;
 pub mod closure;
@@ -52,7 +44,7 @@ pub struct Builder {
     cache: Arc<freqfs::Cache<fs::CacheBlock>>,
     data_dir: PathBuf,
     gateway: Option<gateway::Config>,
-    lead: Option<value::LinkHost>,
+    lead: Option<tc_value::Host>,
     public_key: Option<bytes::Bytes>,
     workspace: freqfs::DirLock<fs::CacheBlock>,
 }
@@ -89,7 +81,7 @@ impl Builder {
     }
 
     /// Specify the host to replicate from (if any).
-    pub fn with_lead(mut self, lead: Option<value::LinkHost>) -> Self {
+    pub fn with_lead(mut self, lead: Option<tc_value::Host>) -> Self {
         self.lead = lead;
         self
     }
@@ -119,16 +111,12 @@ impl Builder {
         }
     }
 
-    async fn load_dir(&self, path: PathBuf, txn_id: transact::TxnId) -> fs::Dir {
+    async fn load_dir(&self, path: PathBuf, txn_id: tc_transact::TxnId) -> fs::Dir {
         Self::maybe_create(&path);
 
-        let cache = self
-            .cache
-            .clone()
-            .load(path)
-            .map_err(fs::io_err)
-            .expect("cache dir");
-        fs::Dir::load(cache, txn_id).await.expect("store")
+        let cache = self.cache.clone().load(path).expect("cache dir");
+
+        fs::Dir::load(txn_id, cache).await.expect("store")
     }
 
     async fn load_or_create<T>(
@@ -137,11 +125,12 @@ impl Builder {
         path_label: tcgeneric::PathLabel,
     ) -> cluster::Cluster<T>
     where
-        cluster::Cluster<T>:
-            transact::fs::Persist<fs::Dir, Schema = cluster::Schema, Txn = txn::Txn> + Send + Sync,
+        cluster::Cluster<T>: tc_transact::fs::Persist<CacheBlock, Schema = cluster::Schema, Txn = txn::Txn>
+            + Send
+            + Sync,
     {
-        use transact::fs::Persist;
-        use transact::Transaction;
+        use tc_transact::fs::Persist;
+        use tc_transact::Transaction;
 
         let txn_id = *txn.id();
         let host = self.gateway.as_ref().expect("gateway config").host();
@@ -163,7 +152,9 @@ impl Builder {
         };
 
         let schema = cluster::Schema::new(host, path_label.into(), self.lead.clone(), actor);
-        cluster::Cluster::<T>::load_or_create(txn_id, schema, dir.into()).expect("cluster")
+        cluster::Cluster::<T>::load_or_create(txn_id, schema, dir.into())
+            .await
+            .expect("cluster")
     }
 
     async fn load_userspace(
@@ -172,9 +163,9 @@ impl Builder {
         gateway: Arc<gateway::Gateway>,
     ) -> UserSpace {
         use chain::Recover;
-        use transact::Transact;
+        use tc_transact::Transact;
 
-        let txn_id = transact::TxnId::new(gateway::Gateway::time());
+        let txn_id = tc_transact::TxnId::new(gateway::Gateway::time());
         let token = gateway.new_token(&txn_id).expect("token");
         let txn = txn_server
             .new_txn(gateway, txn_id, token)
@@ -224,12 +215,12 @@ impl Builder {
 
     async fn replicate(gateway: Arc<gateway::Gateway>, userspace: UserSpace) -> TCResult<()> {
         let txn = gateway
-            .new_txn(transact::TxnId::new(gateway::Gateway::time()), None)
+            .new_txn(tc_transact::TxnId::new(gateway::Gateway::time()), None)
             .await?;
 
         async fn replicate_cluster<T>(txn: &txn::Txn, cluster: cluster::Cluster<T>) -> TCResult<()>
         where
-            T: cluster::Replica + transact::Transact + Send + Sync,
+            T: cluster::Replica + tc_transact::Transact + Send + Sync,
         {
             let txn = cluster.claim(&txn).await?;
 

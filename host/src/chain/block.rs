@@ -5,18 +5,17 @@
 use std::fmt;
 use std::marker::PhantomData;
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::{self, Error};
 use futures::future::TryFutureExt;
 use futures::join;
 use log::debug;
 use safecast::TryCastInto;
-use sha2::digest::Output;
-use sha2::Sha256;
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Persist};
-use tc_transact::{AsyncHash, IntoView, Transact};
+use tc_transact::{AsyncHash, IntoView, Sha256, Transact, Transaction};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{label, Label, Map};
 
@@ -27,7 +26,6 @@ use crate::object::InstanceClass;
 use crate::route::{Public, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
-use crate::transact::Transaction;
 use crate::txn::{Txn, TxnId};
 
 use super::data::History;
@@ -51,7 +49,7 @@ impl<T> BlockChain<T> {
 #[async_trait]
 impl<T> ChainInstance<T> for BlockChain<T>
 where
-    T: Route + fmt::Display,
+    T: Route + fmt::Debug,
 {
     async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
         self.history.append_delete(txn_id, key).await
@@ -80,7 +78,7 @@ impl Replica for BlockChain<crate::cluster::Class> {
             .await?;
 
         let classes: Map<Map<InstanceClass>> =
-            state.try_cast_into(|s| TCError::invalid_value(s, "Class version history"))?;
+            state.try_cast_into(|s| TCError::unexpected(s, "Class version history"))?;
 
         // TODO: verify equality of existing versions
         let latest_version = self.subject.latest(*txn.id()).await?;
@@ -113,7 +111,7 @@ impl Replica for BlockChain<crate::cluster::Library> {
             .await?;
 
         let library: Map<Map<Scalar>> =
-            state.try_cast_into(|s| TCError::invalid_value(s, "Library version history"))?;
+            state.try_cast_into(|s| TCError::unexpected(s, "Library version history"))?;
 
         // TODO: verify equality of existing versions
         let latest_version = self.subject.latest(*txn.id()).await?;
@@ -147,7 +145,7 @@ impl Replica for BlockChain<crate::cluster::Service> {
             .await?;
 
         let library: Map<InstanceClass> =
-            state.try_cast_into(|s| TCError::invalid_value(s, "Service version history"))?;
+            state.try_cast_into(|s| TCError::unexpected(s, "Service version history"))?;
 
         // TODO: verify equality of existing versions
         let latest_version = self.subject.latest(*txn.id()).await?;
@@ -176,7 +174,7 @@ impl Replica for BlockChain<CollectionBase> {
         let chain = txn.get(source.append(CHAIN), Value::default()).await?;
         let chain: Self = chain.try_cast_into(|s| {
             bad_request!(
-                "blockchain expected to replicate a chain of blocks but found {}",
+                "blockchain expected to replicate a chain of blocks but found {:?}",
                 s,
             )
         })?;
@@ -187,49 +185,50 @@ impl Replica for BlockChain<CollectionBase> {
     }
 }
 
-impl<T> Persist<fs::Dir> for BlockChain<T>
+#[async_trait]
+impl<T> Persist<fs::CacheBlock> for BlockChain<T>
 where
-    T: Route + Persist<fs::Dir, Txn = Txn> + fmt::Display,
+    T: Route + Persist<fs::CacheBlock, Txn = Txn> + fmt::Debug,
 {
     type Txn = Txn;
     type Schema = T::Schema;
 
-    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let subject = T::create(txn_id, schema.clone(), store)?;
-        let mut dir = subject.dir().try_write().map_err(fs::io_err)?;
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+        let subject = T::create(txn_id, schema.clone(), store).await?;
+        let mut dir = subject.dir().try_write_owned()?;
 
-        let history = dir
-            .create_dir(HISTORY.to_string())
-            .map(|dir| fs::Dir::new(dir, txn_id))
-            .map_err(fs::io_err)?;
+        let history = {
+            let dir = dir.get_or_create_dir(HISTORY.to_string())?;
+            fs::Dir::load(txn_id, dir).await?
+        };
 
-        let history = History::create(txn_id, (), history.into())?;
-
-        Ok(BlockChain::new(subject, history))
-    }
-
-    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let subject = T::load(txn_id, schema.clone(), store)?;
-
-        let mut dir = subject.dir().try_write().map_err(fs::io_err)?;
-
-        let history = dir
-            .get_or_create_dir(HISTORY.to_string())
-            .map(|dir| fs::Dir::new(dir, txn_id))
-            .map_err(fs::io_err)?;
-
-        let history = History::load(txn_id, (), history.into())?;
+        let history = History::create(txn_id, (), history.into()).await?;
 
         Ok(BlockChain::new(subject, history))
     }
 
-    fn dir(&self) -> <fs::Dir as Dir>::Inner {
+    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+        let subject = T::load(txn_id, schema.clone(), store).await?;
+
+        let mut dir = subject.dir().try_write_owned()?;
+
+        let history = {
+            let dir = dir.get_or_create_dir(HISTORY.to_string())?;
+            fs::Dir::load(txn_id, dir).await?
+        };
+
+        let history = History::load(txn_id, (), history.into()).await?;
+
+        Ok(BlockChain::new(subject, history))
+    }
+
+    fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
         self.subject.dir()
     }
 }
 
 #[async_trait]
-impl<T: Route + fmt::Display> Recover for BlockChain<T> {
+impl<T: Route + fmt::Debug> Recover for BlockChain<T> {
     async fn recover(&self, txn: &Txn) -> TCResult<()> {
         let write_ahead_log = self.history.read_log().await?;
 
@@ -249,13 +248,13 @@ impl<T: Route + fmt::Display> Recover for BlockChain<T> {
 }
 
 #[async_trait]
-impl<T> CopyFrom<fs::Dir, BlockChain<T>> for BlockChain<T>
+impl<T> CopyFrom<fs::CacheBlock, BlockChain<T>> for BlockChain<T>
 where
-    T: Route + Persist<fs::Dir, Txn = Txn> + fmt::Display,
+    T: Route + Persist<fs::CacheBlock, Txn = Txn> + fmt::Debug,
 {
     async fn copy_from(
-        _txn: &<Self as Persist<fs::Dir>>::Txn,
-        _store: fs::Store,
+        _txn: &<Self as Persist<fs::CacheBlock>>::Txn,
+        _store: fs::Dir,
         _instance: BlockChain<T>,
     ) -> TCResult<Self> {
         Err(not_implemented!("BlockChain::copy_from"))
@@ -263,7 +262,7 @@ where
 }
 
 #[async_trait]
-impl<T: Send + Sync> AsyncHash<fs::Dir> for BlockChain<T> {
+impl<T: Send + Sync> AsyncHash<fs::CacheBlock> for BlockChain<T> {
     type Txn = Txn;
 
     async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
@@ -312,7 +311,7 @@ impl<T> ChainVisitor<T> {
 #[async_trait]
 impl<T> de::Visitor for ChainVisitor<T>
 where
-    T: Route + de::FromStream<Context = Txn> + fmt::Display,
+    T: Route + de::FromStream<Context = Txn> + fmt::Debug,
 {
     type Value = BlockChain<T>;
 
@@ -348,7 +347,7 @@ where
 #[async_trait]
 impl<T> de::FromStream for BlockChain<T>
 where
-    T: Route + de::FromStream<Context = Txn> + fmt::Display,
+    T: Route + de::FromStream<Context = Txn> + fmt::Debug,
 {
     type Context = Txn;
 
@@ -358,9 +357,9 @@ where
 }
 
 #[async_trait]
-impl<'en, T> IntoView<'en, fs::Dir> for BlockChain<T>
+impl<'en, T> IntoView<'en, fs::CacheBlock> for BlockChain<T>
 where
-    T: IntoView<'en, fs::Dir, Txn = Txn> + Send + Sync,
+    T: IntoView<'en, fs::CacheBlock, Txn = Txn> + Send + Sync,
 {
     type Txn = Txn;
     type View = (T::View, super::data::HistoryView<'en>);
@@ -372,7 +371,7 @@ where
     }
 }
 
-impl<T> fmt::Display for BlockChain<T> {
+impl<T> fmt::Debug for BlockChain<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "BlockChain<{}>", std::any::type_name::<T>())
     }

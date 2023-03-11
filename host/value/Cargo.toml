@@ -16,8 +16,9 @@ async-hash = "0.4"
 async-trait = "0.1"
 base64 = "0.13"
 bytes = "1.0"
-collate = "~0.2.3"
-destream = "0.6"
+collate = { path = "../../../collate" }
+destream = { path = "../../../destream" }
+ds-ext = { path = "../../../ds-ext", features = ["all"]}
 email-address-parser = "1.0"
 futures = "0.3"
 get-size = "0.1"
@@ -25,8 +26,8 @@ get-size-derive = "0.1"
 handlebars = "4.3"
 hex = "0.4"
 log = { version = "0.4", features = [] }
-number-general = { version = "~0.9.1", features=["hash", "serde", "stream"] }
-safecast = "0.1"
+number-general = { path = "../../../number-general", features=["hash", "serde", "stream"] }
+safecast = { path = "../../../safecast" }
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0", features = [] }
 tcgeneric = { path = "../generic" }

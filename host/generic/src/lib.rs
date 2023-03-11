@@ -14,7 +14,12 @@ pub use map::*;
 pub use time::*;
 pub use tuple::*;
 
-mod id;
+mod id {
+    pub use ds_ext::link::{
+        label, path_label, Id, Label, Path as TCPath, PathBuf as TCPathBuf, PathLabel, PathSegment,
+    };
+}
+
 mod map;
 mod time;
 mod tuple;
@@ -31,8 +36,13 @@ pub type TCBoxStream<'a, T> = Pin<Box<dyn Stream<Item = T> + Send + Unpin + 'a>>
 /// A pinned `TryStream` with error type [`TCError`]
 pub type TCBoxTryStream<'a, T> = Pin<Box<dyn Stream<Item = TCResult<T>> + Send + Unpin + 'a>>;
 
+/// A thread-safe type
+pub trait ThreadSafe: Clone + Send + Sync + 'static {}
+
+impl<T: Clone + Send + Sync + 'static> ThreadSafe for T {}
+
 /// A generic class trait
-pub trait Class: fmt::Display + Sized {}
+pub trait Class: fmt::Debug + Sized {}
 
 /// A generic native (i.e. implemented in Rust) class trait
 pub trait NativeClass: Class {

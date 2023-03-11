@@ -2,17 +2,19 @@
 
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::ops::Deref;
 
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
+use futures::TryStreamExt;
 use get_size::GetSize;
 use get_size_derive::*;
 use log::{error, info};
 use safecast::{AsType, TryCastFrom};
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, Dir, File, FileRead, FileWrite, Persist};
+use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
 use tcgeneric::{Instance, Map, PathSegment};
@@ -105,15 +107,9 @@ impl<'en> en::ToStream<'en> for Version {
     }
 }
 
-impl BlockData for Version {
-    fn ext() -> &'static str {
-        "lib"
-    }
-}
-
-impl fmt::Display for Version {
+impl fmt::Debug for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "library version {}", self.lib)
+        write!(f, "library version {:?}", self.lib)
     }
 }
 
@@ -125,28 +121,28 @@ pub struct Library {
 
 impl Library {
     pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
-        self.file
-            .read(txn_id)
-            .map_ok(|file| file.block_ids().iter().last().cloned())
-            .await
+        let block_ids = self.file.block_ids(txn_id).await?;
+
+        Ok(block_ids
+            .last()
+            .map(|id| id.as_str().parse().expect("version number")))
     }
 
     pub async fn get_version(
         &self,
         txn_id: TxnId,
         number: &VersionNumber,
-    ) -> TCResult<fs::BlockReadGuard<Version>> {
-        let file = self.file.read(txn_id).await?;
-        file.read_block(number).await
+    ) -> TCResult<impl Deref<Target = Version>> {
+        self.file.read_block(txn_id, number).await
     }
 
     pub async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
-        let file = self.file.read(txn_id).await?;
+        let mut blocks = self.file.iter(txn_id).await?;
 
         let mut map = Map::new();
-        for number in file.block_ids() {
-            let block = file.read_block(number).await?;
-            map.insert(number.clone().into(), (&*block).clone().into());
+        while let Some((number, block)) = blocks.try_next().await? {
+            let number = number.as_str().parse()?;
+            map.insert(number, (&*block).clone().into());
         }
 
         Ok(State::Map(map))
@@ -164,26 +160,20 @@ impl DirItem for Library {
         number: VersionNumber,
         schema: Map<Scalar>,
     ) -> TCResult<Version> {
-        let mut file = self.file.write(*txn.id()).await?;
-        if file.contains(&number) {
-            error!("duplicate library version {}", number);
+        let version = Version::from(validate(schema)?);
 
-            Err(bad_request!("{} already has a version {}", self, number))
-        } else {
-            info!("create new library version {}", number);
-            let version = Version::from(validate(schema)?);
-            file.create_block(number, version.clone())
-                .map_ok(|_| ())
-                .await?;
+        self.file
+            .create_block(*txn.id(), number, version.clone())
+            .map_ok(|_| ())
+            .await?;
 
-            Ok(version)
-        }
+        Ok(version)
     }
 }
 
 #[async_trait]
 impl Transact for Library {
-    type Commit = <fs::File<VersionNumber, Version> as Transact>::Commit;
+    type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         self.file.commit(txn_id).await
@@ -198,32 +188,35 @@ impl Transact for Library {
     }
 }
 
-impl Persist<fs::Dir> for Library {
+#[async_trait]
+impl Persist<fs::CacheBlock> for Library {
     type Txn = Txn;
     type Schema = ();
 
-    fn create(txn_id: TxnId, _schema: (), store: fs::Store) -> TCResult<Self> {
-        let file = super::dir::File::try_from(store)?;
-        let versions = file.try_read(txn_id)?;
-        if versions.is_empty() {
-            Ok(Self { file })
-        } else {
-            Err(bad_request!(
-                "cannot create a new library from a non-empty file"
-            ))
-        }
+    async fn create(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+        // let file = dir.into_inner().into();
+        // if file.is_empty(txn_id).await? {
+        //     Ok(Self { file })
+        // } else {
+        //     Err(bad_request!(
+        //         "cannot create a new library from a non-empty file"
+        //     ))
+        // }
+        todo!()
     }
 
-    fn load(_txn_id: TxnId, _schema: (), store: fs::Store) -> TCResult<Self> {
-        store.try_into().map(|file| Self { file })
+    async fn load(_txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+        // let file = dir.into_inner().into();
+        // Ok(Self { file })
+        todo!()
     }
 
-    fn dir(&self) -> <fs::Dir as Dir>::Inner {
+    fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
         self.file.clone().into_inner()
     }
 }
 
-impl fmt::Display for Library {
+impl fmt::Debug for Library {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("library")
     }

@@ -112,7 +112,7 @@ impl Dispatch for Kernel {
     }
 }
 
-impl fmt::Display for Kernel {
+impl fmt::Debug for Kernel {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("host kernel")
     }

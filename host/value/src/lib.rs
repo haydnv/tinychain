@@ -1,28 +1,38 @@
-//! Provides a generic scalar [`Value`] enum which supports collation.
-//!
-//! This library is part of TinyChain: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
+//! A generic scalar [`Value`] enum which supports collation.
 
 use std::cmp::Ordering;
 
 use collate::{Collate, Collator};
-pub use number_general::NumberCollator;
 
 use tcgeneric::Instance;
 
+pub use class::*;
 pub use link::*;
-pub use slice::*;
+pub use number::*;
 pub use string::*;
 pub use value::*;
 pub use version::*;
 
-mod link;
-mod slice;
+mod class;
+
+mod link {
+    pub use ds_ext::link::{Address, Host, Link, Protocol};
+}
+
+mod number {
+    pub use number_general::{
+        Boolean, BooleanType, Complex, ComplexType, Float, FloatInstance, FloatType, Int, IntType,
+        Number, NumberClass, NumberCollator, NumberInstance, NumberType, Trigonometry, UInt,
+        UIntType,
+    };
+}
+
 mod string;
 mod value;
 mod version;
 
 /// [`Collate`] support for [`Value`]
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Eq, PartialEq)]
 pub struct ValueCollator {
     bytes: Collator<Vec<u8>>,
     link: Collator<Link>,
@@ -34,14 +44,23 @@ pub struct ValueCollator {
 impl Collate for ValueCollator {
     type Value = Value;
 
-    fn compare(&self, left: &Self::Value, right: &Self::Value) -> Ordering {
+    fn cmp(&self, left: &Self::Value, right: &Self::Value) -> Ordering {
         match (left, right) {
-            (Value::Bytes(l), Value::Bytes(r)) => self.bytes.compare(l, r),
-            (Value::Link(l), Value::Link(r)) => self.link.compare(l, r),
-            (Value::Number(l), Value::Number(r)) => self.number.compare(l, r),
-            (Value::Version(l), Value::Version(r)) => self.version.compare(l, r),
-            (Value::String(l), Value::String(r)) => self.string.compare(l, r),
-            (Value::Tuple(l), Value::Tuple(r)) => self.compare_slice(l.as_slice(), r.as_slice()),
+            (Value::Bytes(l), Value::Bytes(r)) => self.bytes.cmp(l, r),
+            (Value::Link(l), Value::Link(r)) => self.link.cmp(l, r),
+            (Value::Number(l), Value::Number(r)) => self.number.cmp(l, r),
+            (Value::Version(l), Value::Version(r)) => self.version.cmp(l, r),
+            (Value::String(l), Value::String(r)) => self.string.cmp(l, r),
+            (Value::Tuple(l), Value::Tuple(r)) => {
+                for i in 0..Ord::min(l.len(), r.len()) {
+                    match self.cmp(&l[i], &r[i]) {
+                        Ordering::Equal => {}
+                        ordering => return ordering,
+                    }
+                }
+
+                Ordering::Equal
+            }
             (l, r) => l.class().cmp(&r.class()),
         }
     }

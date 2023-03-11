@@ -1,9 +1,9 @@
 use safecast::CastInto;
 
-#[cfg(feature = "btree")]
+#[cfg(feature = "collection")]
 use tc_btree::BTreeInstance;
 
-#[cfg(feature = "table")]
+#[cfg(feature = "collection")]
 use tc_table::TableInstance;
 
 use tc_value::Value;
@@ -14,26 +14,26 @@ use crate::route::GetHandler;
 
 use super::{Handler, Route};
 
-#[cfg(feature = "btree")]
+#[cfg(feature = "collection")]
 mod btree;
 
-#[cfg(feature = "table")]
+#[cfg(feature = "collection")]
 mod table;
 
-#[cfg(feature = "tensor")]
+#[cfg(feature = "collection")]
 mod tensor;
 
 impl Route for CollectionType {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match self {
-            #[cfg(feature = "btree")]
+            #[cfg(feature = "collection")]
             Self::BTree(btt) => btt.route(path),
-            #[cfg(feature = "table")]
+            #[cfg(feature = "collection")]
             Self::Table(tt) => tt.route(path),
-            #[cfg(feature = "tensor")]
+            #[cfg(feature = "collection")]
             Self::Tensor(tt) => tt.route(path),
 
-            _ => unimplemented!("no collection flags enabled")
+            _ => unimplemented!("no collection flags enabled"),
         }
     }
 }
@@ -52,7 +52,7 @@ impl<'a> Handler<'a> for SchemaHandler<'a> {
                 key.expect_none()?;
 
                 let schema: Value = match self.collection {
-                    #[cfg(feature = "btree")]
+                    #[cfg(feature = "collection")]
                     Collection::BTree(btree) => btree
                         .schema()
                         .to_vec()
@@ -60,13 +60,13 @@ impl<'a> Handler<'a> for SchemaHandler<'a> {
                         .collect::<Tuple<Value>>()
                         .into(),
 
-                    #[cfg(feature = "table")]
+                    #[cfg(feature = "collection")]
                     Collection::Table(table) => table.schema().clone().cast_into(),
 
-                    #[cfg(feature = "tensor")]
+                    #[cfg(feature = "collection")]
                     Collection::Tensor(tensor) => tensor.schema().clone().cast_into(),
 
-                    _ => unimplemented!("no collection flags enabled")
+                    _ => unimplemented!("no collection flags enabled"),
                 };
 
                 Ok(schema.into())
@@ -84,14 +84,14 @@ impl<'a> From<&'a Collection> for SchemaHandler<'a> {
 impl Route for Collection {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         let child_handler: Option<Box<dyn Handler<'a> + 'a>> = match self {
-            #[cfg(feature = "btree")]
+            #[cfg(feature = "collection")]
             Self::BTree(btree) => btree.route(path),
-            #[cfg(feature = "table")]
+            #[cfg(feature = "collection")]
             Self::Table(table) => table.route(path),
-            #[cfg(feature = "tensor")]
+            #[cfg(feature = "collection")]
             Self::Tensor(tensor) => tensor.route(path),
 
-            _ => unimplemented!("no collection flags enabled")
+            _ => unimplemented!("no collection flags enabled"),
         };
 
         if child_handler.is_some() {
@@ -112,13 +112,13 @@ impl Route for Collection {
 impl Route for CollectionBase {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match self {
-            #[cfg(feature = "btree")]
+            #[cfg(feature = "collection")]
             Self::BTree(btree) => btree.route(path),
-            #[cfg(feature = "table")]
+            #[cfg(feature = "collection")]
             Self::Table(table) => table.route(path),
-            #[cfg(feature = "tensor")]
+            #[cfg(feature = "collection")]
             Self::Dense(dense) => dense.route(path),
-            #[cfg(feature = "tensor")]
+            #[cfg(feature = "collection")]
             Self::Sparse(sparse) => sparse.route(path),
 
             _ => unimplemented!(
@@ -137,11 +137,11 @@ impl Route for Static {
         }
 
         match path[0].as_str() {
-            #[cfg(feature = "btree")]
+            #[cfg(feature = "collection")]
             "btree" => btree::Static.route(&path[1..]),
-            #[cfg(feature = "table")]
+            #[cfg(feature = "collection")]
             "table" => table::Static.route(&path[1..]),
-            #[cfg(feature = "tensor")]
+            #[cfg(feature = "collection")]
             "tensor" => tensor::Static.route(&path[1..]),
             _ => None,
         }

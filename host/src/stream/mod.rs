@@ -81,14 +81,14 @@ impl TCStream {
 
     /// Execute the given [`Closure`] with each item in the stream as its `args`.
     pub async fn for_each(self, txn: &Txn, op: Closure) -> TCResult<()> {
-        debug!("Stream::for_each {}", op);
+        debug!("Stream::for_each {:?}", op);
 
         let mut stream = self.into_stream(txn.clone()).await?;
 
         while let Some(args) = stream.try_next().await? {
-            debug!("Stream::for_each calling op with args {}", args);
+            debug!("Stream::for_each calling op with args {:?}", args);
             let result = op.clone().call(&txn, args).await?;
-            debug!("Stream::for_each got result {}", result);
+            debug!("Stream::for_each got result {:?}", result);
         }
 
         Ok(())
@@ -114,7 +114,7 @@ impl Source for TCStream {
 }
 
 #[async_trait]
-impl<'en> IntoView<'en, fs::Dir> for TCStream {
+impl<'en> IntoView<'en, fs::CacheBlock> for TCStream {
     type Txn = Txn;
     type View = en::SeqStream<TCResult<StateView<'en>>, TCBoxTryStream<'en, StateView<'en>>>;
 

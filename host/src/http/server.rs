@@ -203,7 +203,7 @@ impl HTTPServer {
                     .await
             }
 
-            other => Err(TCError::method_not_allowed(other, self, path)),
+            other => Err(TCError::method_not_allowed(other, "HTTP server", path)),
         }
     }
 }
@@ -237,12 +237,6 @@ impl crate::gateway::Server for HTTPServer {
     }
 }
 
-impl fmt::Display for HTTPServer {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("HTTP server")
-    }
-}
-
 async fn destream_body(body: hyper::Body, encoding: Encoding, txn: Txn) -> TCResult<State> {
     const ERR_DESERIALIZE: &str = "error deserializing HTTP request body";
 
@@ -265,9 +259,8 @@ fn get_param<T: DeserializeOwned>(
     name: &str,
 ) -> TCResult<Option<T>> {
     if let Some(param) = params.remove(name) {
-        let val: T = serde_json::from_str(&param).map_err(|cause| {
-            TCError::invalid_value(param, format!("URI parameter {}", name)).consume(cause)
-        })?;
+        let val: T = serde_json::from_str(&param)
+            .map_err(|cause| TCError::unexpected(param, name).consume(cause))?;
 
         Ok(Some(val))
     } else {

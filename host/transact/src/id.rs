@@ -1,5 +1,6 @@
 //! A transaction ID
 
+use std::cmp::Ordering;
 use std::fmt;
 use std::str::FromStr;
 
@@ -9,7 +10,6 @@ use get_size::GetSize;
 use get_size_derive::*;
 use rand::Rng;
 
-use destream::de::Error;
 use destream::IntoStream;
 
 use tc_error::*;
@@ -70,10 +70,10 @@ impl FromStr for TxnId {
     fn from_str(s: &str) -> TCResult<TxnId> {
         let i = s
             .find('-')
-            .ok_or_else(|| TCError::invalid_value(s, "a transaction ID"))?;
+            .ok_or_else(|| TCError::unexpected(s, "a transaction ID"))?;
 
         if i == s.len() - 1 {
-            return Err(TCError::invalid_value(s, "a transaction ID"));
+            return Err(TCError::unexpected(s, "a transaction ID"));
         }
 
         let timestamp = &s[..i];
@@ -81,11 +81,11 @@ impl FromStr for TxnId {
 
         let timestamp = timestamp
             .parse()
-            .map_err(|cause| TCError::invalid_value(timestamp, "a timestamp").consume(cause))?;
+            .map_err(|cause| TCError::unexpected(timestamp, "a timestamp").consume(cause))?;
 
         let nonce = nonce
             .parse()
-            .map_err(|cause| TCError::invalid_value(nonce, "a nonce").consume(cause))?;
+            .map_err(|cause| TCError::unexpected(nonce, "a nonce").consume(cause))?;
 
         Ok(TxnId { timestamp, nonce })
     }
@@ -104,6 +104,36 @@ impl Ord for TxnId {
 impl PartialOrd for TxnId {
     fn partial_cmp(&self, other: &TxnId) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl PartialEq<str> for TxnId {
+    fn eq(&self, other: &str) -> bool {
+        if let Ok(other) = Self::from_str(other) {
+            self == &other
+        } else {
+            false
+        }
+    }
+}
+
+impl PartialOrd<str> for TxnId {
+    fn partial_cmp(&self, other: &str) -> Option<Ordering> {
+        if let Ok(other) = Self::from_str(other) {
+            self.partial_cmp(&other)
+        } else {
+            None
+        }
+    }
+}
+
+impl freqfs::Name for TxnId {
+    fn partial_cmp(&self, other: &String) -> Option<Ordering> {
+        if let Ok(other) = Self::from_str(other) {
+            Some(self.cmp(&other))
+        } else {
+            None
+        }
     }
 }
 

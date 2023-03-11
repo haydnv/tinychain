@@ -100,7 +100,7 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
 
             while let Some(id) = unvisited.pop_front() {
                 let state = self.scope.resolve_id(&id)?;
-                debug!("checking state {}: {}", id, state);
+                debug!("checking state {}: {:?}", id, state);
 
                 if state.is_ref() {
                     let mut deps = HashSet::new();
@@ -125,13 +125,13 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
                     }
 
                     if ready {
-                        debug!("all deps resolved for {}", state);
+                        debug!("all deps resolved for {:?}", state);
                         pending.push_back(id);
                     } else {
                         debug!("{} still has unresolved deps", id);
                     }
                 } else {
-                    debug!("{} already resolved: {}", id, state);
+                    debug!("{} already resolved: {:?}", id, state);
                 }
             }
 
@@ -158,7 +158,7 @@ impl<'a, T: ToState + Instance + Public> Executor<'a, T> {
                 while let Some((id, r)) = providers.next().await {
                     match r {
                         Ok(state) => {
-                            debug!("{} resolved to {}", id, state);
+                            debug!("{} resolved to {:?}", id, state);
                             resolved.insert(id, state);
                         }
                         Err(cause) => return Err(cause.consume(format!("while resolving {}", id))),

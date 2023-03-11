@@ -1,9 +1,9 @@
 //! Resolve a `Closure` repeatedly while a condition is met.
 
-use async_hash::Hash;
 use std::collections::HashSet;
 use std::fmt;
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::Error;
 use destream::{de, en};
@@ -12,7 +12,6 @@ use get_size::GetSize;
 use get_size_derive::*;
 use log::{debug, warn};
 use safecast::{Match, TryCastFrom, TryCastInto};
-use sha2::digest::{Digest, Output};
 
 use tc_error::*;
 use tcgeneric::{Id, Instance, PathSegment, TCPathBuf};
@@ -72,16 +71,16 @@ impl Refer for While {
         context: &'a Scope<'a, T>,
         txn: &'a Txn,
     ) -> TCResult<State> {
-        debug!("While::resolve {}", self);
+        debug!("While::resolve {:?}", self);
 
         if self.cond.is_conditional() {
             return Err(bad_request!(
-                "While does not allow a nested conditional {}",
+                "While does not allow a nested conditional {:?}",
                 self.cond,
             ));
         } else if self.state.is_conditional() {
             return Err(bad_request!(
-                "While does not allow a nested conditional {}",
+                "While does not allow a nested conditional {:?}",
                 self.state,
             ));
         }
@@ -93,14 +92,14 @@ impl Refer for While {
         )?;
 
         let cond = Closure::try_cast_from(cond, |s| {
-            TCError::invalid_type(s, "an Op or Closure for a While")
+            TCError::unexpected(s, "an Op or Closure for a While")
         })?;
 
         let closure = Closure::try_cast_from(closure, |s| {
-            TCError::invalid_type(s, "an Op or Closure for a While")
+            TCError::unexpected(s, "an Op or Closure for a While")
         })?;
 
-        debug!("While condition definition is {}", cond);
+        debug!("While condition definition is {:?}", cond);
 
         loop {
             let mut cond = cond.clone();
@@ -110,14 +109,14 @@ impl Refer for While {
                         break still_going.into()
                     }
                     State::Closure(closure) => {
-                        warn!("While condition returned a nested {}", closure);
+                        warn!("While condition returned a nested {:?}", closure);
                         cond = closure;
                     }
                     State::Scalar(Scalar::Op(op_def)) => {
-                        warn!("While condition returned a nested {}", op_def);
+                        warn!("While condition returned a nested {:?}", op_def);
                         cond = op_def.into()
                     }
-                    other => return Err(TCError::invalid_value(other, "a condition for a While")),
+                    other => return Err(TCError::unexpected(other, "a condition for a While")),
                 }
             };
 
@@ -126,12 +125,12 @@ impl Refer for While {
 
                 if state.is_conditional() {
                     return Err(bad_request!(
-                        "conditional State {} is not allowed in a While loop",
+                        "conditional State {:?} is not allowed in a While loop",
                         state,
                     ));
                 }
 
-                debug!("While loop state is {}", state);
+                debug!("While loop state is {:?}", state);
             } else {
                 break Ok(state);
             }
@@ -169,7 +168,9 @@ impl de::FromStream for While {
 
     async fn from_stream<D: de::Decoder>(context: (), decoder: &mut D) -> Result<Self, D::Error> {
         let while_loop = Scalar::from_stream(context, decoder).await?;
-        Self::try_cast_from(while_loop, |s| de::Error::invalid_value(s, "a While loop"))
+        Self::try_cast_from(while_loop, |s| {
+            de::Error::invalid_value(format!("{s:?}"), "a While loop")
+        })
     }
 }
 
@@ -190,16 +191,6 @@ impl fmt::Debug for While {
         write!(
             f,
             "while {:?} call {:?} with state {:?}",
-            self.cond, self.closure, self.state
-        )
-    }
-}
-
-impl fmt::Display for While {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "while {} call {} with state {}",
             self.cond, self.closure, self.state
         )
     }

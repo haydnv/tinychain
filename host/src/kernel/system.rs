@@ -36,12 +36,12 @@ impl Dispatch for System {
                 Err(forbidden!("access to /"))
             }
         } else if let Some(class) = ScalarType::from_path(path) {
-            debug!("cast {} into {}", key, class);
+            debug!("cast {} into {:?}", key, class);
 
             Scalar::from(key)
                 .into_type(class)
                 .map(State::Scalar)
-                .ok_or_else(|| bad_request!("cannot case into an instance of {}", class))
+                .ok_or_else(|| bad_request!("cannot case into an instance of {:?}", class))
         } else {
             Static.get(txn, path, key).await
         }
@@ -89,13 +89,13 @@ impl Dispatch for System {
             let extends = Link::from(TCPathBuf::from(path.to_vec()));
 
             let proto =
-                data.try_into_map(|state| TCError::invalid_type(state, "a class prototype"))?;
+                data.try_into_map(|state| TCError::unexpected(state, "a class prototype"))?;
 
             let proto = proto
                 .into_iter()
                 .map(|(key, state)| {
                     Scalar::try_cast_from(state, |s| {
-                        TCError::invalid_type(s, "a Scalar Class attribute")
+                        TCError::unexpected(s, "a Scalar Class attribute")
                     })
                     .map(|scalar| (key, scalar))
                 })
@@ -131,7 +131,7 @@ impl Dispatch for System {
     }
 }
 
-impl fmt::Display for System {
+impl fmt::Debug for System {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("the system dispatcher")
     }

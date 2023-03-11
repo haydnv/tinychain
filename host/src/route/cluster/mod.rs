@@ -9,7 +9,7 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::{Transact, Transaction};
-use tc_value::{Link, LinkHost, Value};
+use tc_value::{Host, Link, Value};
 use tcgeneric::{label, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::cluster::{Cluster, Replica, REPLICAS};
@@ -38,7 +38,7 @@ where
     {
         Some(Box::new(move |_txn, key| {
             Box::pin(future::ready((|key: Value| {
-                trace!("GET key {} from {}", key, self.cluster);
+                trace!("GET key {} from {:?}", key, self.cluster);
 
                 if key.is_none() {
                     // return the public key of this replica
@@ -49,7 +49,7 @@ where
                 // TODO: remove this code and use the public key of the gateway instead
 
                 let key = TCPathBuf::try_cast_from(key, |v| {
-                    TCError::invalid_value(v, "a key specification")
+                    TCError::unexpected(v, "a key specification")
                 })?;
 
                 if key == TCPathBuf::default() {
@@ -73,7 +73,7 @@ where
                     // this is a notification of a new participant in the current transaction
 
                     let participant =
-                        value.try_cast_into(|v| TCError::invalid_value(v, "a participant Link"))?;
+                        value.try_cast_into(|v| TCError::unexpected(v, "a participant Link"))?;
 
                     return self.cluster.mutate(&txn, participant).await;
                 }
@@ -81,9 +81,8 @@ where
                 // this is a request to install a new cluster
 
                 let value = if InstanceClass::can_cast_from(&value) {
-                    let class = InstanceClass::try_cast_from(value, |v| {
-                        TCError::invalid_type(v, "a Class")
-                    })?;
+                    let class =
+                        InstanceClass::try_cast_from(value, |v| TCError::unexpected(v, "a Class"))?;
 
                     let link = class.extends();
 
@@ -120,13 +119,13 @@ where
                 // TODO: authorize request using a scope
 
                 if !params.is_empty() {
-                    return Err(bad_request!("unrecognized commit parameters {}", params));
+                    return Err(bad_request!("unrecognized commit parameters {:?}", params));
                 }
 
                 if let Some(owner) = txn.owner() {
                     if owner.host() == Some(txn.host()) && owner.path() == self.cluster.path() {
                         return Err(bad_request!(
-                            "{} received a commit message for itself",
+                            "{:?} received a commit message for itself",
                             self.cluster,
                         ));
                     }
@@ -138,7 +137,7 @@ where
                 }
 
                 #[cfg(debug_assertions)]
-                info!("{} got commit message for {}", self.cluster, txn.id());
+                info!("{:?} got commit message for {}", self.cluster, txn.id());
 
                 let result = if !txn.has_leader(self.cluster.path()) {
                     // in this case, the kernel did not claim leadership
@@ -147,7 +146,7 @@ where
                     // because it has already sent a commit message
                     // so just claim leadership on this host and replicate the commit
                     info!(
-                        "{} will lead and distribute the commit of {}...",
+                        "{:?} will lead and distribute the commit of {}...",
                         self.cluster,
                         txn.id()
                     );
@@ -155,22 +154,22 @@ where
                     self.cluster.lead_and_distribute_commit(txn.clone()).await
                 } else if txn.is_leader(self.cluster.path()) {
                     info!(
-                        "{} will distribute the commit of {}...",
+                        "{:?} will distribute the commit of {}...",
                         self.cluster,
                         txn.id()
                     );
 
                     self.cluster.distribute_commit(txn).await
                 } else {
-                    info!("{} will commit {}...", self.cluster, txn.id());
+                    info!("{:?} will commit {}...", self.cluster, txn.id());
                     self.cluster.commit(*txn.id()).await;
                     Ok(())
                 };
 
                 if result.is_ok() {
-                    info!("{} commit {} succeeded", self.cluster, txn.id());
+                    info!("{:?} commit {} succeeded", self.cluster, txn.id());
                 } else {
-                    info!("{} commit {} failed", self.cluster, txn.id());
+                    info!("{:?} commit {} failed", self.cluster, txn.id());
                 }
 
                 result.map(State::from)
@@ -237,8 +236,7 @@ where
             Box::pin(async move {
                 key.expect_none()?;
 
-                let link =
-                    link.try_cast_into(|v| TCError::invalid_value(v, "a Link to a Cluster"))?;
+                let link = link.try_cast_into(|v| TCError::unexpected(v, "a Link to a Cluster"))?;
 
                 self.cluster.add_replica(txn, link).await?;
 
@@ -253,7 +251,7 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let new_replica = params.require::<LinkHost>(&label("add").into())?;
+                let new_replica = params.require::<Host>(&label("add").into())?;
                 params.expect_empty()?;
 
                 let txn_id = *txn.id();
@@ -281,7 +279,7 @@ where
                 }
 
                 let state = self.cluster.state().state(txn_id).await?;
-                debug!("state of source replica {} is {}", self.cluster, state);
+                debug!("state of source replica {:?} is {:?}", self.cluster, state);
                 Ok(state)
             })
         }))
@@ -293,8 +291,8 @@ where
     {
         Some(Box::new(|txn, replicas| {
             Box::pin(async move {
-                let replicas = Tuple::<LinkHost>::try_cast_from(replicas, |v| {
-                    TCError::invalid_value(v, "a Link to a Cluster")
+                let replicas = Tuple::<Host>::try_cast_from(replicas, |v| {
+                    TCError::unexpected(v, "a Link to a Cluster")
                 })?;
 
                 self.cluster.remove_replicas(*txn.id(), &replicas).await
@@ -311,7 +309,7 @@ impl<'a, T> From<&'a Cluster<T>> for ReplicaHandler<'a, T> {
 
 impl<T> Route for Cluster<T>
 where
-    T: Replica + Route + Transact + fmt::Display + Send + Sync,
+    T: Replica + Route + Transact + fmt::Debug + Send + Sync,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         trace!("Cluster::route {}", TCPath::from(path));
