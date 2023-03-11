@@ -88,8 +88,13 @@ where
 }
 
 #[async_trait]
-impl<T: Transaction<FE>, FE: ThreadSafe> Persist<FE> for CollectionBase<T, FE> {
-    type Txn = T;
+impl<Txn, FE> Persist<FE> for CollectionBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+    Node: freqfs::FileLoad,
+{
+    type Txn = Txn;
     type Schema = Schema;
 
     async fn create(txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
@@ -122,18 +127,28 @@ impl<T: Transaction<FE>, FE: ThreadSafe> Persist<FE> for CollectionBase<T, FE> {
 }
 
 #[async_trait]
-impl<T, FE> CopyFrom<FE, Collection<T, FE>> for CollectionBase<T, FE>
+impl<Txn, FE> CopyFrom<FE, Collection<Txn, FE>> for CollectionBase<Txn, FE>
 where
-    T: Transaction<FE>,
-    FE: ThreadSafe,
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+    Node: freqfs::FileLoad,
 {
-    async fn copy_from(_txn: &T, _store: Dir<FE>, _instance: Collection<T, FE>) -> TCResult<Self> {
+    async fn copy_from(
+        _txn: &Txn,
+        _store: Dir<FE>,
+        _instance: Collection<Txn, FE>,
+    ) -> TCResult<Self> {
         todo!()
     }
 }
 
 #[async_trait]
-impl<T: Transaction<FE>, FE: ThreadSafe> Restore<FE> for CollectionBase<T, FE> {
+impl<Txn, FE> Restore<FE> for CollectionBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+    Node: freqfs::FileLoad,
+{
     async fn restore(&self, _txn_id: TxnId, _backup: &Self) -> TCResult<()> {
         todo!()
     }

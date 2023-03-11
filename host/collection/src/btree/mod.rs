@@ -13,15 +13,15 @@ use tcgeneric::{
     path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryStream, TCPathBuf,
 };
 
+pub use file::BTreeFile;
 pub use schema::Schema;
 pub use slice::BTreeSlice;
 pub(crate) use stream::BTreeView;
-pub use tree::BTreeFile;
 
+mod file;
 mod schema;
 mod slice;
 mod stream;
-mod tree;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "btree"]);
 

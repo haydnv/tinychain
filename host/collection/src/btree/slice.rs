@@ -8,8 +8,8 @@ use tc_error::*;
 use tc_transact::{Transaction, TxnId};
 use tcgeneric::{Instance, TCBoxTryStream};
 
+use super::file::BTreeFile;
 use super::schema::Schema;
-use super::tree::BTreeFile;
 use super::{BTreeInstance, BTreeType, Key, Node, Range};
 
 pub struct BTreeSlice<Txn, FE> {

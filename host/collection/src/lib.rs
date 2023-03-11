@@ -1,5 +1,4 @@
 use std::fmt;
-use std::marker::PhantomData;
 
 use async_hash::{Hash, Output};
 use async_trait::async_trait;

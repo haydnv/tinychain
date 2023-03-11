@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
-use destream::{de, en};
+use destream::en;
 use safecast::AsType;
 
 use tc_error::*;

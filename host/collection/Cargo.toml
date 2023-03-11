@@ -25,3 +25,4 @@ tc-error = { path = "../error" }
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }
 tcgeneric = { path = "../generic" }
+tokio = { version = "1.26", features = ["sync"] }

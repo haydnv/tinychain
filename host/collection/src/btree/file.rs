@@ -1,15 +1,18 @@
 use std::marker::PhantomData;
-use std::sync::{Arc, RwLock};
+use std::string::ToString;
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use destream::{de, en};
+use destream::de;
+use ds_ext::link::{label, Label};
 use ds_ext::{OrdHashMap, OrdHashSet};
-use freqfs::DirReadGuardOwned;
+use freqfs::{DirLock, FileLoad};
 use safecast::AsType;
+use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Inner, Persist, Restore};
-use tc_transact::{IntoView, Transact, Transaction, TxnId};
+use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::ValueCollator;
 use tcgeneric::{Instance, TCBoxTryStream, ThreadSafe};
 
@@ -17,7 +20,10 @@ use super::schema::Schema;
 use super::slice::BTreeSlice;
 use super::{BTreeInstance, BTreeType, Key, Node, Range};
 
-type Canon<FE> = b_tree::BTreeLock<Schema, ValueCollator, DirReadGuardOwned<FE>>;
+const CANON: Label = label("canon");
+const VERSIONS: Label = label("versions");
+
+type Canon<FE> = b_tree::BTreeLock<Schema, ValueCollator, FE>;
 type Semaphore = tc_transact::lock::Semaphore<ValueCollator, Range>;
 
 struct Delta<FE> {
@@ -30,10 +36,12 @@ struct State<FE> {
     commits: OrdHashSet<TxnId>,
     deltas: OrdHashMap<TxnId, Delta<FE>>,
     pending: OrdHashMap<TxnId, Delta<FE>>,
+    versions: DirLock<FE>,
 }
 
 /// A B+Tree which supports concurrent transactional access
 pub struct BTreeFile<Txn, FE> {
+    dir: DirLock<FE>,
     schema: Arc<Schema>,
     semaphore: Semaphore,
     state: Arc<RwLock<State<FE>>>,
@@ -43,9 +51,34 @@ pub struct BTreeFile<Txn, FE> {
 impl<Txn, FE> Clone for BTreeFile<Txn, FE> {
     fn clone(&self) -> Self {
         Self {
+            dir: self.dir.clone(),
             schema: self.schema.clone(),
             semaphore: self.semaphore.clone(),
             state: self.state.clone(),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<Txn, FE> BTreeFile<Txn, FE> {
+    fn new(
+        collator: ValueCollator,
+        schema: Schema,
+        dir: DirLock<FE>,
+        canon: Canon<FE>,
+        versions: DirLock<FE>,
+    ) -> Self {
+        Self {
+            dir,
+            schema: Arc::new(schema),
+            state: Arc::new(RwLock::new(State {
+                canon,
+                commits: OrdHashSet::new(),
+                deltas: OrdHashMap::new(),
+                pending: OrdHashMap::new(),
+                versions,
+            })),
+            semaphore: Semaphore::new(Arc::new(collator)),
             phantom: PhantomData,
         }
     }
@@ -75,10 +108,6 @@ where
         &self.schema
     }
 
-    fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice> {
-        Err(not_implemented!("BTreeFile::slice"))
-    }
-
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
         Err(not_implemented!("BTreeFile::count"))
     }
@@ -92,6 +121,10 @@ where
         Self: 'a,
     {
         Err(not_implemented!("BTreeFile::keys"))
+    }
+
+    fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice> {
+        Err(not_implemented!("BTreeFile::slice"))
     }
 }
 
@@ -134,21 +167,44 @@ where
 impl<Txn, FE> Persist<FE> for BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: ThreadSafe,
+    FE: AsType<Node> + ThreadSafe,
+    Node: FileLoad,
 {
     type Txn = Txn;
     type Schema = Schema;
 
-    async fn create(txn_id: TxnId, schema: Self::Schema, store: Dir<FE>) -> TCResult<Self> {
-        Err(not_implemented!("BTreeFile::create"))
+    async fn create(_txn_id: TxnId, schema: Self::Schema, store: Dir<FE>) -> TCResult<Self> {
+        let dir = store.into_inner();
+        let collator = ValueCollator::default();
+
+        let (canon, versions) = {
+            let mut dir = dir.write().await;
+            let versions = dir.create_dir(VERSIONS.to_string())?;
+            let canon = dir.create_dir(CANON.to_string())?;
+            let canon = Canon::create(schema.clone(), collator.clone(), canon)?;
+            (canon, versions)
+        };
+
+        Ok(Self::new(collator, schema, dir, canon, versions))
     }
 
-    async fn load(txn_id: TxnId, schema: Self::Schema, store: Dir<FE>) -> TCResult<Self> {
-        Err(not_implemented!("BTreeFile::load"))
+    async fn load(_txn_id: TxnId, schema: Self::Schema, store: Dir<FE>) -> TCResult<Self> {
+        let dir = store.into_inner();
+        let collator = ValueCollator::default();
+
+        let (canon, versions) = {
+            let mut dir = dir.write().await;
+            let versions = dir.get_or_create_dir(VERSIONS.to_string())?;
+            let canon = dir.get_or_create_dir(CANON.to_string())?;
+            let canon = Canon::load(schema.clone(), collator.clone(), canon.clone())?;
+            (canon, versions)
+        };
+
+        Ok(Self::new(collator, schema, dir, canon, versions))
     }
 
     fn dir(&self) -> Inner<FE> {
-        todo!()
+        self.dir.clone()
     }
 }
 
@@ -156,8 +212,9 @@ where
 impl<Txn, FE, I> CopyFrom<FE, I> for BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: ThreadSafe,
+    FE: AsType<Node> + ThreadSafe,
     I: BTreeInstance + 'static,
+    Node: freqfs::FileLoad,
 {
     async fn copy_from(
         txn: &<Self as Persist<FE>>::Txn,
@@ -172,7 +229,8 @@ where
 impl<Txn, FE> Restore<FE> for BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: ThreadSafe,
+    FE: AsType<Node> + ThreadSafe,
+    Node: freqfs::FileLoad,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         Err(not_implemented!("BTreeFile::restore"))
