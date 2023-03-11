@@ -1,4 +1,5 @@
 use std::fmt;
+use std::ops::Bound;
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
@@ -9,7 +10,7 @@ use tc_error::{bad_request, TCError, TCResult};
 use tc_value::{NumberType, Value, ValueType};
 use tcgeneric::{Id, NativeClass};
 
-use super::Key;
+use super::{Key, Range};
 
 const MEGA: usize = 1_000_000;
 const MIN_ORDER: usize = 4;
@@ -73,6 +74,38 @@ impl Schema {
             block_size: order * key_size,
             columns,
         })
+    }
+
+    /// Return an error if the given `range` does not match this [`Schema`].
+    #[inline]
+    pub fn validate_range(&self, range: Range) -> TCResult<Range> {
+        if range.len() > self.columns.len() {
+            return Err(bad_request!("{:?} has too many columns", range));
+        }
+
+        let (input_prefix, (start, end)) = range.into_inner();
+
+        let mut prefix = Vec::with_capacity(input_prefix.len());
+        for (value, column) in input_prefix.into_iter().zip(&self.columns) {
+            let value = column.dtype.try_cast(value)?;
+            prefix.push(value);
+        }
+
+        if start == Bound::Unbounded && end == Bound::Unbounded {
+            Ok(Range::from_prefix(prefix))
+        } else {
+            let dtype = self.columns[prefix.len()].dtype;
+            let validate_bound = |bound| match bound {
+                Bound::Unbounded => Ok(Bound::Unbounded),
+                Bound::Included(value) => dtype.try_cast(value).map(Bound::Included),
+                Bound::Excluded(value) => dtype.try_cast(value).map(Bound::Excluded),
+            };
+
+            let start = validate_bound(start)?;
+            let end = validate_bound(end)?;
+
+            Ok(Range::with_bounds(prefix, (start, end)))
+        }
     }
 }
 

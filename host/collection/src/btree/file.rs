@@ -1,15 +1,14 @@
 use std::marker::PhantomData;
 use std::string::ToString;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use destream::de;
 use ds_ext::link::{label, Label};
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, DirWriteGuard, FileLoad};
-use futures::{join, try_join, TryStreamExt};
+use futures::{future, join, try_join, TryFutureExt, TryStreamExt};
 use safecast::AsType;
-use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Inner, Persist, Restore};
@@ -69,7 +68,6 @@ where
 }
 
 struct State<FE> {
-    canon: Version<FE>,
     commits: OrdHashSet<TxnId>,
     deltas: OrdHashMap<TxnId, Delta<FE>>,
     pending: OrdHashMap<TxnId, Delta<FE>>,
@@ -81,7 +79,13 @@ impl<FE> State<FE>
 where
     FE: AsType<Node> + Send + Sync,
 {
-    async fn pending_version(&mut self, txn_id: TxnId) -> TCResult<Delta<FE>> {
+    #[inline]
+    fn pending_version(
+        &mut self,
+        txn_id: TxnId,
+        schema: &Schema,
+        collator: &ValueCollator,
+    ) -> TCResult<Delta<FE>> {
         if let Some(version) = self.pending.get(&txn_id) {
             debug_assert!(!self.commits.contains(&txn_id));
             Ok(version.clone())
@@ -90,11 +94,9 @@ where
         } else if self.finalized.as_ref() > Some(&txn_id) {
             Err(conflict!("{} has already been finalized", txn_id))
         } else {
-            let collator = self.canon.collator().inner().clone();
-
-            let mut versions = self.versions.write().await;
+            let mut versions = self.versions.try_write()?;
             let dir = versions.create_dir(txn_id.to_string())?;
-            let version = Delta::create(self.canon.schema().clone(), collator, dir.try_write()?)?;
+            let version = Delta::create(schema.clone(), collator.clone(), dir.try_write()?)?;
 
             self.pending.insert(txn_id, version.clone());
             Ok(version)
@@ -105,9 +107,9 @@ where
 /// A B+Tree which supports concurrent transactional access
 pub struct BTreeFile<Txn, FE> {
     dir: DirLock<FE>,
-    schema: Arc<Schema>,
-    semaphore: Semaphore,
     state: Arc<RwLock<State<FE>>>,
+    canon: Version<FE>,
+    semaphore: Semaphore,
     phantom: PhantomData<Txn>,
 }
 
@@ -115,32 +117,36 @@ impl<Txn, FE> Clone for BTreeFile<Txn, FE> {
     fn clone(&self) -> Self {
         Self {
             dir: self.dir.clone(),
-            schema: self.schema.clone(),
-            semaphore: self.semaphore.clone(),
             state: self.state.clone(),
+            canon: self.canon.clone(),
+            semaphore: self.semaphore.clone(),
             phantom: PhantomData,
         }
     }
 }
 
 impl<Txn, FE> BTreeFile<Txn, FE> {
-    fn new(schema: Schema, dir: DirLock<FE>, canon: Version<FE>, versions: DirLock<FE>) -> Self {
+    fn new(dir: DirLock<FE>, canon: Version<FE>, versions: DirLock<FE>) -> Self {
         let semaphore = Semaphore::new(canon.collator().clone());
+        let state = State {
+            commits: OrdHashSet::new(),
+            deltas: OrdHashMap::new(),
+            pending: OrdHashMap::new(),
+            versions,
+            finalized: None,
+        };
 
         Self {
             dir,
-            schema: Arc::new(schema),
-            state: Arc::new(RwLock::new(State {
-                canon,
-                commits: OrdHashSet::new(),
-                deltas: OrdHashMap::new(),
-                pending: OrdHashMap::new(),
-                versions,
-                finalized: None,
-            })),
+            state: Arc::new(RwLock::new(state)),
+            canon,
             semaphore,
             phantom: PhantomData,
         }
+    }
+
+    pub(super) fn collator(&self) -> &b_tree::Collator<ValueCollator> {
+        self.canon.collator()
     }
 }
 
@@ -165,15 +171,18 @@ where
     type Slice = BTreeSlice<Txn, FE>;
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        self.canon.schema()
     }
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
-        Err(not_implemented!("BTreeFile::count"))
+        let keys = self.clone().keys(txn_id).await?;
+        keys.try_fold(0u64, |count, _key| future::ready(Ok(count + 1)))
+            .await
     }
 
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
-        Err(not_implemented!("BTreeFile::is_empty"))
+        let mut keys = self.clone().keys(txn_id).await?;
+        keys.try_next().map_ok(|key| key.is_none()).await
     }
 
     async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>>
@@ -184,7 +193,7 @@ where
     }
 
     fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice> {
-        Err(not_implemented!("BTreeFile::slice"))
+        Ok(BTreeSlice::new(self, range, reverse))
     }
 }
 
@@ -194,11 +203,12 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
+        let range = self.schema().validate_range(range)?;
         let permit = self.semaphore.write(txn_id, range.clone()).await?;
 
         let delta = {
-            let mut state = self.state.write().await;
-            state.pending_version(txn_id).await?
+            let mut state = self.state.write().expect("state");
+            state.pending_version(txn_id, self.schema(), self.collator().inner())?
         };
 
         let (mut inserts, mut deletes) = delta.write().await;
@@ -215,14 +225,16 @@ where
     }
 
     async fn upsert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+        let key = b_tree::Schema::validate(self.schema(), key)?;
+
         let permit = self
             .semaphore
             .write(txn_id, Range::from_prefix(key.clone()))
             .await?;
 
         let delta = {
-            let mut state = self.state.write().await;
-            state.pending_version(txn_id).await?
+            let mut state = self.state.write().expect("state");
+            state.pending_version(txn_id, self.schema(), self.collator().inner())?
         };
 
         let (mut inserts, mut deletes) = delta.write().await;
@@ -272,11 +284,11 @@ where
             let mut dir = dir.write().await;
             let versions = dir.create_dir(VERSIONS.to_string())?;
             let canon = dir.create_dir(CANON.to_string())?;
-            let canon = Version::create(schema.clone(), collator, canon)?;
+            let canon = Version::create(schema, collator, canon)?;
             (canon, versions)
         };
 
-        Ok(Self::new(schema, dir, canon, versions))
+        Ok(Self::new(dir, canon, versions))
     }
 
     async fn load(_txn_id: TxnId, schema: Self::Schema, store: Dir<FE>) -> TCResult<Self> {
@@ -287,11 +299,11 @@ where
             let mut dir = dir.write().await;
             let versions = dir.get_or_create_dir(VERSIONS.to_string())?;
             let canon = dir.get_or_create_dir(CANON.to_string())?;
-            let canon = Version::load(schema.clone(), collator.clone(), canon)?;
+            let canon = Version::load(schema, collator, canon)?;
             (canon, versions)
         };
 
-        Ok(Self::new(schema, dir, canon, versions))
+        Ok(Self::new(dir, canon, versions))
     }
 
     fn dir(&self) -> Inner<FE> {

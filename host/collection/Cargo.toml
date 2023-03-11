@@ -16,6 +16,7 @@ async-hash = "0.4"
 async-trait = "0.1"
 b-table = { path = "../../../b-table" }
 b-tree = { path = "../../../b-tree" }
+collate = { path = "../../../collate" }
 destream = { path = "../../../destream" }
 ds-ext = { path = "../../../ds-ext" }
 futures = "0.3"
