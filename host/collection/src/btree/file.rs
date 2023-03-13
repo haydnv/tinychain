@@ -186,15 +186,13 @@ impl<'a, Txn, FE> BTreeFile<Txn, FE>
 where
     FE: AsType<Node> + ThreadSafe,
 {
-    pub(super) async fn into_stream(
+    async fn into_keys(
         self,
         txn_id: TxnId,
         range: Arc<Range>,
         reverse: bool,
-    ) -> TCResult<Keys<'a>> {
-        let permit = self.semaphore.read(txn_id, range).await?;
+    ) -> TCBoxTryStream<'a, Key> {
         let collator = self.collator().clone();
-        let range = permit.deref().clone();
 
         // read-lock the canonical version BEFORE locking self.state,
         // to avoid a deadlock or conflict with Self::finalize
@@ -230,6 +228,20 @@ where
                 .merge_into(keys, collator.clone(), range.clone(), reverse)
                 .await;
         }
+
+        keys
+    }
+
+    pub(super) async fn into_stream(
+        self,
+        txn_id: TxnId,
+        range: Arc<Range>,
+        reverse: bool,
+    ) -> TCResult<Keys<'a>> {
+        let permit = self.semaphore.read(txn_id, range).await?;
+        let keys = self
+            .into_keys(txn_id, permit.deref().clone(), reverse)
+            .await;
 
         Ok(Keys::new(permit, keys))
     }
@@ -477,7 +489,66 @@ where
         store: Dir<FE>,
         instance: I,
     ) -> TCResult<Self> {
-        Err(not_implemented!("BTreeFile::copy_from"))
+        let txn_id = *txn.id();
+        let dir = store.into_inner();
+        let schema = instance.schema().clone();
+        let collator = ValueCollator::default();
+
+        let mut keys = instance.keys(txn_id).await?;
+
+        let (canon, versions) = {
+            let mut dir = dir.write().await;
+            let canon = dir.create_dir(CANON.to_string())?;
+            let versions = dir.create_dir(VERSIONS.to_string())?;
+            (canon, versions)
+        };
+
+        let version = {
+            let mut dir = versions.write().await;
+            dir.create_dir(txn_id.to_string())?
+        };
+
+        let (deletes, inserts) = {
+            let mut version = version.write().await;
+            let deletes = version.create_dir(DELETES.to_string())?;
+            let inserts = version.create_dir(INSERTS.to_string())?;
+            (deletes, inserts)
+        };
+
+        let inserts = Version::create(schema.clone(), collator.clone(), inserts)?;
+
+        {
+            let mut inserts = inserts.write().await;
+            while let Some(key) = keys.try_next().await? {
+                inserts.insert(key).await?;
+            }
+        }
+
+        let deletes = Version::create(schema.clone(), collator.clone(), deletes)?;
+
+        let delta = Delta { deletes, inserts };
+
+        let canon = Version::create(schema, collator, canon)?;
+
+        let semaphore = Semaphore::with_reservation(
+            txn_id,
+            canon.collator().clone(),
+            Arc::new(Range::default()),
+        );
+
+        Ok(Self {
+            dir,
+            canon,
+            state: Arc::new(RwLock::new(State {
+                versions,
+                deltas: OrdHashMap::new(),
+                commits: OrdHashSet::new(),
+                pending: std::iter::once((txn_id, delta)).collect(),
+                finalized: None,
+            })),
+            semaphore,
+            phantom: PhantomData,
+        })
     }
 }
 
@@ -489,6 +560,44 @@ where
     Node: freqfs::FileLoad,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
+        let _permit = self
+            .semaphore
+            .write(txn_id, Arc::new(Range::default()))
+            .await?;
+
+        let collator = self.canon.collator().inner();
+
+        let schema = if self.schema() == backup.schema() {
+            self.schema()
+        } else {
+            return Err(bad_request!(
+                "cannot restore a Table with schema {:?} from one with schema {:?}",
+                self.schema(),
+                backup.schema()
+            ));
+        };
+
+        let delta = {
+            let mut state = self.state.write().expect("state");
+            state.pending_version(txn_id, schema, collator)?
+        };
+
+        let (mut deletes, mut inserts) = delta.write().await;
+
+        let mut to_delete = self
+            .clone()
+            .into_keys(txn_id, Arc::new(Range::default()), false)
+            .await;
+
+        while let Some(key) = to_delete.try_next().await? {
+            try_join!(deletes.insert(key.clone()), inserts.delete(key))?;
+        }
+
+        let mut to_insert = backup.clone().keys(txn_id).await?;
+        while let Some(key) = to_insert.try_next().await? {
+            try_join!(deletes.delete(key.clone()), inserts.insert(key))?;
+        }
+
         Err(not_implemented!("BTreeFile::restore"))
     }
 }
