@@ -1,6 +1,6 @@
 use std::fmt;
 
-use async_hash::{Hash, Output};
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
@@ -117,15 +117,20 @@ where
 {
     type Txn = T;
 
-    async fn hash(self, _txn: &Self::Txn) -> TCResult<Output<Sha256>> {
-        let _schema_hash = Hash::<Sha256>::hash(self.schema());
+    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+        let schema_hash = Hash::<Sha256>::hash(self.schema());
 
-        let _contents_hash = todo!();
+        let contents_hash = match self {
+            Self::BTree(btree) => {
+                let keys = btree.keys(*txn.id()).await?;
+                async_hash::hash_try_stream::<Sha256, _, _, _>(keys).await?
+            }
+        };
 
-        // let mut hasher = Sha256::new();
-        // hasher.update(schema_hash);
-        // hasher.update(contents_hash);
-        // Ok(hasher.finalize())
+        let mut hasher = Sha256::new();
+        hasher.update(schema_hash);
+        hasher.update(contents_hash);
+        Ok(hasher.finalize())
     }
 }
 
@@ -158,7 +163,7 @@ where
 impl<T, FE> de::FromStream for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
 {
     type Context = T;
 

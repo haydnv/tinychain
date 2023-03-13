@@ -32,7 +32,6 @@ type Version<FE> = b_tree::BTreeLock<Schema, ValueCollator, FE>;
 type VersionReadGuard<FE> = b_tree::BTreeReadGuard<Schema, ValueCollator, FE>;
 type VersionWriteGuard<FE> = b_tree::BTreeWriteGuard<Schema, ValueCollator, FE>;
 
-type PermitRead = tc_transact::lock::PermitRead<Arc<Range>>;
 type Semaphore = tc_transact::lock::Semaphore<b_tree::Collator<ValueCollator>, Arc<Range>>;
 
 struct Delta<FE> {
@@ -300,7 +299,8 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
+    /// Delete the given [`Range`] from this [`BTreeFile`] at `txn_id`.
+    pub async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
         let range = Arc::new(self.schema().validate_range(range)?);
         let _permit = self.semaphore.write(txn_id, range.clone()).await?;
 
@@ -322,7 +322,8 @@ where
         Ok(())
     }
 
-    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+    /// Insert the given `key` into this [`BTreeFile`] at `txn_id`.
+    pub async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
         let key = b_tree::Schema::validate(self.schema(), key)?;
 
         let _permit = self
@@ -598,7 +599,7 @@ where
             try_join!(deletes.delete(key.clone()), inserts.insert(key))?;
         }
 
-        Err(not_implemented!("BTreeFile::restore"))
+        Ok(())
     }
 }
 
