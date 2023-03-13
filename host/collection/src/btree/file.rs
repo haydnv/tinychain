@@ -70,21 +70,30 @@ where
         join!(self.inserts.write(), self.deletes.write())
     }
 
-    async fn into_stream(
+    async fn merge_into<'a>(
         self,
+        mut keys: TCBoxTryStream<'a, Key>,
         collator: b_tree::Collator<ValueCollator>,
         range: Arc<Range>,
         reverse: bool,
-    ) -> TCBoxTryStream<'static, Key> {
-        let (deletes, inserts) = join!(self.deletes.read(), self.inserts.read());
+    ) -> TCBoxTryStream<'a, Key> {
+        let (deleted, inserted) = join!(self.deletes.into_read(), self.inserts.into_read());
 
-        let keys = collate::try_diff(
-            collator,
-            inserts.into_stream(range.clone(), reverse),
-            deletes.into_stream(range, reverse),
-        );
+        keys = Box::pin(collate::try_merge(
+            collator.clone(),
+            keys,
+            inserted
+                .into_stream(range.clone(), reverse)
+                .map_err(TCError::from),
+        ));
 
-        Box::pin(keys.map_err(TCError::from))
+        keys = Box::pin(collate::try_diff(
+            collator.clone(),
+            keys,
+            deleted.into_stream(range, reverse).map_err(TCError::from),
+        ));
+
+        keys
     }
 }
 
@@ -118,7 +127,6 @@ where
             let mut versions = self.versions.try_write()?;
             let dir = versions.create_dir(txn_id.to_string())?;
             let version = Delta::create(schema.clone(), collator.clone(), dir.try_write()?)?;
-
             self.pending.insert(txn_id, version.clone());
             Ok(version)
         }
@@ -182,7 +190,7 @@ where
         reverse: bool,
     ) -> TCResult<Keys<'a>> {
         let permit = self.semaphore.read(txn_id, range).await?;
-        let collator = self.collator();
+        let collator = self.collator().clone();
         let range = permit.deref().clone();
 
         let (deltas, pending) = {
@@ -200,7 +208,8 @@ where
             (deltas, pending)
         };
 
-        let canon = self.canon.read().await;
+        let canon = self.canon.into_read().await;
+
         let keys = canon
             .into_stream(range.clone(), reverse)
             .map_err(TCError::from);
@@ -208,16 +217,15 @@ where
         let mut keys: TCBoxTryStream<'static, Key> = Box::pin(keys);
 
         for delta in deltas {
-            let delta = delta
-                .into_stream(collator.clone(), range.clone(), reverse)
+            keys = delta
+                .merge_into(keys, collator.clone(), range.clone(), reverse)
                 .await;
-
-            keys = Box::pin(collate::try_merge(collator.clone(), keys, delta));
         }
 
         if let Some(pending) = pending {
-            let pending = pending.into_stream(collator.clone(), range, reverse).await;
-            keys = Box::pin(collate::try_merge(collator.clone(), keys, pending));
+            keys = pending
+                .merge_into(keys, collator.clone(), range.clone(), reverse)
+                .await;
         }
 
         Ok(Keys::new(permit, keys))
