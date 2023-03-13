@@ -80,6 +80,7 @@ pub trait Transact {
     async fn rollback(&self, txn_id: &TxnId);
 
     /// Delete any version data specific to this transaction.
+    // TODO: this should take an owned TxnId
     async fn finalize(&self, txn_id: &TxnId);
 }
 

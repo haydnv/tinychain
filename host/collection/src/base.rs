@@ -51,7 +51,7 @@ where
 impl<Txn, FE> Transact for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
 {
     type Commit = ();
 

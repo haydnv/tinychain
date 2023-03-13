@@ -44,7 +44,6 @@ rjwt = "~0.4.1"
 safecast = { path = "../../safecast" }
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
-#sha2 = "0.10"
 tbon = { path = "../../tbon" }
 tc-collection = { path = "collection" }
 tc-error = { path = "error" }

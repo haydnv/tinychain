@@ -66,8 +66,12 @@ where
         })
     }
 
-    async fn write(&self) -> (VersionWriteGuard<FE>, VersionWriteGuard<FE>) {
-        join!(self.inserts.write(), self.deletes.write())
+    async fn read(self) -> (VersionReadGuard<FE>, VersionReadGuard<FE>) {
+        join!(self.inserts.into_read(), self.deletes.into_read())
+    }
+
+    async fn write(self) -> (VersionWriteGuard<FE>, VersionWriteGuard<FE>) {
+        join!(self.inserts.into_write(), self.deletes.into_write())
     }
 
     async fn merge_into<'a>(
@@ -193,6 +197,10 @@ where
         let collator = self.collator().clone();
         let range = permit.deref().clone();
 
+        // read-lock the canonical version BEFORE locking self.state,
+        // to avoid a deadlock or conflict with Self::finalize
+        let canon = self.canon.into_read().await;
+
         let (deltas, pending) = {
             let state = self.state.read().expect("state");
             let deltas = state
@@ -207,8 +215,6 @@ where
 
             (deltas, pending)
         };
-
-        let canon = self.canon.into_read().await;
 
         let keys = canon
             .into_stream(range.clone(), reverse)
@@ -287,7 +293,7 @@ where
 {
     async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
         let range = Arc::new(self.schema().validate_range(range)?);
-        let permit = self.semaphore.write(txn_id, range.clone()).await?;
+        let _permit = self.semaphore.write(txn_id, range.clone()).await?;
 
         let delta = {
             let mut state = self.state.write().expect("state");
@@ -310,7 +316,7 @@ where
     async fn upsert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
         let key = b_tree::Schema::validate(self.schema(), key)?;
 
-        let permit = self
+        let _permit = self
             .semaphore
             .write(txn_id, Arc::new(Range::from_prefix(key.clone())))
             .await?;
@@ -332,20 +338,87 @@ where
 impl<Txn, FE> Transact for BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
 {
     type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
-        todo!()
+        let mut state = self.state.write().expect("state");
+
+        if state.finalized.as_ref() > Some(&txn_id) {
+            panic!("tried to commit finalized version {}", txn_id);
+        } else if state.commits.contains(&txn_id) {
+            return log::warn!("duplicate commit at {}", txn_id);
+        } else if let Some(pending) = state.pending.remove(&txn_id) {
+            state.deltas.insert(txn_id, pending);
+        }
+
+        self.semaphore.finalize(&txn_id, false);
+        state.commits.insert(txn_id);
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        todo!()
+        let mut state = self.state.write().expect("state");
+
+        if state.finalized.as_ref() > Some(txn_id) {
+            panic!("tried to roll back finalized version {}", txn_id);
+        } else if state.commits.contains(txn_id) {
+            panic!("tried to roll back committed version {}", txn_id);
+        }
+
+        state.pending.remove(txn_id);
+        self.semaphore.finalize(txn_id, false);
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        todo!()
+        let mut canon = self.canon.write().await;
+
+        let deltas = {
+            let mut state = self.state.write().expect("state");
+
+            if state.finalized.as_ref() > Some(txn_id) {
+                return;
+            }
+
+            let mut deltas = Vec::with_capacity(state.deltas.len());
+
+            while let Some(version_id) = state.pending.keys().next().copied() {
+                if &version_id <= txn_id {
+                    state.pending.pop_first();
+                } else {
+                    break;
+                }
+            }
+
+            while let Some(version_id) = state.commits.first().map(|id| **id) {
+                if &version_id <= txn_id {
+                    state.commits.pop_first();
+                } else {
+                    break;
+                }
+            }
+
+            while let Some(version_id) = state.deltas.keys().next().copied() {
+                if &version_id <= txn_id {
+                    let version = state.deltas.pop_first().expect("version");
+                    deltas.push(version);
+                } else {
+                    break;
+                }
+            }
+
+            state.finalized = Some(*txn_id);
+
+            deltas
+        };
+
+        for delta in deltas {
+            let (deleted, inserted) = delta.read().await;
+            canon.merge(inserted).await.expect("commit inserts");
+            canon.delete_all(deleted).await.expect("commit deletes");
+        }
+
+        self.semaphore.finalize(txn_id, true);
     }
 }
 
