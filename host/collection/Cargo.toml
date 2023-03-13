@@ -14,8 +14,7 @@ categories = ["database", "database-implementations", "data-structures"]
 [dependencies]
 async-hash = "0.4"
 async-trait = "0.1"
-b-table = { path = "../../../b-table" }
-b-tree = { path = "../../../b-tree" }
+b-table = { path = "../../../b-table", features = ["stream"] }
 collate = { path = "../../../collate", features = ["stream"] }
 destream = { path = "../../../destream" }
 ds-ext = { path = "../../../ds-ext" }

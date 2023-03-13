@@ -4,6 +4,7 @@ use std::string::ToString;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
+use b_table::b_tree;
 use destream::de;
 use ds_ext::link::{label, Label};
 use ds_ext::{OrdHashMap, OrdHashSet};
@@ -86,15 +87,13 @@ where
         keys = Box::pin(collate::try_merge(
             collator.clone(),
             keys,
-            inserted
-                .into_stream(range.clone(), reverse)
-                .map_err(TCError::from),
+            inserted.keys(range.clone(), reverse).map_err(TCError::from),
         ));
 
         keys = Box::pin(collate::try_diff(
             collator.clone(),
             keys,
-            deleted.into_stream(range, reverse).map_err(TCError::from),
+            deleted.keys(range, reverse).map_err(TCError::from),
         ));
 
         keys
@@ -216,9 +215,7 @@ where
             (deltas, pending)
         };
 
-        let keys = canon
-            .into_stream(range.clone(), reverse)
-            .map_err(TCError::from);
+        let keys = canon.keys(range.clone(), reverse).map_err(TCError::from);
 
         let mut keys: TCBoxTryStream<'static, Key> = Box::pin(keys);
 
@@ -313,7 +310,7 @@ where
         Ok(())
     }
 
-    async fn upsert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
         let key = b_tree::Schema::validate(self.schema(), key)?;
 
         let _permit = self
@@ -496,15 +493,110 @@ where
     }
 }
 
+struct BTreeVisitor<Txn, FE> {
+    txn: Txn,
+    phantom: PhantomData<FE>,
+}
+
+impl<Txn, FE> BTreeVisitor<Txn, FE> {
+    fn new(txn: Txn) -> Self {
+        Self {
+            txn,
+            phantom: PhantomData,
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> de::Visitor for BTreeVisitor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
+    type Value = BTreeFile<Txn, FE>;
+
+    fn expecting() -> &'static str {
+        "a BTree"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let txn_id = *self.txn.id();
+        let collator = ValueCollator::default();
+        let schema = seq.expect_next::<Schema>(()).await?;
+
+        let (canon, versions) = {
+            let mut dir = self.txn.context().write().await;
+
+            let canon = dir
+                .create_dir(CANON.to_string())
+                .map_err(de::Error::custom)?;
+
+            let versions = dir
+                .create_dir(VERSIONS.to_string())
+                .map_err(de::Error::custom)?;
+
+            (canon, versions)
+        };
+
+        let version = {
+            let mut dir = versions.write().await;
+            dir.create_dir(txn_id.to_string())
+                .map_err(de::Error::custom)?
+        };
+
+        let (deletes, inserts) = {
+            let mut dir = version.write().await;
+
+            let deletes = dir
+                .create_dir(DELETES.to_string())
+                .map_err(de::Error::custom)?;
+
+            let inserts = dir
+                .create_dir(INSERTS.to_string())
+                .map_err(de::Error::custom)?;
+
+            (deletes, inserts)
+        };
+
+        let inserts = seq
+            .expect_next((schema.clone(), collator.clone(), inserts))
+            .await?;
+
+        let deletes = Version::create(schema.clone(), collator.clone(), deletes)
+            .map_err(de::Error::custom)?;
+
+        let version = Delta { inserts, deletes };
+
+        let canon = Version::create(schema, collator, canon).map_err(de::Error::custom)?;
+
+        let collator = canon.collator().clone();
+        let semaphore = Semaphore::with_reservation(txn_id, collator, Arc::new(Range::default()));
+
+        Ok(BTreeFile {
+            dir: self.txn.context().clone(),
+            state: Arc::new(RwLock::new(State {
+                commits: OrdHashSet::with_capacity(0),
+                deltas: OrdHashMap::with_capacity(0),
+                pending: std::iter::once((txn_id, version)).collect(),
+                versions,
+                finalized: None,
+            })),
+            canon,
+            semaphore,
+            phantom: PhantomData,
+        })
+    }
+}
+
 #[async_trait]
 impl<Txn, FE> de::FromStream for BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
 {
     type Context = Txn;
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        todo!()
+        decoder.decode_seq(BTreeVisitor::new(txn)).await
     }
 }

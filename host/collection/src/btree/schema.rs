@@ -3,6 +3,7 @@ use std::ops::Bound;
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
+use b_table::b_tree;
 use destream::{de, en};
 use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
 
@@ -165,6 +166,16 @@ impl<'en> en::IntoStream<'en> for Schema {
 impl<'en> en::ToStream<'en> for Schema {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         self.columns.to_stream(encoder)
+    }
+}
+
+#[async_trait]
+impl de::FromStream for Schema {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
+        let columns = Vec::<Column>::from_stream(cxt, decoder).await?;
+        Self::new(columns).map_err(de::Error::custom)
     }
 }
 
