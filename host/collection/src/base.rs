@@ -24,7 +24,7 @@ pub enum CollectionBase<Txn, FE> {
 impl<Txn, FE> CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
 {
     fn schema(&self) -> Schema {
         match self {
@@ -78,7 +78,7 @@ where
 impl<T, FE> AsyncHash<FE> for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
-    FE: AsType<Node> + Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
 {
     type Txn = T;
 
@@ -168,14 +168,14 @@ impl<T, FE> TryCastFrom<Collection<T, FE>> for CollectionBase<T, FE> {
 impl<'en, T, FE> IntoView<'en, FE> for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
-    FE: Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
     Self: 'en,
 {
     type Txn = T;
     type View = CollectionView<'en>;
 
-    async fn into_view(self, _txn: Self::Txn) -> TCResult<Self::View> {
-        todo!()
+    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
+        Collection::from(self).into_view(txn).await
     }
 }
 

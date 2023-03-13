@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::ops::Deref;
 use std::string::ToString;
 use std::sync::{Arc, RwLock};
 
@@ -18,6 +19,7 @@ use tcgeneric::{Instance, TCBoxTryStream, ThreadSafe};
 
 use super::schema::Schema;
 use super::slice::BTreeSlice;
+use super::stream::Keys;
 use super::{BTreeInstance, BTreeType, Key, Node, Range};
 
 const CANON: Label = label("canon");
@@ -28,7 +30,9 @@ const VERSIONS: Label = label("versions");
 type Version<FE> = b_tree::BTreeLock<Schema, ValueCollator, FE>;
 type VersionReadGuard<FE> = b_tree::BTreeReadGuard<Schema, ValueCollator, FE>;
 type VersionWriteGuard<FE> = b_tree::BTreeWriteGuard<Schema, ValueCollator, FE>;
-type Semaphore = tc_transact::lock::Semaphore<b_tree::Collator<ValueCollator>, Range>;
+
+type PermitRead = tc_transact::lock::PermitRead<Arc<Range>>;
+type Semaphore = tc_transact::lock::Semaphore<b_tree::Collator<ValueCollator>, Arc<Range>>;
 
 struct Delta<FE> {
     deletes: Version<FE>,
@@ -46,7 +50,7 @@ impl<FE> Clone for Delta<FE> {
 
 impl<FE> Delta<FE>
 where
-    FE: AsType<Node> + Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
 {
     fn create(
         schema: Schema,
@@ -65,6 +69,23 @@ where
     async fn write(&self) -> (VersionWriteGuard<FE>, VersionWriteGuard<FE>) {
         join!(self.inserts.write(), self.deletes.write())
     }
+
+    async fn into_stream(
+        self,
+        collator: b_tree::Collator<ValueCollator>,
+        range: Arc<Range>,
+        reverse: bool,
+    ) -> TCBoxTryStream<'static, Key> {
+        let (deletes, inserts) = join!(self.deletes.read(), self.inserts.read());
+
+        let keys = collate::try_diff(
+            collator,
+            inserts.into_stream(range.clone(), reverse),
+            deletes.into_stream(range, reverse),
+        );
+
+        Box::pin(keys.map_err(TCError::from))
+    }
 }
 
 struct State<FE> {
@@ -77,7 +98,7 @@ struct State<FE> {
 
 impl<FE> State<FE>
 where
-    FE: AsType<Node> + Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
 {
     #[inline]
     fn pending_version(
@@ -150,6 +171,59 @@ impl<Txn, FE> BTreeFile<Txn, FE> {
     }
 }
 
+impl<'a, Txn, FE> BTreeFile<Txn, FE>
+where
+    FE: AsType<Node> + ThreadSafe,
+{
+    pub(super) async fn into_stream(
+        self,
+        txn_id: TxnId,
+        range: Arc<Range>,
+        reverse: bool,
+    ) -> TCResult<Keys<'a>> {
+        let permit = self.semaphore.read(txn_id, range).await?;
+        let collator = self.collator();
+        let range = permit.deref().clone();
+
+        let (deltas, pending) = {
+            let state = self.state.read().expect("state");
+            let deltas = state
+                .deltas
+                .iter()
+                .take_while(|(id, _)| *id <= &txn_id)
+                .map(|(_, delta)| delta)
+                .cloned()
+                .collect::<Vec<_>>();
+
+            let pending = state.pending.get(&txn_id).cloned();
+
+            (deltas, pending)
+        };
+
+        let canon = self.canon.read().await;
+        let keys = canon
+            .into_stream(range.clone(), reverse)
+            .map_err(TCError::from);
+
+        let mut keys: TCBoxTryStream<'static, Key> = Box::pin(keys);
+
+        for delta in deltas {
+            let delta = delta
+                .into_stream(collator.clone(), range.clone(), reverse)
+                .await;
+
+            keys = Box::pin(collate::try_merge(collator.clone(), keys, delta));
+        }
+
+        if let Some(pending) = pending {
+            let pending = pending.into_stream(collator.clone(), range, reverse).await;
+            keys = Box::pin(collate::try_merge(collator.clone(), keys, pending));
+        }
+
+        Ok(Keys::new(permit, keys))
+    }
+}
+
 impl<Txn, FE> Instance for BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
@@ -166,7 +240,7 @@ where
 impl<Txn, FE> BTreeInstance for BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
 {
     type Slice = BTreeSlice<Txn, FE>;
 
@@ -185,11 +259,12 @@ where
         keys.try_next().map_ok(|key| key.is_none()).await
     }
 
-    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>>
+    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<Keys<'a>>
     where
         Self: 'a,
     {
-        Err(not_implemented!("BTreeFile::keys"))
+        self.into_stream(txn_id, Arc::new(Range::default()), false)
+            .await
     }
 
     fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice> {
@@ -203,7 +278,7 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
-        let range = self.schema().validate_range(range)?;
+        let range = Arc::new(self.schema().validate_range(range)?);
         let permit = self.semaphore.write(txn_id, range.clone()).await?;
 
         let delta = {
@@ -213,7 +288,7 @@ where
 
         let (mut inserts, mut deletes) = delta.write().await;
 
-        let deleted = self.clone().slice(range, false)?;
+        let deleted = BTreeSlice::new(self.clone(), range, false);
         let mut deleted = deleted.keys(txn_id).await?;
 
         // there's not much point in trying to parallelize this
@@ -229,7 +304,7 @@ where
 
         let permit = self
             .semaphore
-            .write(txn_id, Range::from_prefix(key.clone()))
+            .write(txn_id, Arc::new(Range::from_prefix(key.clone())))
             .await?;
 
         let delta = {

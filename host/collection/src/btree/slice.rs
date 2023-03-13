@@ -8,11 +8,12 @@ use safecast::AsType;
 
 use tc_error::*;
 use tc_transact::{Transaction, TxnId};
-use tcgeneric::{Instance, TCBoxTryStream};
+use tcgeneric::{Instance, ThreadSafe};
 
 use super::file::BTreeFile;
 use super::schema::Schema;
-use super::{BTreeInstance, BTreeType, Key, Node, Range};
+use super::stream::Keys;
+use super::{BTreeInstance, BTreeType, Node, Range};
 
 pub struct BTreeSlice<Txn, FE> {
     file: BTreeFile<Txn, FE>,
@@ -33,10 +34,14 @@ impl<Txn, FE> Clone for BTreeSlice<Txn, FE> {
 }
 
 impl<Txn, FE> BTreeSlice<Txn, FE> {
-    pub(super) fn new(file: BTreeFile<Txn, FE>, range: Range, reverse: bool) -> Self {
+    pub(super) fn new<R: Into<Arc<Range>>>(
+        file: BTreeFile<Txn, FE>,
+        range: R,
+        reverse: bool,
+    ) -> Self {
         Self {
             file,
-            range: Arc::new(range),
+            range: range.into(),
             reverse,
             phantom: PhantomData,
         }
@@ -59,7 +64,7 @@ where
 impl<Txn, FE> BTreeInstance for BTreeSlice<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
 {
     type Slice = Self;
 
@@ -92,10 +97,12 @@ where
         keys.try_next().map_ok(|key| key.is_none()).await
     }
 
-    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>>
+    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<Keys<'a>>
     where
         Self: 'a,
     {
-        Err(not_implemented!("BTreeSlice::keys"))
+        self.file
+            .into_stream(txn_id, self.range, self.reverse)
+            .await
     }
 }

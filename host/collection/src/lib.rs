@@ -8,7 +8,9 @@ use safecast::{as_type, AsType};
 
 use tc_error::*;
 use tc_transact::{AsyncHash, IntoView, Sha256, Transaction};
-use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
+use tcgeneric::{
+    path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
+};
 
 pub use btree::{BTree, BTreeInstance, BTreeType, Node};
 use table::TableType;
@@ -84,7 +86,7 @@ as_type!(Collection<Txn, FE>, BTree, BTree<Txn, FE>);
 impl<Txn, FE> Collection<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
 {
     fn schema(&self) -> Schema {
         match self {
@@ -111,7 +113,7 @@ where
 impl<T, FE> AsyncHash<FE> for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: AsType<Node> + Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
 {
     type Txn = T;
 
@@ -139,14 +141,16 @@ impl<Txn, FE> From<CollectionBase<Txn, FE>> for Collection<Txn, FE> {
 impl<'en, T, FE> IntoView<'en, FE> for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
     Self: 'en,
 {
     type Txn = T;
     type View = CollectionView<'en>;
 
-    async fn into_view(self, _txn: Self::Txn) -> TCResult<Self::View> {
-        todo!()
+    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
+        match self {
+            Self::BTree(btree) => btree.into_view(txn).map_ok(CollectionView::BTree).await,
+        }
     }
 }
 

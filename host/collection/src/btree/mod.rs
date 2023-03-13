@@ -10,13 +10,14 @@ use tc_error::*;
 use tc_transact::{Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{
-    path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCBoxTryStream, TCPathBuf,
+    path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
 };
 
 pub use file::BTreeFile;
 pub use schema::Schema;
 pub use slice::BTreeSlice;
 pub(crate) use stream::BTreeView;
+pub use stream::Keys;
 
 mod file;
 mod schema;
@@ -96,7 +97,7 @@ pub trait BTreeInstance: Clone + Instance {
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool>;
 
     /// Return a `Stream` of this `BTree`'s [`Key`]s.
-    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>>
+    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<Keys<'a>>
     where
         Self: 'a;
 
@@ -139,7 +140,7 @@ where
 impl<Txn, FE> BTreeInstance for BTree<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
 {
     type Slice = Self;
 
@@ -175,7 +176,7 @@ where
         }
     }
 
-    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<TCBoxTryStream<'a, Key>>
+    async fn keys<'a>(self, txn_id: TxnId) -> TCResult<Keys<'a>>
     where
         Self: 'a,
     {
