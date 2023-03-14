@@ -15,7 +15,7 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use log::debug;
 use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
 
-use tc_collection::CollectionVisitor;
+use tc_collection::{CollectionType, CollectionVisitor};
 use tc_error::*;
 use tc_transact::{AsyncHash, Sha256, Transaction};
 use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};

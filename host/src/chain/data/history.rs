@@ -745,10 +745,13 @@ impl<'en> IntoView<'en, fs::CacheBlock> for History {
 
         let seq = stream::iter(0..((*latest) + 1))
             .map(move |block_id| {
-                file.get_file(&block_id).cloned()
+                file.get_file(&block_id)
+                    .cloned()
                     .ok_or_else(|| unexpected!("missing chain block"))
             })
-            .and_then(|block| Box::pin(async move { block.read_owned().map_err(TCError::from).await }))
+            .and_then(|block| {
+                Box::pin(async move { block.read_owned().map_err(TCError::from).await })
+            })
             .map_ok(move |block: FileReadGuardOwned<CacheBlock, ChainBlock>| {
                 let this = self.clone();
                 let txn = txn.clone();

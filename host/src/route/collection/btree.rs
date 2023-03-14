@@ -1,15 +1,16 @@
 use std::iter::FromIterator;
+use std::ops::Bound;
 
 use destream::de::Error;
 use futures::{future, StreamExt, TryFutureExt, TryStreamExt};
 use safecast::{Match, TryCastFrom, TryCastInto};
 
-use tc_btree::{BTreeInstance, BTreeType, BTreeWrite, Range};
+use tc_collection::btree::{BTreeInstance, BTreeType, BTreeWrite, Column, Range, Schema};
 use tc_error::*;
-use tc_transact::fs::Persist;
+use tc_transact::fs::{Dir, Persist};
 use tc_transact::Transaction;
 use tc_value::Value;
-use tcgeneric::{label, Map, PathSegment};
+use tcgeneric::{label, Map, PathSegment, Tuple};
 
 use crate::collection::{BTree, BTreeFile, Collection};
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
@@ -37,33 +38,34 @@ impl<'a> Handler<'a> for CopyHandler {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
                 let schema: Value = params.require(&label("schema").into())?;
-                let schema = tc_btree::RowSchema::try_cast_from(schema, |v| {
-                    TCError::unexpected(v, "a BTree schema")
-                })?;
+                let schema = cast_into_schema(schema)?;
 
                 let source: TCStream = params.require(&label("source").into())?;
                 params.expect_empty()?;
 
                 let txn_id = *txn.id();
 
-                let store = txn.context().create_store_unique(txn_id).await?;
-                let btree = BTreeFile::create(txn_id, schema, store)?;
+                let store = {
+                    let mut dir = txn.context().write().await;
+                    let (_, cache) = dir.create_dir_unique()?;
+                    Dir::load(*txn.id(), cache).await?
+                };
 
                 let keys = source.into_stream(txn.clone()).await?;
-                keys.map(|r| {
-                    r.and_then(|state| {
-                        Value::try_cast_from(state, |s| TCError::unexpected(s, "a BTree key"))
+                let keys = keys
+                    .map(|r| {
+                        r.and_then(|state| {
+                            Value::try_cast_from(state, |s| TCError::unexpected(s, "a BTree key"))
+                        })
                     })
-                })
-                .map(|r| {
-                    r.and_then(|value| {
-                        value.try_cast_into(|v| TCError::unexpected(v, "a BTree key"))
-                    })
-                })
-                .map_ok(|key| btree.insert(txn_id, key))
-                .try_buffer_unordered(num_cpus::get())
-                .try_fold((), |(), ()| future::ready(Ok(())))
-                .await?;
+                    .map(|r| {
+                        r.and_then(|value| {
+                            value.try_cast_into(|v| TCError::unexpected(v, "a BTree key"))
+                        })
+                    });
+
+                let btree = BTreeFile::create(txn_id, schema, store).await?;
+                btree.try_insert_from(*txn.id(), keys).await?;
 
                 Ok(State::Collection(btree.into()))
             })
@@ -80,14 +82,17 @@ impl<'a> Handler<'a> for CreateHandler {
     {
         Some(Box::new(|txn, value| {
             Box::pin(async move {
-                let schema = tc_btree::RowSchema::try_cast_from(value, |v| {
-                    TCError::unexpected(v, "a BTree schema")
-                })?;
+                let schema = cast_into_schema(value)?;
+                let store = {
+                    let mut dir = txn.context().write().await;
+                    let (_, cache) = dir.create_dir_unique()?;
+                    Dir::load(*txn.id(), cache).await?
+                };
 
-                let store = txn.context().create_store_unique(*txn.id()).await?;
                 BTreeFile::create(*txn.id(), schema, store)
-                    .map(Collection::from)
-                    .map(State::from)
+                    .map_ok(Collection::from)
+                    .map_ok(State::from)
+                    .await
             })
         }))
     }
@@ -358,22 +363,59 @@ impl Route for Static {
 
 #[inline]
 fn cast_into_range(scalar: Scalar) -> TCResult<Range> {
-    if scalar.is_none() {
+    let mut range = if scalar.is_none() {
         return Ok(Range::default());
-    } else if let Scalar::Value(value) = scalar {
-        return match value {
-            Value::Tuple(prefix) => Ok(Range::with_prefix(prefix.into_inner())),
-            value => Ok(Range::with_prefix(vec![value])),
-        };
+    } else {
+        Tuple::<Scalar>::try_cast_from(scalar, |s| bad_request!("invalid BTree selector: {:?}", s))?
     };
 
-    let mut prefix: Vec<Value> =
-        scalar.try_cast_into(|s| TCError::unexpected(s, "invalid BTree range"))?;
+    if range
+        .last()
+        .expect("bounds")
+        .matches::<(Bound<Value>, Bound<Value>)>()
+    {
+        let bounds: (Bound<Value>, Bound<Value>) = range
+            .pop()
+            .expect("bounds")
+            .opt_cast_into()
+            .expect("bounds");
 
-    if !prefix.is_empty() && tc_value::Range::can_cast_from(prefix.last().unwrap()) {
-        let range = tc_value::Range::opt_cast_from(prefix.pop().unwrap()).unwrap();
-        Ok((prefix, range.start.into(), range.end.into()).into())
+        let prefix = range
+            .into_iter()
+            .map(|v| {
+                Value::try_cast_from(v, |v| {
+                    bad_request!("invalid value for BTree range: {:?}", v)
+                })
+            })
+            .collect::<TCResult<_>>()?;
+
+        Ok(Range::with_bounds(prefix, bounds))
     } else {
-        Ok(Range::with_prefix(prefix))
+        let prefix = range
+            .into_iter()
+            .map(|v| {
+                Value::try_cast_from(v, |v| {
+                    bad_request!("invalid value for BTree range: {:?}", v)
+                })
+            })
+            .collect::<TCResult<_>>()?;
+
+        Ok(Range::from_prefix(prefix))
     }
+}
+
+#[inline]
+fn cast_into_schema(schema: Value) -> TCResult<Schema> {
+    let columns = if let Value::Tuple(columns) = schema {
+        columns
+            .into_iter()
+            .map(|col| {
+                Column::try_cast_from(col, |v| bad_request!("invalid column schema: {:?}", v))
+            })
+            .collect::<TCResult<Vec<Column>>>()
+    } else {
+        Err(bad_request!("invalid BTree schema: {:?}", schema))
+    }?;
+
+    Schema::new(columns)
 }

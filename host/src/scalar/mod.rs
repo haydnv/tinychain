@@ -694,12 +694,20 @@ impl TryFrom<Scalar> for Value {
 }
 
 impl TryCastFrom<Scalar> for (Bound<Value>, Bound<Value>) {
-    fn can_cast_from(_scalar: &Scalar) -> bool {
-        todo!()
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Range(_) => true,
+            Scalar::Value(value) => Self::can_cast_from(value),
+            _ => false,
+        }
     }
 
-    fn opt_cast_from(_scalar: Scalar) -> Option<Self> {
-        todo!()
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Range(range) => Some(range),
+            Scalar::Value(value) => Self::opt_cast_from(value),
+            _ => None,
+        }
     }
 }
 
