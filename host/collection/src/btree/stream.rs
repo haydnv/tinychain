@@ -4,14 +4,14 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use destream::en;
-use futures::{Stream, TryFutureExt};
+use futures::Stream;
 use safecast::AsType;
 
 use tc_error::*;
 use tc_transact::{IntoView, Transaction};
 use tcgeneric::{TCBoxTryStream, ThreadSafe};
 
-use super::{BTree, BTreeInstance, Key, Node, Range};
+use super::{BTree, BTreeInstance, Key, Node, Range, Schema};
 
 type PermitRead = tc_transact::lock::PermitRead<Arc<Range>>;
 
@@ -37,18 +37,19 @@ impl<'a> Stream for Keys<'a> {
 }
 
 pub struct BTreeView<'en> {
+    schema: Schema,
     keys: Keys<'en>,
+}
+
+impl<'en> BTreeView<'en> {
+    fn new(schema: Schema, keys: Keys<'en>) -> Self {
+        Self { schema, keys }
+    }
 }
 
 impl<'en> en::IntoStream<'en> for BTreeView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        encoder.encode_seq_stream(self.keys)
-    }
-}
-
-impl<'en> From<Keys<'en>> for BTreeView<'en> {
-    fn from(keys: Keys<'en>) -> Self {
-        Self { keys }
+        (self.schema, en::SeqStream::from(self.keys)).into_stream(encoder)
     }
 }
 
@@ -62,9 +63,13 @@ where
     type View = BTreeView<'en>;
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
-        match self {
-            Self::File(file) => file.keys(*txn.id()).map_ok(BTreeView::from).await,
-            Self::Slice(slice) => slice.keys(*txn.id()).map_ok(BTreeView::from).await,
-        }
+        let schema = self.schema().clone();
+
+        let keys = match self {
+            Self::File(file) => file.keys(*txn.id()).await,
+            Self::Slice(slice) => slice.keys(*txn.id()).await,
+        }?;
+
+        Ok(BTreeView::new(schema, keys))
     }
 }

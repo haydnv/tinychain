@@ -2,7 +2,7 @@ use std::fmt;
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
-use destream::{de, en};
+use destream::{de, en, EncodeMap};
 use futures::TryFutureExt;
 use safecast::{as_type, AsType};
 
@@ -200,8 +200,15 @@ pub enum CollectionView<'en> {
 
 impl<'en> en::IntoStream<'en> for CollectionView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        let mut map = encoder.encode_map(Some(1))?;
+
         match self {
-            Self::BTree(btree) => btree.into_stream(encoder),
+            Self::BTree(btree) => {
+                let classpath = BTreeType::default().path();
+                map.encode_entry(classpath.to_string(), btree)?;
+            }
         }
+
+        map.end()
     }
 }

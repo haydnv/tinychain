@@ -88,26 +88,26 @@ where
         collator: b_tree::Collator<ValueCollator>,
         range: Arc<Range>,
         reverse: bool,
-    ) -> TCBoxTryStream<'a, Key> {
+    ) -> TCResult<TCBoxTryStream<'a, Key>> {
         trace!("merge delta");
 
         let (inserted, deleted) = self.read().await;
 
-        if inserted.is_empty(&range).await.expect("inserted") {
+        if inserted.is_empty(&range).await? {
             trace!("no inserts to merge");
         } else {
             let inserted = inserted.keys(range.clone(), reverse).map_err(TCError::from);
             keys = Box::pin(collate::try_merge(collator.clone(), keys, inserted));
         }
 
-        if deleted.is_empty(&range).await.expect("deleted") {
+        if deleted.is_empty(&range).await? {
             trace!("no deletes to merge");
         } else {
             let deleted = deleted.keys(range, reverse).map_err(TCError::from);
             keys = Box::pin(collate::try_diff(collator.clone(), keys, deleted));
         }
 
-        keys
+        Ok(keys)
     }
 }
 
@@ -202,7 +202,7 @@ where
         txn_id: TxnId,
         range: Arc<Range>,
         reverse: bool,
-    ) -> TCBoxTryStream<'a, Key> {
+    ) -> TCResult<TCBoxTryStream<'a, Key>> {
         trace!("BTreeFile::into_keys {:?}", range);
 
         let collator = self.collator().clone();
@@ -239,7 +239,7 @@ where
 
             keys = delta
                 .merge_into(keys, collator.clone(), range.clone(), reverse)
-                .await;
+                .await?;
         }
 
         if let Some(pending) = pending {
@@ -247,10 +247,10 @@ where
 
             keys = pending
                 .merge_into(keys, collator.clone(), range.clone(), reverse)
-                .await;
+                .await?;
         }
 
-        keys
+        Ok(keys)
     }
 
     pub(super) async fn into_stream(
@@ -267,7 +267,7 @@ where
 
         let keys = self
             .into_keys(txn_id, permit.deref().clone(), reverse)
-            .await;
+            .await?;
 
         Ok(Keys::new(permit, keys))
     }
@@ -652,7 +652,7 @@ where
         let mut to_delete = self
             .clone()
             .into_keys(txn_id, Arc::new(Range::default()), false)
-            .await;
+            .await?;
 
         while let Some(key) = to_delete.try_next().await? {
             try_join!(deletes.insert(key.clone()), inserts.delete(key))?;
