@@ -10,6 +10,7 @@ use ds_ext::link::{label, Label};
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, DirWriteGuard, FileLoad};
 use futures::{future, join, try_join, Stream, TryFutureExt, TryStreamExt};
+use log::{debug, trace};
 use safecast::AsType;
 
 use crate::btree::BTreeWrite;
@@ -653,11 +654,18 @@ where
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        debug!("BTreeVisitor::visit_seq");
+
         let txn_id = *self.txn.id();
         let collator = ValueCollator::default();
+
+        trace!("decode schema");
         let schema = seq.expect_next::<Schema>(()).await?;
+        trace!("decoded schema");
 
         let (canon, versions) = {
+            trace!("lock txn context dir to create canon and versions directories...");
+
             let mut dir = self.txn.context().write().await;
 
             let canon = dir
@@ -672,12 +680,19 @@ where
         };
 
         let version = {
+            trace!("lock versions dir to create version {} dir...", txn_id);
+
             let mut dir = versions.write().await;
             dir.create_dir(txn_id.to_string())
                 .map_err(de::Error::custom)?
         };
 
         let (deletes, inserts) = {
+            trace!(
+                "lock version {} dir to create deletes & inserts log dirs...",
+                txn_id
+            );
+
             let mut dir = version.write().await;
 
             let deletes = dir
@@ -691,15 +706,22 @@ where
             (deletes, inserts)
         };
 
-        let inserts = seq
-            .expect_next((schema.clone(), collator.clone(), inserts))
-            .await?;
+        debug!("decode inserts log as a b_tree::BTreeLock...");
+        let cxt = (schema.clone(), collator.clone(), inserts.clone());
+        let inserts = if let Some(inserts) = seq.next_element(cxt).await? {
+            inserts
+        } else {
+            trace!("there is no inserts log to be decoded");
+            Version::create(schema.clone(), collator.clone(), inserts).map_err(de::Error::custom)?
+        };
 
+        trace!("create deletes log");
         let deletes = Version::create(schema.clone(), collator.clone(), deletes)
             .map_err(de::Error::custom)?;
 
         let version = Delta { inserts, deletes };
 
+        trace!("create canonical b_tree::BTreeLock");
         let canon = Version::create(schema, collator, canon).map_err(de::Error::custom)?;
 
         let collator = canon.collator().clone();

@@ -406,23 +406,29 @@ impl DestreamVisitor for ValueTypeVisitor {
 
     async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
         if let Some(path) = access.next_key::<TCPathBuf>(()).await? {
-            if let Ok(list) = access.next_value::<Tuple<Value>>(()).await {
-                if list.is_empty() {
-                    self.visit_path(path)
-                } else {
-                    Err(DestreamError::invalid_value(list, "empty list"))
-                }
-            } else if let Ok(map) = access.next_value::<Map<Value>>(()).await {
+            if let Ok(map) = access.next_value::<Map<Value>>(()).await {
                 if map.is_empty() {
                     self.visit_path(path)
                 } else {
-                    Err(DestreamError::invalid_value(
-                        format!("{:?}", map),
-                        "empty map",
-                    ))
+                    Err(de::Error::custom(format!(
+                        "invalid specification {:?} for Value class {}",
+                        map, path
+                    )))
+                }
+            } else if let Ok(list) = access.next_value::<Tuple<Value>>(()).await {
+                if list.is_empty() {
+                    self.visit_path(path)
+                } else {
+                    Err(de::Error::custom(format!(
+                        "invalid specification {:?} for Value class {}",
+                        list, path
+                    )))
                 }
             } else {
-                Err(de::Error::custom("invalid Value class"))
+                Err(de::Error::custom(format!(
+                    "invalid specification for Value class {}",
+                    path
+                )))
             }
         } else {
             Err(DestreamError::invalid_length(0, Self::expecting()))

@@ -5,6 +5,7 @@ use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use b_table::b_tree;
 use destream::{de, en};
+use log::trace;
 use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
 
 use tc_error::{bad_request, TCError, TCResult};
@@ -50,13 +51,14 @@ impl Schema {
             }
         }
 
+        // todo: rewrite this formula to avoid iteration
         fn index_size(order: usize, key_size: usize, data_size: usize) -> usize {
             let num_keys = data_size / key_size;
             let num_leaves = num_keys / order;
 
             let mut num_index_nodes = num_leaves / order;
             let mut index_size = num_leaves * (key_size + UUID_SIZE);
-            while num_leaves > order {
+            while num_index_nodes > order {
                 num_index_nodes /= order;
                 index_size += num_index_nodes * (key_size + UUID_SIZE);
             }
@@ -198,6 +200,7 @@ impl de::FromStream for Schema {
 
     async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
         let columns = Vec::<Column>::from_stream(cxt, decoder).await?;
+        trace!("decoded columns");
         Self::new(columns).map_err(de::Error::custom)
     }
 }
@@ -355,18 +358,22 @@ impl de::Visitor for ColumnVisitor {
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        trace!("decode column name");
         let name = seq
             .next_element(())
             .await?
             .ok_or_else(|| de::Error::invalid_length(0, "a Column name"))?;
 
+        trace!("decode column dtype");
         let dtype = seq
             .next_element(())
             .await?
             .ok_or_else(|| de::Error::invalid_length(1, "a Column data type"))?;
 
+        trace!("decode column size (optional)");
         let max_len = seq.next_element(()).await?;
 
+        trace!("decoded column");
         Ok(Column {
             name,
             dtype,

@@ -5,6 +5,7 @@ use async_hash::Output;
 use async_trait::async_trait;
 use destream::de;
 use futures::TryFutureExt;
+use log::debug;
 use safecast::{AsType, TryCastFrom};
 
 use tc_error::*;
@@ -219,6 +220,8 @@ where
         class: CollectionType,
         access: &mut A,
     ) -> Result<CollectionBase<Txn, FE>, A::Error> {
+        debug!("CollectionVisitor::visit_map_value with class {:?}", class);
+
         match class {
             CollectionType::BTree(_) => {
                 access
