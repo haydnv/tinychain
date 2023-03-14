@@ -5,6 +5,7 @@ use std::fmt;
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use b_table::b_tree;
+use futures::Stream;
 use safecast::{as_type, AsType};
 
 use tc_error::*;
@@ -106,6 +107,25 @@ pub trait BTreeInstance: Clone + Instance {
     fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice>;
 }
 
+/// B+Tree write methods.
+#[async_trait]
+pub trait BTreeWrite: BTreeInstance {
+    /// Delete all the [`Key`]s in this `BTree`.
+    async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()>;
+
+    /// Insert the given [`Key`] into this `BTree`.
+    ///
+    /// If the [`Key`] is already present, this is a no-op.
+    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()>;
+
+    /// Insert all the keys from the given [`Stream`] into this `BTree`.
+    /// The stream of `keys` does not need to be collated.
+    /// This will stop and return an error if it encounters an invalid [`Key`].
+    async fn try_insert_from<S>(&self, txn_id: TxnId, keys: S) -> TCResult<()>
+    where
+        S: Stream<Item = TCResult<Key>> + Send + Unpin;
+}
+
 pub enum BTree<Txn, FE> {
     File(BTreeFile<Txn, FE>),
     Slice(BTreeSlice<Txn, FE>),
@@ -185,5 +205,51 @@ where
             Self::File(file) => file.keys(txn_id).await,
             Self::Slice(slice) => slice.keys(txn_id).await,
         }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> BTreeWrite for BTree<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
+    async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
+        match self {
+            Self::File(file) => file.delete(txn_id, range).await,
+            slice => Err(bad_request!(
+                "{:?} does not support write operations",
+                slice
+            )),
+        }
+    }
+
+    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+        match self {
+            Self::File(file) => file.insert(txn_id, key).await,
+            slice => Err(bad_request!(
+                "{:?} does not support write operations",
+                slice
+            )),
+        }
+    }
+
+    async fn try_insert_from<S>(&self, txn_id: TxnId, keys: S) -> TCResult<()>
+    where
+        S: Stream<Item = TCResult<Key>> + Send + Unpin,
+    {
+        match self {
+            Self::File(file) => file.try_insert_from(txn_id, keys).await,
+            slice => Err(bad_request!(
+                "{:?} does not support write operations",
+                slice
+            )),
+        }
+    }
+}
+
+impl<Txn, FE> fmt::Debug for BTree<Txn, FE> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a BTree")
     }
 }

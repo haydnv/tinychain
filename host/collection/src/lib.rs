@@ -12,7 +12,9 @@ use tcgeneric::{
     path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
 };
 
-pub use btree::{BTree, BTreeInstance, BTreeType, Node};
+use btree::{BTreeInstance, BTreeType};
+
+pub use btree::{BTree, Node};
 use table::TableType;
 use tensor::TensorType;
 

@@ -9,9 +9,10 @@ use destream::de;
 use ds_ext::link::{label, Label};
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, DirWriteGuard, FileLoad};
-use futures::{future, join, try_join, TryFutureExt, TryStreamExt};
+use futures::{future, join, try_join, Stream, TryFutureExt, TryStreamExt};
 use safecast::AsType;
 
+use crate::btree::BTreeWrite;
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Inner, Persist, Restore};
 use tc_transact::{Transact, Transaction, TxnId};
@@ -294,13 +295,13 @@ where
     }
 }
 
-impl<Txn, FE> BTreeFile<Txn, FE>
+#[async_trait]
+impl<Txn, FE> BTreeWrite for BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    /// Delete the given [`Range`] from this [`BTreeFile`] at `txn_id`.
-    pub async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
+    async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
         let range = Arc::new(self.schema().validate_range(range)?);
         let _permit = self.semaphore.write(txn_id, range.clone()).await?;
 
@@ -322,8 +323,7 @@ where
         Ok(())
     }
 
-    /// Insert the given `key` into this [`BTreeFile`] at `txn_id`.
-    pub async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
         let key = b_tree::Schema::validate(self.schema(), key)?;
 
         let _permit = self
@@ -339,6 +339,29 @@ where
         let (mut inserts, mut deletes) = delta.write().await;
 
         try_join!(inserts.insert(key.clone()), deletes.delete(key))?;
+
+        Ok(())
+    }
+
+    async fn try_insert_from<S>(&self, txn_id: TxnId, mut keys: S) -> TCResult<()>
+    where
+        S: Stream<Item = TCResult<Key>> + Send + Unpin,
+    {
+        let _permit = self
+            .semaphore
+            .write(txn_id, Arc::new(Range::default()))
+            .await?;
+
+        let delta = {
+            let mut state = self.state.write().expect("state");
+            state.pending_version(txn_id, self.schema(), self.collator().inner())?
+        };
+
+        let (mut inserts, mut deletes) = delta.write().await;
+
+        while let Some(key) = keys.try_next().await? {
+            try_join!(inserts.insert(key.clone()), deletes.delete(key))?;
+        }
 
         Ok(())
     }
