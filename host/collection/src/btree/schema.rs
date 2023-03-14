@@ -77,6 +77,11 @@ impl Schema {
         })
     }
 
+    /// Iterate over the [`Column`]s in this [`Schema`].
+    pub fn iter(&self) -> impl Iterator<Item = &Column> {
+        self.columns.iter()
+    }
+
     /// Return an error if the given `range` does not match this [`Schema`].
     #[inline]
     pub fn validate_range(&self, range: Range) -> TCResult<Range> {
@@ -157,6 +162,24 @@ impl<'a, D: Digest> Hash<D> for &'a Schema {
     }
 }
 
+impl IntoIterator for Schema {
+    type Item = Column;
+    type IntoIter = std::vec::IntoIter<Column>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.columns.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Schema {
+    type Item = &'a Column;
+    type IntoIter = <&'a Vec<Column> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.columns).into_iter()
+    }
+}
+
 impl<'en> en::IntoStream<'en> for Schema {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         self.columns.into_stream(encoder)
@@ -176,6 +199,12 @@ impl de::FromStream for Schema {
     async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
         let columns = Vec::<Column>::from_stream(cxt, decoder).await?;
         Self::new(columns).map_err(de::Error::custom)
+    }
+}
+
+impl CastFrom<Schema> for Value {
+    fn cast_from(schema: Schema) -> Self {
+        schema.columns.into_iter().map(Value::cast_from).collect()
     }
 }
 

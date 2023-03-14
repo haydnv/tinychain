@@ -16,7 +16,7 @@ use tcgeneric::{
 };
 
 pub use file::BTreeFile;
-pub use schema::Schema;
+pub use schema::{Column, Schema};
 pub use slice::BTreeSlice;
 pub(crate) use stream::BTreeView;
 pub use stream::Keys;
@@ -132,6 +132,7 @@ pub enum BTree<Txn, FE> {
 }
 
 as_type!(BTree<Txn, FE>, File, BTreeFile<Txn, FE>);
+as_type!(BTree<Txn, FE>, Slice, BTreeSlice<Txn, FE>);
 
 impl<Txn, FE> Clone for BTree<Txn, FE> {
     fn clone(&self) -> Self {

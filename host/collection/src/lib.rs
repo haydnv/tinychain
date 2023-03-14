@@ -25,6 +25,7 @@ pub mod btree;
 pub mod table;
 pub mod tensor;
 
+use crate::btree::BTreeFile;
 pub use base::{CollectionBase, CollectionVisitor};
 pub use schema::Schema;
 
@@ -141,6 +142,12 @@ impl<Txn, FE> From<CollectionBase<Txn, FE>> for Collection<Txn, FE> {
         match base {
             CollectionBase::BTree(btree) => Self::BTree(btree.into()),
         }
+    }
+}
+
+impl<Txn, FE> From<BTreeFile<Txn, FE>> for Collection<Txn, FE> {
+    fn from(btree: BTreeFile<Txn, FE>) -> Self {
+        Self::BTree(btree.into())
     }
 }
 
