@@ -9,7 +9,7 @@ use destream::de;
 use ds_ext::link::{label, Label};
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, DirWriteGuard, FileLoad};
-use futures::{future, join, try_join, Stream, TryFutureExt, TryStreamExt};
+use futures::{future, try_join, Stream, TryFutureExt, TryStreamExt};
 use log::{debug, trace};
 use safecast::AsType;
 
@@ -69,11 +69,17 @@ where
     }
 
     async fn read(self) -> (VersionReadGuard<FE>, VersionReadGuard<FE>) {
-        join!(self.inserts.into_read(), self.deletes.into_read())
+        // acquire these locks in order to avoid the risk of a deadlock
+        let inserts = self.inserts.into_read().await;
+        let deletes = self.deletes.into_read().await;
+        (inserts, deletes)
     }
 
     async fn write(self) -> (VersionWriteGuard<FE>, VersionWriteGuard<FE>) {
-        join!(self.inserts.into_write(), self.deletes.into_write())
+        // acquire these locks in order to avoid the risk of a deadlock
+        let inserts = self.inserts.into_write().await;
+        let deletes = self.deletes.into_write().await;
+        (inserts, deletes)
     }
 
     async fn merge_into<'a>(
@@ -83,19 +89,23 @@ where
         range: Arc<Range>,
         reverse: bool,
     ) -> TCBoxTryStream<'a, Key> {
-        let (deleted, inserted) = join!(self.deletes.into_read(), self.inserts.into_read());
+        trace!("merge delta");
 
-        keys = Box::pin(collate::try_merge(
-            collator.clone(),
-            keys,
-            inserted.keys(range.clone(), reverse).map_err(TCError::from),
-        ));
+        let (inserted, deleted) = self.read().await;
 
-        keys = Box::pin(collate::try_diff(
-            collator.clone(),
-            keys,
-            deleted.keys(range, reverse).map_err(TCError::from),
-        ));
+        if inserted.is_empty(&range).await.expect("inserted") {
+            trace!("no inserts to merge");
+        } else {
+            let inserted = inserted.keys(range.clone(), reverse).map_err(TCError::from);
+            keys = Box::pin(collate::try_merge(collator.clone(), keys, inserted));
+        }
+
+        if deleted.is_empty(&range).await.expect("deleted") {
+            trace!("no deletes to merge");
+        } else {
+            let deleted = deleted.keys(range, reverse).map_err(TCError::from);
+            keys = Box::pin(collate::try_diff(collator.clone(), keys, deleted));
+        }
 
         keys
     }
@@ -193,11 +203,15 @@ where
         range: Arc<Range>,
         reverse: bool,
     ) -> TCBoxTryStream<'a, Key> {
+        trace!("BTreeFile::into_keys {:?}", range);
+
         let collator = self.collator().clone();
 
         // read-lock the canonical version BEFORE locking self.state,
         // to avoid a deadlock or conflict with Self::finalize
         let canon = self.canon.into_read().await;
+
+        trace!("BTreeFile::into_keys locked the canonical version for reading");
 
         let (deltas, pending) = {
             let state = self.state.read().expect("state");
@@ -214,17 +228,23 @@ where
             (deltas, pending)
         };
 
+        trace!("BTreeFile::into_keys got a list of delta versions");
+
         let keys = canon.keys(range.clone(), reverse).map_err(TCError::from);
 
         let mut keys: TCBoxTryStream<'static, Key> = Box::pin(keys);
 
         for delta in deltas {
+            trace!("BTreeFile::into_keys merging delta version...");
+
             keys = delta
                 .merge_into(keys, collator.clone(), range.clone(), reverse)
                 .await;
         }
 
         if let Some(pending) = pending {
+            trace!("BTreeFile::into_keys merging pending delta...");
+
             keys = pending
                 .merge_into(keys, collator.clone(), range.clone(), reverse)
                 .await;
@@ -239,7 +259,12 @@ where
         range: Arc<Range>,
         reverse: bool,
     ) -> TCResult<Keys<'a>> {
-        let permit = self.semaphore.read(txn_id, range).await?;
+        debug!("BTreeFile::into_stream");
+
+        let permit = self.semaphore.read(txn_id, range.clone()).await?;
+
+        trace!("got permit for {:?}", range);
+
         let keys = self
             .into_keys(txn_id, permit.deref().clone(), reverse)
             .await;
@@ -273,12 +298,16 @@ where
     }
 
     async fn count(&self, txn_id: TxnId) -> TCResult<u64> {
+        debug!("BTreeFile::count");
+
         let keys = self.clone().keys(txn_id).await?;
         keys.try_fold(0u64, |count, _key| future::ready(Ok(count + 1)))
             .await
     }
 
     async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
+        debug!("BTreeFile::is_empty");
+
         let mut keys = self.clone().keys(txn_id).await?;
         keys.try_next().map_ok(|key| key.is_none()).await
     }
@@ -287,6 +316,8 @@ where
     where
         Self: 'a,
     {
+        debug!("BTreeFile::keys");
+
         self.into_stream(txn_id, Arc::new(Range::default()), false)
             .await
     }
@@ -326,20 +357,29 @@ where
 
     async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
         let key = b_tree::Schema::validate(self.schema(), key)?;
+        debug!("BTreeFile::insert {:?} at {}", key, txn_id);
 
         let _permit = self
             .semaphore
             .write(txn_id, Arc::new(Range::from_prefix(key.clone())))
             .await?;
 
+        trace!("BTreeFile::insert got permit");
+
         let delta = {
             let mut state = self.state.write().expect("state");
             state.pending_version(txn_id, self.schema(), self.collator().inner())?
         };
 
+        trace!("BTreeFile::insert got pending delta");
+
         let (mut inserts, mut deletes) = delta.write().await;
 
+        trace!("BTreeFile::insert locked pending delta for writing");
+
         try_join!(inserts.insert(key.clone()), deletes.delete(key))?;
+
+        trace!("BTreeFile::insert is complete");
 
         Ok(())
     }
@@ -447,7 +487,7 @@ where
         };
 
         for delta in deltas {
-            let (deleted, inserted) = delta.read().await;
+            let (inserted, deleted) = delta.read().await;
             canon.merge(inserted).await.expect("commit inserts");
             canon.delete_all(deleted).await.expect("commit deletes");
         }
@@ -607,7 +647,7 @@ where
             state.pending_version(txn_id, schema, collator)?
         };
 
-        let (mut deletes, mut inserts) = delta.write().await;
+        let (mut inserts, mut deletes) = delta.write().await;
 
         let mut to_delete = self
             .clone()
