@@ -114,8 +114,10 @@ impl Builder {
     async fn load_dir(&self, path: PathBuf, txn_id: tc_transact::TxnId) -> fs::Dir {
         Self::maybe_create(&path);
 
+        log::debug!("load {} into cache", path.display());
         let cache = self.cache.clone().load(path).expect("cache dir");
 
+        log::debug!("load {:?} into the transactional filesystem", cache);
         fs::Dir::load(txn_id, cache).await.expect("store")
     }
 
@@ -141,6 +143,8 @@ impl Builder {
 
             self.load_dir(path, txn_id).await
         };
+
+        log::debug!("loaded {:?}", dir);
 
         let actor_id = tcgeneric::TCPathBuf::default().into();
         let actor = if let Some(public_key) = &self.public_key {

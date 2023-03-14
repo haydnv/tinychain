@@ -14,22 +14,17 @@ categories = ["concurrency", "data-structures"]
 [dependencies]
 async-hash = "0.4"
 async-trait = "0.1"
-#bytes = "1.0"
 destream = { path = "../../../destream" }
 futures = "0.3"
 freqfs = { path = "../../../freqfs", features = ["stream"] }
 get-size = "0.1"
 get-size-derive = "0.1"
-#hex = "0.4"
-#log = { version = "0.4", features = [] }
-#num_cpus = "1.13"
 rand = "0.8"
 safecast = { path = "../../../safecast" }
 sha2 = "0.10"
-#tbon = { path = "../../../tbon", features = ["tokio-io"] }
 tcgeneric = { path = "../generic" }
 tc-error = { path = "../error" }
 tc-value = { path = "../value" }
 tokio = { version = "1.25", features = ["sync"] }
-txfs = { path = "../../../txfs" }
+txfs = { path = "../../../txfs", features = ["logging"] }
 txn_lock = { path = "../../../txn_lock", features = ["logging"] }
