@@ -12,7 +12,7 @@ use destream::de::Error as DestreamError;
 use destream::{de, en};
 use email_address_parser::EmailAddress;
 use get_size::GetSize;
-use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
+use safecast::{as_type, CastFrom, CastInto, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use uuid::Uuid;
@@ -125,6 +125,15 @@ impl Default for Value {
         Self::None
     }
 }
+
+as_type!(Value, Bytes, Vec<u8>);
+as_type!(Value, Email, EmailAddress);
+as_type!(Value, Id, Id);
+as_type!(Value, Link, Link);
+as_type!(Value, Number, Number);
+as_type!(Value, String, TCString);
+as_type!(Value, Tuple, Tuple<Value>);
+as_type!(Value, Version, Version);
 
 impl PartialEq<Value> for Value {
     fn eq(&self, other: &Value) -> bool {
@@ -372,27 +381,9 @@ impl From<Bytes> for Value {
     }
 }
 
-impl From<Id> for Value {
-    fn from(id: Id) -> Self {
-        Self::Id(id)
-    }
-}
-
 impl From<Host> for Value {
     fn from(host: Host) -> Self {
         Self::Link(host.into())
-    }
-}
-
-impl From<Link> for Value {
-    fn from(link: Link) -> Self {
-        Self::Link(link)
-    }
-}
-
-impl From<Number> for Value {
-    fn from(n: Number) -> Self {
-        Self::Number(n)
     }
 }
 
@@ -411,21 +402,9 @@ impl From<TCPathBuf> for Value {
     }
 }
 
-impl From<Tuple<Value>> for Value {
-    fn from(tuple: Tuple<Value>) -> Self {
-        Self::Tuple(tuple)
-    }
-}
-
 impl From<Vec<Value>> for Value {
     fn from(tuple: Vec<Value>) -> Self {
         Self::Tuple(tuple.into())
-    }
-}
-
-impl From<Version> for Value {
-    fn from(version: Version) -> Self {
-        Self::Version(version)
     }
 }
 
@@ -505,12 +484,38 @@ impl TryFrom<Value> for Tuple<Value> {
 }
 
 impl TryCastFrom<Value> for Bound<Value> {
-    fn can_cast_from(_value: &Value) -> bool {
-        todo!()
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::None => true,
+            Value::Tuple(tuple) if tuple.len() == 2 => match &tuple[0] {
+                Value::String(bound) => bound == "in" || bound == "ex",
+                _ => false,
+            },
+            _ => false,
+        }
     }
 
-    fn opt_cast_from(_value: Value) -> Option<Bound<Value>> {
-        todo!()
+    fn opt_cast_from(value: Value) -> Option<Bound<Value>> {
+        match value {
+            Value::None => Some(Bound::Unbounded),
+            Value::Tuple(mut tuple) if tuple.len() == 2 => {
+                let value = tuple.pop().expect("value");
+                let bound = tuple.pop().expect("bound");
+                match &bound {
+                    Value::String(bound) => {
+                        if bound == "in" {
+                            Some(Bound::Included(value))
+                        } else if bound == "ex" {
+                            Some(Bound::Excluded(value))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
     }
 }
 
@@ -890,21 +895,25 @@ impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Bytes(bytes) => write!(f, "({} bytes)", bytes.len()),
-            Self::Id(id) => write!(f, "{}: {:?}", ValueType::Id, id.as_str()),
-            Self::Email(email) => write!(f, "{}: {:?}", ValueType::Email, email),
-            Self::Link(link) => write!(f, "{}: {:?}", ValueType::Link, link),
+            Self::Id(id) => write!(f, "{:?} ({})", id.as_str(), ValueType::Id),
+            Self::Email(email) => write!(f, "{:?} ({})", email, ValueType::Email),
+            Self::Link(link) => write!(f, "{:?} ({})", link, ValueType::Link),
             Self::None => f.write_str("None"),
             Self::Number(n) => fmt::Debug::fmt(n, f),
-            Self::String(s) => write!(f, "{}: {}", ValueType::String, s),
-            Self::Tuple(t) => write!(
-                f,
-                "{}: ({})",
-                ValueType::Tuple,
-                t.iter()
-                    .map(|v| format!("{:?}", v))
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
+            Self::String(s) => write!(f, "{} ({})", s, ValueType::String),
+            Self::Tuple(t) => {
+                f.write_str("(")?;
+
+                for i in 0..t.len() {
+                    write!(f, "{:?}", t[i])?;
+
+                    if i < t.len() - 1 {
+                        f.write_str(", ")?;
+                    }
+                }
+
+                f.write_str(")")
+            }
             Self::Version(v) => fmt::Debug::fmt(v, f),
         }
     }

@@ -323,6 +323,7 @@ where
     }
 
     fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice> {
+        let range = self.schema().validate_range(range)?;
         Ok(BTreeSlice::new(self, range, reverse))
     }
 }

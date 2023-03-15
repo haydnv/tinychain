@@ -3,6 +3,7 @@ use std::ops::Bound;
 
 use destream::de::Error;
 use futures::{future, StreamExt, TryFutureExt, TryStreamExt};
+use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
 use tc_collection::btree::{BTreeInstance, BTreeType, BTreeWrite, Column, Range, Schema};
@@ -10,7 +11,7 @@ use tc_error::*;
 use tc_transact::fs::{Dir, Persist};
 use tc_transact::Transaction;
 use tc_value::Value;
-use tcgeneric::{label, Map, PathSegment, Tuple};
+use tcgeneric::{label, Map, PathSegment, TCPath, Tuple};
 
 use crate::collection::{BTree, BTreeFile, Collection};
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
@@ -133,9 +134,11 @@ where
                 }
 
                 if let State::Collection(Collection::BTree(value)) = value {
+                    debug!("insert keys from {:?}", value);
                     let keys = value.keys(*txn.id()).await?;
                     self.btree.try_insert_from(*txn.id(), keys).await
                 } else if value.matches::<Value>() {
+                    debug!("insert key {:?}", value);
                     let value = Value::opt_cast_from(value).expect("value");
                     let value = value.try_cast_into(|v| TCError::unexpected(v, "a BTree key"))?;
 
@@ -192,14 +195,13 @@ impl<'a, T: BTreeInstance> Handler<'a> for CountHandler<'a, T> {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                if key.is_some() {
-                    return Err(bad_request!(
-                        "BTree::count does not accept a key {} (call BTree::slice first)",
-                        key,
-                    ));
+                if key.is_none() {
+                    self.btree.count(*txn.id()).map_ok(State::from).await
+                } else {
+                    let range = cast_into_range(Scalar::Value(key))?;
+                    let slice = self.btree.clone().slice(range, false)?;
+                    slice.count(*txn.id()).map_ok(State::from).await
                 }
-
-                self.btree.count(*txn.id()).map_ok(State::from).await
             })
         }))
     }
@@ -315,6 +317,8 @@ impl<T> From<T> for StreamHandler<T> {
 
 impl Route for BTree {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        debug!("BTree::route {}", TCPath::from(path));
+
         route(self, path)
     }
 }
@@ -391,6 +395,8 @@ fn cast_into_range(scalar: Scalar) -> TCResult<Range> {
 
         Ok(Range::with_bounds(prefix, bounds))
     } else {
+        debug!("this is not a range: {:?}", range.last().expect("last"));
+
         let prefix = range
             .into_iter()
             .map(|v| {

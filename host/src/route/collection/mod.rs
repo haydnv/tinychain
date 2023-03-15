@@ -7,7 +7,7 @@ use tc_collection::CollectionType;
 use tc_table::TableInstance;
 
 use tc_value::Value;
-use tcgeneric::{PathSegment, Tuple};
+use tcgeneric::{PathSegment, TCPath, Tuple};
 
 use crate::collection::{Collection, CollectionBase};
 use crate::route::GetHandler;
@@ -76,6 +76,8 @@ impl<'a> From<&'a Collection> for SchemaHandler<'a> {
 
 impl Route for Collection {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        log::debug!("Collection::route {}", TCPath::from(path));
+
         let child_handler: Option<Box<dyn Handler<'a> + 'a>> = match self {
             Self::BTree(btree) => btree.route(path),
             #[cfg(feature = "collection")]
