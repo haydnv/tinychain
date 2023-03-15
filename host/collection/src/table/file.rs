@@ -9,10 +9,10 @@ use freqfs::DirLock;
 use safecast::AsType;
 
 use tc_error::TCResult;
-use tc_transact::fs::{CopyFrom, Dir, Inner, Persist, Restore};
+use tc_transact::fs::{CopyFrom, Dir, Inner, Persist, Restore, VERSIONS};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
-use tcgeneric::{Instance, ThreadSafe};
+use tcgeneric::{label, Instance, Label, ThreadSafe};
 
 use crate::btree::{Node, Schema as IndexSchema};
 use crate::table::Range;
@@ -23,6 +23,12 @@ use super::{
     Key, Row, Schema, TableInstance, TableOrder, TableRead, TableSlice, TableStream, TableType,
     TableWrite, Values,
 };
+
+const CANON: Label = label("canon");
+const DELETES: Label = label("deletes");
+const INSERTS: Label = label("inserts");
+
+type Semaphore = tc_transact::lock::Semaphore<b_table::b_tree::Collator<ValueCollator>, Arc<Range>>;
 
 type Version<FE> = TableLock<Schema, IndexSchema, ValueCollator, FE>;
 
@@ -44,6 +50,7 @@ pub struct TableFile<Txn, FE> {
     dir: DirLock<FE>,
     canon: Version<FE>,
     state: Arc<RwLock<State<FE>>>,
+    semaphore: Semaphore,
     phantom: PhantomData<Txn>,
 }
 
@@ -53,6 +60,32 @@ impl<Txn, FE> Clone for TableFile<Txn, FE> {
             dir: self.dir.clone(),
             canon: self.canon.clone(),
             state: self.state.clone(),
+            semaphore: self.semaphore.clone(),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<Txn, FE> TableFile<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
+    fn new(dir: DirLock<FE>, canon: Version<FE>, versions: DirLock<FE>) -> Self {
+        let semaphore = Semaphore::new(canon.collator().clone());
+        let state = State {
+            commits: OrdHashSet::new(),
+            deltas: OrdHashMap::new(),
+            pending: OrdHashMap::new(),
+            versions,
+            finalized: None,
+        };
+
+        Self {
+            dir,
+            state: Arc::new(RwLock::new(state)),
+            canon,
+            semaphore,
             phantom: PhantomData,
         }
     }
@@ -202,12 +235,34 @@ where
     type Txn = Txn;
     type Schema = Schema;
 
-    async fn create(txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
-        todo!()
+    async fn create(_txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
+        let dir = store.into_inner();
+        let collator = ValueCollator::default();
+
+        let (canon, versions) = {
+            let mut dir = dir.write().await;
+            let versions = dir.create_dir(VERSIONS.to_string())?;
+            let canon = dir.create_dir(CANON.to_string())?;
+            let canon = Version::create(schema, collator, canon)?;
+            (canon, versions)
+        };
+
+        Ok(Self::new(dir, canon, versions))
     }
 
-    async fn load(txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
-        todo!()
+    async fn load(_txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
+        let dir = store.into_inner();
+        let collator = ValueCollator::default();
+
+        let (canon, versions) = {
+            let mut dir = dir.write().await;
+            let versions = dir.get_or_create_dir(VERSIONS.to_string())?;
+            let canon = dir.get_or_create_dir(CANON.to_string())?;
+            let canon = Version::load(schema, collator, canon)?;
+            (canon, versions)
+        };
+
+        Ok(Self::new(dir, canon, versions))
     }
 
     fn dir(&self) -> Inner<FE> {

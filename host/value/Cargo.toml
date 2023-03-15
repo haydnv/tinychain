@@ -12,7 +12,7 @@ keywords = ["tinychain", "scalar", "value", "collate"]
 categories = ["data-structures"]
 
 [dependencies]
-async-hash = "0.4"
+async-hash = { path = "../../../async-hash" }
 async-trait = "0.1"
 base64 = "0.13"
 bytes = "1.0"

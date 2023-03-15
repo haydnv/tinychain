@@ -1,13 +1,13 @@
 use std::fmt;
 
-use async_hash::{Digest, Hash, Output};
+use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
 use safecast::{as_type, AsType};
 
 use tc_error::*;
-use tc_transact::{AsyncHash, IntoView, Sha256, Transaction};
+use tc_transact::{AsyncHash, IntoView, Transaction};
 use tcgeneric::{
     path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
 };

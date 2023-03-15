@@ -7,8 +7,6 @@ use async_trait::async_trait;
 use destream::en;
 use freqfs::DirLock;
 
-pub use sha2::Sha256; // TODO: should this be exported by the async_hash crate?
-
 use tc_error::*;
 use tcgeneric::Id;
 
@@ -51,7 +49,7 @@ pub trait AsyncHash<FE> {
     type Txn: Transaction<FE>;
 
     /// Compute the hash of this state as of a given [`TxnId`]
-    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>>;
+    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<async_hash::Sha256>>;
 }
 
 /// Access a view which can be encoded with [`en::IntoStream`].

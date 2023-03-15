@@ -13,9 +13,8 @@ use futures::{future, try_join, Stream, TryFutureExt, TryStreamExt};
 use log::{debug, trace};
 use safecast::AsType;
 
-use crate::btree::BTreeWrite;
 use tc_error::*;
-use tc_transact::fs::{CopyFrom, Dir, Inner, Persist, Restore};
+use tc_transact::fs::{CopyFrom, Dir, Inner, Persist, Restore, VERSIONS};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::ValueCollator;
 use tcgeneric::{Instance, TCBoxTryStream, ThreadSafe};
@@ -23,12 +22,11 @@ use tcgeneric::{Instance, TCBoxTryStream, ThreadSafe};
 use super::schema::Schema;
 use super::slice::BTreeSlice;
 use super::stream::Keys;
-use super::{BTreeInstance, BTreeType, Key, Node, Range};
+use super::{BTreeInstance, BTreeType, BTreeWrite, Key, Node, Range};
 
 const CANON: Label = label("canon");
 const DELETES: Label = label("deletes");
 const INSERTS: Label = label("inserts");
-const VERSIONS: Label = label("versions");
 
 type Version<FE> = b_tree::BTreeLock<Schema, ValueCollator, FE>;
 type VersionReadGuard<FE> = b_tree::BTreeReadGuard<Schema, ValueCollator, FE>;
