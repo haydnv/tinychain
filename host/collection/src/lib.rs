@@ -2,7 +2,7 @@ use std::fmt;
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
-use destream::{de, en, EncodeMap};
+use destream::{de, en};
 use futures::TryFutureExt;
 use safecast::{as_type, AsType};
 
@@ -13,13 +13,14 @@ use tcgeneric::{
 };
 
 use btree::{BTreeInstance, BTreeType};
-
-pub use btree::{BTree, Node};
-use table::TableType;
+use table::{TableInstance, TableStream, TableType};
 use tensor::TensorType;
 
 mod base;
 mod schema;
+
+pub use btree::{BTree, Node};
+pub use table::Table;
 
 pub mod btree;
 pub mod table;
@@ -82,6 +83,7 @@ impl fmt::Debug for CollectionType {
 #[derive(Clone)]
 pub enum Collection<Txn, FE> {
     BTree(BTree<Txn, FE>),
+    Table(Table<Txn, FE>),
 }
 
 as_type!(Collection<Txn, FE>, BTree, BTree<Txn, FE>);
@@ -94,6 +96,7 @@ where
     fn schema(&self) -> Schema {
         match self {
             Self::BTree(btree) => btree.schema().clone().into(),
+            Self::Table(table) => table.schema().clone().into(),
         }
     }
 }
@@ -108,6 +111,7 @@ where
     fn class(&self) -> CollectionType {
         match self {
             Self::BTree(btree) => btree.class().into(),
+            Self::Table(table) => table.class().into(),
         }
     }
 }
@@ -128,6 +132,10 @@ where
                 let keys = btree.keys(*txn.id()).await?;
                 async_hash::hash_try_stream::<Sha256, _, _, _>(keys).await?
             }
+            Self::Table(table) => {
+                let rows = table.rows(*txn.id()).await?;
+                async_hash::hash_try_stream::<Sha256, _, _, _>(rows).await?
+            }
         };
 
         let mut hasher = Sha256::new();
@@ -141,6 +149,7 @@ impl<Txn, FE> From<CollectionBase<Txn, FE>> for Collection<Txn, FE> {
     fn from(base: CollectionBase<Txn, FE>) -> Self {
         match base {
             CollectionBase::BTree(btree) => Self::BTree(btree.into()),
+            CollectionBase::Table(table) => Self::Table(table.into()),
         }
     }
 }
@@ -164,6 +173,7 @@ where
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         match self {
             Self::BTree(btree) => btree.into_view(txn).map_ok(CollectionView::BTree).await,
+            Self::Table(table) => table.into_view(txn).map_ok(CollectionView::Table).await,
         }
     }
 }
@@ -196,16 +206,23 @@ impl<T, FE> fmt::Debug for Collection<T, FE> {
 /// A view of a [`Collection`] within a single `Transaction`, used for serialization.
 pub enum CollectionView<'en> {
     BTree(btree::BTreeView<'en>),
+    Table(table::TableView<'en>),
 }
 
 impl<'en> en::IntoStream<'en> for CollectionView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        use en::EncodeMap;
+
         let mut map = encoder.encode_map(Some(1))?;
 
         match self {
             Self::BTree(btree) => {
                 let classpath = BTreeType::default().path();
                 map.encode_entry(classpath.to_string(), btree)?;
+            }
+            Self::Table(table) => {
+                let classpath = TableType::default().path();
+                map.encode_entry(classpath.to_string(), table)?;
             }
         }
 

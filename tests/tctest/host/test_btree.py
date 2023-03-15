@@ -34,7 +34,7 @@ class BTreeTests(HostTest):
             result = self.host.post(ENDPOINT, cxt)
             self.assertEqual(result, x)
 
-    def testSlice(self):
+    def testSliceOne(self):
         keys = [[i, num2words(i)] for i in range(50)]
 
         cxt = tc.Context()
