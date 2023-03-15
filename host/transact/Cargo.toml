@@ -16,7 +16,7 @@ async-hash = "0.4"
 async-trait = "0.1"
 destream = { path = "../../../destream" }
 futures = "0.3"
-freqfs = { path = "../../../freqfs", features = ["stream"] }
+freqfs = { path = "../../../freqfs", features = ["all"] }
 get-size = "0.1"
 get-size-derive = "0.1"
 rand = "0.8"
@@ -25,6 +25,6 @@ sha2 = "0.10"
 tcgeneric = { path = "../generic" }
 tc-error = { path = "../error" }
 tc-value = { path = "../value" }
-tokio = { version = "1.25", features = ["sync"] }
+tokio = { version = "1.26", features = ["sync"] }
 txfs = { path = "../../../txfs", features = ["logging"] }
 txn_lock = { path = "../../../txn_lock", features = ["logging"] }

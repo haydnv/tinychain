@@ -338,18 +338,48 @@ where
         let range = Arc::new(self.schema().validate_range(range)?);
         let _permit = self.semaphore.write(txn_id, range.clone()).await?;
 
-        let delta = {
+        let (deltas, pending) = {
             let mut state = self.state.write().expect("state");
-            state.pending_version(txn_id, self.schema(), self.collator().inner())?
+
+            let deltas = state
+                .deltas
+                .iter()
+                .take_while(|(id, _)| *id < &txn_id)
+                .map(|(_, delta)| delta)
+                .cloned()
+                .collect::<Vec<_>>();
+
+            let pending = state.pending_version(txn_id, self.schema(), self.collator().inner())?;
+            (deltas, pending)
         };
 
-        let (mut inserts, mut deletes) = delta.write().await;
+        let canon = self.canon.read().await;
+        let mut keys: TCBoxTryStream<Key> =
+            Box::pin(canon.keys(range.clone(), false).map_err(TCError::from));
 
-        let deleted = BTreeSlice::new(self.clone(), range, false);
-        let mut deleted = deleted.keys(txn_id).await?;
+        for delta in deltas {
+            let collator = self.collator().clone();
+            keys = delta
+                .merge_into(keys, collator, range.clone(), false)
+                .await?;
+        }
+
+        let (mut inserts, mut deletes) = pending.write().await;
+
+        if range.is_default() {
+            inserts.truncate().await?;
+
+            while let Some(key) = keys.try_next().await? {
+                deletes.insert(key).await?;
+            }
+        } else {
+            while let Some(key) = keys.try_next().await? {
+                try_join!(inserts.delete(key.clone()), deletes.insert(key))?;
+            }
+        }
 
         // there's not much point in trying to parallelize this
-        while let Some(key) = deleted.try_next().await? {
+        while let Some(key) = keys.try_next().await? {
             try_join!(inserts.delete(key.clone().into()), deletes.insert(key))?;
         }
 
