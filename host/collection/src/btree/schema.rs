@@ -23,6 +23,7 @@ const UUID_SIZE: usize = 16;
 #[derive(Clone, Eq, PartialEq)]
 pub struct Schema {
     columns: Vec<Column>,
+    names: Vec<Id>,
     block_size: usize,
     order: usize,
 }
@@ -72,8 +73,11 @@ impl Schema {
             order += 1;
         }
 
+        let names = columns.iter().map(|col| col.name.clone()).collect();
+
         Ok(Self {
             order,
+            names,
             block_size: order * key_size,
             columns,
         })
@@ -149,6 +153,29 @@ impl b_tree::Schema for Schema {
                     .ok_or_else(|| bad_request!("invalid value for column {}", &col.name))
             })
             .collect()
+    }
+}
+
+impl b_table::IndexSchema for Schema {
+    type Id = Id;
+
+    fn columns(&self) -> &[Self::Id] {
+        &self.names
+    }
+
+    fn extract_key(&self, key: &[Self::Value], other: &Self) -> b_tree::Key<Self::Value> {
+        let mut extracted = Vec::with_capacity(b_tree::Schema::len(other));
+
+        // TODO: should this construct a HashMap instead of using a nested iteration?
+        for i in 0..b_tree::Schema::len(other) {
+            for (val, name) in key.iter().zip(&self.names) {
+                if name == &other.columns()[i] {
+                    extracted.push(val.clone());
+                }
+            }
+        }
+
+        extracted
     }
 }
 
