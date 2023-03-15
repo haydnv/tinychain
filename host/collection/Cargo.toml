@@ -14,12 +14,17 @@ categories = ["database", "database-implementations", "data-structures"]
 [dependencies]
 async-hash = "0.4"
 async-trait = "0.1"
-b-table = { path = "../../../b-table" }
-b-tree = { path = "../../../b-tree" }
+b-table = { path = "../../../b-table", features = ["stream"] }
+collate = { path = "../../../collate", features = ["stream"] }
 destream = { path = "../../../destream" }
+ds-ext = { path = "../../../ds-ext" }
 futures = "0.3"
+freqfs = { path = "../../../freqfs" }
+log = { version = "0.4", features = ["release_max_level_info"] }
+num_cpus = "1.15"
 safecast = { path = "../../../safecast" }
 tc-error = { path = "../error" }
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }
 tcgeneric = { path = "../generic" }
+tokio = { version = "1.26", features = ["sync"] }

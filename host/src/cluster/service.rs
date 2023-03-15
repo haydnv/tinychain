@@ -10,6 +10,7 @@ use futures::future::{join_all, try_join_all, TryFutureExt};
 use futures::{join, try_join};
 use safecast::{as_type, AsType};
 
+use tc_collection::Schema as CollectionSchema;
 use tc_error::*;
 use tc_transact::fs::*;
 use tc_transact::lock::TxnLock;
@@ -19,7 +20,7 @@ use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, TCPathBuf};
 
 use crate::chain::{Chain, ChainType, Recover};
 use crate::cluster::{DirItem, Replica};
-use crate::collection::{CollectionBase, Schema as CollectionSchema};
+use crate::collection::CollectionBase;
 use crate::fs;
 use crate::fs::CacheBlock;
 use crate::object::{InstanceClass, ObjectType};

@@ -242,7 +242,7 @@ where
         };
 
         info!(
-            "{} will distribute commit {} of {} to replica set {}...",
+            "{:?} will distribute commit {} of {} to replica set {}...",
             self,
             txn.id(),
             self.schema.path,

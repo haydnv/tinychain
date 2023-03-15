@@ -145,6 +145,12 @@ impl<FE: ThreadSafe + for<'a> FileSave<'a>> Transact for Dir<FE> {
     }
 }
 
+impl<FE> fmt::Debug for Dir<FE> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.inner.fmt(f)
+    }
+}
+
 /// A transactional file
 pub struct File<FE, N, B> {
     inner: txfs::Dir<TxnId, FE>,

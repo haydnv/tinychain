@@ -6,13 +6,14 @@ use futures::future::TryFutureExt;
 use log::debug;
 use safecast::*;
 
+use tc_collection::CollectionType;
 use tc_error::*;
 use tc_transact::fs::*;
 use tc_transact::{AsyncHash, Transact, Transaction};
 use tc_value::Value;
 use tcgeneric::{Id, NativeClass};
 
-use crate::collection::{Collection, CollectionType};
+use crate::collection::Collection;
 use crate::fs;
 use crate::scalar::{OpRef, Scalar, TCRef};
 use crate::state::State;

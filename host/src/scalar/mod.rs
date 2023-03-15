@@ -660,17 +660,6 @@ impl TryFrom<Scalar> for Map<Scalar> {
     }
 }
 
-impl TryFrom<Scalar> for (Bound<Value>, Bound<Value>) {
-    type Error = TCError;
-
-    fn try_from(scalar: Scalar) -> TCResult<(Bound<Value>, Bound<Value>)> {
-        match scalar {
-            Scalar::Range(range) => Ok(range),
-            other => Err(TCError::unexpected(other, "a Range")),
-        }
-    }
-}
-
 impl TryFrom<Scalar> for TCRef {
     type Error = TCError;
 
@@ -694,12 +683,36 @@ impl TryFrom<Scalar> for Value {
 }
 
 impl TryCastFrom<Scalar> for (Bound<Value>, Bound<Value>) {
-    fn can_cast_from(_scalar: &Scalar) -> bool {
-        todo!()
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Range(_) => true,
+            Scalar::Value(value) => Self::can_cast_from(value),
+            Scalar::Tuple(tuple) if tuple.len() == 2 => tuple.iter().all(|scalar| match scalar {
+                Scalar::Value(value) => Bound::<Value>::can_cast_from(value),
+                Scalar::Tuple(tuple) if tuple.len() == 2 => match &tuple[0] {
+                    Scalar::Value(Value::String(bound)) if bound == "in" || bound == "ex" => {
+                        Value::can_cast_from(&tuple[1])
+                    }
+                    _ => false,
+                },
+                _ => false,
+            }),
+            Scalar::Tuple(_) => false,
+            _ => false,
+        }
     }
 
-    fn opt_cast_from(_scalar: Scalar) -> Option<Self> {
-        todo!()
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Range(range) => Some(range),
+            Scalar::Value(value) => Self::opt_cast_from(value),
+            Scalar::Tuple(mut tuple) if tuple.len() == 2 => {
+                let hi: Value = tuple.pop().expect("hi").opt_cast_into()?;
+                let lo: Value = tuple.pop().expect("lo").opt_cast_into()?;
+                Some((lo.opt_cast_into()?, hi.opt_cast_into()?))
+            }
+            _ => None,
+        }
     }
 }
 

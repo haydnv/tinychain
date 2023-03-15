@@ -1,17 +1,155 @@
 use std::fmt;
+use std::ops::Bound;
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
+use b_table::b_tree;
 use destream::{de, en};
+use log::trace;
 use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
 
+use tc_error::{bad_request, TCError, TCResult};
 use tc_value::{NumberType, Value, ValueType};
 use tcgeneric::{Id, NativeClass};
+
+use super::{Key, Range};
+
+const MEGA: usize = 1_000_000;
+const MIN_ORDER: usize = 4;
+const TERA: usize = 1_000_000_000_000;
+const UUID_SIZE: usize = 16;
 
 /// The schema of a B+Tree
 #[derive(Clone, Eq, PartialEq)]
 pub struct Schema {
     columns: Vec<Column>,
+    block_size: usize,
+    order: usize,
+}
+
+impl Schema {
+    /// Construct a new B+Tree schema with the given `columns`.
+    pub fn new(columns: Vec<Column>) -> TCResult<Self> {
+        let mut key_size = 0;
+        for col in &columns {
+            if let Some(size) = col.dtype().size() {
+                key_size += size;
+
+                if col.max_len().is_some() {
+                    return Err(bad_request!(
+                        "maximum length is not applicable to a column of type {}",
+                        col.dtype(),
+                    ));
+                }
+            } else if let Some(size) = col.max_len() {
+                key_size += size;
+            } else {
+                return Err(bad_request!(
+                    "column of type {} requires a maximum length",
+                    col.dtype(),
+                ));
+            }
+        }
+
+        // todo: rewrite this formula to avoid iteration
+        fn index_size(order: usize, key_size: usize, data_size: usize) -> usize {
+            let num_keys = data_size / key_size;
+            let num_leaves = num_keys / order;
+
+            let mut num_index_nodes = num_leaves / order;
+            let mut index_size = num_leaves * (key_size + UUID_SIZE);
+            while num_index_nodes > order {
+                num_index_nodes /= order;
+                index_size += num_index_nodes * (key_size + UUID_SIZE);
+            }
+
+            index_size
+        }
+
+        // calculate the minimum order such that 1TB of leaf data on disk needs 100MB of index data
+        let mut order = MIN_ORDER;
+        while index_size(order, key_size, TERA) > 100 * MEGA {
+            order += 1;
+        }
+
+        Ok(Self {
+            order,
+            block_size: order * key_size,
+            columns,
+        })
+    }
+
+    /// Iterate over the [`Column`]s in this [`Schema`].
+    pub fn iter(&self) -> impl Iterator<Item = &Column> {
+        self.columns.iter()
+    }
+
+    /// Return an error if the given `range` does not match this [`Schema`].
+    #[inline]
+    pub fn validate_range(&self, range: Range) -> TCResult<Range> {
+        if range.len() > self.columns.len() {
+            return Err(bad_request!("{:?} has too many columns", range));
+        }
+
+        let (input_prefix, (start, end)) = range.into_inner();
+
+        let mut prefix = Vec::with_capacity(input_prefix.len());
+        for (value, column) in input_prefix.into_iter().zip(&self.columns) {
+            let value = column.dtype.try_cast(value)?;
+            prefix.push(value);
+        }
+
+        if start == Bound::Unbounded && end == Bound::Unbounded {
+            Ok(Range::from_prefix(prefix))
+        } else {
+            let dtype = self.columns[prefix.len()].dtype;
+            let validate_bound = |bound| match bound {
+                Bound::Unbounded => Ok(Bound::Unbounded),
+                Bound::Included(value) => dtype.try_cast(value).map(Bound::Included),
+                Bound::Excluded(value) => dtype.try_cast(value).map(Bound::Excluded),
+            };
+
+            let start = validate_bound(start)?;
+            let end = validate_bound(end)?;
+
+            Ok(Range::with_bounds(prefix, (start, end)))
+        }
+    }
+}
+
+impl b_tree::Schema for Schema {
+    type Error = TCError;
+    type Value = Value;
+
+    fn block_size(&self) -> usize {
+        self.block_size
+    }
+
+    fn len(&self) -> usize {
+        self.columns.len()
+    }
+
+    fn order(&self) -> usize {
+        self.order
+    }
+
+    fn validate(&self, key: Key) -> TCResult<Key> {
+        if key.len() != self.len() {
+            return Err(bad_request!(
+                "BTree expected a key of length {}, not {}",
+                self.len(),
+                key.len()
+            ));
+        }
+
+        key.into_iter()
+            .zip(&self.columns)
+            .map(|(val, col)| {
+                val.into_type(col.dtype)
+                    .ok_or_else(|| bad_request!("invalid value for column {}", &col.name))
+            })
+            .collect()
+    }
 }
 
 impl<D: Digest> Hash<D> for Schema {
@@ -26,6 +164,24 @@ impl<'a, D: Digest> Hash<D> for &'a Schema {
     }
 }
 
+impl IntoIterator for Schema {
+    type Item = Column;
+    type IntoIter = std::vec::IntoIter<Column>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.columns.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Schema {
+    type Item = &'a Column;
+    type IntoIter = <&'a Vec<Column> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.columns).into_iter()
+    }
+}
+
 impl<'en> en::IntoStream<'en> for Schema {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         self.columns.into_stream(encoder)
@@ -35,6 +191,23 @@ impl<'en> en::IntoStream<'en> for Schema {
 impl<'en> en::ToStream<'en> for Schema {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         self.columns.to_stream(encoder)
+    }
+}
+
+#[async_trait]
+impl de::FromStream for Schema {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
+        let columns = Vec::<Column>::from_stream(cxt, decoder).await?;
+        trace!("decoded columns");
+        Self::new(columns).map_err(de::Error::custom)
+    }
+}
+
+impl CastFrom<Schema> for Value {
+    fn cast_from(schema: Schema) -> Self {
+        schema.columns.into_iter().map(Value::cast_from).collect()
     }
 }
 
@@ -185,18 +358,22 @@ impl de::Visitor for ColumnVisitor {
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        trace!("decode column name");
         let name = seq
             .next_element(())
             .await?
             .ok_or_else(|| de::Error::invalid_length(0, "a Column name"))?;
 
+        trace!("decode column dtype");
         let dtype = seq
             .next_element(())
             .await?
             .ok_or_else(|| de::Error::invalid_length(1, "a Column data type"))?;
 
+        trace!("decode column size (optional)");
         let max_len = seq.next_element(()).await?;
 
+        trace!("decoded column");
         Ok(Column {
             name,
             dtype,

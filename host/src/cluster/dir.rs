@@ -380,16 +380,17 @@ where
     Cluster<BlockChain<T>>: Recover,
 {
     async fn recover(&self, txn: &Txn) -> TCResult<()> {
-        todo!()
-        // let contents = self.contents.read(*txn.id()).await?;
-        // let recovery = contents.values().map(|entry| match entry {
-        //     DirEntry::Dir(dir) => dir.recover(txn),
-        //     DirEntry::Item(item) => item.recover(txn),
-        // });
-        //
-        // try_join_all(recovery).await?;
+        let contents = self.contents.iter(*txn.id()).await?;
+        let recovery = contents.map(|(_name, entry)| async move {
+            match entry.clone() {
+                DirEntry::Dir(dir) => dir.recover(txn).await,
+                DirEntry::Item(item) => item.recover(txn).await,
+            }
+        });
 
-        // Ok(())
+        try_join_all(recovery).await?;
+
+        Ok(())
     }
 }
 

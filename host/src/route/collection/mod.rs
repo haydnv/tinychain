@@ -1,20 +1,19 @@
-use safecast::CastInto;
+use safecast::{CastFrom, CastInto};
 
-#[cfg(feature = "collection")]
-use tc_btree::BTreeInstance;
+use tc_collection::btree::{BTreeInstance, BTreeWrite};
+use tc_collection::CollectionType;
 
 #[cfg(feature = "collection")]
 use tc_table::TableInstance;
 
 use tc_value::Value;
-use tcgeneric::{PathSegment, Tuple};
+use tcgeneric::{PathSegment, TCPath, Tuple};
 
-use crate::collection::{Collection, CollectionBase, CollectionType};
+use crate::collection::{Collection, CollectionBase};
 use crate::route::GetHandler;
 
 use super::{Handler, Route};
 
-#[cfg(feature = "collection")]
 mod btree;
 
 #[cfg(feature = "collection")]
@@ -52,13 +51,7 @@ impl<'a> Handler<'a> for SchemaHandler<'a> {
                 key.expect_none()?;
 
                 let schema: Value = match self.collection {
-                    #[cfg(feature = "collection")]
-                    Collection::BTree(btree) => btree
-                        .schema()
-                        .to_vec()
-                        .into_iter()
-                        .collect::<Tuple<Value>>()
-                        .into(),
+                    Collection::BTree(btree) => btree.schema().clone().cast_into(),
 
                     #[cfg(feature = "collection")]
                     Collection::Table(table) => table.schema().clone().cast_into(),
@@ -83,8 +76,9 @@ impl<'a> From<&'a Collection> for SchemaHandler<'a> {
 
 impl Route for Collection {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        log::debug!("Collection::route {}", TCPath::from(path));
+
         let child_handler: Option<Box<dyn Handler<'a> + 'a>> = match self {
-            #[cfg(feature = "collection")]
             Self::BTree(btree) => btree.route(path),
             #[cfg(feature = "collection")]
             Self::Table(table) => table.route(path),
@@ -112,7 +106,6 @@ impl Route for Collection {
 impl Route for CollectionBase {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match self {
-            #[cfg(feature = "collection")]
             Self::BTree(btree) => btree.route(path),
             #[cfg(feature = "collection")]
             Self::Table(table) => table.route(path),
@@ -137,7 +130,6 @@ impl Route for Static {
         }
 
         match path[0].as_str() {
-            #[cfg(feature = "collection")]
             "btree" => btree::Static.route(&path[1..]),
             #[cfg(feature = "collection")]
             "table" => table::Static.route(&path[1..]),
