@@ -457,15 +457,14 @@ where
         let mut state = self.state.write().expect("state");
 
         if state.finalized.as_ref() > Some(&txn_id) {
-            panic!("tried to commit finalized version {}", txn_id);
-        } else if state.commits.contains(&txn_id) {
-            return log::warn!("duplicate commit at {}", txn_id);
+            panic!("cannot commit finalized version {}", txn_id);
+        } else if !state.commits.insert(txn_id) {
+            log::warn!("duplicate commit at {}", txn_id);
         } else if let Some(pending) = state.pending.remove(&txn_id) {
             state.deltas.insert(txn_id, pending);
         }
 
         self.semaphore.finalize(&txn_id, false);
-        state.commits.insert(txn_id);
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
