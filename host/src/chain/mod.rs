@@ -4,14 +4,14 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use async_hash::generic_array::GenericArray;
-use async_hash::{Digest, Hash, Output};
+use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Persist};
-use tc_transact::{AsyncHash, IntoView, Sha256, Transact, TxnId};
+use tc_transact::{AsyncHash, IntoView, Transact, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
 

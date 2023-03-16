@@ -5,7 +5,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::str::FromStr;
 
-use async_hash::{Digest, Hash, Output};
+use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de::{self, Error};
@@ -17,7 +17,7 @@ use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
 
 use tc_collection::{CollectionType, CollectionVisitor};
 use tc_error::*;
-use tc_transact::{AsyncHash, Sha256, Transaction};
+use tc_transact::{AsyncHash, Transaction};
 use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 

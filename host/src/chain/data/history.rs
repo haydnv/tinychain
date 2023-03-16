@@ -4,7 +4,7 @@ use std::fmt;
 use std::iter;
 
 use async_hash::generic_array::GenericArray;
-use async_hash::{Digest, Hash, Output};
+use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
@@ -18,7 +18,7 @@ use safecast::*;
 use tc_error::*;
 use tc_transact::fs::{Dir, Persist};
 use tc_transact::lock::TxnLock;
-use tc_transact::{AsyncHash, IntoView, Sha256, Transact, Transaction, TxnId};
+use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, Tuple};
 

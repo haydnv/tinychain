@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 
-use async_hash::{Digest, Hash, Output};
+use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use destream::de::{self, Error};
 use futures::future::TryFutureExt;
@@ -13,7 +13,7 @@ use log::debug;
 use safecast::{CastInto, TryCastInto};
 
 use tc_error::*;
-use tc_transact::{AsyncHash, IntoView, Sha256};
+use tc_transact::{AsyncHash, IntoView};
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf, Tuple};
 
 use crate::fs;

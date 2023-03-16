@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use async_hash::{Digest, Hash, Output};
+use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use destream::{de, FromStream};
 use freqfs::{FileLock, FileWriteGuard};
@@ -15,7 +15,7 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
-use tc_transact::{AsyncHash, IntoView, Sha256, Transact, Transaction, TxnId};
+use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Id, Label};
 

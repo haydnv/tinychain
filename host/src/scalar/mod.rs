@@ -6,7 +6,7 @@ use std::fmt;
 use std::ops::{Bound, Deref, DerefMut};
 use std::str::FromStr;
 
-use async_hash::{Digest, Hash, Output};
+use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de::Error;
@@ -19,7 +19,6 @@ use log::{debug, warn};
 use safecast::{as_type, Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::Sha256;
 use tc_value::{Float, Host, Link, Number, TCString, Value, ValueType};
 use tcgeneric::*;
 
