@@ -9,7 +9,7 @@ use destream::de;
 use ds_ext::link::{label, Label};
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, DirWriteGuard, FileLoad};
-use futures::{future, try_join, Stream, TryFutureExt, TryStreamExt};
+use futures::{future, Stream, TryFutureExt, TryStreamExt};
 use log::{debug, trace};
 use safecast::AsType;
 
@@ -357,6 +357,7 @@ where
 
         for delta in deltas {
             let collator = self.collator().clone();
+
             keys = delta
                 .merge_into(keys, collator, range.clone(), false)
                 .await?;
@@ -372,13 +373,15 @@ where
             }
         } else {
             while let Some(key) = keys.try_next().await? {
-                try_join!(inserts.delete(key.clone()), deletes.insert(key))?;
+                inserts.delete(&key).await?;
+                deletes.insert(key).await?;
             }
         }
 
         // there's not much point in trying to parallelize this
         while let Some(key) = keys.try_next().await? {
-            try_join!(inserts.delete(key.clone().into()), deletes.insert(key))?;
+            inserts.delete(&key).await?;
+            deletes.insert(key).await?;
         }
 
         Ok(())
@@ -406,7 +409,8 @@ where
 
         trace!("BTreeFile::insert locked pending delta for writing");
 
-        try_join!(inserts.insert(key.clone()), deletes.delete(key))?;
+        deletes.delete(&key).await?;
+        inserts.insert(key).await?;
 
         trace!("BTreeFile::insert is complete");
 
@@ -430,7 +434,8 @@ where
         let (mut inserts, mut deletes) = delta.write().await;
 
         while let Some(key) = keys.try_next().await? {
-            try_join!(inserts.insert(key.clone()), deletes.delete(key))?;
+            deletes.delete(&key).await?;
+            inserts.insert(key).await?;
         }
 
         Ok(())
@@ -684,12 +689,14 @@ where
             .await?;
 
         while let Some(key) = to_delete.try_next().await? {
-            try_join!(deletes.insert(key.clone()), inserts.delete(key))?;
+            deletes.delete(&key).await?;
+            inserts.insert(key).await?;
         }
 
         let mut to_insert = backup.clone().keys(txn_id).await?;
         while let Some(key) = to_insert.try_next().await? {
-            try_join!(deletes.delete(key.clone()), inserts.insert(key))?;
+            deletes.delete(&key).await?;
+            inserts.insert(key).await?;
         }
 
         Ok(())
