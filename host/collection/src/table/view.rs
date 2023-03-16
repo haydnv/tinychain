@@ -1,14 +1,17 @@
+use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use ds_ext::Id;
+use futures::{future, TryStreamExt};
 use safecast::AsType;
 
-use tc_error::TCResult;
+use tc_error::*;
 use tc_transact::{Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{Instance, ThreadSafe};
 
+use crate::btree::Schema as IndexSchema;
 use crate::Node;
 
 use super::file::TableFile;
@@ -22,6 +25,12 @@ use super::{
 pub struct Limited<T> {
     source: T,
     limit: u64,
+}
+
+impl<T> Limited<T> {
+    pub(super) fn new(source: T, limit: u64) -> Self {
+        Self { source, limit }
+    }
 }
 
 impl<T> Instance for Limited<T>
@@ -44,18 +53,26 @@ impl<T: TableInstance> TableInstance for Limited<T> {
 #[async_trait]
 impl<T: TableStream> TableStream for Limited<T> {
     type Limit = Self;
-    type Selection = Limited<Selection<T>>;
+    type Selection = Limited<T::Selection>;
 
     async fn count(self, txn_id: TxnId) -> TCResult<u64> {
-        todo!()
+        let rows = self.rows(txn_id).await?;
+        rows.try_fold(0, |count, _row| future::ready(Ok(count + 1)))
+            .await
     }
 
     fn limit(self, limit: u64) -> Self::Limit {
-        todo!()
+        Self {
+            source: self.source,
+            limit: Ord::min(self.limit, limit),
+        }
     }
 
     fn select(self, columns: Vec<Id>) -> TCResult<Self::Selection> {
-        todo!()
+        self.source.select(columns).map(|source| Limited {
+            source,
+            limit: self.limit,
+        })
     }
 
     async fn rows<'a>(self, txn_id: TxnId) -> TCResult<Rows<'a>> {
@@ -82,6 +99,33 @@ pub struct Selection<T> {
     schema: Schema,
 }
 
+impl<T: TableInstance> Selection<T> {
+    pub(super) fn new(source: T, columns: Vec<Id>) -> TCResult<Self> {
+        let mut column_schema = Vec::with_capacity(columns.len());
+        let mut i = 0;
+        for name in columns {
+            for column in b_table::Schema::primary(source.schema()) {
+                if column.name == name {
+                    column_schema.push(column.clone());
+                    break;
+                }
+            }
+
+            i += 1;
+            if column_schema.len() != i {
+                return Err(bad_request!("cannot select nonexistent column {}", name));
+            }
+        }
+
+        let schema = IndexSchema::new(column_schema)?;
+
+        Ok(Self {
+            source,
+            schema: Schema::from_index(schema),
+        })
+    }
+}
+
 impl<T> Instance for Selection<T>
 where
     Self: Send + Sync,
@@ -104,11 +148,19 @@ impl<T: TableOrder> TableOrder for Selection<T> {
     type Reverse = Selection<T::Reverse>;
 
     fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
-        todo!()
+        self.source
+            .order_by(columns, reverse)
+            .map(|source| Selection {
+                source,
+                schema: self.schema,
+            })
     }
 
     fn reverse(self) -> TCResult<Self::Reverse> {
-        todo!()
+        self.source.reverse().map(|source| Selection {
+            source,
+            schema: self.schema,
+        })
     }
 }
 
@@ -120,28 +172,42 @@ impl<T: TableRead> TableRead for Selection<T> {
 }
 
 impl<T: super::TableSlice> super::TableSlice for Selection<T> {
-    type Slice = Self;
+    type Slice = Selection<<T as super::TableSlice>::Slice>;
 
     fn slice(self, range: Range) -> TCResult<Self::Slice> {
-        todo!()
+        self.source.slice(range).map(|source| Selection {
+            source,
+            schema: self.schema,
+        })
     }
 }
 
 #[async_trait]
-impl<T: TableStream> TableStream for Selection<T> {
+impl<T: TableStream + fmt::Debug> TableStream for Selection<T> {
     type Limit = Limited<Self>;
     type Selection = Self;
 
     async fn count(self, txn_id: TxnId) -> TCResult<u64> {
-        todo!()
+        self.source.count(txn_id).await
     }
 
     fn limit(self, limit: u64) -> Self::Limit {
-        todo!()
+        Limited::new(self, limit)
     }
 
     fn select(self, columns: Vec<Id>) -> TCResult<Self::Selection> {
-        todo!()
+        for name in &columns {
+            let selected = b_table::IndexSchema::columns(b_table::Schema::primary(self.schema()));
+            if !selected.contains(name) {
+                return Err(bad_request!(
+                    "cannot select column {} from {:?}",
+                    name,
+                    self
+                ));
+            }
+        }
+
+        Selection::new(self.source, columns)
     }
 
     async fn rows<'a>(self, txn_id: TxnId) -> TCResult<Rows<'a>> {
@@ -161,11 +227,71 @@ where
     }
 }
 
+impl<T> fmt::Debug for Selection<T>
+where
+    T: TableInstance + fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let columns = b_table::IndexSchema::columns(b_table::Schema::primary(&self.schema));
+        write!(
+            f,
+            "a selection of columns {:?} from {:?}",
+            columns, self.source
+        )
+    }
+}
+
 /// A slice of a relational database table
 pub struct TableSlice<Txn, FE> {
     table: TableFile<Txn, FE>,
     range: Arc<Range>,
+    order: Arc<Vec<Id>>,
     reverse: bool,
+}
+
+impl<Txn, FE> TableSlice<Txn, FE>
+where
+    TableFile<Txn, FE>: TableInstance,
+{
+    pub(super) fn new(
+        table: TableFile<Txn, FE>,
+        range: Arc<Range>,
+        order: Arc<Vec<Id>>,
+        reverse: bool,
+    ) -> TCResult<Self> {
+        // verify that the requested range is supported
+        if !b_table::IndexSchema::supports(b_table::Schema::primary(table.schema()), &range) {
+            let mut supported = false;
+            for (_, index) in b_table::Schema::auxiliary(table.schema()) {
+                supported = supported || b_table::IndexSchema::supports(index, &range);
+            }
+
+            if !supported {
+                return Err(bad_request!(
+                    "{:?} has no index which supports {:?}",
+                    table,
+                    range
+                ));
+            }
+        }
+
+        // verify that the requested order is supported
+        if !b_table::IndexSchema::columns(b_table::Schema::primary(table.schema()))
+            .starts_with(&order)
+        {
+            let mut supported = false;
+            for (_, index) in b_table::Schema::auxiliary(table.schema()) {
+                supported = supported || b_table::IndexSchema::columns(index).starts_with(&order);
+            }
+        }
+
+        Ok(Self {
+            table,
+            range,
+            order,
+            reverse,
+        })
+    }
 }
 
 impl<Txn, FE> Clone for TableSlice<Txn, FE> {
@@ -173,6 +299,7 @@ impl<Txn, FE> Clone for TableSlice<Txn, FE> {
         Self {
             table: self.table.clone(),
             range: self.range.clone(),
+            order: self.order.clone(),
             reverse: self.reverse,
         }
     }
@@ -208,11 +335,27 @@ where
     type Reverse = Self;
 
     fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
-        todo!()
+        if self.order.starts_with(&columns) {
+            Ok(Self {
+                table: self.table,
+                order: self.order,
+                range: self.range,
+                reverse: self.reverse ^ reverse,
+            })
+        } else {
+            Err(bad_request!(
+                "cannot reorder a table slice--consider re-slicing the table instead"
+            ))
+        }
     }
 
     fn reverse(self) -> TCResult<Self::Reverse> {
-        todo!()
+        Ok(Self {
+            table: self.table,
+            order: self.order,
+            range: self.range,
+            reverse: !self.reverse,
+        })
     }
 }
 

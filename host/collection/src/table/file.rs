@@ -1,3 +1,4 @@
+use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, RwLock};
 
@@ -187,11 +188,11 @@ where
     type Reverse = Slice<Txn, FE>;
 
     fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
-        todo!()
+        Slice::new(self, Arc::new(Range::default()), Arc::new(columns), reverse)
     }
 
     fn reverse(self) -> TCResult<Self::Reverse> {
-        todo!()
+        Slice::new(self, Arc::new(Range::default()), Arc::new(vec![]), true)
     }
 }
 
@@ -221,6 +222,7 @@ where
 
         if let Some(pending) = pending {
             let (inserted, deleted) = pending.read().await;
+
             if let Some(row) = inserted.get(&key).await? {
                 return Ok(Some(row));
             } else if deleted.contains(&key).await? {
@@ -230,6 +232,7 @@ where
 
         for delta in deltas.into_iter().rev() {
             let (inserted, deleted) = delta.read().await;
+
             if let Some(row) = inserted.get(&key).await? {
                 return Ok(Some(row));
             } else if deleted.contains(&key).await? {
@@ -250,7 +253,7 @@ where
     type Slice = Slice<Txn, FE>;
 
     fn slice(self, range: Range) -> TCResult<Self::Slice> {
-        todo!()
+        Slice::new(self, Arc::new(range), Arc::new(vec![]), false)
     }
 }
 
@@ -270,11 +273,11 @@ where
     }
 
     fn limit(self, limit: u64) -> Self::Limit {
-        todo!()
+        Limited::new(self, limit)
     }
 
     fn select(self, columns: Vec<Id>) -> TCResult<Self::Selection> {
-        todo!()
+        Selection::new(self, columns)
     }
 
     async fn rows<'a>(self, txn_id: TxnId) -> TCResult<Rows<'a>> {
@@ -403,5 +406,18 @@ where
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
         todo!()
+    }
+}
+
+impl<Txn, FE> fmt::Debug for TableFile<Txn, FE>
+where
+    Self: TableInstance,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "a relational database table with schema {:?}",
+            self.schema()
+        )
     }
 }

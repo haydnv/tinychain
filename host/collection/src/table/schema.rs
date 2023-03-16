@@ -8,18 +8,27 @@ use tc_error::*;
 use tc_value::Value;
 use tcgeneric::Id;
 
-use crate::btree::{Column, Schema as BTreeSchema};
+use crate::btree::{Column, Schema as IndexSchema};
 use crate::table::{Key, Range};
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct Schema {
     key: Vec<Id>,
     values: Vec<Id>,
-    primary: BTreeSchema,
-    indices: Vec<(String, BTreeSchema)>,
+    primary: IndexSchema,
+    indices: Vec<(String, IndexSchema)>,
 }
 
 impl Schema {
+    pub(super) fn from_index(primary: IndexSchema) -> Self {
+        Self {
+            key: vec![],
+            values: primary.iter().map(|col| &col.name).cloned().collect(),
+            primary,
+            indices: vec![],
+        }
+    }
+
     pub(super) fn range_from_key(&self, key: Key) -> TCResult<Range> {
         if key.len() != self.key.len() {
             return Err(bad_request!(
@@ -46,7 +55,7 @@ impl b_table::Schema for Schema {
     type Id = Id;
     type Error = TCError;
     type Value = Value;
-    type Index = BTreeSchema;
+    type Index = IndexSchema;
 
     fn key(&self) -> &[Self::Id] {
         &self.key

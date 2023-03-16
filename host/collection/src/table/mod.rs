@@ -110,7 +110,7 @@ pub trait TableRead: TableInstance {
 }
 
 /// Methods for slicing a table
-pub trait TableSlice: TableStream {
+pub trait TableSlice: TableInstance {
     /// The type of `Table` returned by this instance's `slice` method.
     type Slice: TableInstance;
 
