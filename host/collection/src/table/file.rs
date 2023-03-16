@@ -22,8 +22,8 @@ use crate::btree::{Node, Schema as IndexSchema};
 use super::stream::Rows;
 use super::view::{Limited, Selection, TableSlice as Slice};
 use super::{
-    Key, Range, Row, Schema, TableInstance, TableOrder, TableRead, TableSlice, TableStream,
-    TableType, TableWrite, Values,
+    Key, Range, Schema, TableInstance, TableOrder, TableRead, TableSlice, TableStream, TableType,
+    TableWrite, Values,
 };
 
 const CANON: Label = label("canon");
@@ -112,6 +112,37 @@ struct State<FE> {
     finalized: Option<TxnId>,
 }
 
+impl<FE> State<FE>
+where
+    FE: AsType<Node> + ThreadSafe,
+{
+    #[inline]
+    fn pending_version(
+        &mut self,
+        txn_id: TxnId,
+        schema: &Schema,
+        collator: &ValueCollator,
+    ) -> TCResult<Delta<FE>> {
+        if let Some(version) = self.pending.get(&txn_id) {
+            debug_assert!(!self.commits.contains(&txn_id));
+            Ok(version.clone())
+        } else if self.commits.contains(&txn_id) {
+            Err(conflict!("{} has already been committed", txn_id))
+        } else if self.finalized.as_ref() > Some(&txn_id) {
+            Err(conflict!("{} has already been finalized", txn_id))
+        } else {
+            let dir = {
+                let mut versions = self.versions.try_write()?;
+                versions.create_dir(txn_id.to_string())?
+            };
+
+            let version = Delta::create(schema.clone(), collator.clone(), dir.try_write()?)?;
+            self.pending.insert(txn_id, version.clone());
+            Ok(version)
+        }
+    }
+}
+
 /// A relational database table which supports a primary key and multiple indices
 pub struct TableFile<Txn, FE> {
     dir: DirLock<FE>,
@@ -140,6 +171,7 @@ where
 {
     fn new(dir: DirLock<FE>, canon: Version<FE>, versions: DirLock<FE>) -> Self {
         let semaphore = Semaphore::new(Arc::new(canon.collator().inner().clone()));
+
         let state = State {
             commits: OrdHashSet::new(),
             deltas: OrdHashMap::new(),
@@ -203,6 +235,7 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Vec<Value>>> {
+        let key = b_table::Schema::validate_key(self.schema(), key)?;
         let range = self.schema().range_from_key(key.clone())?;
         let _permit = self.semaphore.read(txn_id, range).await?;
 
@@ -292,15 +325,79 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     async fn delete(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
-        todo!()
-    }
+        let key = b_table::Schema::validate_key(self.schema(), key)?;
+        let range = self.schema().range_from_key(key.clone())?;
+        let _permit = self.semaphore.write(txn_id, range).await?;
 
-    async fn update(&self, txn_id: TxnId, key: Key, values: Row) -> TCResult<()> {
-        todo!()
+        // lock the canonical version BEFORE this lock's internal state,
+        // to avoid the risk of a deadlock with the commit method
+        let canon = self.canon.read().await;
+
+        let (deltas, pending) = {
+            let mut state = self.state.write().expect("state");
+
+            let deltas = state
+                .deltas
+                .iter()
+                .take_while(|(id, _)| *id < &txn_id)
+                .map(|(_, delta)| delta)
+                .cloned()
+                .collect::<Vec<_>>();
+
+            let pending =
+                state.pending_version(txn_id, self.schema(), self.canon.collator().inner())?;
+
+            (deltas, pending)
+        };
+
+        let mut row = None;
+        for delta in deltas {
+            let (inserted, deleted) = delta.read().await;
+            if deleted.contains(&key).await? {
+                return Ok(());
+            } else if let Some(insert) = inserted.get(&key).await? {
+                row = Some(insert);
+                break;
+            }
+        }
+
+        let mut row = if let Some(row) = row {
+            row
+        } else if let Some(row) = canon.get(&key).await? {
+            row
+        } else {
+            return Ok(());
+        };
+
+        let (mut inserts, mut deletes) = pending.write().await;
+
+        let values = row.drain(key.len()..).collect();
+        debug_assert_eq!(key, row[..key.len()]);
+
+        inserts.delete(&key).await?;
+        deletes.upsert(key, values).await?;
+
+        Ok(())
     }
 
     async fn upsert(&self, txn_id: TxnId, key: Key, values: Values) -> TCResult<()> {
-        todo!()
+        let key = b_table::Schema::validate_key(self.schema(), key)?;
+        let values = b_table::Schema::validate_values(self.schema(), values)?;
+
+        let range = self.schema().range_from_key(key.clone())?;
+        let _permit = self.semaphore.write(txn_id, range).await?;
+
+        let pending = {
+            let mut state = self.state.write().expect("state");
+            state.pending_version(txn_id, self.schema(), self.canon.collator().inner())?
+        };
+
+        let (mut inserts, mut deletes) = pending.write().await;
+
+        deletes.delete(&key).await?;
+        inserts.upsert(key, values).await?;
+
+        Ok(())
     }
 }
 

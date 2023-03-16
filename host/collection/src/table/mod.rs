@@ -143,9 +143,6 @@ pub trait TableWrite: TableInstance {
     /// Delete the given row from this table, if present.
     async fn delete(&self, txn_id: TxnId, key: Key) -> TCResult<()>;
 
-    /// Update one row of this table.
-    async fn update(&self, txn_id: TxnId, key: Key, values: Row) -> TCResult<()>;
-
     /// Insert or update the given row.
     async fn upsert(&self, txn_id: TxnId, key: Key, values: Values) -> TCResult<()>;
 }
@@ -315,12 +312,40 @@ where
     }
 }
 
+#[async_trait]
+impl<Txn, FE> TableWrite for Table<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
+    async fn delete(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+        if let Self::Table(table) = self {
+            table.delete(txn_id, key).await
+        } else {
+            Err(bad_request!("{:?} does not support write operations", self))
+        }
+    }
+
+    async fn upsert(&self, txn_id: TxnId, key: Key, values: Values) -> TCResult<()> {
+        if let Self::Table(table) = self {
+            table.upsert(txn_id, key, values).await
+        } else {
+            Err(bad_request!("{:?} does not support write operations", self))
+        }
+    }
+}
+
 impl<Txn, FE> fmt::Debug for Table<Txn, FE>
 where
-    Txn: Send + Sync,
-    FE: Send + Sync,
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "an instance of {:?}", self.class())
+        match self {
+            Self::Limited(limited) => limited.fmt(f),
+            Self::Selection(selection) => selection.fmt(f),
+            Self::Slice(slice) => slice.fmt(f),
+            Self::Table(table) => table.fmt(f),
+        }
     }
 }

@@ -136,8 +136,11 @@ where
         } else if self.finalized.as_ref() > Some(&txn_id) {
             Err(conflict!("{} has already been finalized", txn_id))
         } else {
-            let mut versions = self.versions.try_write()?;
-            let dir = versions.create_dir(txn_id.to_string())?;
+            let dir = {
+                let mut versions = self.versions.try_write()?;
+                versions.create_dir(txn_id.to_string())?
+            };
+
             let version = Delta::create(schema.clone(), collator.clone(), dir.try_write()?)?;
             self.pending.insert(txn_id, version.clone());
             Ok(version)

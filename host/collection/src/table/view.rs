@@ -92,6 +92,15 @@ where
     }
 }
 
+impl<T> fmt::Debug for Limited<T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "the first {} rows of {:?}", self.limit, self.source)
+    }
+}
+
 /// A result set from a database table with a limited set of columns
 #[derive(Clone)]
 pub struct Selection<T> {
@@ -405,5 +414,18 @@ where
 
     async fn rows<'a>(self, txn_id: TxnId) -> TCResult<Rows<'a>> {
         todo!()
+    }
+}
+
+impl<Txn, FE> fmt::Debug for TableSlice<Txn, FE>
+where
+    TableFile<Txn, FE>: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "a slice of {:?} with order {:?} and range {:?}",
+            self.table, self.order, self.range
+        )
     }
 }
