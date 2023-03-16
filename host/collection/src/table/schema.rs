@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::fmt;
 
 use async_hash::{Digest, Hash, Output};
-use destream::en;
+use async_trait::async_trait;
+use destream::{de, en};
 
 use tc_error::*;
 use tc_value::Value;
@@ -150,6 +151,52 @@ impl<'en> en::IntoStream<'en> for Schema {
             .collect::<Vec<(String, Vec<Id>)>>();
 
         ((key, values), indices).into_stream(encoder)
+    }
+}
+
+#[async_trait]
+impl de::FromStream for Schema {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
+        let ((key, values), indices): ((Vec<Column>, Vec<Column>), Vec<(String, Vec<Id>)>) =
+            de::FromStream::from_stream(cxt, decoder).await?;
+
+        let key_names = key.iter().map(|col| &col.name).cloned().collect();
+        let value_names = values.iter().map(|col| &col.name).cloned().collect();
+
+        let mut primary = Vec::with_capacity(key.len() + values.len());
+        primary.extend(key);
+        primary.extend(values);
+
+        let columns: HashMap<_, _> = primary.iter().map(|col| (&col.name, col)).collect();
+
+        let indices = indices
+            .into_iter()
+            .map(|(name, column_names)| {
+                let columns = column_names
+                    .into_iter()
+                    .map(|name| {
+                        columns.get(&name).map(|col| *col).cloned().ok_or_else(|| {
+                            de::Error::invalid_value(name, "there is no such column to index")
+                        })
+                    })
+                    .collect::<Result<Vec<Column>, D::Error>>()?;
+
+                IndexSchema::new(columns)
+                    .map(|schema| (name, schema))
+                    .map_err(de::Error::custom)
+            })
+            .collect::<Result<Vec<(String, IndexSchema)>, D::Error>>()?;
+
+        let primary = IndexSchema::new(primary).map_err(de::Error::custom)?;
+
+        Ok(Self {
+            key: key_names,
+            values: value_names,
+            primary,
+            indices,
+        })
     }
 }
 

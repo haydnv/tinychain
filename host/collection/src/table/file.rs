@@ -22,8 +22,8 @@ use crate::btree::{Node, Schema as IndexSchema};
 use super::stream::Rows;
 use super::view::{Limited, Selection, TableSlice as Slice};
 use super::{
-    Key, Range, Schema, TableInstance, TableOrder, TableRead, TableSlice, TableStream, TableType,
-    TableWrite, Values,
+    Key, Range, Row, Schema, TableInstance, TableOrder, TableRead, TableSlice, TableStream,
+    TableType, TableWrite, Values,
 };
 
 const CANON: Label = label("canon");
@@ -190,6 +190,18 @@ where
     }
 }
 
+impl<Txn, FE> TableFile<Txn, FE> {
+    async fn into_rows<'a>(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Vec<Id>,
+        reverse: bool,
+    ) -> TCResult<TCBoxTryStream<'a, Row>> {
+        todo!()
+    }
+}
+
 impl<Txn, FE> Instance for TableFile<Txn, FE>
 where
     Self: Send + Sync,
@@ -329,8 +341,8 @@ where
         let range = self.schema().range_from_key(key.clone())?;
         let _permit = self.semaphore.write(txn_id, range).await?;
 
-        // lock the canonical version BEFORE this lock's internal state,
-        // to avoid the risk of a deadlock with the commit method
+        // read-lock the canonical version BEFORE locking self.state,
+        // to avoid a deadlock or conflict with Self::finalize
         let canon = self.canon.read().await;
 
         let (deltas, pending) = {
@@ -534,6 +546,7 @@ where
     }
 }
 
+// TODO: can this be consolidated with impl CopyFrom for BTreeFile?
 #[async_trait]
 impl<Txn, FE, T> CopyFrom<FE, T> for TableFile<Txn, FE>
 where
@@ -546,10 +559,68 @@ where
         store: Dir<FE>,
         instance: T,
     ) -> TCResult<Self> {
-        todo!()
+        let txn_id = *txn.id();
+        let dir = store.into_inner();
+        let schema = instance.schema().clone();
+        let collator = ValueCollator::default();
+
+        let mut rows = instance.rows(txn_id).await?;
+
+        let (canon, versions) = {
+            let mut dir = dir.write().await;
+            let canon = dir.create_dir(CANON.to_string())?;
+            let versions = dir.create_dir(VERSIONS.to_string())?;
+            (canon, versions)
+        };
+
+        let version = {
+            let mut dir = versions.write().await;
+            dir.create_dir(txn_id.to_string())?
+        };
+
+        let (deletes, inserts) = {
+            let mut version = version.write().await;
+            let deletes = version.create_dir(DELETES.to_string())?;
+            let inserts = version.create_dir(INSERTS.to_string())?;
+            (deletes, inserts)
+        };
+
+        let inserts = Version::create(schema.clone(), collator.clone(), inserts)?;
+
+        {
+            let key_len = b_table::Schema::key(&schema).len();
+            let mut inserts = inserts.write().await;
+            while let Some(mut key) = rows.try_next().await? {
+                let values = key.drain(key_len..).collect();
+                inserts.upsert(key, values).await?;
+            }
+        }
+
+        let deletes = Version::create(schema.clone(), collator.clone(), deletes)?;
+
+        let delta = Delta { deletes, inserts };
+
+        let canon = Version::create(schema, collator.clone(), canon)?;
+
+        let semaphore = Semaphore::with_reservation(txn_id, collator.into(), Range::default());
+
+        Ok(Self {
+            dir,
+            canon,
+            state: Arc::new(RwLock::new(State {
+                versions,
+                deltas: OrdHashMap::new(),
+                commits: OrdHashSet::new(),
+                pending: std::iter::once((txn_id, delta)).collect(),
+                finalized: None,
+            })),
+            semaphore,
+            phantom: PhantomData,
+        })
     }
 }
 
+// TODO: can this be consolidated with impl Restore for BTreeFile?
 #[async_trait]
 impl<Txn, FE> Restore<FE> for TableFile<Txn, FE>
 where
@@ -557,7 +628,151 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
-        todo!()
+        let _permit = self.semaphore.write(txn_id, Range::default()).await?;
+
+        let collator = self.canon.collator().inner();
+
+        let schema = if self.schema() == backup.schema() {
+            self.schema()
+        } else {
+            return Err(bad_request!(
+                "cannot restore a Table with schema {:?} from one with schema {:?}",
+                self.schema(),
+                backup.schema()
+            ));
+        };
+
+        let delta = {
+            let mut state = self.state.write().expect("state");
+            state.pending_version(txn_id, schema, collator)?
+        };
+
+        let key_len = b_table::Schema::key(schema).len();
+
+        let (mut inserts, mut deletes) = delta.write().await;
+
+        let mut to_delete = self
+            .clone()
+            .into_rows(txn_id, Range::default(), vec![], false)
+            .await?;
+
+        while let Some(mut row) = to_delete.try_next().await? {
+            let values = row.drain(key_len..).collect();
+            let key = row;
+
+            inserts.delete(&key).await?;
+            deletes.upsert(key, values).await?;
+        }
+
+        let mut to_insert = backup.clone().rows(txn_id).await?;
+        while let Some(mut row) = to_insert.try_next().await? {
+            let values = row.drain(key_len..).collect();
+            let key = row;
+
+            deletes.delete(&key).await?;
+            inserts.upsert(key, values).await?;
+        }
+
+        Ok(())
+    }
+}
+
+struct TableVisitor<Txn, FE> {
+    txn: Txn,
+    phantom: PhantomData<FE>,
+}
+
+impl<Txn, FE> TableVisitor<Txn, FE> {
+    fn new(txn: Txn) -> Self {
+        Self {
+            txn,
+            phantom: PhantomData,
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> de::Visitor for TableVisitor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
+    type Value = TableFile<Txn, FE>;
+
+    fn expecting() -> &'static str {
+        "a Table"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let txn_id = *self.txn.id();
+        let collator = ValueCollator::default();
+
+        let schema = seq.expect_next::<Schema>(()).await?;
+
+        let (canon, versions) = {
+            let mut dir = self.txn.context().write().await;
+
+            let canon = dir
+                .create_dir(CANON.to_string())
+                .map_err(de::Error::custom)?;
+
+            let versions = dir
+                .create_dir(VERSIONS.to_string())
+                .map_err(de::Error::custom)?;
+
+            (canon, versions)
+        };
+
+        let version = {
+            let mut dir = versions.write().await;
+            dir.create_dir(txn_id.to_string())
+                .map_err(de::Error::custom)?
+        };
+
+        let (deletes, inserts) = {
+            let mut dir = version.write().await;
+
+            let deletes = dir
+                .create_dir(DELETES.to_string())
+                .map_err(de::Error::custom)?;
+
+            let inserts = dir
+                .create_dir(INSERTS.to_string())
+                .map_err(de::Error::custom)?;
+
+            (deletes, inserts)
+        };
+
+        let cxt = (schema.clone(), collator.clone(), inserts.clone());
+        let inserts = if let Some(inserts) = seq.next_element(cxt).await? {
+            inserts
+        } else {
+            Version::create(schema.clone(), collator.clone(), inserts).map_err(de::Error::custom)?
+        };
+
+        let deletes = Version::create(schema.clone(), collator.clone(), deletes)
+            .map_err(de::Error::custom)?;
+
+        let version = Delta { inserts, deletes };
+
+        let canon = Version::create(schema, collator, canon).map_err(de::Error::custom)?;
+
+        let collator = Arc::new(canon.collator().inner().clone());
+        let semaphore = Semaphore::with_reservation(txn_id, collator, Range::default());
+
+        Ok(TableFile {
+            dir: self.txn.context().clone(),
+            state: Arc::new(RwLock::new(State {
+                commits: OrdHashSet::with_capacity(0),
+                deltas: OrdHashMap::with_capacity(0),
+                pending: std::iter::once((txn_id, version)).collect(),
+                versions,
+                finalized: None,
+            })),
+            canon,
+            semaphore,
+            phantom: PhantomData,
+        })
     }
 }
 
@@ -570,7 +785,7 @@ where
     type Context = Txn;
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        todo!()
+        decoder.decode_seq(TableVisitor::new(txn)).await
     }
 }
 

@@ -672,7 +672,7 @@ where
             self.schema()
         } else {
             return Err(bad_request!(
-                "cannot restore a Table with schema {:?} from one with schema {:?}",
+                "cannot restore a BTree with schema {:?} from one with schema {:?}",
                 self.schema(),
                 backup.schema()
             ));
@@ -691,8 +691,8 @@ where
             .await?;
 
         while let Some(key) = to_delete.try_next().await? {
-            deletes.delete(&key).await?;
-            inserts.insert(key).await?;
+            inserts.delete(&key).await?;
+            deletes.insert(key).await?;
         }
 
         let mut to_insert = backup.clone().keys(txn_id).await?;
