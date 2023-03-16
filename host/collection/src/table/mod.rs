@@ -24,14 +24,14 @@ mod schema;
 mod stream;
 mod view;
 
-/// A range of a table
-pub type Range = b_table::Range<Id, Value>;
-
 /// The key of a row in a table
 pub type Key = Vec<Value>;
 
 /// The values of a row in a table
 pub type Values = Vec<Value>;
+
+/// A range used to select a slice of a table
+pub type Range = b_table::Range<Id, Value>;
 
 /// A row in a table
 pub type Row = Vec<Value>;
@@ -100,16 +100,13 @@ pub trait TableOrder: TableInstance {
 
     /// Reverse the order returned by `rows`.
     fn reverse(self) -> TCResult<Self::Reverse>;
-
-    /// Return an error if this table does not support ordering by the given columns.
-    fn validate_order(&self, order: &[Id]) -> TCResult<()>;
 }
 
 /// A method to read a single row
 #[async_trait]
 pub trait TableRead: TableInstance {
     /// Read the row with the given `key` from this table, if present.
-    async fn read(&self, txn_id: &TxnId, key: &Key) -> TCResult<Option<Vec<Value>>>;
+    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Vec<Value>>>;
 }
 
 /// Methods for slicing a table
@@ -119,9 +116,6 @@ pub trait TableSlice: TableStream {
 
     /// Limit the returned `rows` to the given [`Range`].
     fn slice(self, range: Range) -> TCResult<Self::Slice>;
-
-    /// Return an error if this table does not support the given [`Range`].
-    fn validate_range(&self, range: &Range) -> TCResult<()>;
 }
 
 /// Table read methods
@@ -237,15 +231,6 @@ where
             other => Err(bad_request!("{:?} does not support ordering", other)),
         }
     }
-
-    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
-        match self {
-            Self::Selection(selection) => selection.validate_order(order),
-            Self::Slice(slice) => slice.validate_order(order),
-            Self::Table(table) => table.validate_order(order),
-            other => Err(bad_request!("{:?} does not support ordering", other)),
-        }
-    }
 }
 
 #[async_trait]
@@ -254,12 +239,13 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    async fn read(&self, txn_id: &TxnId, key: &Key) -> TCResult<Option<Vec<Value>>> {
+    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Vec<Value>>> {
         match self {
+            Self::Selection(selection) => selection.read(txn_id, key).await,
             Self::Slice(slice) => slice.read(txn_id, key).await,
             Self::Table(table) => table.read(txn_id, key).await,
             other => Err(bad_request!(
-                "{:?} does not support reading a single row",
+                "{:?} does not support reading an individual row",
                 other.class()
             )),
         }
@@ -278,15 +264,6 @@ where
             Self::Selection(selection) => selection.slice(range).map(Self::from),
             Self::Slice(slice) => slice.slice(range).map(Self::from),
             Self::Table(table) => table.slice(range).map(Self::from),
-            other => Err(bad_request!("{:?} does not support slicing", other)),
-        }
-    }
-
-    fn validate_range(&self, range: &Range) -> TCResult<()> {
-        match self {
-            Self::Selection(selection) => selection.validate_range(range),
-            Self::Slice(slice) => slice.validate_range(range),
-            Self::Table(table) => table.validate_range(range),
             other => Err(bad_request!("{:?} does not support slicing", other)),
         }
     }

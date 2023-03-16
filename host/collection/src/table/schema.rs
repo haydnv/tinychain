@@ -1,13 +1,15 @@
+use std::collections::HashMap;
 use std::fmt;
 
 use async_hash::{Digest, Hash, Output};
 use destream::en;
-use tc_error::{bad_request, TCError};
-use tc_value::Value;
 
+use tc_error::*;
+use tc_value::Value;
 use tcgeneric::Id;
 
 use crate::btree::{Column, Schema as BTreeSchema};
+use crate::table::{Key, Range};
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct Schema {
@@ -15,6 +17,29 @@ pub struct Schema {
     values: Vec<Id>,
     primary: BTreeSchema,
     indices: Vec<(String, BTreeSchema)>,
+}
+
+impl Schema {
+    pub(super) fn range_from_key(&self, key: Key) -> TCResult<Range> {
+        if key.len() != self.key.len() {
+            return Err(bad_request!(
+                "invalid key for table with schema {:?}: {:?}",
+                self,
+                key
+            ));
+        }
+
+        let mut range = HashMap::with_capacity(key.len());
+        for (val, col) in key.into_iter().zip(&self.primary) {
+            let val = val
+                .into_type(col.dtype)
+                .ok_or_else(|| bad_request!("key has an invalid value for column {}", col.name))?;
+
+            range.insert(col.name.clone(), val.into());
+        }
+
+        Ok(range.into())
+    }
 }
 
 impl b_table::Schema for Schema {

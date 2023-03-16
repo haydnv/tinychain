@@ -110,8 +110,11 @@ impl<T: TableOrder> TableOrder for Selection<T> {
     fn reverse(self) -> TCResult<Self::Reverse> {
         todo!()
     }
+}
 
-    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
+#[async_trait]
+impl<T: TableRead> TableRead for Selection<T> {
+    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Vec<Value>>> {
         todo!()
     }
 }
@@ -120,10 +123,6 @@ impl<T: super::TableSlice> super::TableSlice for Selection<T> {
     type Slice = Self;
 
     fn slice(self, range: Range) -> TCResult<Self::Slice> {
-        todo!()
-    }
-
-    fn validate_range(&self, range: &Range) -> TCResult<()> {
         todo!()
     }
 }
@@ -215,10 +214,6 @@ where
     fn reverse(self) -> TCResult<Self::Reverse> {
         todo!()
     }
-
-    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
-        todo!()
-    }
 }
 
 #[async_trait]
@@ -227,7 +222,7 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    async fn read(&self, txn_id: &TxnId, key: &Key) -> TCResult<Option<Vec<Value>>> {
+    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Vec<Value>>> {
         todo!()
     }
 }
@@ -240,10 +235,6 @@ where
     type Slice = Self;
 
     fn slice(self, range: Range) -> TCResult<Self::Slice> {
-        todo!()
-    }
-
-    fn validate_range(&self, range: &Range) -> TCResult<()> {
         todo!()
     }
 }

@@ -2,39 +2,105 @@ use std::marker::PhantomData;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use b_table::TableLock;
+use b_table::{b_tree, TableLock};
 use destream::de;
 use ds_ext::{Id, OrdHashMap, OrdHashSet};
-use freqfs::DirLock;
+use freqfs::{DirLock, DirWriteGuard};
+use futures::{future, TryFutureExt, TryStreamExt};
+use log::trace;
 use safecast::AsType;
 
-use tc_error::TCResult;
+use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Inner, Persist, Restore, VERSIONS};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
-use tcgeneric::{label, Instance, Label, ThreadSafe};
+use tcgeneric::{label, Instance, Label, TCBoxTryStream, ThreadSafe};
 
 use crate::btree::{Node, Schema as IndexSchema};
-use crate::table::Range;
 
 use super::stream::Rows;
 use super::view::{Limited, Selection, TableSlice as Slice};
 use super::{
-    Key, Row, Schema, TableInstance, TableOrder, TableRead, TableSlice, TableStream, TableType,
-    TableWrite, Values,
+    Key, Range, Row, Schema, TableInstance, TableOrder, TableRead, TableSlice, TableStream,
+    TableType, TableWrite, Values,
 };
 
 const CANON: Label = label("canon");
 const DELETES: Label = label("deletes");
 const INSERTS: Label = label("inserts");
 
-type Semaphore = tc_transact::lock::Semaphore<b_table::b_tree::Collator<ValueCollator>, Arc<Range>>;
-
 type Version<FE> = TableLock<Schema, IndexSchema, ValueCollator, FE>;
+type VersionReadGuard<FE> = b_table::TableReadGuard<Schema, IndexSchema, ValueCollator, FE>;
+type VersionWriteGuard<FE> = b_table::TableWriteGuard<Schema, IndexSchema, ValueCollator, FE>;
+
+type Semaphore = tc_transact::lock::Semaphore<ValueCollator, Range>;
 
 struct Delta<FE> {
     deletes: Version<FE>,
     inserts: Version<FE>,
+}
+
+impl<FE> Clone for Delta<FE> {
+    fn clone(&self) -> Self {
+        Self {
+            deletes: self.deletes.clone(),
+            inserts: self.inserts.clone(),
+        }
+    }
+}
+
+// TODO: should this code be consolidated with b_tree::Delta?
+impl<FE> Delta<FE>
+where
+    FE: AsType<Node> + ThreadSafe,
+{
+    fn create(
+        schema: Schema,
+        collator: ValueCollator,
+        mut dir: DirWriteGuard<FE>,
+    ) -> TCResult<Self> {
+        let deletes = dir.create_dir(DELETES.to_string())?;
+        let inserts = dir.create_dir(INSERTS.to_string())?;
+
+        Ok(Self {
+            deletes: Version::create(schema.clone(), collator.clone(), deletes)?,
+            inserts: Version::create(schema, collator, inserts)?,
+        })
+    }
+
+    async fn read(self) -> (VersionReadGuard<FE>, VersionReadGuard<FE>) {
+        // acquire these locks in order to avoid the risk of a deadlock
+        let inserts = self.inserts.into_read().await;
+        let deletes = self.deletes.into_read().await;
+        (inserts, deletes)
+    }
+
+    async fn write(self) -> (VersionWriteGuard<FE>, VersionWriteGuard<FE>) {
+        // acquire these locks in order to avoid the risk of a deadlock
+        let inserts = self.inserts.into_write().await;
+        let deletes = self.deletes.into_write().await;
+        (inserts, deletes)
+    }
+
+    async fn merge_into<'a>(
+        self,
+        mut keys: TCBoxTryStream<'a, Key>,
+        collator: b_tree::Collator<ValueCollator>,
+        range: b_table::Range<Id, Value>,
+        reverse: bool,
+    ) -> TCResult<TCBoxTryStream<'a, Key>> {
+        trace!("merge delta");
+
+        let rows = self.inserts.rows(range.clone(), reverse).await?;
+        let inserted = rows.map_err(TCError::from);
+        keys = Box::pin(collate::try_merge(collator.clone(), keys, inserted));
+
+        let rows = self.deletes.rows(range, reverse).await?;
+        let deleted = rows.map_err(TCError::from);
+        keys = Box::pin(collate::try_diff(collator.clone(), keys, deleted));
+
+        Ok(keys)
+    }
 }
 
 struct State<FE> {
@@ -72,7 +138,7 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     fn new(dir: DirLock<FE>, canon: Version<FE>, versions: DirLock<FE>) -> Self {
-        let semaphore = Semaphore::new(canon.collator().clone());
+        let semaphore = Semaphore::new(Arc::new(canon.collator().inner().clone()));
         let state = State {
             commits: OrdHashSet::new(),
             deltas: OrdHashMap::new(),
@@ -127,10 +193,6 @@ where
     fn reverse(self) -> TCResult<Self::Reverse> {
         todo!()
     }
-
-    fn validate_order(&self, order: &[Id]) -> TCResult<()> {
-        todo!()
-    }
 }
 
 #[async_trait]
@@ -139,8 +201,44 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    async fn read(&self, txn_id: &TxnId, key: &Key) -> TCResult<Option<Vec<Value>>> {
-        todo!()
+    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Vec<Value>>> {
+        let range = self.schema().range_from_key(key.clone())?;
+        let _permit = self.semaphore.read(txn_id, range).await?;
+
+        let (deltas, pending) = {
+            let state = self.state.read().expect("state");
+
+            let deltas = state
+                .deltas
+                .iter()
+                .take_while(|(id, _)| *id <= &txn_id)
+                .map(|(_, delta)| delta)
+                .cloned()
+                .collect::<Vec<_>>();
+
+            (deltas, state.pending.get(&txn_id).cloned())
+        };
+
+        if let Some(pending) = pending {
+            let (inserted, deleted) = pending.read().await;
+            if let Some(row) = inserted.get(&key).await? {
+                return Ok(Some(row));
+            } else if deleted.contains(&key).await? {
+                return Ok(None);
+            }
+        }
+
+        for delta in deltas.into_iter().rev() {
+            let (inserted, deleted) = delta.read().await;
+            if let Some(row) = inserted.get(&key).await? {
+                return Ok(Some(row));
+            } else if deleted.contains(&key).await? {
+                return Ok(None);
+            }
+        }
+
+        let canon = self.canon.read().await;
+        canon.get(&key).map_err(TCError::from).await
     }
 }
 
@@ -152,10 +250,6 @@ where
     type Slice = Slice<Txn, FE>;
 
     fn slice(self, range: Range) -> TCResult<Self::Slice> {
-        todo!()
-    }
-
-    fn validate_range(&self, range: &Range) -> TCResult<()> {
         todo!()
     }
 }
@@ -170,7 +264,9 @@ where
     type Selection = Selection<Self>;
 
     async fn count(self, txn_id: TxnId) -> TCResult<u64> {
-        todo!()
+        let mut rows = self.rows(txn_id).await?;
+        rows.try_fold(0, |count, _| future::ready(Ok(count + 1)))
+            .await
     }
 
     fn limit(self, limit: u64) -> Self::Limit {
