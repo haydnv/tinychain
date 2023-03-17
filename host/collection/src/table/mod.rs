@@ -106,7 +106,7 @@ pub trait TableOrder: TableInstance {
 #[async_trait]
 pub trait TableRead: TableInstance {
     /// Read the row with the given `key` from this table, if present.
-    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Vec<Value>>>;
+    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Row>>;
 }
 
 /// Methods for slicing a table
@@ -128,7 +128,7 @@ pub trait TableStream: TableInstance + Sized {
     async fn count(self, txn_id: TxnId) -> TCResult<u64>;
 
     /// Limit the number of rows returned by `rows`.
-    fn limit(self, limit: u64) -> Self::Limit;
+    fn limit(self, limit: u64) -> TCResult<Self::Limit>;
 
     /// Limit the columns returned by `rows`.
     fn select(self, columns: Vec<Id>) -> TCResult<Self::Selection>;
@@ -236,7 +236,7 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Vec<Value>>> {
+    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Row>> {
         match self {
             Self::Selection(selection) => selection.read(txn_id, key).await,
             Self::Slice(slice) => slice.read(txn_id, key).await,
@@ -284,12 +284,12 @@ where
         }
     }
 
-    fn limit(self, limit: u64) -> Self {
+    fn limit(self, limit: u64) -> TCResult<Self> {
         match self {
-            Self::Limited(limited) => limited.limit(limit).into(),
-            Self::Selection(selection) => selection.limit(limit).into(),
-            Self::Slice(slice) => slice.limit(limit).into(),
-            Self::Table(table) => table.limit(limit).into(),
+            Self::Limited(limited) => limited.limit(limit).map(Self::from),
+            Self::Selection(selection) => selection.limit(limit).map(Self::from),
+            Self::Slice(slice) => slice.limit(limit).map(Self::from),
+            Self::Table(table) => table.limit(limit).map(Self::from),
         }
     }
 

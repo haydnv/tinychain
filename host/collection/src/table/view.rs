@@ -1,14 +1,13 @@
 use std::fmt;
-use std::sync::Arc;
 
 use async_trait::async_trait;
+use collate::OverlapsRange;
 use ds_ext::Id;
-use futures::{future, TryStreamExt};
+use futures::{future, TryFutureExt, TryStreamExt};
 use safecast::AsType;
 
 use tc_error::*;
 use tc_transact::{Transaction, TxnId};
-use tc_value::Value;
 use tcgeneric::{Instance, ThreadSafe};
 
 use crate::btree::Schema as IndexSchema;
@@ -17,19 +16,21 @@ use crate::Node;
 use super::file::TableFile;
 use super::stream::Rows;
 use super::{
-    Key, Range, Schema, Table, TableInstance, TableOrder, TableRead, TableStream, TableType,
+    Key, Range, Row, Schema, Table, TableInstance, TableOrder, TableRead, TableStream, TableType,
 };
 
 /// A result set from a database table with a limited number of rows
 #[derive(Clone)]
 pub struct Limited<T> {
     source: T,
-    limit: u64,
+    limit: usize,
 }
 
 impl<T> Limited<T> {
-    pub(super) fn new(source: T, limit: u64) -> Self {
-        Self { source, limit }
+    pub(super) fn new(source: T, limit: u64) -> TCResult<Self> {
+        usize::try_from(limit)
+            .map(|limit| Self { source, limit })
+            .map_err(|cause| bad_request!("limit {} is too large: {}", limit, cause))
     }
 }
 
@@ -61,11 +62,13 @@ impl<T: TableStream> TableStream for Limited<T> {
             .await
     }
 
-    fn limit(self, limit: u64) -> Self::Limit {
-        Self {
-            source: self.source,
-            limit: Ord::min(self.limit, limit),
-        }
+    fn limit(self, limit: u64) -> TCResult<Self::Limit> {
+        usize::try_from(limit)
+            .map(|limit| Self {
+                source: self.source,
+                limit,
+            })
+            .map_err(|cause| bad_request!("limit {} is too large: {}", limit, cause))
     }
 
     fn select(self, columns: Vec<Id>) -> TCResult<Self::Selection> {
@@ -76,7 +79,10 @@ impl<T: TableStream> TableStream for Limited<T> {
     }
 
     async fn rows<'a>(self, txn_id: TxnId) -> TCResult<Rows<'a>> {
-        todo!()
+        self.source
+            .rows(txn_id)
+            .map_ok(|rows| rows.limit(self.limit))
+            .await
     }
 }
 
@@ -111,8 +117,7 @@ pub struct Selection<T> {
 impl<T: TableInstance> Selection<T> {
     pub(super) fn new(source: T, columns: Vec<Id>) -> TCResult<Self> {
         let mut column_schema = Vec::with_capacity(columns.len());
-        let mut i = 0;
-        for name in columns {
+        for (i, name) in columns.into_iter().enumerate() {
             for column in b_table::Schema::primary(source.schema()) {
                 if column.name == name {
                     column_schema.push(column.clone());
@@ -120,7 +125,6 @@ impl<T: TableInstance> Selection<T> {
                 }
             }
 
-            i += 1;
             if column_schema.len() != i {
                 return Err(bad_request!("cannot select nonexistent column {}", name));
             }
@@ -175,8 +179,16 @@ impl<T: TableOrder> TableOrder for Selection<T> {
 
 #[async_trait]
 impl<T: TableRead> TableRead for Selection<T> {
-    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Vec<Value>>> {
-        todo!()
+    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Row>> {
+        let schema = b_table::Schema::primary(self.schema());
+        let source_schema = b_table::Schema::primary(self.source.schema());
+
+        if let Some(row) = self.source.read(txn_id, key).await? {
+            let row = b_table::IndexSchema::extract_key(schema, &row, source_schema);
+            Ok(Some(row))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -200,7 +212,7 @@ impl<T: TableStream + fmt::Debug> TableStream for Selection<T> {
         self.source.count(txn_id).await
     }
 
-    fn limit(self, limit: u64) -> Self::Limit {
+    fn limit(self, limit: u64) -> TCResult<Self::Limit> {
         Limited::new(self, limit)
     }
 
@@ -220,7 +232,12 @@ impl<T: TableStream + fmt::Debug> TableStream for Selection<T> {
     }
 
     async fn rows<'a>(self, txn_id: TxnId) -> TCResult<Rows<'a>> {
-        todo!()
+        let source_schema = self.source.schema().clone();
+
+        self.source
+            .rows(txn_id)
+            .map_ok(move |rows| rows.select(source_schema, self.schema))
+            .await
     }
 }
 
@@ -253,8 +270,8 @@ where
 /// A slice of a relational database table
 pub struct TableSlice<Txn, FE> {
     table: TableFile<Txn, FE>,
-    range: Arc<Range>,
-    order: Arc<Vec<Id>>,
+    range: Range,
+    order: Vec<Id>,
     reverse: bool,
 }
 
@@ -264,8 +281,8 @@ where
 {
     pub(super) fn new(
         table: TableFile<Txn, FE>,
-        range: Arc<Range>,
-        order: Arc<Vec<Id>>,
+        range: Range,
+        order: Vec<Id>,
         reverse: bool,
     ) -> TCResult<Self> {
         // verify that the requested range is supported
@@ -374,8 +391,14 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Vec<Value>>> {
-        todo!()
+    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Row>> {
+        let range = self.schema().range_from_key(key.clone())?;
+
+        if self.range.contains(&range, self.table.collator().inner()) {
+            self.table.read(txn_id, key).await
+        } else {
+            Err(bad_request!("key {:?} does not lie within {:?}", key, self))
+        }
     }
 }
 
@@ -387,7 +410,20 @@ where
     type Slice = Self;
 
     fn slice(self, range: Range) -> TCResult<Self::Slice> {
-        todo!()
+        if self.range.contains(&range, self.table.collator().inner()) {
+            Ok(Self {
+                table: self.table,
+                range,
+                order: self.order,
+                reverse: self.reverse,
+            })
+        } else {
+            Err(bad_request!(
+                "slice range {:?} does not lie within {:?}",
+                range,
+                self
+            ))
+        }
     }
 }
 
@@ -401,19 +437,23 @@ where
     type Selection = Selection<Self>;
 
     async fn count(self, txn_id: TxnId) -> TCResult<u64> {
-        todo!()
+        let rows = self.rows(txn_id).await?;
+        rows.try_fold(0, |count, _row| future::ready(Ok(count + 1)))
+            .await
     }
 
-    fn limit(self, limit: u64) -> Self::Limit {
-        todo!()
+    fn limit(self, limit: u64) -> TCResult<Self::Limit> {
+        Limited::new(self, limit)
     }
 
     fn select(self, columns: Vec<Id>) -> TCResult<Self::Selection> {
-        todo!()
+        Selection::new(self, columns)
     }
 
     async fn rows<'a>(self, txn_id: TxnId) -> TCResult<Rows<'a>> {
-        todo!()
+        self.table
+            .into_stream(txn_id, self.range, self.order, self.reverse)
+            .await
     }
 }
 

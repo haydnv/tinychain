@@ -254,6 +254,10 @@ where
 
         Ok(Rows::new(permit, keys))
     }
+
+    pub(super) fn collator(&self) -> &b_tree::Collator<ValueCollator> {
+        self.canon.collator()
+    }
 }
 
 impl<Txn, FE> Instance for TableFile<Txn, FE>
@@ -286,11 +290,11 @@ where
     type Reverse = Slice<Txn, FE>;
 
     fn order_by(self, columns: Vec<Id>, reverse: bool) -> TCResult<Self::OrderBy> {
-        Slice::new(self, Arc::new(Range::default()), Arc::new(columns), reverse)
+        Slice::new(self, Range::default(), columns, reverse)
     }
 
     fn reverse(self) -> TCResult<Self::Reverse> {
-        Slice::new(self, Arc::new(Range::default()), Arc::new(vec![]), true)
+        Slice::new(self, Range::default(), vec![], true)
     }
 }
 
@@ -300,7 +304,7 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Vec<Value>>> {
+    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Row>> {
         let key = b_table::Schema::validate_key(self.schema(), key)?;
         let range = self.schema().range_from_key(key.clone())?;
         let _permit = self.semaphore.read(txn_id, range).await?;
@@ -352,7 +356,7 @@ where
     type Slice = Slice<Txn, FE>;
 
     fn slice(self, range: Range) -> TCResult<Self::Slice> {
-        Slice::new(self, Arc::new(range), Arc::new(vec![]), false)
+        Slice::new(self, range, vec![], false)
     }
 }
 
@@ -372,7 +376,7 @@ where
             .await
     }
 
-    fn limit(self, limit: u64) -> Self::Limit {
+    fn limit(self, limit: u64) -> TCResult<Self::Limit> {
         Limited::new(self, limit)
     }
 
