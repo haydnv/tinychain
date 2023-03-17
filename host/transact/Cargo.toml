@@ -12,7 +12,7 @@ keywords = ["tinychain", "transaction", "executor"]
 categories = ["concurrency", "data-structures"]
 
 [dependencies]
-async-hash = "0.4"
+async-hash = { path = "../../../async-hash" }
 async-trait = "0.1"
 destream = { path = "../../../destream" }
 futures = "0.3"

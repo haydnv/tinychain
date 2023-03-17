@@ -2,7 +2,7 @@ use std::collections::btree_map::{BTreeMap, Entry};
 use std::fmt;
 use std::iter::FromIterator;
 
-use async_hash::{Digest, Hash, Output};
+use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
@@ -11,7 +11,7 @@ use get_size::GetSize;
 use log::debug;
 
 use tc_error::*;
-use tc_transact::{Sha256, TxnId};
+use tc_transact::TxnId;
 use tc_value::Value;
 use tcgeneric::Tuple;
 

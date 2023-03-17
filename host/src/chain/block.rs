@@ -5,7 +5,7 @@
 use std::fmt;
 use std::marker::PhantomData;
 
-use async_hash::{Digest, Hash, Output};
+use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use destream::de::{self, Error};
 use futures::future::TryFutureExt;
@@ -15,7 +15,7 @@ use safecast::TryCastInto;
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Persist};
-use tc_transact::{AsyncHash, IntoView, Sha256, Transact, Transaction};
+use tc_transact::{AsyncHash, IntoView, Transact, Transaction};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{label, Label, Map};
 

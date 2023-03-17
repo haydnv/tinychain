@@ -263,15 +263,11 @@ impl<T: fmt::Debug> fmt::Debug for Map<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("{")?;
 
-        let mut i = 0;
-        let last = self.len() - 1;
-
-        for (k, v) in self {
+        for (i, (k, v)) in self.iter().enumerate() {
             write!(f, "\t{}: {:?}", k, v)?;
 
-            if i < last {
+            if i < self.len() - 1 {
                 f.write_str(",\n")?;
-                i += 1;
             }
         }
 

@@ -13,6 +13,7 @@ use tcgeneric::{Id, ThreadSafe};
 
 use super::{TCResult, Transact, Transaction, TxnId};
 
+pub use txfs::VERSIONS;
 pub use txfs::Key;
 
 /// The underlying filesystem directory type backing a [`Dir`]

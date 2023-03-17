@@ -408,6 +408,12 @@ impl From<Vec<Value>> for Value {
     }
 }
 
+impl From<String> for Value {
+    fn from(s: String) -> Self {
+        Self::String(s.into())
+    }
+}
+
 impl From<i64> for Value {
     fn from(n: i64) -> Self {
         Self::Number(n.into())
@@ -676,6 +682,28 @@ impl TryCastFrom<Value> for Number {
             Value::Tuple(_) => None,
             Value::String(s) => Number::from_str(&s).ok(),
             Value::Version(_) => None,
+        }
+    }
+}
+
+impl TryCastFrom<Value> for String {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Link(_) => true,
+            Value::Id(_) => true,
+            Value::Number(_) => true,
+            Value::String(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Link(link) => Some(link.to_string()),
+            Value::Id(id) => Some(id.to_string()),
+            Value::Number(n) => Some(n.to_string()),
+            Value::String(s) => Some(s.into()),
+            _ => None,
         }
     }
 }

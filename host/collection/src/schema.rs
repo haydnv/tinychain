@@ -6,8 +6,8 @@ use safecast::as_type;
 
 use tcgeneric::NativeClass;
 
-use crate::btree::{BTreeType, Schema as BTreeSchema};
-use crate::table::{Schema as TableSchema, TableType};
+use crate::btree::{BTreeSchema, BTreeType};
+use crate::table::{TableSchema, TableType};
 use crate::tensor::{Schema as TensorSchema, TensorType};
 
 /// The schema of a `Collection`.
@@ -41,32 +41,6 @@ impl<'a, D: Digest> Hash<D> for &'a Schema {
 
 impl<'en> en::IntoStream<'en> for Schema {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        use destream::en::EncodeMap;
-
-        match self {
-            Self::BTree(schema) => {
-                let mut map = encoder.encode_map(Some(1))?;
-                map.encode_entry(BTreeType::default().path(), (schema,))?;
-                map.end()
-            }
-
-            Self::Table(schema) => {
-                let mut map = encoder.encode_map(Some(1))?;
-                map.encode_entry(TableType::default().path(), (schema,))?;
-                map.end()
-            }
-
-            Self::Dense(schema) | Self::Sparse(schema) => {
-                let mut map = encoder.encode_map(Some(1))?;
-                map.encode_entry(TensorType::Dense.path(), (schema,))?;
-                map.end()
-            }
-        }
-    }
-}
-
-impl<'en> en::ToStream<'en> for Schema {
-    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         use destream::en::EncodeMap;
 
         match self {

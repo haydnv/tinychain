@@ -2,18 +2,17 @@ use destream::de::Error;
 use futures::{future, StreamExt, TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::*;
+use std::ops::Bound;
 
+use tc_collection::table::*;
 use tc_error::*;
-use tc_table::{
-    Bounds, ColumnBound, Key, TableInstance, TableOrder, TableRead, TableSlice, TableStream,
-    TableType, TableWrite,
-};
-use tc_transact::fs::Persist;
+use tc_transact::fs::{CopyFrom, Persist};
 use tc_transact::Transaction;
-use tc_value::{Bound, Value};
+use tc_value::Value;
 use tcgeneric::{label, Id, Map, PathSegment};
 
-use crate::collection::{Collection, Table, TableIndex};
+use crate::collection::{Collection, Table, TableFile};
+use crate::fs::Dir;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
@@ -39,42 +38,18 @@ impl<'a> Handler<'a> for CopyHandler {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
                 let schema: Value = params.require(&label("schema").into())?;
-                let schema = tc_table::TableSchema::try_cast_from(schema, |v| {
-                    TCError::unexpected(v, "a Table schema")
-                })?;
+                let _schema = TableSchema::try_cast_from_value(schema)?;
 
-                let source: TCStream = params.require(&label("source").into())?;
+                let _source: TCStream = params.require(&label("source").into())?;
                 params.expect_empty()?;
 
-                let txn_id = *txn.id();
+                let _store = {
+                    let mut context = txn.context().write().await;
+                    let (_, dir) = context.create_dir_unique()?;
+                    Dir::load(*txn.id(), dir).await?
+                };
 
-                let store = txn.context().create_store_unique(*txn.id()).await?;
-                let table = TableIndex::create(txn_id, schema, store)?;
-
-                let rows = source.into_stream(txn.clone()).await?;
-                rows.map(|r| {
-                    r.and_then(|state| {
-                        Value::try_cast_from(state, |s| TCError::unexpected(s, "a Value"))
-                    })
-                })
-                .map(|r| {
-                    r.and_then(|value| {
-                        value.try_cast_into(|v| TCError::unexpected(v, "a table row"))
-                    })
-                })
-                .map(|r| {
-                    r.and_then(|row| {
-                        TableInstance::schema(&table)
-                            .primary()
-                            .key_values_from_tuple(row)
-                    })
-                })
-                .map_ok(|(key, values)| table.upsert(txn_id, key, values))
-                .try_buffer_unordered(num_cpus::get())
-                .try_fold((), |(), ()| future::ready(Ok(())))
-                .await?;
-
-                Ok(State::Collection(table.into()))
+                Err(not_implemented!("copy a Table from a Stream"))
             })
         }))
     }
@@ -89,14 +64,19 @@ impl<'a> Handler<'a> for CreateHandler {
     {
         Some(Box::new(|txn, value| {
             Box::pin(async move {
-                let schema = tc_table::TableSchema::try_cast_from(value, |v| {
-                    TCError::unexpected(v, "a Table schema")
-                })?;
+                let schema = TableSchema::try_cast_from_value(value)?;
 
-                let store = txn.context().create_store_unique(*txn.id()).await?;
-                TableIndex::create(*txn.id(), schema, store)
-                    .map(Collection::from)
-                    .map(State::from)
+                let store = {
+                    let mut context = txn.context().write().await;
+                    let (_, dir) = context.create_dir_unique()?;
+                    Dir::load(*txn.id(), dir).await?
+                };
+
+                TableFile::create(*txn.id(), schema, store)
+                    .map_ok(Table::from)
+                    .map_ok(Collection::Table)
+                    .map_ok(State::Collection)
+                    .await
             })
         }))
     }
@@ -113,8 +93,8 @@ impl<'a, T: TableRead + 'a> Handler<'a> for ContainsHandler<'a, T> {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let key = primary_key(key, self.table)?;
-                let row = self.table.read(txn.id(), &key).await?;
+                let key = try_into_key(key)?;
+                let row = self.table.read(*txn.id(), key).await?;
                 Ok(Value::from(row.is_some()).into())
             })
         }))
@@ -177,7 +157,8 @@ where
                     bad_request!("limit must be a positive integer, not {}", v)
                 })?;
 
-                Ok(Collection::Table(self.table.limit(limit).into()).into())
+                let table = self.table.limit(limit)?;
+                Ok(State::Collection(Collection::Table(table.into())))
             })
         }))
     }
@@ -248,9 +229,10 @@ where
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
-                    let key = primary_key(key.clone(), self.table)?;
+                    let key = try_into_key(key)?;
+
                     self.table
-                        .read(txn.id(), &key)
+                        .read(*txn.id(), key)
                         .map_ok(Value::from)
                         .map_ok(State::from)
                         .await
@@ -269,23 +251,10 @@ where
             Box::pin(async move {
                 debug!("Table PUT {:?} <- {:?}", key, values);
 
-                let key = primary_key(key, self.table)?;
+                let key = try_into_key(key)?;
 
                 if values.is_map() {
-                    let values =
-                        values.try_into_map(|s| TCError::unexpected(s, "a Map of row values"))?;
-
-                    let values = values
-                        .into_iter()
-                        .map(|(id, state)| {
-                            Value::try_cast_from(state, |s| {
-                                TCError::unexpected(s, "a Value for a column")
-                            })
-                            .map(|value| (id, value))
-                        })
-                        .collect::<TCResult<Map<Value>>>()?;
-
-                    self.table.update(*txn.id(), key, values).await
+                    Err(not_implemented!("update an existing table row"))
                 } else if values.is_tuple() {
                     let values = values.try_into_tuple(|s| {
                         TCError::unexpected(s, "a Tuple of Values for a Table row")
@@ -330,7 +299,7 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let key = primary_key(key, self.table)?;
+                let key = try_into_key(key)?;
                 self.table.delete(*txn.id(), key).await
             })
         }))
@@ -454,7 +423,7 @@ impl Route for Table {
     }
 }
 
-impl Route for TableIndex {
+impl Route for TableFile {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         route(self, path)
     }
@@ -506,37 +475,32 @@ impl Route for Static {
 }
 
 #[inline]
-fn cast_into_bounds(scalar: Scalar) -> TCResult<Bounds> {
+fn cast_into_bounds(scalar: Scalar) -> TCResult<Range> {
     if scalar.is_none() {
-        return Ok(Bounds::default());
+        return Ok(Range::default());
     }
 
-    let scalar = Map::<Value>::try_cast_from(scalar, |s| {
-        bad_request!("invalid selection bounds for Table: {}", s)
-    })?;
+    let column_ranges = Map::<Scalar>::try_from(scalar)?;
 
-    scalar
+    column_ranges
         .into_iter()
-        .map(|(col_name, bound)| {
-            if bound.matches::<(Bound, Bound)>()
-                || bound.matches::<(Bound, Value)>()
-                || bound.matches::<(Value, Bound)>()
-            {
-                Ok(ColumnBound::In(bound.opt_cast_into().unwrap()))
-            } else if bound.matches::<Value>() {
-                Ok(ColumnBound::Is(bound.opt_cast_into().unwrap()))
+        .map(|(name, range)| {
+            if range.matches::<(Bound<Value>, Bound<Value>)>() {
+                let (start, end) = range.opt_cast_into().expect("column range");
+                Ok((name, ColumnRange::In((start, end))))
+            } else if range.matches::<Value>() {
+                let value = range.opt_cast_into().expect("column value");
+                Ok((name, ColumnRange::Eq(value)))
             } else {
-                Err(bad_request!("invalid column bound {}", bound))
+                Err(bad_request!("{:?} is not a valid column range", range))
             }
-            .map(|bound| (col_name, bound))
         })
         .collect()
 }
 
 #[inline]
-fn primary_key<T: TableInstance>(key: Value, table: &T) -> TCResult<Key> {
-    let key = key.try_cast_into(|v| TCError::unexpected(v, "a Table key"))?;
-    table.schema().primary().validate_key(key)
+fn try_into_key(key: Value) -> TCResult<Key> {
+    key.try_cast_into(|v| TCError::unexpected(v, "a Table key"))
 }
 
 fn column_schema<T: TableInstance>(table: &T) -> Value {
@@ -545,6 +509,7 @@ fn column_schema<T: TableInstance>(table: &T) -> Value {
         .primary()
         .columns()
         .into_iter()
+        .cloned()
         .map(Value::from)
         .collect();
 
@@ -553,10 +518,11 @@ fn column_schema<T: TableInstance>(table: &T) -> Value {
 
 fn key_columns<T: TableInstance>(table: &T) -> Value {
     let key = table
+        .schema()
         .key()
         .iter()
         .cloned()
-        .map(|column| Value::from(column))
+        .map(Value::Id)
         .collect();
 
     Value::Tuple(key)
@@ -564,9 +530,9 @@ fn key_columns<T: TableInstance>(table: &T) -> Value {
 
 fn key_names<T: TableInstance>(table: &T) -> Value {
     let key = table
+        .schema()
         .key()
         .iter()
-        .map(|col| &col.name)
         .cloned()
         .map(Value::Id)
         .collect();
