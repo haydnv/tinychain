@@ -452,44 +452,40 @@ where
             (deltas, pending)
         };
 
-        let mut row = None;
-        for delta in deltas {
-            let (inserted, deleted) = delta.read().await;
+        let (mut inserts, mut deletes) = pending.write().await;
 
-            if deleted.contains(&key).await? {
-                debug!(
-                    "{:?} has already been deleted and this delete will soon be merged",
-                    key
-                );
-                return Ok(());
-            } else if let Some(insert) = inserted.get(&key).await? {
-                row = Some(insert);
-                break;
+        if deletes.contains(&key).await? {
+            return Ok(());
+        }
+
+        let mut row = inserts.get(&key).await?;
+
+        if row.is_none() {
+            for delta in deltas {
+                let (inserted, deleted) = delta.read().await;
+
+                if deleted.contains(&key).await? {
+                    return Ok(());
+                } else if let Some(insert) = inserted.get(&key).await? {
+                    row = Some(insert);
+                    break;
+                }
             }
         }
 
-        let (mut inserts, mut deletes) = pending.write().await;
+        if row.is_none() {
+            row = canon.get(&key).await?;
+        }
 
-        let mut row = if let Some(row) = row {
-            row
-        } else if let Some(row) = canon.get(&key).await? {
-            row
-        } else if let Some(row) = inserts.get(&key).await? {
-            row
-        } else {
-            debug!("there is no row with key {:?} to delete", key);
-            return Ok(());
-        };
+        if let Some(mut row) = row {
+            trace!("found row {:?} to delete", row);
 
-        trace!("found row {:?} to delete", row);
+            let values = row.drain(key.len()..).collect();
+            debug_assert_eq!(key, row[..key.len()]);
 
-        let values = row.drain(key.len()..).collect();
-        debug_assert_eq!(key, row[..key.len()]);
-
-        trace!("logging delete of {:?}...", key);
-
-        inserts.delete(&key).await?;
-        deletes.upsert(key, values).await?;
+            inserts.delete(&key).await?;
+            deletes.upsert(key, values).await?;
+        }
 
         Ok(())
     }

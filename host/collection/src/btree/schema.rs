@@ -171,6 +171,7 @@ impl b_table::IndexSchema for BTreeSchema {
             for (val, name) in key.iter().zip(&self.names) {
                 if name == &other.columns()[i] {
                     extracted.push(val.clone());
+                    break;
                 }
             }
         }
