@@ -363,14 +363,15 @@ impl TryCastFrom<Value> for Column {
 
 impl CastFrom<Column> for Value {
     fn cast_from(column: Column) -> Self {
-        Value::Tuple(
-            vec![
-                column.name.into(),
-                column.dtype.path().into(),
-                column.max_len.map(Value::from).into(),
-            ]
-            .into(),
-        )
+        let mut tuple = Vec::with_capacity(3);
+        tuple.push(String::from(column.name).into());
+        tuple.push(column.dtype.path().into());
+
+        if let Some(max_len) = column.max_len {
+            tuple.push(max_len.into());
+        }
+
+        Value::Tuple(tuple.into())
     }
 }
 

@@ -60,11 +60,9 @@ impl TableSchema {
         let key_names = key.iter().map(|col| &col.name).cloned().collect();
         let value_names = values.iter().map(|col| &col.name).cloned().collect();
 
-        let mut primary = Vec::with_capacity(key.len() + values.len());
-        primary.extend(key);
-        primary.extend(values);
-
-        let columns: HashMap<_, _> = primary.iter().map(|col| (&col.name, col)).collect();
+        let mut columns = HashMap::with_capacity(key.len() + values.len());
+        columns.extend(key.iter().map(|col| (&col.name, col)));
+        columns.extend(values.iter().map(|col| (&col.name, col)));
 
         let indices = indices
             .into_iter()
@@ -80,12 +78,17 @@ impl TableSchema {
                             )
                         })
                     })
+                    .chain(key.iter().cloned().map(Ok))
                     .collect::<TCResult<Vec<Column>>>()?;
 
                 let index_schema = IndexSchema::new(columns)?;
                 Ok((index_name, index_schema))
             })
             .collect::<TCResult<Vec<_>>>()?;
+
+        let mut primary = Vec::with_capacity(key.len() + values.len());
+        primary.extend(key);
+        primary.extend(values);
 
         let primary = IndexSchema::new(primary)?;
 
@@ -95,6 +98,34 @@ impl TableSchema {
             primary,
             indices,
         })
+    }
+
+    #[inline]
+    fn pack(self) -> ((Vec<Column>, Vec<Column>), Vec<(String, Vec<Id>)>) {
+        let key_len = self.key.len();
+
+        let mut columns = self.primary.into_iter();
+
+        let mut key = Vec::with_capacity(key_len);
+        for _ in 0..key_len {
+            let column = columns.next().expect("column");
+            key.push(column);
+        }
+
+        let values = columns.collect();
+
+        let indices = self
+            .indices
+            .into_iter()
+            .map(|(name, schema)| {
+                let len = b_table::b_tree::Schema::len(&schema) - key_len;
+                let columns = schema.into_iter().take(len).map(|col| col.name).collect();
+
+                (name, columns)
+            })
+            .collect();
+
+        ((key, values), indices)
     }
 }
 
@@ -170,33 +201,23 @@ impl<'a, D: Digest> Hash<D> for &'a TableSchema {
 
 impl CastFrom<TableSchema> for Value {
     fn cast_from(schema: TableSchema) -> Self {
-        let key_len = schema.key.len();
+        let ((key, values), indices) = schema.pack();
 
-        let mut columns = schema.primary.into_iter();
+        let key = key.into_iter().map(Value::cast_from).collect::<Value>();
+        let values = values.into_iter().map(Value::cast_from).collect::<Value>();
 
-        let mut key = Vec::with_capacity(key_len);
-        for _ in 0..key_len {
-            let column = columns.next().expect("column");
-            key.push(Value::cast_from(column));
-        }
-        let key = Value::Tuple(key.into());
-
-        let values = columns.map(Value::cast_from).collect::<Value>();
-
-        let indices = schema
-            .indices
+        let indices = indices
             .into_iter()
-            .map(|(name, schema)| {
-                let len = b_table::b_tree::Schema::len(&schema) - key_len;
-                let columns = schema
-                    .into_iter()
-                    .take(len)
-                    .map(|col| col.name)
-                    .map(Value::from)
-                    .collect::<Value>();
-
-                Value::Tuple(vec![name.into(), columns].into())
+            .map(|(name, columns)| {
+                (
+                    Value::from(name),
+                    columns
+                        .into_iter()
+                        .map(Value::from)
+                        .collect::<Value>(),
+                )
             })
+            .map(|(name, columns)| Value::Tuple(vec![name, columns].into()))
             .collect::<Value>();
 
         Value::Tuple(vec![vec![key, values].into(), indices].into())
@@ -205,7 +226,7 @@ impl CastFrom<TableSchema> for Value {
 
 impl<'en> en::IntoStream<'en> for TableSchema {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        Value::cast_from(self).into_stream(encoder)
+        self.pack().into_stream(encoder)
     }
 }
 
@@ -214,44 +235,8 @@ impl de::FromStream for TableSchema {
     type Context = ();
 
     async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
-        let ((key, values), indices): ((Vec<Column>, Vec<Column>), Vec<(String, Vec<Id>)>) =
-            de::FromStream::from_stream(cxt, decoder).await?;
-
-        let key_names = key.iter().map(|col| &col.name).cloned().collect();
-        let value_names = values.iter().map(|col| &col.name).cloned().collect();
-
-        let mut primary = Vec::with_capacity(key.len() + values.len());
-        primary.extend(key);
-        primary.extend(values);
-
-        let columns: HashMap<_, _> = primary.iter().map(|col| (&col.name, col)).collect();
-
-        let indices = indices
-            .into_iter()
-            .map(|(name, column_names)| {
-                let columns = column_names
-                    .into_iter()
-                    .map(|name| {
-                        columns.get(&name).map(|col| *col).cloned().ok_or_else(|| {
-                            de::Error::invalid_value(name, "there is no such column to index")
-                        })
-                    })
-                    .collect::<Result<Vec<Column>, D::Error>>()?;
-
-                IndexSchema::new(columns)
-                    .map(|schema| (name, schema))
-                    .map_err(de::Error::custom)
-            })
-            .collect::<Result<Vec<(String, IndexSchema)>, D::Error>>()?;
-
-        let primary = IndexSchema::new(primary).map_err(de::Error::custom)?;
-
-        Ok(Self {
-            key: key_names,
-            values: value_names,
-            primary,
-            indices,
-        })
+        let value = Value::from_stream(cxt, decoder).await?;
+        Self::try_cast_from_value(value).map_err(de::Error::custom)
     }
 }
 

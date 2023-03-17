@@ -9,6 +9,7 @@ use destream::de;
 use ds_ext::{Id, OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, DirWriteGuard};
 use futures::{future, TryFutureExt, TryStreamExt};
+use log::{debug, trace};
 use safecast::AsType;
 
 use tc_error::*;
@@ -764,10 +765,13 @@ where
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        trace!("TableVisitor::visit_seq");
+
         let txn_id = *self.txn.id();
         let collator = ValueCollator::default();
 
         let schema = seq.expect_next::<TableSchema>(()).await?;
+        trace!("decoded table schema: {:?}", schema);
 
         let (canon, versions) = {
             let mut dir = self.txn.context().write().await;
@@ -783,11 +787,15 @@ where
             (canon, versions)
         };
 
+        trace!("created canon and versions dirs");
+
         let version = {
             let mut dir = versions.write().await;
             dir.create_dir(txn_id.to_string())
                 .map_err(de::Error::custom)?
         };
+
+        trace!("created version dir");
 
         let (deletes, inserts) = {
             let mut dir = version.write().await;
@@ -810,12 +818,18 @@ where
             Version::create(schema.clone(), collator.clone(), inserts).map_err(de::Error::custom)?
         };
 
+        trace!("decoded version inserts");
+
         let deletes = Version::create(schema.clone(), collator.clone(), deletes)
             .map_err(de::Error::custom)?;
 
         let version = Delta { inserts, deletes };
 
+        trace!("created version");
+
         let canon = Version::create(schema, collator, canon).map_err(de::Error::custom)?;
+
+        trace!("created canonical version");
 
         let collator = Arc::new(canon.collator().inner().clone());
         let semaphore = Semaphore::with_reservation(txn_id, collator, Range::default());
@@ -845,6 +859,8 @@ where
     type Context = Txn;
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+        debug!("TableFile::from_stream");
+
         decoder.decode_seq(TableVisitor::new(txn)).await
     }
 }

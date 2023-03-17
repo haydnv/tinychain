@@ -14,10 +14,9 @@ class TableTests(HostTest):
     def testCreate(self):
         cxt = tc.Context()
         cxt.table = tc.table.Table(SCHEMA)
-        cxt.result = tc.after(cxt.table.insert(("name",), (0,)), cxt.table.count())
 
-        count = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(count, 1)
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, expected(SCHEMA, []))
 
     def testDelete(self):
         count = 2
