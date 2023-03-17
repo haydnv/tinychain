@@ -6,8 +6,8 @@ use safecast::as_type;
 
 use tcgeneric::NativeClass;
 
-use crate::btree::{BTreeType, Schema as BTreeSchema};
-use crate::table::{Schema as TableSchema, TableType};
+use crate::btree::{BTreeSchema, BTreeType};
+use crate::table::{TableSchema, TableType};
 use crate::tensor::{Schema as TensorSchema, TensorType};
 
 /// The schema of a `Collection`.

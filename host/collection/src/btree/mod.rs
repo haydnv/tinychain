@@ -15,8 +15,10 @@ use tcgeneric::{
     path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
 };
 
+pub use b_tree::Schema;
+
 pub use file::BTreeFile;
-pub use schema::{Column, Schema};
+pub use schema::{BTreeSchema, Column};
 pub use slice::BTreeSlice;
 pub(crate) use stream::BTreeView;
 pub use stream::Keys;
@@ -90,7 +92,7 @@ pub trait BTreeInstance: Clone + Instance {
     type Slice: BTreeInstance;
 
     /// Borrow to this `BTree`'s schema.
-    fn schema(&self) -> &Schema;
+    fn schema(&self) -> &BTreeSchema;
 
     /// Return the number of [`Key`]s in this `BTree`.
     async fn count(&self, txn_id: TxnId) -> TCResult<u64>;
@@ -166,7 +168,7 @@ where
 {
     type Slice = Self;
 
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> &BTreeSchema {
         match self {
             Self::File(file) => BTreeInstance::schema(file),
             Self::Slice(slice) => BTreeInstance::schema(slice),

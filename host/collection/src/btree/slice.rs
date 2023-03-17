@@ -11,7 +11,7 @@ use tc_transact::{Transaction, TxnId};
 use tcgeneric::{Instance, ThreadSafe};
 
 use super::file::BTreeFile;
-use super::schema::Schema;
+use super::schema::BTreeSchema;
 use super::stream::Keys;
 use super::{BTreeInstance, BTreeType, Node, Range};
 
@@ -68,7 +68,7 @@ where
 {
     type Slice = Self;
 
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> &BTreeSchema {
         self.file.schema()
     }
 

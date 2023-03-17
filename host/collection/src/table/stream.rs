@@ -11,7 +11,7 @@ use tc_error::*;
 use tc_transact::{IntoView, Transaction};
 use tcgeneric::{TCBoxTryStream, ThreadSafe};
 
-use super::{Node, Range, Row, Schema as TableSchema, Table, TableInstance, TableStream};
+use super::{Node, Range, Row, Table, TableInstance, TableSchema, TableStream};
 
 type PermitRead = tc_transact::lock::PermitRead<Range>;
 

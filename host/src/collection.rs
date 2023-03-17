@@ -15,3 +15,9 @@ pub type BTree = tc_collection::BTree<Txn, CacheBlock>;
 
 /// A B+Tree file
 pub type BTreeFile = tc_collection::btree::BTreeFile<Txn, CacheBlock>;
+
+/// A relational database table
+pub type Table = tc_collection::table::Table<Txn, CacheBlock>;
+
+/// A relational database table file
+pub type TableFile = tc_collection::table::TableFile<Txn, CacheBlock>;

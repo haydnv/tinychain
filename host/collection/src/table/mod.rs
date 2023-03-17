@@ -14,8 +14,10 @@ use tcgeneric::{
 
 use super::Node;
 
+pub use b_table::{IndexSchema, Schema};
+
 pub use file::TableFile;
-pub use schema::Schema;
+pub use schema::TableSchema;
 pub use stream::Rows;
 pub(crate) use stream::TableView;
 
@@ -29,6 +31,9 @@ pub type Key = Vec<Value>;
 
 /// The values of a row in a table
 pub type Values = Vec<Value>;
+
+/// A range of an individual column
+pub type ColumnRange = b_table::ColumnRange<Value>;
 
 /// A range used to select a slice of a table
 pub type Range = b_table::Range<Id, Value>;
@@ -84,7 +89,7 @@ impl fmt::Debug for TableType {
 /// Methods common to every table view
 pub trait TableInstance: Instance<Class = TableType> {
     /// Borrow the schema of this `Table`.
-    fn schema(&self) -> &Schema;
+    fn schema(&self) -> &TableSchema;
 }
 
 /// Table ordering methods
@@ -193,7 +198,7 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> &TableSchema {
         match self {
             Self::Limited(limited) => limited.schema(),
             Self::Selection(selection) => selection.schema(),

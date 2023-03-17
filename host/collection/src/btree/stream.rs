@@ -11,7 +11,7 @@ use tc_error::*;
 use tc_transact::{IntoView, Transaction};
 use tcgeneric::{TCBoxTryStream, ThreadSafe};
 
-use super::{BTree, BTreeInstance, Key, Node, Range, Schema};
+use super::{BTree, BTreeInstance, BTreeSchema, Key, Node, Range};
 
 type PermitRead = tc_transact::lock::PermitRead<Arc<Range>>;
 
@@ -37,12 +37,12 @@ impl<'a> Stream for Keys<'a> {
 }
 
 pub struct BTreeView<'en> {
-    schema: Schema,
+    schema: BTreeSchema,
     keys: Keys<'en>,
 }
 
 impl<'en> BTreeView<'en> {
-    fn new(schema: Schema, keys: Keys<'en>) -> Self {
+    fn new(schema: BTreeSchema, keys: Keys<'en>) -> Self {
         Self { schema, keys }
     }
 }

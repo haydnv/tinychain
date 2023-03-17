@@ -17,12 +17,12 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
 use tcgeneric::{label, Instance, Label, TCBoxTryStream, ThreadSafe};
 
-use crate::btree::{Node, Schema as IndexSchema};
+use crate::btree::{BTreeSchema as IndexSchema, Node};
 
 use super::stream::Rows;
 use super::view::{Limited, Selection, TableSlice as Slice};
 use super::{
-    Key, Range, Row, Schema, TableInstance, TableOrder, TableRead, TableSlice, TableStream,
+    Key, Range, Row, TableInstance, TableOrder, TableRead, TableSchema, TableSlice, TableStream,
     TableType, TableWrite, Values,
 };
 
@@ -30,9 +30,9 @@ const CANON: Label = label("canon");
 const DELETES: Label = label("deletes");
 const INSERTS: Label = label("inserts");
 
-type Version<FE> = TableLock<Schema, IndexSchema, ValueCollator, FE>;
-type VersionReadGuard<FE> = b_table::TableReadGuard<Schema, IndexSchema, ValueCollator, FE>;
-type VersionWriteGuard<FE> = b_table::TableWriteGuard<Schema, IndexSchema, ValueCollator, FE>;
+type Version<FE> = TableLock<TableSchema, IndexSchema, ValueCollator, FE>;
+type VersionReadGuard<FE> = b_table::TableReadGuard<TableSchema, IndexSchema, ValueCollator, FE>;
+type VersionWriteGuard<FE> = b_table::TableWriteGuard<TableSchema, IndexSchema, ValueCollator, FE>;
 
 type Semaphore = tc_transact::lock::Semaphore<ValueCollator, Range>;
 
@@ -56,7 +56,7 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     fn create(
-        schema: Schema,
+        schema: TableSchema,
         collator: ValueCollator,
         mut dir: DirWriteGuard<FE>,
     ) -> TCResult<Self> {
@@ -119,7 +119,7 @@ where
     fn pending_version(
         &mut self,
         txn_id: TxnId,
-        schema: &Schema,
+        schema: &TableSchema,
         collator: &ValueCollator,
     ) -> TCResult<Delta<FE>> {
         if let Some(version) = self.pending.get(&txn_id) {
@@ -276,7 +276,7 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> &TableSchema {
         self.canon.schema()
     }
 }
@@ -569,9 +569,9 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     type Txn = Txn;
-    type Schema = Schema;
+    type Schema = TableSchema;
 
-    async fn create(_txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
+    async fn create(_txn_id: TxnId, schema: TableSchema, store: Dir<FE>) -> TCResult<Self> {
         let dir = store.into_inner();
         let collator = ValueCollator::default();
 
@@ -586,7 +586,7 @@ where
         Ok(Self::new(dir, canon, versions))
     }
 
-    async fn load(_txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
+    async fn load(_txn_id: TxnId, schema: TableSchema, store: Dir<FE>) -> TCResult<Self> {
         let dir = store.into_inner();
         let collator = ValueCollator::default();
 
@@ -767,7 +767,7 @@ where
         let txn_id = *self.txn.id();
         let collator = ValueCollator::default();
 
-        let schema = seq.expect_next::<Schema>(()).await?;
+        let schema = seq.expect_next::<TableSchema>(()).await?;
 
         let (canon, versions) = {
             let mut dir = self.txn.context().write().await;

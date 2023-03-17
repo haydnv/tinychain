@@ -19,7 +19,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::ValueCollator;
 use tcgeneric::{Instance, TCBoxTryStream, ThreadSafe};
 
-use super::schema::Schema;
+use super::schema::BTreeSchema;
 use super::slice::BTreeSlice;
 use super::stream::Keys;
 use super::{BTreeInstance, BTreeType, BTreeWrite, Key, Node, Range};
@@ -28,9 +28,9 @@ const CANON: Label = label("canon");
 const DELETES: Label = label("deletes");
 const INSERTS: Label = label("inserts");
 
-type Version<FE> = b_tree::BTreeLock<Schema, ValueCollator, FE>;
-type VersionReadGuard<FE> = b_tree::BTreeReadGuard<Schema, ValueCollator, FE>;
-type VersionWriteGuard<FE> = b_tree::BTreeWriteGuard<Schema, ValueCollator, FE>;
+type Version<FE> = b_tree::BTreeLock<BTreeSchema, ValueCollator, FE>;
+type VersionReadGuard<FE> = b_tree::BTreeReadGuard<BTreeSchema, ValueCollator, FE>;
+type VersionWriteGuard<FE> = b_tree::BTreeWriteGuard<BTreeSchema, ValueCollator, FE>;
 
 type Semaphore = tc_transact::lock::Semaphore<b_tree::Collator<ValueCollator>, Arc<Range>>;
 
@@ -53,7 +53,7 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     fn create(
-        schema: Schema,
+        schema: BTreeSchema,
         collator: ValueCollator,
         mut dir: DirWriteGuard<FE>,
     ) -> TCResult<Self> {
@@ -125,7 +125,7 @@ where
     fn pending_version(
         &mut self,
         txn_id: TxnId,
-        schema: &Schema,
+        schema: &BTreeSchema,
         collator: &ValueCollator,
     ) -> TCResult<Delta<FE>> {
         if let Some(version) = self.pending.get(&txn_id) {
@@ -294,7 +294,7 @@ where
 {
     type Slice = BTreeSlice<Txn, FE>;
 
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> &BTreeSchema {
         self.canon.schema()
     }
 
@@ -540,7 +540,7 @@ where
     Node: FileLoad,
 {
     type Txn = Txn;
-    type Schema = Schema;
+    type Schema = BTreeSchema;
 
     async fn create(_txn_id: TxnId, schema: Self::Schema, store: Dir<FE>) -> TCResult<Self> {
         let dir = store.into_inner();
@@ -738,7 +738,7 @@ where
         let collator = ValueCollator::default();
 
         trace!("decode schema");
-        let schema = seq.expect_next::<Schema>(()).await?;
+        let schema = seq.expect_next::<BTreeSchema>(()).await?;
         trace!("decoded schema");
 
         let (canon, versions) = {

@@ -4,6 +4,8 @@ use futures::future::{self, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
 use safecast::TryCastFrom;
 
+use tc_collection::btree::BTreeInstance;
+use tc_collection::table::TableStream;
 use tc_error::*;
 use tc_transact::Transaction;
 use tc_value::Value;
@@ -31,64 +33,76 @@ pub struct Collection {
 
 #[async_trait]
 impl Source for Collection {
-    #[allow(unused_variables)]
     async fn into_stream(self, txn: Txn) -> TCResult<TCBoxTryStream<'static, State>> {
         use crate::collection::Collection;
 
-        // match self.collection {
-        //     #[cfg(feature = "collection")]
-        //     Collection::BTree(btree) => {
-        //         let keys = btree.keys(*txn.id()).await?;
-        //         let keys: TCBoxTryStream<'static, State> =
-        //             Box::pin(keys.map_ok(Value::from).map_ok(State::from));
-        //
-        //         Ok(keys)
-        //     }
-        //
-        //     #[cfg(feature = "collection")]
-        //     Collection::Table(table) => {
-        //         let rows = table.rows(*txn.id()).await?;
-        //         let rows: TCBoxTryStream<'static, State> =
-        //             Box::pin(rows.map_ok(Value::from).map_ok(State::from));
-        //
-        //         Ok(rows)
-        //     }
-        //
-        //     #[cfg(feature = "collection")]
-        //     Collection::Tensor(tensor) => match tensor {
-        //         tc_tensor::Tensor::Dense(dense) => {
-        //             use tc_tensor::DenseAccess;
-        //             let elements = dense.into_inner().value_stream(txn).await?;
-        //             Ok(Box::pin(elements.map_ok(State::from)))
-        //         }
-        //         tc_tensor::Tensor::Sparse(sparse) => {
-        //             use safecast::CastInto;
-        //             use tc_tensor::SparseAccess;
-        //             use tcgeneric::Tuple;
-        //
-        //             let filled = sparse.into_inner().filled(txn).await?;
-        //             let filled = filled
-        //                 .map_ok(|(coord, value)| {
-        //                     let coord = coord
-        //                         .into_iter()
-        //                         .map(tc_value::Number::from)
-        //                         .collect::<Tuple<Value>>();
-        //
-        //                     Tuple::<Value>::from(vec![Value::Tuple(coord), value.cast_into()])
-        //                 })
-        //                 .map_ok(State::from);
-        //
-        //             Ok(Box::pin(filled))
-        //         }
-        //     },
-        // }
-        todo!()
+        match self.collection {
+            Collection::BTree(btree) => {
+                let keys = btree.keys(*txn.id()).await?;
+                let keys: TCBoxTryStream<'static, State> =
+                    Box::pin(keys.map_ok(Value::from).map_ok(State::from));
+
+                Ok(keys)
+            }
+
+            Collection::Table(table) => {
+                let rows = table.rows(*txn.id()).await?;
+                let rows: TCBoxTryStream<'static, State> =
+                    Box::pin(rows.map_ok(Value::from).map_ok(State::from));
+
+                Ok(rows)
+            }
+
+            #[cfg(feature = "collection")]
+            Collection::Tensor(tensor) => match tensor {
+                tc_tensor::Tensor::Dense(dense) => {
+                    use tc_tensor::DenseAccess;
+                    let elements = dense.into_inner().value_stream(txn).await?;
+                    Ok(Box::pin(elements.map_ok(State::from)))
+                }
+                tc_tensor::Tensor::Sparse(sparse) => {
+                    use safecast::CastInto;
+                    use tc_tensor::SparseAccess;
+                    use tcgeneric::Tuple;
+
+                    let filled = sparse.into_inner().filled(txn).await?;
+                    let filled = filled
+                        .map_ok(|(coord, value)| {
+                            let coord = coord
+                                .into_iter()
+                                .map(tc_value::Number::from)
+                                .collect::<Tuple<Value>>();
+
+                            Tuple::<Value>::from(vec![Value::Tuple(coord), value.cast_into()])
+                        })
+                        .map_ok(State::from);
+
+                    Ok(Box::pin(filled))
+                }
+            },
+        }
     }
 }
 
 impl From<crate::collection::Collection> for Collection {
     fn from(collection: crate::collection::Collection) -> Self {
         Self { collection }
+    }
+}
+
+impl From<crate::collection::BTree> for Collection {
+    fn from(btree: crate::collection::BTree) -> Self {
+        Self {
+            collection: btree.into(),
+        }
+    }
+}
+
+impl From<crate::collection::Table> for Collection {
+    fn from(table: crate::collection::Table) -> Self {
+        Self {
+            collection: table.into(),
+        }
     }
 }
 

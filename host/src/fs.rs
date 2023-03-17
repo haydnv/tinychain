@@ -76,8 +76,3 @@ async fn persist<'en, T: en::ToStream<'en>>(
 
     tokio::io::copy(&mut reader, file).await
 }
-
-#[inline]
-fn file_ext(path: &'_ Path) -> Option<&'_ str> {
-    path.extension().and_then(|ext| ext.to_str())
-}

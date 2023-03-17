@@ -21,14 +21,14 @@ const UUID_SIZE: usize = 16;
 
 /// The schema of a B+Tree
 #[derive(Clone, Eq, PartialEq)]
-pub struct Schema {
+pub struct BTreeSchema {
     columns: Vec<Column>,
     names: Vec<Id>,
     block_size: usize,
     order: usize,
 }
 
-impl Schema {
+impl BTreeSchema {
     /// Construct a new B+Tree schema with the given `columns`.
     pub fn new(columns: Vec<Column>) -> TCResult<Self> {
         let mut key_size = 0;
@@ -83,12 +83,12 @@ impl Schema {
         })
     }
 
-    /// Iterate over the [`Column`]s in this [`Schema`].
+    /// Iterate over the [`Column`]s in this [`BTreeSchema`].
     pub fn iter(&self) -> impl Iterator<Item = &Column> {
         self.columns.iter()
     }
 
-    /// Return an error if the given `range` does not match this [`Schema`].
+    /// Return an error if the given `range` does not match this [`BTreeSchema`].
     #[inline]
     pub fn validate_range(&self, range: Range) -> TCResult<Range> {
         if range.len() > self.columns.len() {
@@ -121,7 +121,7 @@ impl Schema {
     }
 }
 
-impl b_tree::Schema for Schema {
+impl b_tree::Schema for BTreeSchema {
     type Error = TCError;
     type Value = Value;
 
@@ -156,7 +156,7 @@ impl b_tree::Schema for Schema {
     }
 }
 
-impl b_table::IndexSchema for Schema {
+impl b_table::IndexSchema for BTreeSchema {
     type Id = Id;
 
     fn columns(&self) -> &[Self::Id] {
@@ -179,19 +179,19 @@ impl b_table::IndexSchema for Schema {
     }
 }
 
-impl<D: Digest> Hash<D> for Schema {
+impl<D: Digest> Hash<D> for BTreeSchema {
     fn hash(self) -> Output<D> {
         Hash::<D>::hash(self.columns)
     }
 }
 
-impl<'a, D: Digest> Hash<D> for &'a Schema {
+impl<'a, D: Digest> Hash<D> for &'a BTreeSchema {
     fn hash(self) -> Output<D> {
         Hash::<D>::hash(&self.columns)
     }
 }
 
-impl IntoIterator for Schema {
+impl IntoIterator for BTreeSchema {
     type Item = Column;
     type IntoIter = std::vec::IntoIter<Column>;
 
@@ -200,7 +200,7 @@ impl IntoIterator for Schema {
     }
 }
 
-impl<'a> IntoIterator for &'a Schema {
+impl<'a> IntoIterator for &'a BTreeSchema {
     type Item = &'a Column;
     type IntoIter = <&'a Vec<Column> as IntoIterator>::IntoIter;
 
@@ -209,20 +209,20 @@ impl<'a> IntoIterator for &'a Schema {
     }
 }
 
-impl<'en> en::IntoStream<'en> for Schema {
+impl<'en> en::IntoStream<'en> for BTreeSchema {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         self.columns.into_stream(encoder)
     }
 }
 
-impl<'en> en::ToStream<'en> for Schema {
+impl<'en> en::ToStream<'en> for BTreeSchema {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         self.columns.to_stream(encoder)
     }
 }
 
 #[async_trait]
-impl de::FromStream for Schema {
+impl de::FromStream for BTreeSchema {
     type Context = ();
 
     async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
@@ -232,13 +232,13 @@ impl de::FromStream for Schema {
     }
 }
 
-impl CastFrom<Schema> for Value {
-    fn cast_from(schema: Schema) -> Self {
+impl CastFrom<BTreeSchema> for Value {
+    fn cast_from(schema: BTreeSchema) -> Self {
         schema.columns.into_iter().map(Value::cast_from).collect()
     }
 }
 
-impl fmt::Debug for Schema {
+impl fmt::Debug for BTreeSchema {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "[{:?}]", self.columns)
     }

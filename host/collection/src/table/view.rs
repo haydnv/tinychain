@@ -10,14 +10,13 @@ use tc_error::*;
 use tc_transact::{Transaction, TxnId};
 use tcgeneric::{Instance, ThreadSafe};
 
-use crate::btree::Schema as IndexSchema;
+use crate::btree::BTreeSchema;
 use crate::Node;
 
 use super::file::TableFile;
+use super::schema::TableSchema;
 use super::stream::Rows;
-use super::{
-    Key, Range, Row, Schema, Table, TableInstance, TableOrder, TableRead, TableStream, TableType,
-};
+use super::{Key, Range, Row, Table, TableInstance, TableOrder, TableRead, TableStream, TableType};
 
 /// A result set from a database table with a limited number of rows
 #[derive(Clone)]
@@ -46,7 +45,7 @@ where
 }
 
 impl<T: TableInstance> TableInstance for Limited<T> {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> &TableSchema {
         self.source.schema()
     }
 }
@@ -111,7 +110,7 @@ where
 #[derive(Clone)]
 pub struct Selection<T> {
     source: T,
-    schema: Schema,
+    schema: TableSchema,
 }
 
 impl<T: TableInstance> Selection<T> {
@@ -130,11 +129,11 @@ impl<T: TableInstance> Selection<T> {
             }
         }
 
-        let schema = IndexSchema::new(column_schema)?;
+        let schema = BTreeSchema::new(column_schema)?;
 
         Ok(Self {
             source,
-            schema: Schema::from_index(schema),
+            schema: TableSchema::from_index(schema),
         })
     }
 }
@@ -151,7 +150,7 @@ where
 }
 
 impl<T: TableInstance> TableInstance for Selection<T> {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> &TableSchema {
         &self.schema
     }
 }
@@ -347,7 +346,7 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> &TableSchema {
         self.table.schema()
     }
 }

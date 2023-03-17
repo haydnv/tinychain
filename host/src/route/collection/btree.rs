@@ -6,7 +6,7 @@ use futures::{future, StreamExt, TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
-use tc_collection::btree::{BTreeInstance, BTreeType, BTreeWrite, Column, Range, Schema};
+use tc_collection::btree::{BTreeInstance, BTreeSchema, BTreeType, BTreeWrite, Column, Range};
 use tc_error::*;
 use tc_transact::fs::{Dir, Persist};
 use tc_transact::Transaction;
@@ -411,7 +411,7 @@ fn cast_into_range(scalar: Scalar) -> TCResult<Range> {
 }
 
 #[inline]
-fn cast_into_schema(schema: Value) -> TCResult<Schema> {
+fn cast_into_schema(schema: Value) -> TCResult<BTreeSchema> {
     let columns = if let Value::Tuple(columns) = schema {
         columns
             .into_iter()
@@ -423,5 +423,5 @@ fn cast_into_schema(schema: Value) -> TCResult<Schema> {
         Err(bad_request!("invalid BTree schema: {:?}", schema))
     }?;
 
-    Schema::new(columns)
+    BTreeSchema::new(columns)
 }

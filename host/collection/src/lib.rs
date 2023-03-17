@@ -87,6 +87,7 @@ pub enum Collection<Txn, FE> {
 }
 
 as_type!(Collection<Txn, FE>, BTree, BTree<Txn, FE>);
+as_type!(Collection<Txn, FE>, Table, Table<Txn, FE>);
 
 impl<Txn, FE> Collection<Txn, FE>
 where
