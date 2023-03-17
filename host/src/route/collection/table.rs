@@ -93,7 +93,7 @@ impl<'a, T: TableRead + 'a> Handler<'a> for ContainsHandler<'a, T> {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let key = primary_key(key, self.table)?;
+                let key = try_into_key(key)?;
                 let row = self.table.read(*txn.id(), key).await?;
                 Ok(Value::from(row.is_some()).into())
             })
@@ -229,7 +229,7 @@ where
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
-                    let key = primary_key(key, self.table)?;
+                    let key = try_into_key(key)?;
 
                     self.table
                         .read(*txn.id(), key)
@@ -251,7 +251,7 @@ where
             Box::pin(async move {
                 debug!("Table PUT {:?} <- {:?}", key, values);
 
-                let key = primary_key(key, self.table)?;
+                let key = try_into_key(key)?;
 
                 if values.is_map() {
                     Err(not_implemented!("update an existing table row"))
@@ -299,7 +299,7 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let key = primary_key(key, self.table)?;
+                let key = try_into_key(key)?;
                 self.table.delete(*txn.id(), key).await
             })
         }))
@@ -499,9 +499,8 @@ fn cast_into_bounds(scalar: Scalar) -> TCResult<Range> {
 }
 
 #[inline]
-fn primary_key<T: TableInstance>(key: Value, table: &T) -> TCResult<Key> {
-    let key = key.try_cast_into(|v| TCError::unexpected(v, "a Table key"))?;
-    tc_collection::btree::Schema::validate(table.schema().primary(), key)
+fn try_into_key(key: Value) -> TCResult<Key> {
+    key.try_cast_into(|v| TCError::unexpected(v, "a Table key"))
 }
 
 fn column_schema<T: TableInstance>(table: &T) -> Value {
