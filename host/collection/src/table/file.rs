@@ -202,13 +202,19 @@ where
         order: Vec<Id>,
         reverse: bool,
     ) -> TCResult<TCBoxTryStream<'a, Row>> {
+        debug!(
+            "TableFile::into_rows: {:?} ordered by {:?} (reversed: {}) at {}",
+            range, order, reverse, txn_id
+        );
+
         let collator = (&**self.canon.collator()).clone();
 
         // read-lock the canonical version BEFORE locking self.state,
         // to avoid a deadlock or conflict with Self::finalize
         let rows = self.canon.rows(range.clone(), &order, reverse).await?;
-
         let mut rows: TCBoxTryStream<'static, Key> = Box::pin(rows.map_err(TCError::from));
+
+        trace!("got canon rows");
 
         let (deltas, pending) = {
             let state = self.state.read().expect("state");
@@ -225,16 +231,24 @@ where
             (deltas, pending)
         };
 
+        trace!("merging {} committed deltas...", deltas.len());
+
         for delta in deltas {
             rows = delta
                 .merge_into(rows, collator.clone(), range.clone(), &order, reverse)
                 .await?;
         }
 
+        trace!("merged committed deltas");
+
         if let Some(pending) = pending {
+            trace!("merging pending delta");
+
             rows = pending
                 .merge_into(rows, collator.clone(), range.clone(), &order, reverse)
                 .await?;
+
+            trace!("merged pending deltas");
         }
 
         Ok(rows)
@@ -247,7 +261,14 @@ where
         order: Vec<Id>,
         reverse: bool,
     ) -> TCResult<Rows<'a>> {
+        debug!(
+            "TableFile::into_stream: {:?} ordered by {:?} (reversed: {}) at {}",
+            range, order, reverse, txn_id
+        );
+
         let permit = self.semaphore.read(txn_id, range.clone()).await?;
+
+        trace!("got read permit for {:?}", *permit);
 
         let keys = self
             .into_rows(txn_id, permit.deref().clone(), order, reverse)
@@ -371,7 +392,11 @@ where
     type Selection = Selection<Self>;
 
     async fn count(self, txn_id: TxnId) -> TCResult<u64> {
+        debug!("TableFile::count");
+
         let rows = self.rows(txn_id).await?;
+
+        trace!("got rows to count");
 
         rows.try_fold(0, |count, _| future::ready(Ok(count + 1)))
             .await
@@ -398,9 +423,13 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     async fn delete(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+        debug!("TableFile::delete {:?}", key);
+
         let key = b_table::Schema::validate_key(self.schema(), key)?;
         let range = self.schema().range_from_key(key.clone())?;
         let _permit = self.semaphore.write(txn_id, range).await?;
+
+        trace!("got write permit to delete {:?}", key);
 
         // read-lock the canonical version BEFORE locking self.state,
         // to avoid a deadlock or conflict with Self::finalize
@@ -428,6 +457,10 @@ where
             let (inserted, deleted) = delta.read().await;
 
             if deleted.contains(&key).await? {
+                debug!(
+                    "{:?} has already been deleted and this delete will soon be merged",
+                    key
+                );
                 return Ok(());
             } else if let Some(insert) = inserted.get(&key).await? {
                 row = Some(insert);
@@ -435,18 +468,25 @@ where
             }
         }
 
+        let (mut inserts, mut deletes) = pending.write().await;
+
         let mut row = if let Some(row) = row {
             row
         } else if let Some(row) = canon.get(&key).await? {
             row
+        } else if let Some(row) = inserts.get(&key).await? {
+            row
         } else {
+            debug!("there is no row with key {:?} to delete", key);
             return Ok(());
         };
 
-        let (mut inserts, mut deletes) = pending.write().await;
+        trace!("found row {:?} to delete", row);
 
         let values = row.drain(key.len()..).collect();
         debug_assert_eq!(key, row[..key.len()]);
+
+        trace!("logging delete of {:?}...", key);
 
         inserts.delete(&key).await?;
         deletes.upsert(key, values).await?;

@@ -211,10 +211,7 @@ impl CastFrom<TableSchema> for Value {
             .map(|(name, columns)| {
                 (
                     Value::from(name),
-                    columns
-                        .into_iter()
-                        .map(Value::from)
-                        .collect::<Value>(),
+                    columns.into_iter().map(Value::from).collect::<Value>(),
                 )
             })
             .map(|(name, columns)| Value::Tuple(vec![name, columns].into()))

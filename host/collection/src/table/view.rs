@@ -116,16 +116,23 @@ pub struct Selection<T> {
 impl<T: TableInstance> Selection<T> {
     pub(super) fn new(source: T, columns: Vec<Id>) -> TCResult<Self> {
         let mut column_schema = Vec::with_capacity(columns.len());
-        for (i, name) in columns.into_iter().enumerate() {
-            for column in b_table::Schema::primary(source.schema()) {
+        for name in columns.into_iter() {
+            let mut present = false;
+            let schema = b_table::Schema::primary(source.schema());
+            for column in schema {
                 if column.name == name {
                     column_schema.push(column.clone());
+                    present = true;
                     break;
                 }
             }
 
-            if column_schema.len() != i {
-                return Err(bad_request!("cannot select nonexistent column {}", name));
+            if !present {
+                return Err(bad_request!(
+                    "cannot select column {} from {:?}",
+                    name,
+                    schema
+                ));
             }
         }
 
