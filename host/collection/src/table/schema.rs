@@ -129,7 +129,7 @@ impl<'en> en::IntoStream<'en> for Schema {
         let mut columns = self.primary.into_iter();
 
         let mut key = Vec::with_capacity(key_len);
-        for i in 0..key_len {
+        for _ in 0..key_len {
             key.push(columns.next().expect("column"));
         }
 

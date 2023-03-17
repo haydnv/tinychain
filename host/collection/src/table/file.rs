@@ -1,5 +1,6 @@
 use std::fmt;
 use std::marker::PhantomData;
+use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
@@ -8,7 +9,6 @@ use destream::de;
 use ds_ext::{Id, OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, DirWriteGuard};
 use futures::{future, TryFutureExt, TryStreamExt};
-use log::trace;
 use safecast::AsType;
 
 use tc_error::*;
@@ -85,22 +85,21 @@ where
 
     async fn merge_into<'a>(
         self,
-        mut keys: TCBoxTryStream<'a, Key>,
+        mut rows: TCBoxTryStream<'a, Row>,
         collator: b_tree::Collator<ValueCollator>,
         range: b_table::Range<Id, Value>,
+        order: &[Id],
         reverse: bool,
     ) -> TCResult<TCBoxTryStream<'a, Key>> {
-        trace!("merge delta");
+        let inserted = self.inserts.rows(range.clone(), order, reverse).await?;
+        let inserted = inserted.map_err(TCError::from);
+        rows = Box::pin(collate::try_merge(collator.clone(), rows, inserted));
 
-        let rows = self.inserts.rows(range.clone(), reverse).await?;
-        let inserted = rows.map_err(TCError::from);
-        keys = Box::pin(collate::try_merge(collator.clone(), keys, inserted));
+        let deleted = self.deletes.rows(range, order, reverse).await?;
+        let deleted = deleted.map_err(TCError::from);
+        rows = Box::pin(collate::try_diff(collator.clone(), rows, deleted));
 
-        let rows = self.deletes.rows(range, reverse).await?;
-        let deleted = rows.map_err(TCError::from);
-        keys = Box::pin(collate::try_diff(collator.clone(), keys, deleted));
-
-        Ok(keys)
+        Ok(rows)
     }
 }
 
@@ -190,7 +189,11 @@ where
     }
 }
 
-impl<Txn, FE> TableFile<Txn, FE> {
+impl<Txn, FE> TableFile<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
     async fn into_rows<'a>(
         self,
         txn_id: TxnId,
@@ -198,7 +201,58 @@ impl<Txn, FE> TableFile<Txn, FE> {
         order: Vec<Id>,
         reverse: bool,
     ) -> TCResult<TCBoxTryStream<'a, Row>> {
-        todo!()
+        let collator = (&**self.canon.collator()).clone();
+
+        // read-lock the canonical version BEFORE locking self.state,
+        // to avoid a deadlock or conflict with Self::finalize
+        let rows = self.canon.rows(range.clone(), &order, reverse).await?;
+
+        let mut rows: TCBoxTryStream<'static, Key> = Box::pin(rows.map_err(TCError::from));
+
+        let (deltas, pending) = {
+            let state = self.state.read().expect("state");
+            let deltas = state
+                .deltas
+                .iter()
+                .take_while(|(id, _)| *id <= &txn_id)
+                .map(|(_, delta)| delta)
+                .cloned()
+                .collect::<Vec<_>>();
+
+            let pending = state.pending.get(&txn_id).cloned();
+
+            (deltas, pending)
+        };
+
+        for delta in deltas {
+            rows = delta
+                .merge_into(rows, collator.clone(), range.clone(), &order, reverse)
+                .await?;
+        }
+
+        if let Some(pending) = pending {
+            rows = pending
+                .merge_into(rows, collator.clone(), range.clone(), &order, reverse)
+                .await?;
+        }
+
+        Ok(rows)
+    }
+
+    pub(super) async fn into_stream<'a>(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Vec<Id>,
+        reverse: bool,
+    ) -> TCResult<Rows<'a>> {
+        let permit = self.semaphore.read(txn_id, range.clone()).await?;
+
+        let keys = self
+            .into_rows(txn_id, permit.deref().clone(), order, reverse)
+            .await?;
+
+        Ok(Rows::new(permit, keys))
     }
 }
 
@@ -312,7 +366,8 @@ where
     type Selection = Selection<Self>;
 
     async fn count(self, txn_id: TxnId) -> TCResult<u64> {
-        let mut rows = self.rows(txn_id).await?;
+        let rows = self.rows(txn_id).await?;
+
         rows.try_fold(0, |count, _| future::ready(Ok(count + 1)))
             .await
     }
@@ -326,7 +381,8 @@ where
     }
 
     async fn rows<'a>(self, txn_id: TxnId) -> TCResult<Rows<'a>> {
-        todo!()
+        self.into_stream(txn_id, Range::default(), vec![], false)
+            .await
     }
 }
 

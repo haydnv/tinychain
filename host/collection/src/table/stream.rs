@@ -1,5 +1,4 @@
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use async_trait::async_trait;
@@ -13,7 +12,7 @@ use tcgeneric::{TCBoxTryStream, ThreadSafe};
 
 use super::{Node, Range, Row, Schema, Table, TableInstance, TableStream};
 
-type PermitRead = tc_transact::lock::PermitRead<Arc<Range>>;
+type PermitRead = tc_transact::lock::PermitRead<Range>;
 
 /// A stream over a range of rows in a `Table`
 pub struct Rows<'a> {
