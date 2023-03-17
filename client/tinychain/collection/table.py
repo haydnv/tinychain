@@ -91,6 +91,7 @@ class Table(Collection):
         to_delete = self.where(where) if where else self
         return to_delete.select(self.key_names()).rows().for_each(delete_row)
 
+    # TODO: delete this method and merge its functionality with delete, above
     def delete_row(self, key):
         """Delete the row with the given key from this `Table`, if it exists."""
 
@@ -163,11 +164,6 @@ class Table(Collection):
 
         update_row = closure(self)(get(lambda cxt, key: self.update_row(key, values)))
         return self.where(where).select(self.key_names()).index().keys().for_each(update_row)
-
-    def update_row(self, key, values):
-        """Update the specified row with the given `values`."""
-
-        return self._put("", key, values)
 
     def upsert(self, key, values):
         """
