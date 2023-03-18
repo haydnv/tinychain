@@ -8,7 +8,7 @@ use b_table::{b_tree, TableLock};
 use destream::de;
 use ds_ext::{Id, OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, DirWriteGuard};
-use futures::{future, TryFutureExt, TryStreamExt};
+use futures::{future, try_join, TryFutureExt, TryStreamExt};
 use log::{debug, trace};
 use safecast::AsType;
 
@@ -725,6 +725,8 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
+        debug!("Table::restore");
+
         let _permit = self.semaphore.write(txn_id, Range::default()).await?;
 
         let collator = self.canon.collator().inner();
@@ -739,28 +741,37 @@ where
             ));
         };
 
-        let delta = {
+        let canon = self.canon.read().await;
+
+        let (deltas, pending) = {
             let mut state = self.state.write().expect("state");
-            state.pending_version(txn_id, schema, collator)?
+
+            let deltas = state
+                .deltas
+                .iter()
+                .take_while(|(id, _)| *id < &txn_id)
+                .map(|(_, delta)| delta)
+                .cloned()
+                .collect::<Vec<_>>();
+
+            let pending = state.pending_version(txn_id, schema, collator)?;
+
+            (deltas, pending)
         };
 
-        let key_len = b_table::Schema::key(schema).len();
+        let (mut inserts, mut deletes) = pending.write().await;
 
-        let (mut inserts, mut deletes) = delta.write().await;
+        try_join!(inserts.truncate(), deletes.truncate())?;
 
-        let mut to_delete = self
-            .clone()
-            .into_rows(txn_id, Range::default(), vec![], false)
-            .await?;
+        deletes.merge(canon).await?;
 
-        while let Some(mut row) = to_delete.try_next().await? {
-            let values = row.drain(key_len..).collect();
-            let key = row;
-
-            inserts.delete(&key).await?;
-            deletes.upsert(key, values).await?;
+        for delta in deltas {
+            let (inserted, deleted) = delta.read().await;
+            deletes.merge(inserted).await?;
+            deletes.delete_all(deleted).await?;
         }
 
+        let key_len = b_table::Schema::key(self.schema()).len();
         let mut to_insert = backup.clone().rows(txn_id).await?;
         while let Some(mut row) = to_insert.try_next().await? {
             let values = row.drain(key_len..).collect();

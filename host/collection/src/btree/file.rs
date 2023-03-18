@@ -9,7 +9,7 @@ use destream::de;
 use ds_ext::link::{label, Label};
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, DirWriteGuard, FileLoad};
-use futures::{future, Stream, TryFutureExt, TryStreamExt};
+use futures::{future, try_join, Stream, TryFutureExt, TryStreamExt};
 use log::{debug, trace};
 use safecast::AsType;
 
@@ -90,6 +90,8 @@ where
         trace!("merge delta");
 
         let (inserted, deleted) = self.read().await;
+
+        trace!("merge delta acquired a read lock on the version to merge");
 
         if inserted.is_empty(&range).await? {
             trace!("no inserts to merge");
@@ -336,6 +338,8 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
+        debug!("BTreeFile::delete");
+
         let range = Arc::new(self.schema().validate_range(range)?);
         let _permit = self.semaphore.write(txn_id, range.clone()).await?;
 
@@ -543,6 +547,8 @@ where
     type Schema = BTreeSchema;
 
     async fn create(_txn_id: TxnId, schema: Self::Schema, store: Dir<FE>) -> TCResult<Self> {
+        debug!("BTreeFile::create");
+
         let dir = store.into_inner();
         let collator = ValueCollator::default();
 
@@ -558,6 +564,8 @@ where
     }
 
     async fn load(_txn_id: TxnId, schema: Self::Schema, store: Dir<FE>) -> TCResult<Self> {
+        debug!("BTreeFile::load");
+
         let dir = store.into_inner();
         let collator = ValueCollator::default();
 
@@ -590,6 +598,8 @@ where
         store: Dir<FE>,
         instance: I,
     ) -> TCResult<Self> {
+        debug!("BTreeFile::copy_from");
+
         let txn_id = *txn.id();
         let dir = store.into_inner();
         let schema = instance.schema().clone();
@@ -661,6 +671,8 @@ where
     Node: freqfs::FileLoad,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
+        debug!("BTreeFile::restore");
+
         let _permit = self
             .semaphore
             .write(txn_id, Arc::new(Range::default()))
@@ -678,21 +690,34 @@ where
             ));
         };
 
-        let delta = {
+        let canon = self.canon.read().await;
+
+        let (deltas, pending) = {
             let mut state = self.state.write().expect("state");
-            state.pending_version(txn_id, schema, collator)?
+
+            let deltas = state
+                .deltas
+                .iter()
+                .take_while(|(id, _)| *id < &txn_id)
+                .map(|(_, delta)| delta)
+                .cloned()
+                .collect::<Vec<_>>();
+
+            let pending = state.pending_version(txn_id, schema, collator)?;
+
+            (deltas, pending)
         };
 
-        let (mut inserts, mut deletes) = delta.write().await;
+        let (mut inserts, mut deletes) = pending.write().await;
 
-        let mut to_delete = self
-            .clone()
-            .into_keys(txn_id, Arc::new(Range::default()), false)
-            .await?;
+        try_join!(inserts.truncate(), deletes.truncate())?;
 
-        while let Some(key) = to_delete.try_next().await? {
-            inserts.delete(&key).await?;
-            deletes.insert(key).await?;
+        deletes.merge(canon).await?;
+
+        for delta in deltas {
+            let (inserted, deleted) = delta.read().await;
+            deletes.merge(inserted).await?;
+            deletes.delete_all(deleted).await?;
         }
 
         let mut to_insert = backup.clone().keys(txn_id).await?;
@@ -804,6 +829,8 @@ where
 
         let collator = canon.collator().clone();
         let semaphore = Semaphore::with_reservation(txn_id, collator, Arc::new(Range::default()));
+
+        trace!("decoded BTreeFile");
 
         Ok(BTreeFile {
             dir: self.txn.context().clone(),

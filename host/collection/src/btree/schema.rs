@@ -83,6 +83,12 @@ impl BTreeSchema {
         })
     }
 
+    /// Try to construct a [`TableSchema`] from its [`Value`] representation.
+    pub fn try_cast_from_value(value: Value) -> TCResult<Self> {
+        let columns = value.try_cast_into(|v| bad_request!("invalid BTree schema: {}", v))?;
+        Self::new(columns)
+    }
+
     /// Iterate over the [`Column`]s in this [`BTreeSchema`].
     pub fn iter(&self) -> impl Iterator<Item = &Column> {
         self.columns.iter()
