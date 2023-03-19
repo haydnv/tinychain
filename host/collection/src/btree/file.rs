@@ -338,7 +338,7 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
-        debug!("BTreeFile::delete");
+        debug!("BTreeFile::delete {:?}", range);
 
         let range = Arc::new(self.schema().validate_range(range)?);
         let _permit = self.semaphore.write(txn_id, range.clone()).await?;
@@ -370,25 +370,25 @@ where
                 .await?;
         }
 
-        let (mut inserts, mut deletes) = pending.write().await;
-
         if range.is_default() {
+            let (mut inserts, mut deletes) = pending.write().await;
+
             inserts.truncate().await?;
 
             while let Some(key) = keys.try_next().await? {
                 deletes.insert(key).await?;
             }
         } else {
+            let inserts = pending.inserts.read().await;
+            let mut deletes = pending.deletes.write().await;
+
+            let collator = self.collator().clone();
+            let inserted = inserts.keys(range, false).map_err(TCError::from);
+            keys = Box::pin(collate::try_merge(collator, keys, inserted));
+
             while let Some(key) = keys.try_next().await? {
-                inserts.delete(&key).await?;
                 deletes.insert(key).await?;
             }
-        }
-
-        // there's not much point in trying to parallelize this
-        while let Some(key) = keys.try_next().await? {
-            inserts.delete(&key).await?;
-            deletes.insert(key).await?;
         }
 
         Ok(())
@@ -458,6 +458,8 @@ where
     type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
+        debug!("BTreeFile::commit {}", txn_id);
+
         let mut state = self.state.write().expect("state");
 
         if state.finalized.as_ref() > Some(&txn_id) {
@@ -472,6 +474,8 @@ where
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
+        debug!("BTreeFile::rollback {}", txn_id);
+
         let mut state = self.state.write().expect("state");
 
         if state.finalized.as_ref() > Some(txn_id) {
@@ -481,10 +485,13 @@ where
         }
 
         state.pending.remove(txn_id);
+
         self.semaphore.finalize(txn_id, false);
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
+        debug!("BTreeFile::finalize {}", txn_id);
+
         let mut canon = self.canon.write().await;
 
         let deltas = {

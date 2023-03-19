@@ -521,6 +521,8 @@ where
     type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
+        debug!("Table::commit {}", txn_id);
+
         let mut state = self.state.write().expect("state");
 
         if state.finalized.as_ref() > Some(&txn_id) {
@@ -535,6 +537,8 @@ where
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
+        debug!("Table::rollback {}", txn_id);
+
         let mut state = self.state.write().expect("state");
 
         if state.finalized.as_ref() > Some(txn_id) {
@@ -548,6 +552,8 @@ where
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
+        debug!("Table::finalize {}", txn_id);
+
         let mut canon = self.canon.write().await;
 
         let deltas = {
