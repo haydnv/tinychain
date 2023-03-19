@@ -384,15 +384,20 @@ where
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        if let Some(contents) = self.contents.read_and_finalize(*txn_id) {
-            join_all(contents.values().map(|entry| entry.rollback(txn_id))).await;
-        }
+        let (_, (contents, _)) = join!(
+            self.dir.rollback(*txn_id, false),
+            self.contents.read_and_rollback(*txn_id)
+        );
+
+        join_all(contents.values().map(|entry| entry.rollback(txn_id))).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         if let Some(contents) = self.contents.read_and_finalize(*txn_id) {
             join_all(contents.values().map(|entry| entry.finalize(txn_id))).await;
         }
+
+        self.dir.finalize(*txn_id).await;
     }
 }
 

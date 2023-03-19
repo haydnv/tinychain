@@ -7,6 +7,7 @@ use std::ops::Deref;
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
+use futures::join;
 use futures::TryStreamExt;
 use get_size::GetSize;
 use get_size_derive::*;
@@ -179,15 +180,18 @@ impl Transact for Library {
     type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
-        self.versions.commit(txn_id).await
+        join!(self.dir.commit(txn_id, false), self.versions.commit(txn_id));
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        self.versions.rollback(txn_id).await
+        join!(
+            self.dir.rollback(*txn_id, false),
+            self.versions.rollback(txn_id)
+        );
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.versions.finalize(txn_id).await
+        join!(self.dir.finalize(*txn_id), self.versions.finalize(txn_id));
     }
 }
 

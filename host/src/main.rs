@@ -89,7 +89,7 @@ struct Config {
         long = "request_ttl",
         value_parser = duration,
         default_value = "3",
-        help = "maximum allowed request duration",
+        help = "maximum allowed request duration (in seconds)",
     )]
     pub request_ttl: Duration,
 

@@ -86,7 +86,7 @@ impl TxnServer {
     }
 
     pub(crate) async fn finalize_expired(&self, gateway: &Gateway, now: NetworkTime) {
-        let (mut active, mut workspace) = join!(self.active.write(), self.workspace.write());
+        let mut active = self.active.write().await;
 
         let expired = active
             .iter()
@@ -100,7 +100,12 @@ impl TxnServer {
 
             gateway.finalize(txn_id).await;
 
-            if let Some(workspace) = workspace.get_dir(&txn_id) {
+            let workspace = {
+                let workspace = self.workspace.read().await;
+                workspace.get_dir(&txn_id).cloned()
+            };
+
+            if let Some(workspace) = workspace {
                 workspace
                     .write()
                     .await
@@ -113,6 +118,7 @@ impl TxnServer {
 
     async fn txn_dir(&self, txn_id: TxnId) -> TCResult<DirLock<fs::CacheBlock>> {
         let mut workspace = self.workspace.write().await;
+
         workspace
             .create_dir(txn_id.to_string())
             .map_err(TCError::from)

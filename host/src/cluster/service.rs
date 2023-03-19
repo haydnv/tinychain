@@ -346,7 +346,7 @@ impl Transact for Service {
         }))
         .await;
 
-        self.schema.commit(txn_id).await;
+        join!(self.schema.commit(txn_id), self.dir.commit(txn_id, false));
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
@@ -359,7 +359,10 @@ impl Transact for Service {
         )
         .await;
 
-        self.schema.rollback(txn_id).await;
+        join!(
+            self.schema.rollback(txn_id),
+            self.dir.rollback(*txn_id, false)
+        );
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -372,7 +375,7 @@ impl Transact for Service {
             .await;
         }
 
-        self.schema.finalize(txn_id).await;
+        join!(self.schema.finalize(txn_id), self.dir.finalize(*txn_id));
     }
 }
 

@@ -209,13 +209,13 @@ impl<FE: ThreadSafe + for<'a> FileSave<'a>> Dir<FE> {
     }
 
     /// Roll back this [`Dir`] at `txn_id`.
-    pub async fn rollback(&self, txn_id: &TxnId, recursive: bool) {
-        self.inner.rollback(*txn_id, recursive).await
+    pub async fn rollback(&self, txn_id: TxnId, recursive: bool) {
+        self.inner.rollback(txn_id, recursive).await
     }
 
     /// Finalize this [`Dir`] at `txn_id`.
-    pub async fn finalize(&self, txn_id: &TxnId) {
-        self.inner.finalize(*txn_id).await
+    pub async fn finalize(&self, txn_id: TxnId) {
+        self.inner.finalize(txn_id).await
     }
 }
 

@@ -75,10 +75,10 @@ impl Transact for Store {
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        self.dir.rollback(txn_id, true).await
+        self.dir.rollback(*txn_id, true).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.dir.finalize(txn_id).await
+        self.dir.finalize(*txn_id).await
     }
 }
