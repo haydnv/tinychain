@@ -385,7 +385,15 @@ impl Instance for Scalar {
 
 impl GetSize for Scalar {
     fn get_size(&self) -> usize {
-        todo!()
+        match self {
+            Self::Cluster(cluster) => cluster.get_size(),
+            Self::Map(map) => map.get_size(),
+            Self::Op(op) => op.get_size(),
+            Self::Range((start, end)) => start.get_size() + end.get_size(),
+            Self::Ref(tc_ref) => tc_ref.get_size(),
+            Self::Tuple(tuple) => tuple.get_size(),
+            Self::Value(value) => value.get_size(),
+        }
     }
 }
 
@@ -676,6 +684,7 @@ impl TryFrom<Scalar> for Value {
     fn try_from(scalar: Scalar) -> TCResult<Value> {
         match scalar {
             Scalar::Value(value) => Ok(value),
+            Scalar::Tuple(tuple) => tuple.into_iter().map(Value::try_from).collect(),
             other => Err(TCError::unexpected(other, "a Value")),
         }
     }

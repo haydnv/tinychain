@@ -239,12 +239,18 @@ impl From<txfs::Error> for TCError {
 impl From<io::Error> for TCError {
     fn from(cause: io::Error) -> Self {
         match cause.kind() {
-            io::ErrorKind::WouldBlock => {
-                conflict!("synchronous filesystem access failed").consume(cause)
-            }
+            io::ErrorKind::AlreadyExists => bad_request!("tried to create a filesystem entry that already exists: {}", cause),
+            io::ErrorKind::InvalidInput => bad_request!("{}", cause),
             io::ErrorKind::NotFound => TCError::not_found(cause),
             io::ErrorKind::PermissionDenied => {
-                unexpected!("host filesystem permission denied").consume(cause)
+                #[cfg(debug_assertions)]
+                panic!("host filesystem denied permission: {}", cause);
+
+                #[cfg(not(debug_assertions))]
+                bad_gateway!("host filesystem permission denied").consume(cause)
+            }
+            io::ErrorKind::WouldBlock => {
+                conflict!("synchronous filesystem access failed").consume(cause)
             }
             kind => unexpected!("host filesystem error: {:?}", kind).consume(cause),
         }

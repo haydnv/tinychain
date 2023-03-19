@@ -3,13 +3,15 @@
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
-use futures::stream::{FuturesUnordered, StreamExt};
-use log::{debug, info};
+use futures::join;
+use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
+use log::*;
 use safecast::CastInto;
 
 use tc_error::*;
@@ -17,11 +19,13 @@ use tc_transact::fs::Persist;
 use tc_transact::lock::{TxnLock, TxnMapLock};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
-use tcgeneric::{label, Label, Map, PathSegment, ThreadSafe};
+use tcgeneric::{label, Id, Label, Map, PathSegment, ThreadSafe};
 
 use crate::chain::{BlockChain, Recover};
+use crate::cluster::class;
 use crate::fs;
 use crate::fs::CacheBlock;
+use crate::object::InstanceClass;
 use crate::route::Route;
 use crate::state::State;
 use crate::txn::{Actor, Txn};
@@ -124,7 +128,7 @@ impl<T> fmt::Debug for DirEntry<T> {
 #[derive(Clone)]
 pub struct Dir<T> {
     schema: Schema,
-    cache: freqfs::DirLock<fs::CacheBlock>,
+    dir: fs::Dir,
     contents: TxnMapLock<PathSegment, DirEntry<T>>,
 }
 
@@ -137,13 +141,11 @@ impl<T> Dir<T> {
 
 impl<T: Clone> Dir<T> {
     fn new(txn_id: TxnId, schema: Schema, dir: fs::Dir) -> TCResult<Self> {
-        let cache = tc_transact::fs::Dir::into_inner(dir);
-
         let contents = TxnMapLock::new(txn_id);
 
         Ok(Self {
             schema,
-            cache,
+            dir,
             contents,
         })
     }
@@ -154,12 +156,11 @@ impl<T: Clone> Dir<T> {
         dir: fs::Dir,
         contents: C,
     ) -> TCResult<Self> {
-        let cache = tc_transact::fs::Dir::into_inner(dir);
         let contents = TxnMapLock::with_contents(txn_id, contents);
 
         Ok(Self {
             schema,
-            cache,
+            dir,
             contents,
         })
     }
@@ -174,12 +175,13 @@ impl<T: Clone> Dir<T> {
             return Ok(None);
         }
 
-        // match self.contents.try_get(txn_id, &path[0]) {
-        //     Some(DirEntry::Item(item)) => Ok(Some((&path[1..], DirEntry::Item(item.clone())))),
-        //     Some(DirEntry::Dir(dir)) => dir.lookup(txn_id, &path[1..]).map(Some),
-        //     None => Ok(None),
-        // }
-        todo!()
+        match self.contents.try_get(txn_id, &path[0])? {
+            Some(entry) => match &*entry {
+                DirEntry::Item(item) => Ok(Some((&path[1..], DirEntry::Item(item.clone())))),
+                DirEntry::Dir(dir) => dir.lookup(txn_id, &path[1..]).map(Some),
+            },
+            None => Ok(None),
+        }
     }
 }
 
@@ -187,9 +189,12 @@ impl<T> Dir<T>
 where
     DirEntry<T>: Clone,
 {
-    pub async fn entry(&self, txn_id: TxnId, name: &PathSegment) -> TCResult<Option<DirEntry<T>>> {
-        // self.contents.get(txn_id, name).map_err(TCError::from).await
-        todo!()
+    pub async fn entry(
+        &self,
+        txn_id: TxnId,
+        name: &PathSegment,
+    ) -> TCResult<Option<impl Deref<Target = DirEntry<T>>>> {
+        self.contents.get(txn_id, name).map_err(TCError::from).await
     }
 }
 
@@ -208,25 +213,33 @@ where
         name: PathSegment,
         link: Link,
     ) -> TCResult<Cluster<Self>> {
-        let schema = entry_schema(txn, &self.schema.actor, &name, link).await?;
-
         let txn_id = *txn.id();
 
-        // if self.contents.contains_key(txn_id, name).await? {
-        //     return Err(bad_request!("there is already a directory at {}", name));
-        // }
+        if let Some(entry) = self.contents.get(txn_id, &name).await? {
+            return match &*entry {
+                DirEntry::Dir(dir) => {
+                    if dir.link() == link {
+                        Ok(dir.clone())
+                    } else {
+                        Err(bad_request!(
+                            "cannot replace lead {} with {}",
+                            dir.link(),
+                            link
+                        ))
+                    }
+                }
+                DirEntry::Item(_) => Err(bad_request!("there is already an entry at {}", name)),
+            };
+        }
 
-        let mut cache = self.cache.write().await;
+        let schema = entry_schema(txn, &self.schema.actor, &name, link).await?;
 
-        let dir = cache.create_dir(name.to_string())?;
-        let dir = fs::Dir::load(txn_id, dir).await?;
-
+        let dir = self.dir.create_dir(txn_id, name.clone()).await?;
         let dir = Self::create(txn_id, schema.clone(), dir).await?;
-
         let dir = Cluster::with_state(schema, txn_id, dir);
 
         self.contents
-            .insert(txn_id, name.clone(), DirEntry::Dir(dir.clone()))
+            .insert(txn_id, name, DirEntry::Dir(dir.clone()))
             .await?;
 
         Ok(dir)
@@ -240,7 +253,6 @@ where
     DirEntry<T>: Clone,
 {
     /// Create a new item in this [`Dir`].
-    // TODO: make this method idempotent
     async fn create_item(
         &self,
         txn: &Txn,
@@ -249,26 +261,36 @@ where
     ) -> TCResult<Cluster<BlockChain<T>>> {
         debug!("cluster::Dir::create_item {} at {}", name, link);
 
-        let schema = entry_schema(txn, &self.schema.actor, &name, link).await?;
-
         let txn_id = *txn.id();
 
-        // if contents.contains_key(&name) {
-        //     return Err(bad_request!("there is already a cluster at {}", name));
-        // }
+        if let Some(dir) = self.contents.get(txn_id, &name).await? {
+            match &*dir {
+                DirEntry::Item(item) => {
+                    if item.link() == link {
+                        Ok(item.clone())
+                    } else {
+                        Err(bad_request!(
+                            "cannot replace cluster lead {} with {}",
+                            item.link(),
+                            link
+                        ))
+                    }
+                }
+                DirEntry::Dir(_) => Err(bad_request!("there is already a directory at {}", name)),
+            }
+        } else {
+            let schema = entry_schema(txn, &self.schema.actor, &name, link).await?;
 
-        let store = {
-            let dir = fs::Dir::load(txn_id, self.cache.clone()).await?;
-            dir.create_dir(txn_id, name.clone()).await?
-        };
+            let dir = self.dir.create_dir(txn_id, name.clone()).await?;
+            let item = BlockChain::create(txn_id, (), dir).await?;
+            let item = Cluster::with_state(schema, txn_id, item);
 
-        let item = BlockChain::create(txn_id, (), store).await?;
-        let item = Cluster::with_state(schema, txn_id, item);
-        self.contents
-            .insert(txn_id, name, DirEntry::Item(item.clone()))
-            .await?;
+            self.contents
+                .insert(txn_id, name, DirEntry::Item(item.clone()))
+                .await?;
 
-        Ok(item)
+            Ok(item)
+        }
     }
 }
 
@@ -281,21 +303,19 @@ where
     Self: Persist<CacheBlock, Txn = Txn, Schema = Schema> + Route + fmt::Debug,
 {
     async fn state(&self, txn_id: TxnId) -> TCResult<State> {
-        todo!()
-        // let contents = self.contents.read(txn_id).await?;
-        // let mut state = Map::<State>::new();
-        // for (name, entry) in contents.iter() {
-        //     let class = match entry {
-        //         DirEntry::Dir(_) => true.into(),
-        //         DirEntry::Item(_) => false.into(),
-        //     };
-        //
-        //     state.insert(name.clone(), class);
-        // }
-        //
-        // debug!("directory state to replicate is {}", state);
-        //
-        // Ok(State::Map(state.cast_into()))
+        let mut state = Map::<State>::new();
+        for (name, entry) in self.contents.iter(txn_id).await? {
+            let class = match &*entry {
+                DirEntry::Dir(_) => true.into(),
+                DirEntry::Item(_) => false.into(),
+            };
+
+            state.insert(Id::clone(&*name), class);
+        }
+
+        debug!("directory state to replicate is {:?}", state);
+
+        Ok(State::Map(state.cast_into()))
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
@@ -323,7 +343,7 @@ where
             let link = source.clone().append(name.clone());
 
             if let Some(entry) = self.entry(txn_id, &name).await? {
-                match entry {
+                match &*entry {
                     DirEntry::Dir(dir) => dir.lead_and_add_replica(txn.clone()).await?,
                     DirEntry::Item(item) => item.lead_and_add_replica(txn.clone()).await?,
                 };
@@ -350,7 +370,10 @@ where
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("commit {:?}", self);
 
-        let (contents, _) = self.contents.read_and_commit(txn_id).await;
+        let (_, (contents, _)) = join!(
+            self.dir.commit(txn_id, false),
+            self.contents.read_and_commit(txn_id),
+        );
 
         let commits = contents
             .iter()
@@ -403,45 +426,42 @@ impl Persist<CacheBlock> for Dir<Class> {
         Self::new(txn_id, schema, store)
     }
 
-    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-        // let mut contents = BTreeMap::new();
-        // for (name, entry) in lock.iter() {
-        //     let schema = schema.extend(name.clone());
-        //
-        //     let entry = match entry {
-        //         fs::DirEntry::Dir(dir) => {
-        //             let is_chain = {
-        //                 let cache = dir.clone().into_inner();
-        //                 let contents = cache.try_read().expect("cache read");
-        //
-        //                 if contents.is_empty() {
-        //                     return Err(unexpected!(
-        //                         "an empty directory at {} is ambiguous",
-        //                         schema.path
-        //                     ));
-        //                 }
-        //
-        //                 contents.contains(&*crate::chain::HISTORY)
-        //             };
-        //
-        //             if is_chain {
-        //                 Cluster::load(txn_id, schema, dir.clone().into()).map(DirEntry::Item)
-        //             } else {
-        //                 Cluster::load(txn_id, schema, dir.clone().into()).map(DirEntry::Dir)
-        //             }
-        //         }
-        //         file => Err(unexpected!("invalid Class dir entry: {}", file)),
-        //     }?;
-        //
-        //     contents.insert(name.clone(), entry);
-        // }
-        //
-        // Self::with_contents(txn_id, schema, dir, contents)
-        todo!()
+    async fn load(txn_id: TxnId, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
+        dir.trim(txn_id).await?;
+
+        let mut loaded = BTreeMap::new();
+
+        let mut contents = dir.iter::<Id, InstanceClass>(txn_id).await?;
+        while let Some((name, entry)) = contents.try_next().await? {
+            let schema = schema.extend(name.clone());
+
+            let entry = match entry {
+                fs::DirEntry::Dir(dir) => {
+                    let is_chain = dir.contains(txn_id, &crate::chain::HISTORY.into()).await?;
+
+                    if is_chain {
+                        Cluster::load(txn_id, schema, dir)
+                            .map_ok(DirEntry::Item)
+                            .await
+                    } else {
+                        Cluster::load(txn_id, schema, dir)
+                            .map_ok(DirEntry::Dir)
+                            .await
+                    }
+                }
+                fs::DirEntry::File(file) => Err(unexpected!("invalid Class dir entry: {:?}", file)),
+            }?;
+
+            loaded.insert(name, entry);
+        }
+
+        std::mem::drop(contents);
+
+        Self::with_contents(txn_id, schema, dir, loaded)
     }
 
     fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
-        self.cache.clone()
+        self.dir.clone().into_inner()
     }
 }
 
@@ -486,7 +506,7 @@ impl Persist<CacheBlock> for Dir<Library> {
     }
 
     fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
-        self.cache.clone()
+        self.dir.clone().into_inner()
     }
 }
 
@@ -499,38 +519,47 @@ impl Persist<CacheBlock> for Dir<Service> {
         Self::new(txn_id, schema, store)
     }
 
-    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-        // let lock = tc_transact::fs::Dir::try_read(&dir, txn_id)?;
-        // let mut contents = BTreeMap::new();
-        //
-        // for (name, entry) in lock.iter() {
-        //     let schema = schema.extend(name.clone());
-        //
-        //     let entry = match entry {
-        //         fs::DirEntry::File(file) => {
-        //             Err(unexpected!("invalid Service directory entry: {}", file))
-        //         }
-        //         fs::DirEntry::Dir(dir) => {
-        //             let is_service = dir.contains(txn_id, &super::service::SCHEMA).await?;
-        //
-        //             let store = dir.clone().into();
-        //             if is_service {
-        //                 Cluster::load(txn_id, schema, store).map(DirEntry::Item)
-        //             } else {
-        //                 Cluster::load(txn_id, schema, store).map(DirEntry::Dir)
-        //             }
-        //         }
-        //     }?;
-        //
-        //     contents.insert(name.clone(), entry);
-        // }
-        //
-        // Self::with_contents(txn_id, schema, dir, contents)
-        todo!()
+    async fn load(txn_id: TxnId, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
+        let mut loaded = BTreeMap::new();
+
+        let mut contents = dir.iter::<Id, InstanceClass>(txn_id).await?;
+
+        while let Some((name, entry)) = contents.try_next().await? {
+            let schema = schema.extend(name.clone());
+
+            let entry = match entry {
+                fs::DirEntry::File(file) => {
+                    Err(unexpected!("invalid Service directory entry: {:?}", file))
+                }
+                fs::DirEntry::Dir(dir) => {
+                    let is_service = dir.contains(txn_id, &super::service::SCHEMA.into()).await?;
+
+                    if is_service {
+                        trace!("load item {} in service dir", name);
+
+                        Cluster::load(txn_id, schema, dir.clone())
+                            .map_ok(DirEntry::Item)
+                            .await
+                    } else {
+                        trace!("load sub-dir {} in service dir", name);
+
+                        Cluster::load(txn_id, schema, dir.clone())
+                            .map_ok(DirEntry::Dir)
+                            .await
+                    }
+                }
+            }?;
+
+            loaded.insert(name.clone(), entry);
+        }
+
+        std::mem::drop(contents);
+
+        Self::with_contents(txn_id, schema, dir, loaded)
     }
 
     fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
-        self.cache.clone()
+        self.dir.clone().into_inner()
     }
 }
 

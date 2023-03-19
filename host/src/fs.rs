@@ -24,7 +24,7 @@ use crate::object::InstanceClass;
 pub type Dir = tc_transact::fs::Dir<CacheBlock>;
 
 /// An entry in a transactional directory
-pub type DirEntry = tc_transact::fs::DirEntry<CacheBlock>;
+pub type DirEntry<N, B> = tc_transact::fs::DirEntry<CacheBlock, N, B>;
 
 /// A transactional file
 pub type File<N, B> = tc_transact::fs::File<CacheBlock, N, B>;

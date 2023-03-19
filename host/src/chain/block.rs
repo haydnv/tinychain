@@ -194,6 +194,8 @@ where
     type Schema = T::Schema;
 
     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+        debug!("BlockChain::create");
+
         let subject = T::create(txn_id, schema.clone(), store).await?;
         let mut dir = subject.dir().try_write_owned()?;
 
@@ -208,9 +210,11 @@ where
     }
 
     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+        debug!("BlockChain::load");
+
         let subject = T::load(txn_id, schema.clone(), store).await?;
 
-        let mut dir = subject.dir().try_write_owned()?;
+        let mut dir = subject.dir().write_owned().await;
 
         let history = {
             let dir = dir.get_or_create_dir(HISTORY.to_string())?;

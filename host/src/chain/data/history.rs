@@ -179,6 +179,8 @@ impl History {
                 latest_txn_id = Some(*txn_id);
             }
 
+            trace!("the latest txn id in this chain history is {:?} (compare to {:?} in the history to replicate from)", latest_txn_id, source.mutations.keys().last());
+
             for (txn_id, ops) in &source.mutations {
                 if let Some(latest_txn_id) = &latest_txn_id {
                     if txn_id <= latest_txn_id {
@@ -187,6 +189,7 @@ impl History {
                 }
 
                 assert!(!dest.mutations.contains_key(txn_id));
+
                 replay_and_save(
                     subject,
                     txn,
@@ -209,7 +212,10 @@ impl History {
 
         // if the other chain has the same number of blocks, replication is complete
         if *latest == *other_latest {
+            trace!("the chain to replicate from has the same hash as this chain");
             return Ok(());
+        } else {
+            trace!("the chain to replicate from has a different hash than this chain...");
         }
 
         // otherwise, handle the remaining blocks
@@ -280,6 +286,8 @@ impl Persist<fs::CacheBlock> for History {
     type Schema = ();
 
     async fn create(txn_id: TxnId, _schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
+        debug!("History::create");
+
         let store = dir
             .create_dir(txn_id, STORE.into())
             .map_ok(Store::new)
@@ -303,6 +311,8 @@ impl Persist<fs::CacheBlock> for History {
     }
 
     async fn load(txn_id: TxnId, _schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
+        debug!("History::load");
+
         let store = dir
             .get_or_create_dir(txn_id, STORE.into())
             .map_ok(Store::new)
@@ -519,6 +529,7 @@ impl Transact for History {
                 .sync()
                 .await
                 .expect("sync write-ahead log after commit");
+
             trace!("sync'd write-ahead block to disk");
         }
 
@@ -704,11 +715,16 @@ where
     for op in ops {
         match op {
             Mutation::Delete(key) => {
+                trace!("replay DELETE {} at {}", key, txn_id);
+
                 subject.delete(txn, &[], key.clone()).await?;
                 block.append_delete(txn_id, key.clone())
             }
             Mutation::Put(key, original_hash) => {
                 let state = source.resolve(*txn.id(), original_hash.clone()).await?;
+
+                trace!("replay PUT {}: {:?} at {}", key, state, txn_id);
+
                 subject.put(txn, &[], key.clone(), state.clone()).await?;
 
                 let computed_hash = dest.save_state(txn, state).await?;

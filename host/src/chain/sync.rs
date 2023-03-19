@@ -236,7 +236,7 @@ where
 
         let subject = T::load_or_create(txn_id, schema, store).await?;
 
-        let mut dir = subject.dir().try_write_owned()?;
+        let mut dir = subject.dir().write_owned().await;
 
         let store = {
             let dir = dir.get_or_create_dir(STORE.to_string())?;

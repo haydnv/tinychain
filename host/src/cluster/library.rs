@@ -17,7 +17,7 @@ use tc_error::*;
 use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
-use tcgeneric::{Instance, Map, PathSegment};
+use tcgeneric::{label, Instance, Label, Map, PathSegment};
 
 use crate::fs;
 use crate::object::ObjectType;
@@ -26,6 +26,8 @@ use crate::state::State;
 use crate::txn::Txn;
 
 use super::DirItem;
+
+const LIB: Label = label("lib");
 
 /// A version of a [`Library`]
 #[derive(Clone, GetSize)]
@@ -116,12 +118,13 @@ impl fmt::Debug for Version {
 /// A versioned collection of [`Scalar`]s
 #[derive(Clone)]
 pub struct Library {
-    file: fs::File<VersionNumber, Version>,
+    dir: fs::Dir,
+    versions: fs::File<VersionNumber, Version>,
 }
 
 impl Library {
     pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
-        let block_ids = self.file.block_ids(txn_id).await?;
+        let block_ids = self.versions.block_ids(txn_id).await?;
 
         Ok(block_ids
             .last()
@@ -133,11 +136,11 @@ impl Library {
         txn_id: TxnId,
         number: &VersionNumber,
     ) -> TCResult<impl Deref<Target = Version>> {
-        self.file.read_block(txn_id, number).await
+        self.versions.read_block(txn_id, number).await
     }
 
     pub async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
-        let mut blocks = self.file.iter(txn_id).await?;
+        let mut blocks = self.versions.iter(txn_id).await?;
 
         let mut map = Map::new();
         while let Some((number, block)) = blocks.try_next().await? {
@@ -162,7 +165,7 @@ impl DirItem for Library {
     ) -> TCResult<Version> {
         let version = Version::from(validate(schema)?);
 
-        self.file
+        self.versions
             .create_block(*txn.id(), number, version.clone())
             .map_ok(|_| ())
             .await?;
@@ -176,15 +179,15 @@ impl Transact for Library {
     type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
-        self.file.commit(txn_id).await
+        self.versions.commit(txn_id).await
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        self.file.rollback(txn_id).await
+        self.versions.rollback(txn_id).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.file.finalize(txn_id).await
+        self.versions.finalize(txn_id).await
     }
 }
 
@@ -194,25 +197,17 @@ impl Persist<fs::CacheBlock> for Library {
     type Schema = ();
 
     async fn create(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
-        // let file = dir.into_inner().into();
-        // if file.is_empty(txn_id).await? {
-        //     Ok(Self { file })
-        // } else {
-        //     Err(bad_request!(
-        //         "cannot create a new library from a non-empty file"
-        //     ))
-        // }
-        todo!()
+        let versions = dir.create_file(txn_id, LIB.into()).await?;
+        Ok(Self { dir, versions })
     }
 
-    async fn load(_txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
-        // let file = dir.into_inner().into();
-        // Ok(Self { file })
-        todo!()
+    async fn load(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+        let versions = dir.get_file(txn_id, &LIB.into()).await?;
+        Ok(Self { dir, versions })
     }
 
     fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
-        self.file.clone().into_inner()
+        self.dir.clone().into_inner()
     }
 }
 

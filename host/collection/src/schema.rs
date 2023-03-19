@@ -4,11 +4,14 @@ use async_hash::{Digest, Hash, Output};
 use destream::en;
 use safecast::as_type;
 
-use tcgeneric::NativeClass;
+use tc_error::*;
+use tc_value::Value;
+use tcgeneric::{NativeClass, TCPathBuf};
 
 use crate::btree::{BTreeSchema, BTreeType};
 use crate::table::{TableSchema, TableType};
 use crate::tensor::{Schema as TensorSchema, TensorType};
+use crate::CollectionType;
 
 /// The schema of a `Collection`.
 #[derive(Clone, Eq, PartialEq)]
@@ -35,6 +38,23 @@ impl<'a, D: Digest> Hash<D> for &'a Schema {
             Schema::Table(schema) => Hash::<D>::hash((TableType::default().path(), schema)),
             Schema::Dense(schema) => Hash::<D>::hash((TensorType::Dense.path(), schema)),
             Schema::Sparse(schema) => Hash::<D>::hash((TensorType::Sparse.path(), schema)),
+        }
+    }
+}
+
+impl TryFrom<(TCPathBuf, Value)> for Schema {
+    type Error = TCError;
+
+    fn try_from(value: (TCPathBuf, Value)) -> Result<Self, Self::Error> {
+        let (classpath, schema) = value;
+
+        let class = CollectionType::from_path(&classpath)
+            .ok_or_else(|| bad_request!("invalid collection type: {}", classpath))?;
+
+        match class {
+            CollectionType::BTree(_) => BTreeSchema::try_cast_from_value(schema).map(Self::BTree),
+            CollectionType::Table(_) => TableSchema::try_cast_from_value(schema).map(Self::Table),
+            CollectionType::Tensor(_) => todo!(),
         }
     }
 }

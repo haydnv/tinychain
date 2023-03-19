@@ -4,7 +4,8 @@ use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
-use futures::TryFutureExt;
+use futures::{TryFutureExt, TryStreamExt};
+use log::trace;
 
 use tc_error::*;
 use tc_transact::fs::*;
@@ -32,13 +33,14 @@ impl Version {
     }
 
     async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
-        todo!()
+        let mut classes = Map::new();
 
-        // let mut classes = Map::new();
-        // for (block_id, class) in self.classes.iter(txn_id) {
-        //     classes.insert(block_id.into(), class.clone().into());
-        // }
-        // Ok(State::Map(classes))
+        let mut blocks = self.classes.iter(txn_id).await?;
+        while let Some((block_id, class)) = blocks.try_next().await? {
+            classes.insert(block_id, class.clone().into());
+        }
+
+        Ok(State::Map(classes))
     }
 
     pub async fn get_class(
@@ -64,14 +66,22 @@ pub struct Class {
 
 impl Class {
     pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
-        if self.dir.is_empty(txn_id).await? {
-            Ok(None)
+        let file_names = self.dir.entry_names(txn_id).await?;
+
+        let mut latest = None;
+        for version in file_names {
+            if latest.is_none() {
+                latest = Some(version);
+            } else if Some(&version) > latest.as_ref() {
+                latest = Some(version);
+            }
+        }
+
+        if let Some(latest) = latest {
+            trace!("latest Class version is {}", latest);
+            latest.as_str().parse().map(|id| Some(id))
         } else {
-            // let zero = VersionNumber::default().into();
-            // let file_names = self.dir.file_names(txn_id).await?;
-            //
-            // file_names.fold(&zero, Ord::max).as_str().parse().map(Some)
-            todo!()
+            Ok(None)
         }
     }
 
@@ -83,22 +93,13 @@ impl Class {
     }
 
     pub async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
-        todo!()
-        // let mut versions = Map::new();
-        // for (number, file) in self.dir.iter(txn_id).await? {
-        // let file = match file {
-        //     fs::DirEntry::File(fs::FileEntry::Class(file)) => Ok(file.clone()),
-        //     other => Err(unexpected!(
-        //         "class directory contains invalid file: {}",
-        //         other
-        //     )),
-        // }?;
-        //
-        // let version = Version::with_file(file).to_state(txn_id).await?;
-        // versions.insert(number.clone(), version);
-        // }
+        let mut versions = Map::new();
+        for (number, file) in self.dir.files(txn_id).await? {
+            let version = Version::with_file(file).to_state(txn_id).await?;
+            versions.insert(number.clone(), version);
+        }
 
-        // Ok(State::Map(versions))
+        Ok(State::Map(versions))
     }
 }
 
@@ -129,14 +130,14 @@ impl DirItem for Class {
 
 #[async_trait]
 impl Transact for Class {
-    type Commit = <fs::Dir as Transact>::Commit;
+    type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
-        self.dir.commit(txn_id).await
+        self.dir.commit(txn_id, true).await
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        self.dir.rollback(txn_id).await
+        self.dir.rollback(txn_id, true).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
