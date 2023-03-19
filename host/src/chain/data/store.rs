@@ -66,16 +66,16 @@ impl Store {
 
 #[async_trait]
 impl Transact for Store {
-    type Commit = <fs::Dir as Transact>::Commit;
+    type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("commit chain data store at {}", txn_id);
 
-        self.dir.commit(txn_id).await
+        self.dir.commit(txn_id, true).await
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        self.dir.rollback(txn_id).await
+        self.dir.rollback(txn_id, true).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {

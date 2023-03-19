@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use async_trait::async_trait;
 use freqfs::{FileLoad, FileSave};
 use futures::future::TryFutureExt;
-use futures::stream::{self, Stream};
+use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use get_size::GetSize;
 use safecast::AsType;
 
@@ -14,7 +14,6 @@ use tcgeneric::{Id, ThreadSafe};
 use super::{TCResult, Transact, Transaction, TxnId};
 
 pub use txfs::VERSIONS;
-pub use txfs::Key;
 
 /// The underlying filesystem directory type backing a [`Dir`]
 pub type Inner<FE> = freqfs::DirLock<FE>;
@@ -26,7 +25,10 @@ pub type BlockRead<FE, B> = txfs::FileVersionRead<TxnId, FE, B>;
 pub type BlockWrite<FE, B> = txfs::FileVersionWrite<TxnId, FE, B>;
 
 /// An entry in a [`Dir`]
-pub type DirEntry<FE> = txfs::DirEntry<TxnId, FE>;
+pub enum DirEntry<FE, N, B> {
+    Dir(Dir<FE>),
+    File(File<FE, N, B>),
+}
 
 /// A transactional directory
 pub struct Dir<FE> {
@@ -86,9 +88,27 @@ impl<FE: ThreadSafe> Dir<FE> {
             .await
     }
 
-    /// Iterate over the names of the [`File`]s in this [`Dir`] at `txn_id`.
-    pub async fn file_names(&self, txn_id: TxnId) -> TCResult<impl Iterator<Item = Key>> {
-        self.inner.file_names(txn_id).map_err(TCError::from).await
+    /// Iterate over the names of the entries in this [`Dir`] at `txn_id`.
+    pub async fn entry_names(&self, txn_id: TxnId) -> TCResult<impl Iterator<Item = Id>> {
+        let names = self.inner.dir_names(txn_id).await?;
+        // TODO: avoid this call to parse()
+        Ok(names.map(|name| name.parse().expect("dir entry name")))
+    }
+
+    /// Iterate over each [`DirEntry`] in this [`Dir`] at `txn_id`, assuming it is a [`File`].
+    pub async fn files<N, B>(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<impl Iterator<Item = (Id, File<FE, N, B>)>> {
+        let entries = self.inner.iter(txn_id).await?;
+        Ok(entries.map(|(name, entry)| {
+            let file = match &*entry {
+                txfs::DirEntry::Dir(blocks_dir) => File::new(blocks_dir.clone()),
+                other => panic!("not a block directory: {:?}", other),
+            };
+
+            (name.parse().expect("name"), file)
+        }))
     }
 
     /// Get the sub-[`Dir`] with the given `name` at `txn_id`, or return a "not found" error.
@@ -127,21 +147,74 @@ impl<FE: ThreadSafe> Dir<FE> {
     pub async fn is_empty(&self, txn_id: TxnId) -> TCResult<bool> {
         self.inner.is_empty(txn_id).map_err(TCError::from).await
     }
+
+    /// Iterate over the [`DirEntry`]s in this [`Dir`] at `txn_id`.
+    pub async fn iter<N, B>(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<impl Stream<Item = TCResult<(Id, DirEntry<FE, N, B>)>> + Unpin + Send + '_> {
+        let entries = self.inner.iter(txn_id).await?;
+
+        let entries = stream::iter(entries).then(move |(name, entry)| async move {
+            // TODO: avoid this call to parse()
+            let name: Id = name.parse().expect("dir entry name");
+            let entry = match &*entry {
+                txfs::DirEntry::Dir(dir) => {
+                    if dir.is_empty(txn_id).await? {
+                        panic!("an empty filesystem directory is ambiguous");
+                        // return Err(unexpected!("an empty filesystem directory is ambiguous"));
+                    } else if dir.contains_files(txn_id).await? {
+                        DirEntry::File(File::new(dir.clone()))
+                    } else {
+                        DirEntry::Dir(Self { inner: dir.clone() })
+                    }
+                }
+                txfs::DirEntry::File(block) => panic!(
+                    "a transactional Dir should never contain blocks: {:?}",
+                    block
+                ),
+            };
+
+            Ok((name, entry))
+        });
+
+        Ok(Box::pin(entries))
+    }
+
+    /// Delete any empty entries in this [`Dir`] at `txn_id`.
+    pub async fn trim(&self, txn_id: TxnId) -> TCResult<()> {
+        let mut to_delete = Vec::new();
+        let entries = self.inner.iter(txn_id).await?;
+
+        for (name, entry) in entries {
+            if let txfs::DirEntry::Dir(dir) = &*entry {
+                if dir.is_empty(txn_id).await? {
+                    to_delete.push(name);
+                }
+            }
+        }
+
+        for name in to_delete {
+            self.inner.delete(txn_id, (&*name).clone()).await?;
+        }
+
+        Ok(())
+    }
 }
 
-#[async_trait]
-impl<FE: ThreadSafe + for<'a> FileSave<'a>> Transact for Dir<FE> {
-    type Commit = ();
-
-    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
-        self.inner.commit(txn_id).await
+impl<FE: ThreadSafe + for<'a> FileSave<'a>> Dir<FE> {
+    /// Commit this [`Dir`] at `txn_id`.
+    pub async fn commit(&self, txn_id: TxnId, recursive: bool) {
+        self.inner.commit(txn_id, recursive).await
     }
 
-    async fn rollback(&self, txn_id: &TxnId) {
-        self.inner.rollback(*txn_id).await
+    /// Roll back this [`Dir`] at `txn_id`.
+    pub async fn rollback(&self, txn_id: &TxnId, recursive: bool) {
+        self.inner.rollback(*txn_id, recursive).await
     }
 
-    async fn finalize(&self, txn_id: &TxnId) {
+    /// Finalize this [`Dir`] at `txn_id`.
+    pub async fn finalize(&self, txn_id: &TxnId) {
         self.inner.finalize(*txn_id).await
     }
 }
@@ -222,10 +295,18 @@ where
     /// Iterate over the blocks in this [`File`].
     pub async fn iter(
         &self,
-        _txn_id: TxnId,
-    ) -> TCResult<impl Stream<Item = TCResult<(txfs::Key, BlockRead<FE, B>)>>> {
-        // TODO
-        Ok(stream::empty::<TCResult<(txfs::Key, BlockRead<FE, B>)>>())
+        txn_id: TxnId,
+    ) -> TCResult<impl Stream<Item = TCResult<(Id, BlockRead<FE, B>)>> + Send + Unpin + '_> {
+        self.inner
+            .files(txn_id)
+            // TODO: avoid this call to parse()
+            .map_ok(|blocks| {
+                blocks
+                    .map_ok(|(name, data)| (name.parse().expect("block ID"), data))
+                    .map_err(TCError::from)
+            })
+            .map_err(TCError::from)
+            .await
     }
 
     /// Lock the block at `name` for reading at `txn_id`.
@@ -255,15 +336,25 @@ where
     type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
-        self.inner.commit(txn_id).await
+        self.inner.commit(txn_id, true).await
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        self.inner.rollback(*txn_id).await
+        self.inner.rollback(*txn_id, true).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.inner.finalize(*txn_id).await
+    }
+}
+
+impl<FE, N, B> fmt::Debug for File<FE, N, B> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "a transactional File with blocks of type {}",
+            std::any::type_name::<B>()
+        )
     }
 }
 
