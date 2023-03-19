@@ -57,7 +57,6 @@ class BTreeChainTests(PersistenceTest, unittest.TestCase):
         hosts[1].delete(endpoint, (1,))
         hosts[2].start()
 
-        printlines(5)
         actual = hosts[2].get(endpoint)
         self.assertEqual(actual, expected([row2]))
 
