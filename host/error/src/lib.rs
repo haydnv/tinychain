@@ -6,7 +6,7 @@ use std::convert::Infallible;
 use std::{fmt, io};
 
 use destream::en;
-use ds_ext::link::ParseError;
+use pathlink::ParseError;
 
 /// A result of type `T`, or a [`TCError`]
 pub type TCResult<T> = Result<T, TCError>;
@@ -239,7 +239,10 @@ impl From<txfs::Error> for TCError {
 impl From<io::Error> for TCError {
     fn from(cause: io::Error) -> Self {
         match cause.kind() {
-            io::ErrorKind::AlreadyExists => bad_request!("tried to create a filesystem entry that already exists: {}", cause),
+            io::ErrorKind::AlreadyExists => bad_request!(
+                "tried to create a filesystem entry that already exists: {}",
+                cause
+            ),
             io::ErrorKind::InvalidInput => bad_request!("{}", cause),
             io::ErrorKind::NotFound => TCError::not_found(cause),
             io::ErrorKind::PermissionDenied => {

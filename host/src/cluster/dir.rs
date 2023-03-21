@@ -33,7 +33,7 @@ use crate::txn::{Actor, Txn};
 use super::{Class, Cluster, Library, Replica, Schema, Service, REPLICAS};
 
 /// The type of file stored in a [`Library`] directory
-pub type File = fs::File<VersionNumber, super::library::Version>;
+pub type File = fs::File<super::library::Version>;
 
 /// The name of the endpoint which lists the names of each entry in a [`Dir`]
 pub const ENTRIES: Label = label("entries");
@@ -436,9 +436,9 @@ impl Persist<CacheBlock> for Dir<Class> {
 
         let mut loaded = BTreeMap::new();
 
-        let mut contents = dir.iter::<Id, InstanceClass>(txn_id).await?;
+        let mut contents = dir.iter::<InstanceClass>(txn_id).await?;
         while let Some((name, entry)) = contents.try_next().await? {
-            let schema = schema.extend(name.clone());
+            let schema = schema.extend((*name).clone());
 
             let entry = match entry {
                 fs::DirEntry::Dir(dir) => {
@@ -457,7 +457,7 @@ impl Persist<CacheBlock> for Dir<Class> {
                 fs::DirEntry::File(file) => Err(unexpected!("invalid Class dir entry: {:?}", file)),
             }?;
 
-            loaded.insert(name, entry);
+            loaded.insert((*name).clone(), entry);
         }
 
         std::mem::drop(contents);
@@ -527,10 +527,10 @@ impl Persist<CacheBlock> for Dir<Service> {
     async fn load(txn_id: TxnId, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
         let mut loaded = BTreeMap::new();
 
-        let mut contents = dir.iter::<Id, InstanceClass>(txn_id).await?;
+        let mut contents = dir.iter::<InstanceClass>(txn_id).await?;
 
         while let Some((name, entry)) = contents.try_next().await? {
-            let schema = schema.extend(name.clone());
+            let schema = schema.extend((*name).clone());
 
             let entry = match entry {
                 fs::DirEntry::File(file) => {
@@ -555,7 +555,7 @@ impl Persist<CacheBlock> for Dir<Service> {
                 }
             }?;
 
-            loaded.insert(name.clone(), entry);
+            loaded.insert((*name).clone(), entry);
         }
 
         std::mem::drop(contents);

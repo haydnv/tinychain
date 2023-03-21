@@ -13,7 +13,7 @@ use tcgeneric::{Id, ThreadSafe};
 
 use super::{TCResult, Transact, Transaction, TxnId};
 
-pub use txfs::VERSIONS;
+pub use txfs::{Key, VERSIONS};
 
 /// The underlying filesystem directory type backing a [`Dir`]
 pub type Inner<FE> = freqfs::DirLock<FE>;
@@ -25,9 +25,9 @@ pub type BlockRead<FE, B> = txfs::FileVersionRead<TxnId, FE, B>;
 pub type BlockWrite<FE, B> = txfs::FileVersionWrite<TxnId, FE, B>;
 
 /// An entry in a [`Dir`]
-pub enum DirEntry<FE, N, B> {
+pub enum DirEntry<FE, B> {
     Dir(Dir<FE>),
-    File(File<FE, N, B>),
+    File(File<FE, B>),
 }
 
 /// A transactional directory
@@ -60,7 +60,7 @@ impl<FE: ThreadSafe> Dir<FE> {
     /// Check whether this [`Dir`] has an entry with the given `name` at `txn_id`.
     pub async fn contains(&self, txn_id: TxnId, name: &Id) -> TCResult<bool> {
         self.inner
-            .contains(txn_id, name.as_str())
+            .contains(txn_id, name)
             .map_err(TCError::from)
             .await
     }
@@ -75,10 +75,9 @@ impl<FE: ThreadSafe> Dir<FE> {
     }
 
     /// Create a new [`File`] with the given `name` at `txn_id`.
-    pub async fn create_file<N, B>(&self, txn_id: TxnId, name: Id) -> TCResult<File<FE, N, B>>
+    pub async fn create_file<B>(&self, txn_id: TxnId, name: Id) -> TCResult<File<FE, B>>
     where
         B: GetSize + Clone,
-        N: fmt::Display,
         FE: AsType<B>,
     {
         self.inner
@@ -89,17 +88,15 @@ impl<FE: ThreadSafe> Dir<FE> {
     }
 
     /// Iterate over the names of the entries in this [`Dir`] at `txn_id`.
-    pub async fn entry_names(&self, txn_id: TxnId) -> TCResult<impl Iterator<Item = Id>> {
-        let names = self.inner.dir_names(txn_id).await?;
-        // TODO: avoid this call to parse()
-        Ok(names.map(|name| name.parse().expect("dir entry name")))
+    pub async fn entry_names(&self, txn_id: TxnId) -> TCResult<impl Iterator<Item = Key>> {
+        self.inner.dir_names(txn_id).map_err(TCError::from).await
     }
 
     /// Iterate over each [`DirEntry`] in this [`Dir`] at `txn_id`, assuming it is a [`File`].
-    pub async fn files<N, B>(
+    pub async fn files<B>(
         &self,
         txn_id: TxnId,
-    ) -> TCResult<impl Iterator<Item = (Id, File<FE, N, B>)>> {
+    ) -> TCResult<impl Iterator<Item = (Key, File<FE, B>)>> {
         let entries = self.inner.iter(txn_id).await?;
         Ok(entries.map(|(name, entry)| {
             let file = match &*entry {
@@ -107,13 +104,13 @@ impl<FE: ThreadSafe> Dir<FE> {
                 other => panic!("not a block directory: {:?}", other),
             };
 
-            (name.parse().expect("name"), file)
+            (name, file)
         }))
     }
 
     /// Get the sub-[`Dir`] with the given `name` at `txn_id`, or return a "not found" error.
     pub async fn get_dir(&self, txn_id: TxnId, name: &Id) -> TCResult<Self> {
-        if let Some(dir) = self.inner.get_dir(txn_id, name.as_str()).await? {
+        if let Some(dir) = self.inner.get_dir(txn_id, name).await? {
             Ok(Self { inner: dir.clone() })
         } else {
             Err(TCError::not_found(name))
@@ -122,7 +119,7 @@ impl<FE: ThreadSafe> Dir<FE> {
 
     /// Get the sub-[`Dir`] with the given `name` at `txn_id`, or create a new one.
     pub async fn get_or_create_dir(&self, txn_id: TxnId, name: Id) -> TCResult<Self> {
-        if let Some(dir) = self.inner.get_dir(txn_id, name.as_str()).await? {
+        if let Some(dir) = self.inner.get_dir(txn_id, &name).await? {
             Ok(Self { inner: dir.clone() })
         } else {
             self.create_dir(txn_id, name).await
@@ -130,13 +127,12 @@ impl<FE: ThreadSafe> Dir<FE> {
     }
 
     /// Get the [`File`] with the given `name` at `txn_id`, or return a "not found" error.
-    pub async fn get_file<N, B>(&self, txn_id: TxnId, name: &Id) -> TCResult<File<FE, N, B>>
+    pub async fn get_file<B>(&self, txn_id: TxnId, name: &Id) -> TCResult<File<FE, B>>
     where
         B: GetSize + Clone,
-        N: fmt::Display,
         FE: AsType<B>,
     {
-        if let Some(blocks) = self.inner.get_dir(txn_id, name.as_str()).await? {
+        if let Some(blocks) = self.inner.get_dir(txn_id, name).await? {
             Ok(File::new(blocks.clone()))
         } else {
             Err(TCError::not_found(name))
@@ -149,15 +145,13 @@ impl<FE: ThreadSafe> Dir<FE> {
     }
 
     /// Iterate over the [`DirEntry`]s in this [`Dir`] at `txn_id`.
-    pub async fn iter<N, B>(
+    pub async fn iter<B>(
         &self,
         txn_id: TxnId,
-    ) -> TCResult<impl Stream<Item = TCResult<(Id, DirEntry<FE, N, B>)>> + Unpin + Send + '_> {
+    ) -> TCResult<impl Stream<Item = TCResult<(Key, DirEntry<FE, B>)>> + Unpin + Send + '_> {
         let entries = self.inner.iter(txn_id).await?;
 
         let entries = stream::iter(entries).then(move |(name, entry)| async move {
-            // TODO: avoid this call to parse()
-            let name: Id = name.parse().expect("dir entry name");
             let entry = match &*entry {
                 txfs::DirEntry::Dir(dir) => {
                     if dir.is_empty(txn_id).await? {
@@ -226,23 +220,21 @@ impl<FE> fmt::Debug for Dir<FE> {
 }
 
 /// A transactional file
-pub struct File<FE, N, B> {
+pub struct File<FE, B> {
     inner: txfs::Dir<TxnId, FE>,
-    name: PhantomData<N>,
     block: PhantomData<B>,
 }
 
-impl<FE, N, B> Clone for File<FE, N, B> {
+impl<FE, B> Clone for File<FE, B> {
     fn clone(&self) -> Self {
         Self::new(self.inner.clone())
     }
 }
 
-impl<FE, N, B> File<FE, N, B> {
+impl<FE, B> File<FE, B> {
     fn new(inner: txfs::Dir<TxnId, FE>) -> Self {
         Self {
             inner,
-            name: PhantomData,
             block: PhantomData,
         }
     }
@@ -253,81 +245,67 @@ impl<FE, N, B> File<FE, N, B> {
     }
 }
 
-// TODO: there should be a way to avoid calling name.to_string() on every lookup
-impl<FE, N, B> File<FE, N, B>
+impl<FE, B> File<FE, B>
 where
     FE: for<'a> FileSave<'a> + AsType<B> + Clone + Send + Sync,
-    N: fmt::Display,
     B: FileLoad + GetSize + Clone,
 {
     /// Construct an iterator over the name of each block in this [`File`] at `txn_id`.
-    pub async fn block_ids(&self, txn_id: TxnId) -> TCResult<impl Iterator<Item = Id>> {
-        self.inner
-            .file_names(txn_id)
-            .map_ok(|names| names.map(|name| name.parse().expect("block ID")))
-            .map_err(TCError::from)
-            .await
+    pub async fn block_ids(&self, txn_id: TxnId) -> TCResult<impl Iterator<Item = Key>> {
+        self.inner.file_names(txn_id).map_err(TCError::from).await
     }
 
     /// Create a new block at `txn_id` with the given `name` and `contents`.
     pub async fn create_block(
         &self,
         txn_id: TxnId,
-        name: N,
+        name: Id,
         contents: B,
     ) -> TCResult<BlockWrite<FE, B>> {
         let block = self
             .inner
-            .create_file(txn_id, name.to_string(), contents)
+            .create_file(txn_id, name.into(), contents)
             .await?;
 
         block.into_write(txn_id).map_err(TCError::from).await
     }
 
     /// Delete the block with the given `name` at `txn_id` and return `true` if it was present.
-    pub async fn delete_block(&self, txn_id: TxnId, name: &N) -> TCResult<bool> {
-        self.inner
-            .delete(txn_id, name.to_string())
-            .map_err(TCError::from)
-            .await
+    pub async fn delete_block(&self, txn_id: TxnId, name: Id) -> TCResult<bool> {
+        self.inner.delete(txn_id, name).map_err(TCError::from).await
     }
 
     /// Iterate over the blocks in this [`File`].
     pub async fn iter(
         &self,
         txn_id: TxnId,
-    ) -> TCResult<impl Stream<Item = TCResult<(Id, BlockRead<FE, B>)>> + Send + Unpin + '_> {
+    ) -> TCResult<impl Stream<Item = TCResult<(Key, BlockRead<FE, B>)>> + Send + Unpin + '_> {
         self.inner
             .files(txn_id)
-            // TODO: avoid this call to parse()
-            .map_ok(|blocks| {
-                blocks
-                    .map_ok(|(name, data)| (name.parse().expect("block ID"), data))
-                    .map_err(TCError::from)
-            })
+            .map_ok(|blocks| blocks.map_err(TCError::from))
             .map_err(TCError::from)
             .await
     }
 
     /// Lock the block at `name` for reading at `txn_id`.
-    pub async fn read_block(&self, txn_id: TxnId, name: &N) -> TCResult<BlockRead<FE, B>> {
+    pub async fn read_block(&self, txn_id: TxnId, name: &Id) -> TCResult<BlockRead<FE, B>> {
         self.inner
-            .read_file(txn_id, &name.to_string())
+            .read_file(txn_id, name)
             .map_err(TCError::from)
             .await
     }
 
     /// Lock the block at `name` for writing at `txn_id`.
-    pub async fn write_block(&self, txn_id: TxnId, name: &N) -> TCResult<BlockWrite<FE, B>> {
+    pub async fn write_block(&self, txn_id: TxnId, name: &Id) -> TCResult<BlockWrite<FE, B>> {
         self.inner
-            .write_file(txn_id, &name.to_string())
+            .write_file(txn_id, name)
             .map_err(TCError::from)
             .await
     }
 }
 
 #[async_trait]
-impl<FE, N, B> Transact for File<FE, N, B>
+impl<FE, B> Transact for File<FE, B>
 where
     FE: for<'a> FileSave<'a> + AsType<B> + Clone + Send + Sync,
     B: FileLoad + GetSize + Clone,
@@ -348,7 +326,7 @@ where
     }
 }
 
-impl<FE, N, B> fmt::Debug for File<FE, N, B> {
+impl<FE, B> fmt::Debug for File<FE, B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,

@@ -24,10 +24,10 @@ use crate::object::InstanceClass;
 pub type Dir = tc_transact::fs::Dir<CacheBlock>;
 
 /// An entry in a transactional directory
-pub type DirEntry<N, B> = tc_transact::fs::DirEntry<CacheBlock, N, B>;
+pub type DirEntry<B> = tc_transact::fs::DirEntry<CacheBlock, B>;
 
 /// A transactional file
-pub type File<N, B> = tc_transact::fs::File<CacheBlock, N, B>;
+pub type File<B> = tc_transact::fs::File<CacheBlock, B>;
 
 /// A cached filesystem block.
 #[derive(Clone, GetSize)]

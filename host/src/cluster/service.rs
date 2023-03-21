@@ -240,7 +240,7 @@ impl fmt::Debug for Version {
 #[derive(Clone)]
 pub struct Service {
     dir: fs::Dir,
-    schema: fs::File<VersionNumber, InstanceClass>,
+    schema: fs::File<InstanceClass>,
     versions: TxnMapLock<VersionNumber, Version>,
 }
 
@@ -292,7 +292,7 @@ impl DirItem for Service {
         let txn_id = *txn.id();
 
         self.schema
-            .create_block(txn_id, number.clone(), schema.clone().into())
+            .create_block(txn_id, number.into(), schema.clone().into())
             .await?;
 
         let store = self.dir.create_dir(txn_id, number.clone().into()).await?;
@@ -314,7 +314,7 @@ impl Replica for Service {
         let mut blocks = self.schema.iter(txn_id).await?;
         while let Some((number, version)) = blocks.try_next().await? {
             let version = InstanceClass::clone(&*version).into();
-            map.insert(number, version);
+            map.insert(number.as_str().parse()?, version);
         }
 
         Ok(State::Map(map))
@@ -416,7 +416,7 @@ impl Persist<CacheBlock> for Service {
         debug!("load Service");
 
         let schema = dir
-            .get_file::<VersionNumber, InstanceClass>(txn_id, &SCHEMA.into())
+            .get_file::<InstanceClass>(txn_id, &SCHEMA.into())
             .await?;
 
         let mut versions = BTreeMap::new();
@@ -429,7 +429,7 @@ impl Persist<CacheBlock> for Service {
             trace!("loading Service version {}...", version_number);
 
             // `get_or_create_dir` here in case of a service with no persistent data
-            let store = dir.get_or_create_dir(txn_id, number).await?;
+            let store = dir.get_or_create_dir(txn_id, (*number).clone()).await?;
             trace!(
                 "got transactional directory for Service version {}",
                 version_number

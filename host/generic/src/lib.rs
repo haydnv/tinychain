@@ -9,16 +9,13 @@ use futures::{Future, Stream};
 
 use tc_error::*;
 
-pub use id::*;
+pub use pathlink::{
+    label, path_label, Id, Label, Path as TCPath, PathBuf as TCPathBuf, PathLabel, PathSegment,
+};
+
 pub use map::*;
 pub use time::*;
 pub use tuple::*;
-
-mod id {
-    pub use ds_ext::link::{
-        label, path_label, Id, Label, Path as TCPath, PathBuf as TCPathBuf, PathLabel, PathSegment,
-    };
-}
 
 mod map;
 mod time;

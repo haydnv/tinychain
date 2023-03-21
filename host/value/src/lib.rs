@@ -16,7 +16,7 @@ pub use version::*;
 mod class;
 
 mod link {
-    pub use ds_ext::link::{Address, Host, Link, Protocol};
+    pub use pathlink::{Address, Host, Link, Protocol};
 }
 
 mod number {

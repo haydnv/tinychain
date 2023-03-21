@@ -2,13 +2,12 @@ use std::fmt;
 
 use async_trait::async_trait;
 use collate::OverlapsRange;
-use ds_ext::Id;
 use futures::{future, TryFutureExt, TryStreamExt};
 use safecast::AsType;
 
 use tc_error::*;
 use tc_transact::{Transaction, TxnId};
-use tcgeneric::{Instance, ThreadSafe};
+use tcgeneric::{Id, Instance, ThreadSafe};
 
 use crate::btree::BTreeSchema;
 use crate::Node;

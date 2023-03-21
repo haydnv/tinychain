@@ -24,11 +24,11 @@ use super::DirItem;
 /// A version of a set of [`InstanceClass`]es
 #[derive(Clone)]
 pub struct Version {
-    classes: fs::File<Id, InstanceClass>,
+    classes: fs::File<InstanceClass>,
 }
 
 impl Version {
-    fn with_file(classes: fs::File<Id, InstanceClass>) -> Self {
+    fn with_file(classes: fs::File<InstanceClass>) -> Self {
         Self { classes }
     }
 
@@ -37,7 +37,7 @@ impl Version {
 
         let mut blocks = self.classes.iter(txn_id).await?;
         while let Some((block_id, class)) = blocks.try_next().await? {
-            classes.insert(block_id, class.clone().into());
+            classes.insert((*block_id).clone(), class.clone().into());
         }
 
         Ok(State::Map(classes))
@@ -68,18 +68,20 @@ impl Class {
     pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
         let file_names = self.dir.entry_names(txn_id).await?;
 
-        let mut latest = None;
+        let mut latest: Option<Key> = None;
         for version in file_names {
-            if latest.is_none() {
-                latest = Some(version);
-            } else if Some(&version) > latest.as_ref() {
+            if let Some(prior) = latest.as_mut() {
+                if &*version > &**prior {
+                    *prior = version;
+                }
+            } else {
                 latest = Some(version);
             }
         }
 
         if let Some(latest) = latest {
-            trace!("latest Class version is {}", latest);
-            latest.as_str().parse().map(|id| Some(id))
+            let latest = latest.as_str().parse()?;
+            Ok(Some(latest))
         } else {
             Ok(None)
         }
@@ -96,7 +98,7 @@ impl Class {
         let mut versions = Map::new();
         for (number, file) in self.dir.files(txn_id).await? {
             let version = Version::with_file(file).to_state(txn_id).await?;
-            versions.insert(number.clone(), version);
+            versions.insert((*number).clone(), version);
         }
 
         Ok(State::Map(versions))

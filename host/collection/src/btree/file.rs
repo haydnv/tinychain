@@ -6,7 +6,6 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use b_table::b_tree;
 use destream::de;
-use ds_ext::link::{label, Label};
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, DirWriteGuard, FileLoad};
 use futures::{future, try_join, Stream, TryFutureExt, TryStreamExt};
@@ -17,7 +16,7 @@ use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Inner, Persist, Restore, VERSIONS};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::ValueCollator;
-use tcgeneric::{Instance, TCBoxTryStream, ThreadSafe};
+use tcgeneric::{label, Instance, Label, TCBoxTryStream, ThreadSafe};
 
 use super::schema::BTreeSchema;
 use super::slice::BTreeSlice;

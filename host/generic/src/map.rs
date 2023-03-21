@@ -153,7 +153,7 @@ impl<T> IntoIterator for Map<T> {
 
 impl<'a, T> IntoIterator for &'a Map<T> {
     type Item = (&'a Id, &'a T);
-    type IntoIter = ds_ext::ord::map::Iter<'a, Id, T>;
+    type IntoIter = ds_ext::map::Iter<'a, Id, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.inner.iter()

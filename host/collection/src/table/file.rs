@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use b_table::{b_tree, TableLock};
 use destream::de;
-use ds_ext::{Id, OrdHashMap, OrdHashSet};
+use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, DirWriteGuard};
 use futures::{future, try_join, TryFutureExt, TryStreamExt};
 use log::{debug, trace};
@@ -16,7 +16,7 @@ use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Inner, Persist, Restore, VERSIONS};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
-use tcgeneric::{label, Instance, Label, TCBoxTryStream, ThreadSafe};
+use tcgeneric::{label, Id, Instance, Label, TCBoxTryStream, ThreadSafe};
 
 use crate::btree::{BTreeSchema as IndexSchema, Node};
 

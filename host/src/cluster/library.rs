@@ -120,7 +120,7 @@ impl fmt::Debug for Version {
 #[derive(Clone)]
 pub struct Library {
     dir: fs::Dir,
-    versions: fs::File<VersionNumber, Version>,
+    versions: fs::File<Version>,
 }
 
 impl Library {
@@ -137,7 +137,7 @@ impl Library {
         txn_id: TxnId,
         number: &VersionNumber,
     ) -> TCResult<impl Deref<Target = Version>> {
-        self.versions.read_block(txn_id, number).await
+        self.versions.read_block(txn_id, &(*number).into()).await
     }
 
     pub async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
@@ -167,7 +167,7 @@ impl DirItem for Library {
         let version = Version::from(validate(schema)?);
 
         self.versions
-            .create_block(*txn.id(), number, version.clone())
+            .create_block(*txn.id(), number.into(), version.clone())
             .map_ok(|_| ())
             .await?;
 
