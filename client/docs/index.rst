@@ -11,15 +11,12 @@ Modules
    chain
    generic
    interface
-   math
    math.interface
    math.linalg
    math.operator
-   ml
    ml.nn
    ml.optimizer
    ml.service
-   scalar
    scalar.number
    scalar.ref
    scalar.value
