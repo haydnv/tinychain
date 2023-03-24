@@ -5,7 +5,7 @@ import math
 import typing
 
 from ...decorators import post
-from ...generic import autobox, gcs, resolve_class, Map
+from ...generic import autobox, resolve_class, Map
 from ...interface import Compare, Interface
 from ...math.interface import Boolean, Numeric, Trigonometric
 from ...math.operator import deref, is_one, is_zero, operator
@@ -26,7 +26,7 @@ from .operator import Broadcast, Cast, Concatenate, Copy, Expand, Flip, Read, Re
 from .operator import Max, Min, Norm, Product, Sum
 
 
-DType = typing.TypeVar("DType", bound=type[Number])
+DType = typing.TypeVar("DType")
 
 
 class NDArray(Interface):
