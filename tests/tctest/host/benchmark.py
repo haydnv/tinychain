@@ -33,8 +33,8 @@ class DataStructures(tc.service.Service):
         table_schema = tc.table.Schema([("x", tc.I32)], [("y", tc.I32)]).create_index("y", ["y"])
         self.table = chain_type(tc.table.Table(table_schema))
 
-        # self.tensor1 = chain_type(tc.tensor.Dense(([100, 50], tc.F32)))
-        # self.tensor2 = chain_type(tc.tensor.Dense(([50, 1], tc.F32)))
+        self.tensor1 = chain_type(tc.tensor.Dense(([100, 50], tc.F32)))
+        self.tensor2 = chain_type(tc.tensor.Dense(([50, 1], tc.F32)))
 
         tc.service.Service.__init__(self)
 
@@ -54,26 +54,26 @@ class DataStructures(tc.service.Service):
     def table_read(self, key: tc.UInt):
         return self.table[(key,)]
 
-    # @tc.get
-    # def tensor_multiply(self) -> tc.F32:
-    #     return (self.tensor1 * self.tensor2.transpose()).sum()
+    @tc.get
+    def tensor_multiply(self) -> tc.F32:
+        return (self.tensor1 * self.tensor2.transpose()).sum()
 
-    # @tc.get
-    # def neural_net_train(self, cxt) -> tc.F32:
-    #     cxt.inputs = tc.tensor.Dense.random_uniform([20, 2], 0, 1)
-    #
-    #     def cost(i, o):
-    #         labels = tc.math.constant(i[:, 0].logical_xor(i[:, 1]).expand_dims())
-    #         return (o - labels)**2
-    #
-    #     layers = [
-    #         tc.ml.nn.Linear.create(2, 2, tc.ml.sigmoid),
-    #         tc.ml.nn.Linear.create(2, 1, tc.ml.sigmoid)]
-    #
-    #     dnn = tc.ml.nn.Sequential(layers)
-    #     cxt.optimizer = tc.ml.optimizer.Adam(dnn, cost)
-    #
-    #     return cxt.optimizer.train(1, cxt.inputs)
+    @tc.get
+    def neural_net_train(self, cxt) -> tc.F32:
+        cxt.inputs = tc.tensor.Dense.random_uniform([20, 2], 0, 1)
+
+        def cost(i, o):
+            labels = tc.math.constant(i[:, 0].logical_xor(i[:, 1]).expand_dims())
+            return (o - labels)**2
+
+        layers = [
+            tc.ml.nn.Linear.create(2, 2, tc.ml.sigmoid),
+            tc.ml.nn.Linear.create(2, 1, tc.ml.sigmoid)]
+
+        dnn = tc.ml.nn.Sequential(layers)
+        cxt.optimizer = tc.ml.optimizer.Adam(dnn, cost)
+
+        return cxt.optimizer.train(1, cxt.inputs)
 
 
 async def start_and_install_deps(chain_type, actor, **flags):
@@ -85,7 +85,7 @@ async def start_and_install_deps(chain_type, actor, **flags):
 
     host = start_local_host_async(NS, **flags)
 
-    # uri = tc.URI(tc.ml.NeuralNets)
+    uri = tc.URI(tc.ml.NeuralNets)
 
     start = time.time()
     response = await host.create_namespace(actor, tc.URI(tc.service.Library), tc.ml.NS, LEAD)
@@ -93,17 +93,17 @@ async def start_and_install_deps(chain_type, actor, **flags):
     elapsed = time.time() - start
     print(f"created library directory in {elapsed:.4f}")
 
-    # start = time.time()
-    # response = await host.install(actor, tc.ml.NeuralNets())
-    # assert response.status == 200, await response.text()
-    # elapsed = time.time() - start
-    # print(f"installed library in {elapsed:.4f}")
+    start = time.time()
+    response = await host.install(actor, tc.ml.NeuralNets())
+    assert response.status == 200, await response.text()
+    elapsed = time.time() - start
+    print(f"installed library in {elapsed:.4f}")
 
-    # start = time.time()
-    # response = await host.install(actor, tc.ml.Optimizers())
-    # assert response.status == 200, await response.text()
-    # elapsed = time.time() - start
-    # print(f"installed library in {elapsed:.4f}")
+    start = time.time()
+    response = await host.install(actor, tc.ml.Optimizers())
+    assert response.status == 200, await response.text()
+    elapsed = time.time() - start
+    print(f"installed library in {elapsed:.4f}")
 
     start = time.time()
     uri = tc.URI(DataStructures).path()
@@ -177,11 +177,11 @@ class ConcurrentWriteBenchmarks(benchmark.Benchmark):
         print(f"Table insert row x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
         await self.host.delete(self._link("/table"))
 
-    # async def neural_net_train(self, num_users, concurrency):
-    #     requests = [self.host.get(self._link("/neural_net_train")) for _ in range(num_users)]
-    #     responses, elapsed, success = await self.run(requests, concurrency)
-    #     qps = num_users / elapsed
-    #     print(f"create & train a neural net x {num_users} users: {elapsed:.4f}s @ {qps:.2f}/s, {success:.2f}% success")
+    async def neural_net_train(self, num_users, concurrency):
+        requests = [self.host.get(self._link("/neural_net_train")) for _ in range(num_users)]
+        responses, elapsed, success = await self.run(requests, concurrency)
+        qps = num_users / elapsed
+        print(f"create & train a neural net x {num_users} users: {elapsed:.4f}s @ {qps:.2f}/s, {success:.2f}% success")
 
 
 class LoadBenchmarks(benchmark.Benchmark):
@@ -215,12 +215,12 @@ class LoadBenchmarks(benchmark.Benchmark):
         qps = int(num_users / elapsed)
         print(f"Table read row x {num_users} users: {elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
-    # async def tensor_multiply(self, num_users, concurrency):
-    #     requests = [self.host.get(self._link("/tensor_multiply")) for _ in range(num_users)]
-    #     responses, elapsed, success = await self.run(requests, concurrency)
-    #     qps = int(num_users / elapsed)
-    #     print(f"Tensor transpose, broadcast, multiply & sum x {num_users} users: "
-    #           + f"{elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
+    async def tensor_multiply(self, num_users, concurrency):
+        requests = [self.host.get(self._link("/tensor_multiply")) for _ in range(num_users)]
+        responses, elapsed, success = await self.run(requests, concurrency)
+        qps = int(num_users / elapsed)
+        print(f"Tensor transpose, broadcast, multiply & sum x {num_users} users: "
+              + f"{elapsed:.4f}s @ {qps}/s, {success:.2f}% success")
 
 
 class ReplicationBenchmarks(benchmark.Benchmark):
