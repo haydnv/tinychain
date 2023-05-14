@@ -4,6 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use b_table::TableLock;
 use ds_ext::{OrdHashMap, OrdHashSet};
+use fensor::{CDatatype, Node, Shape};
 use freqfs::{DirLock, DirWriteGuard};
 use safecast::AsType;
 use tokio::sync::RwLock;
@@ -11,12 +12,12 @@ use tokio::sync::RwLock;
 use tc_error::*;
 use tc_transact::fs::{Dir, Inner, Persist, VERSIONS};
 use tc_transact::{Transaction, TxnId};
-use tc_value::NumberCollator;
+use tc_value::{DType, NumberCollator, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
-use super::{Range, TensorType};
+use crate::tensor::{Range, TensorInstance, TensorType};
 
-pub use fensor::sparse::{IndexSchema, Node, Schema};
+use super::{IndexSchema, Schema};
 
 const CANON: Label = label("canon");
 const FILLED: Label = label("filled");
@@ -109,15 +110,15 @@ where
 }
 
 /// A tensor to hold sparse data, based on [`b_table::Table`]
-pub struct SparseTensor<Txn, FE> {
+pub struct SparseTensor<Txn, FE, T> {
     dir: DirLock<FE>,
     canon: Version<FE>,
     state: Arc<RwLock<State<FE>>>,
     semaphore: Semaphore,
-    phantom: PhantomData<Txn>,
+    phantom: PhantomData<(Txn, T)>,
 }
 
-impl<Txn, FE> Clone for SparseTensor<Txn, FE> {
+impl<Txn, FE, T> Clone for SparseTensor<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
             dir: self.dir.clone(),
@@ -129,7 +130,7 @@ impl<Txn, FE> Clone for SparseTensor<Txn, FE> {
     }
 }
 
-impl<Txn, FE> SparseTensor<Txn, FE>
+impl<Txn, FE, T> SparseTensor<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
@@ -155,7 +156,7 @@ where
     }
 }
 
-impl<Txn, FE> Instance for SparseTensor<Txn, FE>
+impl<Txn, FE, T> Instance for SparseTensor<Txn, FE, T>
 where
     Self: Send + Sync,
 {
@@ -166,8 +167,31 @@ where
     }
 }
 
+impl<Txn, FE, T> fensor::TensorInstance for SparseTensor<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
+    fn dtype(&self) -> NumberType {
+        T::dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.canon.schema().shape()
+    }
+}
+
+impl<Txn, FE, T> TensorInstance for SparseTensor<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
+}
+
 #[async_trait]
-impl<Txn, FE> Persist<FE> for SparseTensor<Txn, FE>
+impl<Txn, FE, T> Persist<FE> for SparseTensor<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,

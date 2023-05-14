@@ -109,17 +109,17 @@ impl fmt::Debug for TensorType {
 
 /// A [`Tensor`] instance
 pub trait TensorInstance: fensor::TensorInstance {
-    /// A dense representation of this [`Tensor`]
-    type Dense: TensorInstance;
+    // /// A dense representation of this [`Tensor`]
+    // type Dense: TensorInstance;
 
-    /// A sparse representation of this [`Tensor`]
-    type Sparse: TensorInstance;
+    // /// A sparse representation of this [`Tensor`]
+    // type Sparse: TensorInstance;
 
-    /// Return a dense representation of this [`Tensor`].
-    fn into_dense(self) -> Self::Dense;
+    // /// Return a dense representation of this [`Tensor`].
+    // fn into_dense(self) -> Self::Dense;
 
-    /// Return a sparse representation of this [`Tensor`].
-    fn into_sparse(self) -> Self::Sparse;
+    // /// Return a sparse representation of this [`Tensor`].
+    // fn into_sparse(self) -> Self::Sparse;
 }
 
 /// [`Tensor`] boolean operations.
