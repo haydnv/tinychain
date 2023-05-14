@@ -13,7 +13,7 @@ categories = ["rust-patterns"]
 
 [dependencies]
 destream = { path = "../../../destream" }
-ds-ext = { path = "../../../ds-ext" }
+fensor = { path = "../../../fensor", optional = true }
 log = { version = "0.4", features = ["release_max_level_info"] }
 pathlink = { path = "../../../pathlink" }
 serde = "1.0"

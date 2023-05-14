@@ -24,7 +24,7 @@ freqfs = { path = "../../../freqfs" }
 log = { version = "0.4", features = ["release_max_level_info"] }
 num_cpus = "1.15"
 safecast = { path = "../../../safecast" }
-tc-error = { path = "../error" }
+tc-error = { path = "../error", features = ["fensor"] }
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }
 tcgeneric = { path = "../generic" }

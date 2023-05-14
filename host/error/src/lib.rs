@@ -217,6 +217,27 @@ impl From<ParseError> for TCError {
     }
 }
 
+#[cfg(feature = "fensor")]
+impl From<fensor::Error> for TCError {
+    fn from(err: fensor::Error) -> Self {
+        match err {
+            fensor::Error::Bounds(cause) => Self {
+                kind: ErrorKind::BadRequest,
+                data: cause.into(),
+            },
+            fensor::Error::IO(err) => err.into(),
+            fensor::Error::Math(cause) => Self {
+                kind: ErrorKind::Internal,
+                data: cause.to_string().into(),
+            },
+            fensor::Error::Index(cause) => Self {
+                kind: ErrorKind::BadRequest,
+                data: cause.to_string().into(),
+            },
+        }
+    }
+}
+
 impl From<txn_lock::Error> for TCError {
     fn from(err: txn_lock::Error) -> Self {
         Self {

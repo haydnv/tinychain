@@ -14,6 +14,7 @@ use tcgeneric::{
 
 pub use fensor::{AxisRange, Range, Shape};
 
+pub mod dense;
 pub mod sparse;
 
 /// A [`Tensor`] coordinate
