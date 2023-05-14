@@ -12,9 +12,7 @@ use tcgeneric::{
     label, path_label, Class, NativeClass, PathLabel, PathSegment, TCBoxTryFuture, TCPathBuf,
 };
 
-pub use range::{AxisRange, Range, Shape};
-
-mod range;
+pub use fensor::{AxisRange, Range, Shape};
 
 /// A [`Tensor`] coordinate
 pub type Coord = Vec<u64>;
@@ -105,21 +103,6 @@ impl fmt::Debug for TensorType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("type Tensor")
     }
-}
-
-/// Basic properties common to all [`Tensor`]s
-pub trait TensorAccess {
-    /// The datatype of this [`Tensor`]
-    fn dtype(&self) -> NumberType;
-
-    /// The number of dimensions of this [`Tensor`]
-    fn ndim(&self) -> usize;
-
-    /// The shape of this [`Tensor`]
-    fn shape(&'_ self) -> &'_ Shape;
-
-    /// The number of elements in this [`Tensor`]
-    fn size(&self) -> u64;
 }
 
 /// A [`Tensor`] instance
@@ -230,7 +213,7 @@ pub trait TensorDiagonal<FE> {
     type Txn: Transaction<FE>;
 
     /// The type of [`Tensor`] returned by `diagonal`
-    type Diagonal: TensorAccess;
+    type Diagonal: TensorInstance;
 
     async fn diagonal(self, txn: Self::Txn) -> TCResult<Self::Diagonal>;
 }
