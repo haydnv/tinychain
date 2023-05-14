@@ -14,6 +14,8 @@ use tcgeneric::{
 
 pub use fensor::{AxisRange, Range, Shape};
 
+pub mod sparse;
+
 /// A [`Tensor`] coordinate
 pub type Coord = Vec<u64>;
 
@@ -106,7 +108,7 @@ impl fmt::Debug for TensorType {
 }
 
 /// A [`Tensor`] instance
-pub trait TensorInstance {
+pub trait TensorInstance: fensor::TensorInstance {
     /// A dense representation of this [`Tensor`]
     type Dense: TensorInstance;
 
