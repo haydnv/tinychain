@@ -548,6 +548,7 @@ where
         }
 
         state.pending.remove(txn_id);
+
         self.semaphore.finalize(txn_id, false);
     }
 
