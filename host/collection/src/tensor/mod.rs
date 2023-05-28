@@ -17,6 +17,8 @@ pub use fensor::{AxisRange, Range, Shape};
 pub mod dense;
 pub mod sparse;
 
+const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
+
 /// A [`Tensor`] coordinate
 pub type Coord = Vec<u64>;
 
@@ -69,8 +71,6 @@ impl<'en> en::ToStream<'en> for Schema {
         en::IntoStream::into_stream((ValueType::from(self.dtype).path(), &self.shape), encoder)
     }
 }
-
-const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
 /// The [`Class`] of a [`Tensor`]
 #[derive(Clone, Copy, Eq, PartialEq)]

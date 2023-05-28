@@ -6,8 +6,7 @@ use collate::Collator;
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use fensor::{
-    Buffer, CDatatype, DenseAccess, DenseCow, DenseFile, DenseWrite, DenseWriteGuard,
-    DenseWriteLock,
+    Buffer, CDatatype, DenseAccess, DenseCow, DenseFile, DenseWriteGuard, DenseWriteLock,
 };
 use freqfs::{DirLock, FileLoad};
 use log::debug;
@@ -19,7 +18,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{DType, NumberInstance, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
-use crate::tensor::{Range, Shape, TensorInstance, TensorType};
+use crate::tensor::{Range, Shape, TensorType};
 
 const CANON: Label = label("canon");
 
@@ -35,7 +34,7 @@ struct State<FE, T> {
     finalized: Option<TxnId>,
 }
 
-pub struct DenseTensor<Txn, FE, T> {
+pub struct DenseTensorFile<Txn, FE, T> {
     dir: DirLock<FE>,
     canon: DenseFile<FE, T>,
     state: Arc<RwLock<State<FE, T>>>,
@@ -43,7 +42,7 @@ pub struct DenseTensor<Txn, FE, T> {
     phantom: PhantomData<Txn>,
 }
 
-impl<Txn, FE, T> Clone for DenseTensor<Txn, FE, T> {
+impl<Txn, FE, T> Clone for DenseTensorFile<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
             dir: self.dir.clone(),
@@ -55,7 +54,7 @@ impl<Txn, FE, T> Clone for DenseTensor<Txn, FE, T> {
     }
 }
 
-impl<Txn, FE, T> DenseTensor<Txn, FE, T>
+impl<Txn, FE, T> DenseTensorFile<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Buffer<T>> + ThreadSafe,
@@ -82,7 +81,7 @@ where
     }
 }
 
-impl<Txn, FE, T> Instance for DenseTensor<Txn, FE, T>
+impl<Txn, FE, T> Instance for DenseTensorFile<Txn, FE, T>
 where
     Self: Send + Sync,
 {
@@ -93,7 +92,7 @@ where
     }
 }
 
-impl<Txn, FE, T> fensor::TensorInstance for DenseTensor<Txn, FE, T>
+impl<Txn, FE, T> fensor::TensorInstance for DenseTensorFile<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
@@ -108,16 +107,8 @@ where
     }
 }
 
-impl<Txn, FE, T> TensorInstance for DenseTensor<Txn, FE, T>
-where
-    Txn: ThreadSafe,
-    FE: ThreadSafe,
-    T: CDatatype + DType,
-{
-}
-
 #[async_trait]
-impl<Txn, FE, T> Persist<FE> for DenseTensor<Txn, FE, T>
+impl<Txn, FE, T> Persist<FE> for DenseTensorFile<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: FileLoad + AsType<Buffer<T>> + ThreadSafe,
@@ -163,7 +154,7 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE, T> Transact for DenseTensor<Txn, FE, T>
+impl<Txn, FE, T> Transact for DenseTensorFile<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Buffer<T>> + FileLoad,
@@ -207,7 +198,7 @@ where
     async fn finalize(&self, txn_id: &TxnId) {
         debug!("DenseTensor::finalize {}", txn_id);
 
-        let mut canon = self.canon.write().await;
+        let canon = self.canon.write().await;
 
         let deltas = {
             let mut state = self.state.write().expect("state");
