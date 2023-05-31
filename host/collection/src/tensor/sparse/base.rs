@@ -30,10 +30,24 @@ const ZEROS: Label = label("zeros");
 type Semaphore = tc_transact::lock::Semaphore<Collator<u64>, Range>;
 type Version<FE, T> = SparseCow<FE, T, SparseAccess<FE, T>>;
 
+struct Delta<FE, T> {
+    filled: SparseTable<FE, T>,
+    zeros: SparseTable<FE, T>,
+}
+
+impl<FE, T> Clone for Delta<FE, T> {
+    fn clone(&self) -> Self {
+        Delta {
+            filled: self.filled.clone(),
+            zeros: self.zeros.clone(),
+        }
+    }
+}
+
 struct State<FE, T> {
     commits: OrdHashSet<TxnId>,
-    deltas: OrdHashMap<TxnId, Version<FE, T>>,
-    pending: OrdHashMap<TxnId, Version<FE, T>>,
+    deltas: OrdHashMap<TxnId, Delta<FE, T>>,
+    pending: OrdHashMap<TxnId, Delta<FE, T>>,
     versions: DirLock<FE>,
     finalized: Option<TxnId>,
 }
@@ -47,21 +61,22 @@ where
     fn latest_version(
         &self,
         txn_id: TxnId,
-        canon: &SparseTable<FE, T>,
+        canon: SparseAccess<FE, T>,
     ) -> TCResult<SparseAccess<FE, T>> {
-        if let Some(pending) = self.pending.get(&txn_id) {
-            Ok(pending.clone().into())
-        } else if let Some((_, committed)) = self
-            .deltas
-            .iter()
-            .skip_while(|(version_id, _)| *version_id > &txn_id)
-            .next()
-        {
-            Ok(committed.clone().into())
-        } else if self.finalized <= Some(txn_id) {
-            Ok(canon.clone().into())
+        if self.finalized < Some(txn_id) {
+            Err(conflict!("sparse tensor is already finalized at {txn_id}"))
         } else {
-            return Err(conflict!("sparse tensor is already finalized at {txn_id}"));
+            let mut version = canon.clone().into();
+            for (_version_id, delta) in self
+                .deltas
+                .iter()
+                .take_while(|(version_id, _delta)| *version_id < &txn_id)
+            {
+                version =
+                    Version::create(version, delta.filled.clone(), delta.zeros.clone()).into();
+            }
+
+            Ok(version)
         }
     }
 
@@ -71,13 +86,15 @@ where
         txn_id: TxnId,
         canon: SparseAccess<FE, T>,
     ) -> TCResult<Version<FE, T>> {
-        if let Some(version) = self.pending.get(&txn_id) {
+        if let Some(delta) = self.pending.get(&txn_id) {
             debug_assert!(!self.commits.contains(&txn_id));
-            Ok(version.clone())
+            Ok(Version::create(
+                canon,
+                delta.filled.clone(),
+                delta.zeros.clone(),
+            ))
         } else if self.commits.contains(&txn_id) {
             Err(conflict!("{} has already been committed", txn_id))
-        } else if self.finalized.as_ref() > Some(&txn_id) {
-            Err(conflict!("{} has already been finalized", txn_id))
         } else {
             let dir = {
                 let mut versions = self.versions.try_write()?;
@@ -90,9 +107,12 @@ where
             let filled = SparseTable::create(filled, canon.shape().clone())?;
             let zeros = SparseTable::create(zeros, canon.shape().clone())?;
 
-            let version = Version::create(canon, filled, zeros);
-            self.pending.insert(txn_id, version.clone());
-            Ok(version)
+            let latest = self.latest_version(txn_id, canon)?;
+
+            let delta = Delta { filled, zeros };
+            self.pending.insert(txn_id, delta.clone());
+
+            Ok(Version::create(latest, delta.filled, delta.zeros))
         }
     }
 }
@@ -183,7 +203,7 @@ where
 
         let version = {
             let state = self.state.read().expect("sparse state");
-            state.latest_version(txn_id, &self.canon)?
+            state.latest_version(txn_id, self.canon.clone().into())?
         };
 
         version
@@ -220,6 +240,7 @@ where
         };
 
         let mut version = version.write().await;
+
         version
             .write_value(coord, value.cast_into())
             .map_err(TCError::from)
@@ -356,7 +377,10 @@ where
         };
 
         for delta in deltas {
-            canon.merge(delta).await.expect("write dense tensor delta");
+            canon
+                .merge(delta.filled, delta.zeros)
+                .await
+                .expect("write dense tensor delta");
         }
 
         self.semaphore.finalize(txn_id, true);
