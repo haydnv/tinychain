@@ -2,22 +2,24 @@ use std::marker::PhantomData;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
+use collate::Collator;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use fensor::{
-    CDatatype, Node, Shape, SparseAccess, SparseCow, SparseTable, SparseWrite, SparseWriteGuard,
-    TensorInstance,
+    CDatatype, Node, Shape, SparseAccess, SparseCow, SparseInstance, SparseTable, SparseWrite,
+    SparseWriteGuard, TensorInstance,
 };
 use freqfs::{DirLock, FileLoad};
+use futures::TryFutureExt;
 use log::debug;
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
 use tc_transact::fs::{Dir, Inner, Persist, VERSIONS};
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{DType, Number, NumberCollator, NumberInstance, NumberType};
+use tc_value::{DType, Number, NumberInstance, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
-use crate::tensor::{Range, TensorType};
+use crate::tensor::{Coord, Range, TensorIO, TensorType};
 
 use super::Schema;
 
@@ -25,7 +27,7 @@ const CANON: Label = label("canon");
 const FILLED: Label = label("filled");
 const ZEROS: Label = label("zeros");
 
-type Semaphore = tc_transact::lock::Semaphore<NumberCollator, Range>;
+type Semaphore = tc_transact::lock::Semaphore<Collator<u64>, Range>;
 type Version<FE, T> = SparseCow<FE, T, SparseAccess<FE, T>>;
 
 struct State<FE, T> {
@@ -41,6 +43,28 @@ where
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType,
 {
+    #[inline]
+    fn latest_version(
+        &self,
+        txn_id: TxnId,
+        canon: &SparseTable<FE, T>,
+    ) -> TCResult<SparseAccess<FE, T>> {
+        if let Some(pending) = self.pending.get(&txn_id) {
+            Ok(pending.clone().into())
+        } else if let Some((_, committed)) = self
+            .deltas
+            .iter()
+            .skip_while(|(version_id, _)| *version_id > &txn_id)
+            .next()
+        {
+            Ok(committed.clone().into())
+        } else if self.finalized <= Some(txn_id) {
+            Ok(canon.clone().into())
+        } else {
+            return Err(conflict!("sparse tensor is already finalized at {txn_id}"));
+        }
+    }
+
     #[inline]
     fn pending_version(
         &mut self,
@@ -100,7 +124,7 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     fn new(dir: DirLock<FE>, canon: SparseTable<FE, T>, versions: DirLock<FE>) -> Self {
-        let semaphore = Semaphore::new(Arc::new(canon.collator().inner().clone()));
+        let semaphore = Semaphore::new(Arc::new(Collator::default()));
 
         let state = State {
             commits: OrdHashSet::new(),
@@ -143,6 +167,63 @@ where
 
     fn shape(&self) -> &Shape {
         self.canon.schema().shape()
+    }
+}
+
+#[async_trait]
+impl<Txn, FE, T> TensorIO for SparseTensorTable<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+    T: CDatatype + DType + NumberInstance,
+    Number: From<T> + CastInto<T>,
+{
+    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
+        let _permit = self.semaphore.read(txn_id, coord.to_vec().into()).await?;
+
+        let version = {
+            let state = self.state.read().expect("sparse state");
+            state.latest_version(txn_id, &self.canon)?
+        };
+
+        version
+            .read_value(coord)
+            .map_ok(Number::from)
+            .map_err(TCError::from)
+            .await
+    }
+
+    async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
+        let _permit = self.semaphore.write(txn_id, range.clone().into()).await?;
+        let value = value.cast_into();
+
+        let version = {
+            let mut state = self.state.write().expect("sparse state");
+            state.pending_version(txn_id, self.canon.clone().into())?
+        };
+
+        let mut version = version.write().await;
+
+        for coord in range.affected() {
+            version.write_value(coord, value).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        let _permit = self.semaphore.write(txn_id, coord.to_vec().into()).await?;
+
+        let version = {
+            let mut state = self.state.write().expect("sparse state");
+            state.pending_version(txn_id, self.canon.clone().into())?
+        };
+
+        let mut version = version.write().await;
+        version
+            .write_value(coord, value.cast_into())
+            .map_err(TCError::from)
+            .await
     }
 }
 
