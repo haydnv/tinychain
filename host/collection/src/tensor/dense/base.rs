@@ -25,16 +25,15 @@ use crate::tensor::{Coord, Range, Shape, TensorIO, TensorType};
 
 const CANON: Label = label("canon");
 
-type Version<FE, T> = DenseCow<FE, DenseAccess<FE, T>>;
-
 type Semaphore = tc_transact::lock::Semaphore<Collator<u64>, Range>;
 
 struct State<FE, T> {
     commits: OrdHashSet<TxnId>,
-    deltas: OrdHashMap<TxnId, Version<FE, T>>,
-    pending: OrdHashMap<TxnId, Version<FE, T>>,
+    deltas: OrdHashMap<TxnId, DirLock<FE>>,
+    pending: OrdHashMap<TxnId, DirLock<FE>>,
     versions: DirLock<FE>,
     finalized: Option<TxnId>,
+    dtype: PhantomData<T>,
 }
 
 impl<FE, T> State<FE, T>
@@ -47,22 +46,22 @@ where
     fn latest_version(
         &self,
         txn_id: TxnId,
-        canon: &DenseFile<FE, T>,
+        canon: DenseAccess<FE, T>,
     ) -> TCResult<DenseAccess<FE, T>> {
-        if let Some(pending) = self.pending.get(&txn_id) {
-            Ok(pending.clone().into())
-        } else if let Some((_, committed)) = self
-            .deltas
-            .iter()
-            .skip_while(|(version_id, _)| *version_id > &txn_id)
-            .next()
-        {
-            Ok(committed.clone().into())
-        } else if self.finalized <= Some(txn_id) {
-            Ok(canon.clone().into())
-        } else {
+        if self.finalized > Some(txn_id) {
             return Err(conflict!("dense tensor is already finalized at {txn_id}"));
         }
+
+        let mut version = canon;
+        for (_version_id, delta) in self
+            .deltas
+            .iter()
+            .take_while(|(version_id, _delta)| *version_id <= &txn_id)
+        {
+            version = DenseCow::create(version, delta.clone()).into();
+        }
+
+        Ok(version)
     }
 
     #[inline]
@@ -71,22 +70,31 @@ where
         txn_id: TxnId,
         canon: DenseAccess<FE, T>,
     ) -> TCResult<DenseCow<FE, DenseAccess<FE, T>>> {
-        if let Some(version) = self.pending.get(&txn_id) {
-            debug_assert!(!self.commits.contains(&txn_id));
-            Ok(version.clone())
-        } else if self.commits.contains(&txn_id) {
-            Err(conflict!("{} has already been committed", txn_id))
-        } else if self.finalized.as_ref() > Some(&txn_id) {
-            Err(conflict!("{} has already been finalized", txn_id))
+        if self.commits.contains(&txn_id) {
+            return Err(conflict!("{} has already been committed", txn_id));
+        } else if self.finalized > Some(txn_id) {
+            return Err(conflict!("dense tensor is already finalized at {txn_id}"));
+        }
+
+        let mut version = canon;
+        for (_version_id, delta) in self
+            .deltas
+            .iter()
+            .take_while(|(version_id, _delta)| *version_id < &txn_id)
+        {
+            version = DenseCow::create(version, delta.clone()).into();
+        }
+
+        if let Some(delta) = self.pending.get(&txn_id) {
+            Ok(DenseCow::create(version, delta.clone()))
         } else {
-            let dir = {
+            let delta = {
                 let mut versions = self.versions.try_write()?;
                 versions.create_dir(txn_id.to_string())?
             };
 
-            let version = DenseCow::create(canon, dir);
-            self.pending.insert(txn_id, version.clone());
-            Ok(version)
+            self.pending.insert(txn_id, delta.clone());
+            Ok(DenseCow::create(version, delta.clone()))
         }
     }
 }
@@ -126,6 +134,7 @@ where
             pending: OrdHashMap::new(),
             versions,
             finalized: None,
+            dtype: PhantomData,
         };
 
         Self {
@@ -178,7 +187,7 @@ where
 
         let version = {
             let state = self.state.read().expect("dense state");
-            state.latest_version(txn_id, &self.canon)?
+            state.latest_version(txn_id, self.canon.clone().into())?
         };
 
         version
@@ -193,7 +202,7 @@ where
 
         let version = {
             let mut state = self.state.write().expect("dense state");
-            let canon = state.latest_version(txn_id, &self.canon)?;
+            let canon = state.latest_version(txn_id, self.canon.clone().into())?;
             state.pending_version(txn_id, canon)?
         };
 
@@ -210,7 +219,7 @@ where
 
         let version = {
             let mut state = self.state.write().expect("dense state");
-            let canon = state.latest_version(txn_id, &self.canon)?;
+            let canon = state.latest_version(txn_id, self.canon.clone().into())?;
             state.pending_version(txn_id, canon)?
         };
 
@@ -355,10 +364,7 @@ where
         };
 
         for delta in deltas {
-            canon
-                .overwrite(delta)
-                .await
-                .expect("write dense tensor delta");
+            canon.merge(delta).await.expect("write dense tensor delta");
         }
 
         self.semaphore.finalize(txn_id, true);

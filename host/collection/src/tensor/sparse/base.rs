@@ -63,21 +63,20 @@ where
         txn_id: TxnId,
         canon: SparseAccess<FE, T>,
     ) -> TCResult<SparseAccess<FE, T>> {
-        if self.finalized < Some(txn_id) {
-            Err(conflict!("sparse tensor is already finalized at {txn_id}"))
-        } else {
-            let mut version = canon.clone().into();
-            for (_version_id, delta) in self
-                .deltas
-                .iter()
-                .take_while(|(version_id, _delta)| *version_id < &txn_id)
-            {
-                version =
-                    Version::create(version, delta.filled.clone(), delta.zeros.clone()).into();
-            }
-
-            Ok(version)
+        if self.finalized > Some(txn_id) {
+            return Err(conflict!("sparse tensor is already finalized at {txn_id}"));
         }
+
+        let mut version = canon.clone().into();
+        for (_version_id, delta) in self
+            .deltas
+            .iter()
+            .take_while(|(version_id, _delta)| *version_id <= &txn_id)
+        {
+            version = Version::create(version, delta.filled.clone(), delta.zeros.clone()).into();
+        }
+
+        Ok(version)
     }
 
     #[inline]
@@ -86,15 +85,27 @@ where
         txn_id: TxnId,
         canon: SparseAccess<FE, T>,
     ) -> TCResult<Version<FE, T>> {
+        if self.commits.contains(&txn_id) {
+            return Err(conflict!("{} has already been committed", txn_id));
+        } else if self.finalized > Some(txn_id) {
+            return Err(conflict!("sparse tensor is already finalized at {txn_id}"));
+        }
+
+        let mut version = canon.clone().into();
+        for (_version_id, delta) in self
+            .deltas
+            .iter()
+            .take_while(|(version_id, _delta)| *version_id < &txn_id)
+        {
+            version = Version::create(version, delta.filled.clone(), delta.zeros.clone()).into();
+        }
+
         if let Some(delta) = self.pending.get(&txn_id) {
-            debug_assert!(!self.commits.contains(&txn_id));
             Ok(Version::create(
-                canon,
+                version,
                 delta.filled.clone(),
                 delta.zeros.clone(),
             ))
-        } else if self.commits.contains(&txn_id) {
-            Err(conflict!("{} has already been committed", txn_id))
         } else {
             let dir = {
                 let mut versions = self.versions.try_write()?;
@@ -106,13 +117,10 @@ where
             let zeros = dir.create_dir(ZEROS.to_string())?;
             let filled = SparseTable::create(filled, canon.shape().clone())?;
             let zeros = SparseTable::create(zeros, canon.shape().clone())?;
-
-            let latest = self.latest_version(txn_id, canon)?;
-
             let delta = Delta { filled, zeros };
             self.pending.insert(txn_id, delta.clone());
 
-            Ok(Version::create(latest, delta.filled, delta.zeros))
+            Ok(Version::create(version, delta.filled, delta.zeros))
         }
     }
 }
