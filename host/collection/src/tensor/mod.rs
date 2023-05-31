@@ -145,6 +145,7 @@ pub trait TensorBoolean<O> {
 pub trait TensorBooleanConst {
     /// The return type of a boolean operation.
     type Combine: TensorInstance;
+
     /// The return type of a boolean operation with a result expected to be dense.
     type DenseCombine: TensorInstance;
 
@@ -223,12 +224,9 @@ pub trait TensorDiagonal<FE> {
 
 /// [`Tensor`] I/O operations
 #[async_trait]
-pub trait TensorIO<FE> {
-    /// The type of [`Transaction`] to expect
-    type Txn: Transaction<FE>;
-
+pub trait TensorIO {
     /// Read a single value from this [`Tensor`].
-    async fn read_value(self, txn: Self::Txn, coord: Coord) -> TCResult<Number>;
+    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number>;
 
     /// Write a single value to the slice of this [`Tensor`] with the given [`Range`].
     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()>;

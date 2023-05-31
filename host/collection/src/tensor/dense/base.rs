@@ -1,3 +1,4 @@
+use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, RwLock};
 
@@ -6,19 +7,21 @@ use collate::Collator;
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use fensor::{
-    Buffer, CDatatype, DenseAccess, DenseCow, DenseFile, DenseWriteGuard, DenseWriteLock,
+    Buffer, CDatatype, DenseAccess, DenseCow, DenseFile, DenseInstance, DenseSlice,
+    DenseWriteGuard, DenseWriteLock, TensorInstance,
 };
 use freqfs::{DirLock, FileLoad};
+use futures::TryFutureExt;
 use log::debug;
-use safecast::AsType;
+use safecast::{AsType, CastInto};
 
 use tc_error::*;
 use tc_transact::fs::{Dir, Inner, Persist, VERSIONS};
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{DType, NumberInstance, NumberType};
+use tc_value::{DType, Number, NumberInstance, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
-use crate::tensor::{Range, Shape, TensorType};
+use crate::tensor::{Coord, Range, Shape, TensorIO, TensorType};
 
 const CANON: Label = label("canon");
 
@@ -32,6 +35,60 @@ struct State<FE, T> {
     pending: OrdHashMap<TxnId, Version<FE, T>>,
     versions: DirLock<FE>,
     finalized: Option<TxnId>,
+}
+
+impl<FE, T> State<FE, T>
+where
+    FE: AsType<Buffer<T>> + FileLoad + ThreadSafe,
+    T: CDatatype + DType,
+    Buffer<T>: de::FromStream<Context = ()>,
+{
+    #[inline]
+    fn latest_version(
+        &self,
+        txn_id: TxnId,
+        canon: &DenseFile<FE, T>,
+    ) -> TCResult<DenseAccess<FE, T>> {
+        if let Some(pending) = self.pending.get(&txn_id) {
+            Ok(pending.clone().into())
+        } else if let Some((_, committed)) = self
+            .deltas
+            .iter()
+            .skip_while(|(version_id, _)| *version_id > &txn_id)
+            .next()
+        {
+            Ok(committed.clone().into())
+        } else if self.finalized <= Some(txn_id) {
+            Ok(canon.clone().into())
+        } else {
+            return Err(conflict!("dense tensor is already finalized at {txn_id}"));
+        }
+    }
+
+    #[inline]
+    fn pending_version(
+        &mut self,
+        txn_id: TxnId,
+        canon: DenseAccess<FE, T>,
+    ) -> TCResult<DenseCow<FE, DenseAccess<FE, T>>> {
+        if let Some(version) = self.pending.get(&txn_id) {
+            debug_assert!(!self.commits.contains(&txn_id));
+            Ok(version.clone())
+        } else if self.commits.contains(&txn_id) {
+            Err(conflict!("{} has already been committed", txn_id))
+        } else if self.finalized.as_ref() > Some(&txn_id) {
+            Err(conflict!("{} has already been finalized", txn_id))
+        } else {
+            let dir = {
+                let mut versions = self.versions.try_write()?;
+                versions.create_dir(txn_id.to_string())?
+            };
+
+            let version = DenseCow::create(canon, dir);
+            self.pending.insert(txn_id, version.clone());
+            Ok(version)
+        }
+    }
 }
 
 pub struct DenseTensorFile<Txn, FE, T> {
@@ -104,6 +161,64 @@ where
 
     fn shape(&self) -> &Shape {
         self.canon.shape()
+    }
+}
+
+#[async_trait]
+impl<Txn, FE, T> TensorIO for DenseTensorFile<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Buffer<T>> + FileLoad + ThreadSafe,
+    T: CDatatype + DType,
+    Buffer<T>: de::FromStream<Context = ()>,
+    Number: From<T> + CastInto<T>,
+{
+    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
+        let _permit = self.semaphore.read(txn_id, coord.to_vec().into()).await?;
+
+        let version = {
+            let state = self.state.read().expect("dense state");
+            state.latest_version(txn_id, &self.canon)?
+        };
+
+        version
+            .read_value(coord)
+            .map_ok(Number::from)
+            .map_err(TCError::from)
+            .await
+    }
+
+    async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
+        let _permit = self.semaphore.write(txn_id, range.clone().into()).await?;
+
+        let version = {
+            let mut state = self.state.write().expect("dense state");
+            let canon = state.latest_version(txn_id, &self.canon)?;
+            state.pending_version(txn_id, canon)?
+        };
+
+        let slice = DenseSlice::new(version, range)?;
+        let slice = slice.write().await;
+        slice
+            .overwrite_value(value.cast_into())
+            .map_err(TCError::from)
+            .await
+    }
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        let _permit = self.semaphore.write(txn_id, coord.to_vec().into()).await?;
+
+        let version = {
+            let mut state = self.state.write().expect("dense state");
+            let canon = state.latest_version(txn_id, &self.canon)?;
+            state.pending_version(txn_id, canon)?
+        };
+
+        let version = version.write().await;
+        version
+            .write_value(coord, value.cast_into())
+            .map_err(TCError::from)
+            .await
     }
 }
 
@@ -247,5 +362,17 @@ where
         }
 
         self.semaphore.finalize(txn_id, true);
+    }
+}
+
+impl<Txn, FE, T> fmt::Debug for DenseTensorFile<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Buffer<T>>,
+    T: CDatatype + DType,
+    DenseFile<FE, T>: TensorInstance,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "dense tensor file with shape {:?}", self.canon.shape())
     }
 }
