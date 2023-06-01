@@ -18,13 +18,17 @@ b-table = { path = "../../../b-table", features = ["all"] }
 collate = { path = "../../../collate", features = ["stream"] }
 destream = { path = "../../../destream" }
 ds-ext = { path = "../../../ds-ext" }
-fensor = { path= "../../../fensor" }
+#fensor = { path = "../../../fensor" }
 futures = "0.3"
 freqfs = { path = "../../../freqfs" }
+ha-ndarray = { path = "../../../ha-ndarray" }
+itertools = "0.10"
 log = { version = "0.4", features = ["release_max_level_info"] }
 num_cpus = "1.15"
+pin-project = "1.1"
+rayon = "1.7"
 safecast = { path = "../../../safecast" }
-tc-error = { path = "../error", features = ["fensor"] }
+tc-error = { path = "../error", features = ["ha-ndarray"] }
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }
 tcgeneric = { path = "../generic" }

@@ -12,15 +12,26 @@ use tcgeneric::{
     label, path_label, Class, NativeClass, PathLabel, PathSegment, TCBoxTryFuture, TCPathBuf,
 };
 
-pub use fensor::{AxisRange, Range, Shape};
+pub use shape::{AxisRange, Range, Shape};
 
-pub mod dense;
+// pub mod dense;
+pub mod shape;
 pub mod sparse;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
+#[cfg(debug_assertions)]
+const IDEAL_BLOCK_SIZE: usize = 24;
+
+#[cfg(not(debug_assertions))]
+const IDEAL_BLOCK_SIZE: usize = 65_536;
+
+pub type Axes = Vec<usize>;
+
 /// A [`Tensor`] coordinate
 pub type Coord = Vec<u64>;
+
+pub type Strides = Vec<u64>;
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct Schema {
@@ -109,7 +120,7 @@ impl fmt::Debug for TensorType {
 }
 
 /// A [`Tensor`] instance
-pub trait TensorInstance: fensor::TensorInstance {
+pub trait TensorInstance: Send + Sync + 'static {
     // /// A dense representation of this [`Tensor`]
     // type Dense: TensorInstance;
 
@@ -121,6 +132,18 @@ pub trait TensorInstance: fensor::TensorInstance {
 
     // /// Return a sparse representation of this [`Tensor`].
     // fn into_sparse(self) -> Self::Sparse;
+
+    fn dtype(&self) -> NumberType;
+
+    fn ndim(&self) -> usize {
+        self.shape().len()
+    }
+
+    fn shape(&self) -> &Shape;
+
+    fn size(&self) -> u64 {
+        self.shape().iter().product()
+    }
 }
 
 /// [`Tensor`] boolean operations.
@@ -448,4 +471,56 @@ pub trait TensorTrig {
 
     /// Element-wise hyperbolic arctangent
     fn atanh(&self) -> TCResult<Self::Unary>;
+}
+
+#[inline]
+fn offset_of(coord: Coord, shape: &[u64]) -> u64 {
+    let strides = shape.iter().enumerate().map(|(x, dim)| {
+        if *dim == 1 {
+            0
+        } else {
+            shape.iter().rev().take(shape.len() - 1 - x).product()
+        }
+    });
+
+    coord.into_iter().zip(strides).map(|(i, dim)| i * dim).sum()
+}
+
+#[inline]
+fn strides_for(shape: &[u64], ndim: usize) -> Strides {
+    debug_assert!(ndim >= shape.len());
+
+    let zeros = std::iter::repeat(0).take(ndim - shape.len());
+
+    let strides = shape.iter().enumerate().map(|(x, dim)| {
+        if *dim == 1 {
+            0
+        } else {
+            shape.iter().rev().take(shape.len() - 1 - x).product()
+        }
+    });
+
+    zeros.chain(strides).collect()
+}
+
+#[inline]
+fn validate_order(order: &[usize], ndim: usize) -> bool {
+    order.len() == ndim && order.iter().all(|x| x < &ndim)
+}
+
+#[inline]
+fn validate_transpose(permutation: Option<Axes>, shape: &[u64]) -> Result<Axes, TCError> {
+    if let Some(axes) = permutation {
+        if axes.len() == shape.len() && (0..shape.len()).into_iter().all(|x| axes.contains(&x)) {
+            Ok(axes)
+        } else {
+            Err(bad_request!(
+                "invalid permutation for shape {:?}: {:?}",
+                shape,
+                axes
+            ))
+        }
+    } else {
+        Ok((0..shape.len()).into_iter().rev().collect())
+    }
 }

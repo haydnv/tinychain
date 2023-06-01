@@ -217,23 +217,12 @@ impl From<ParseError> for TCError {
     }
 }
 
-#[cfg(feature = "fensor")]
-impl From<fensor::Error> for TCError {
-    fn from(err: fensor::Error) -> Self {
-        match err {
-            fensor::Error::Bounds(cause) => Self {
-                kind: ErrorKind::BadRequest,
-                data: cause.into(),
-            },
-            fensor::Error::IO(err) => err.into(),
-            fensor::Error::Math(cause) => Self {
-                kind: ErrorKind::Internal,
-                data: cause.to_string().into(),
-            },
-            fensor::Error::Index(cause) => Self {
-                kind: ErrorKind::BadRequest,
-                data: cause.to_string().into(),
-            },
+#[cfg(feature = "ha-ndarray")]
+impl From<ha_ndarray::Error> for TCError {
+    fn from(err: ha_ndarray::Error) -> Self {
+        Self {
+            kind: ErrorKind::Internal,
+            data: err.to_string().into(),
         }
     }
 }

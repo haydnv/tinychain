@@ -4,12 +4,9 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use collate::Collator;
 use ds_ext::{OrdHashMap, OrdHashSet};
-use fensor::{
-    CDatatype, Node, Shape, SparseAccess, SparseCow, SparseInstance, SparseTable, SparseWrite,
-    SparseWriteGuard, TensorInstance,
-};
 use freqfs::{DirLock, FileLoad};
 use futures::TryFutureExt;
+use ha_ndarray::CDatatype;
 use log::debug;
 use safecast::{AsType, CastInto};
 
@@ -19,9 +16,10 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberInstance, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
-use crate::tensor::{Coord, Range, TensorIO, TensorType};
+use crate::tensor::{Coord, Range, Shape, TensorIO, TensorInstance, TensorType};
 
-use super::Schema;
+use super::access::{SparseAccess, SparseCow, SparseVersion, SparseWrite, SparseWriteGuard};
+use super::{Node, Schema, SparseInstance};
 
 const CANON: Label = label("canon");
 const FILLED: Label = label("filled");
@@ -31,8 +29,8 @@ type Semaphore = tc_transact::lock::Semaphore<Collator<u64>, Range>;
 type Version<FE, T> = SparseCow<FE, T, SparseAccess<FE, T>>;
 
 struct Delta<FE, T> {
-    filled: SparseTable<FE, T>,
-    zeros: SparseTable<FE, T>,
+    filled: SparseVersion<FE, T>,
+    zeros: SparseVersion<FE, T>,
 }
 
 impl<FE, T> Clone for Delta<FE, T> {
@@ -115,9 +113,10 @@ where
             let mut dir = dir.try_write()?;
             let filled = dir.create_dir(FILLED.to_string())?;
             let zeros = dir.create_dir(ZEROS.to_string())?;
-            let filled = SparseTable::create(filled, canon.shape().clone())?;
-            let zeros = SparseTable::create(zeros, canon.shape().clone())?;
+            let filled = SparseVersion::create(filled, canon.shape().clone())?;
+            let zeros = SparseVersion::create(zeros, canon.shape().clone())?;
             let delta = Delta { filled, zeros };
+
             self.pending.insert(txn_id, delta.clone());
 
             Ok(Version::create(version, delta.filled, delta.zeros))
@@ -128,7 +127,7 @@ where
 /// A tensor to hold sparse data, based on [`b_table::Table`]
 pub struct SparseTensorTable<Txn, FE, T> {
     dir: DirLock<FE>,
-    canon: SparseTable<FE, T>,
+    canon: SparseVersion<FE, T>,
     state: Arc<RwLock<State<FE, T>>>,
     semaphore: Semaphore,
     phantom: PhantomData<(Txn, T)>,
@@ -151,7 +150,7 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    fn new(dir: DirLock<FE>, canon: SparseTable<FE, T>, versions: DirLock<FE>) -> Self {
+    fn new(dir: DirLock<FE>, canon: SparseVersion<FE, T>, versions: DirLock<FE>) -> Self {
         let semaphore = Semaphore::new(Arc::new(Collator::default()));
 
         let state = State {
@@ -272,7 +271,7 @@ where
             let mut dir = dir.write().await;
             let versions = dir.create_dir(VERSIONS.to_string())?;
             let canon = dir.create_dir(CANON.to_string())?;
-            let canon = SparseTable::create(canon, schema.shape().clone())?;
+            let canon = SparseVersion::create(canon, schema.shape().clone())?;
             (canon, versions)
         };
 
@@ -286,7 +285,7 @@ where
             let mut dir = dir.write().await;
             let versions = dir.get_or_create_dir(VERSIONS.to_string())?;
             let canon = dir.get_or_create_dir(CANON.to_string())?;
-            let canon = SparseTable::load(canon, schema.shape().clone())?;
+            let canon = SparseVersion::load(canon, schema.shape().clone())?;
             (canon, versions)
         };
 
