@@ -5,14 +5,16 @@ use async_trait::async_trait;
 use futures::stream::Stream;
 use ha_ndarray::{Array, CDatatype, NDArrayRead, NDArrayTransform, NDArrayWrite};
 
-use tc_error::TCResult;
-use tc_value::DType;
+use tc_error::*;
+use tc_value::{DType, NumberType};
+
+use access::{DenseBroadcast, DenseReshape, DenseSlice, DenseTranspose};
 
 mod access;
 mod base;
 mod stream;
 
-use super::{offset_of, Coord, TensorInstance};
+use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
 
 type BlockShape = ha_ndarray::Shape;
 type BlockStream<Block> = Pin<Box<dyn Stream<Item = TCResult<Block>> + Send>>;
@@ -84,4 +86,75 @@ pub trait DenseWriteGuard<T>: Send + Sync {
     async fn overwrite_value(&self, value: T) -> TCResult<()>;
 
     async fn write_value(&self, coord: Coord, value: T) -> TCResult<()>;
+}
+
+#[derive(Clone)]
+pub struct DenseTensor<A> {
+    accessor: A,
+}
+
+impl<A> DenseTensor<A> {
+    pub fn into_inner(self) -> A {
+        self.accessor
+    }
+}
+
+impl<A: TensorInstance> TensorInstance for DenseTensor<A> {
+    fn dtype(&self) -> NumberType {
+        self.accessor.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.accessor.shape()
+    }
+}
+
+impl<A> TensorTransform for DenseTensor<A>
+where
+    A: DenseInstance,
+{
+    type Broadcast = DenseTensor<DenseBroadcast<A>>;
+    type Cast = DenseTensor<DenseReshape<A>>; // TODO
+    type Expand = DenseTensor<DenseReshape<A>>;
+    type Reshape = DenseTensor<DenseReshape<A>>;
+    type Slice = DenseTensor<DenseSlice<A>>;
+    type Transpose = DenseTensor<DenseTranspose<A>>;
+
+    fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
+        DenseBroadcast::new(self.accessor, shape).map(DenseTensor::from)
+    }
+
+    fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
+        Err(not_implemented!("cast dense tensor into {dtype}"))
+    }
+
+    fn expand(self, mut axes: Axes) -> TCResult<Self::Expand> {
+        let mut shape = self.shape().to_vec();
+
+        axes.sort();
+
+        for x in axes.into_iter().rev() {
+            shape.insert(x, 1);
+        }
+
+        DenseReshape::new(self.accessor, shape.into()).map(DenseTensor::from)
+    }
+
+    fn reshape(self, shape: Shape) -> TCResult<Self::Reshape> {
+        DenseReshape::new(self.accessor, shape).map(DenseTensor::from)
+    }
+
+    fn slice(self, range: Range) -> TCResult<Self::Slice> {
+        DenseSlice::new(self.accessor, range).map(DenseTensor::from)
+    }
+
+    fn transpose(self, permutation: Option<Axes>) -> TCResult<Self::Transpose> {
+        DenseTranspose::new(self.accessor, permutation).map(DenseTensor::from)
+    }
+}
+
+impl<A> From<A> for DenseTensor<A> {
+    fn from(accessor: A) -> Self {
+        Self { accessor }
+    }
 }

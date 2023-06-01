@@ -99,7 +99,7 @@ where
     }
 }
 
-pub struct DenseTensorFile<Txn, FE, T> {
+pub struct DenseFile<Txn, FE, T> {
     dir: DirLock<FE>,
     canon: DenseVersion<FE, T>,
     state: Arc<RwLock<State<FE, T>>>,
@@ -107,7 +107,7 @@ pub struct DenseTensorFile<Txn, FE, T> {
     phantom: PhantomData<Txn>,
 }
 
-impl<Txn, FE, T> Clone for DenseTensorFile<Txn, FE, T> {
+impl<Txn, FE, T> Clone for DenseFile<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
             dir: self.dir.clone(),
@@ -119,7 +119,7 @@ impl<Txn, FE, T> Clone for DenseTensorFile<Txn, FE, T> {
     }
 }
 
-impl<Txn, FE, T> DenseTensorFile<Txn, FE, T>
+impl<Txn, FE, T> DenseFile<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Buffer<T>> + ThreadSafe,
@@ -147,7 +147,7 @@ where
     }
 }
 
-impl<Txn, FE, T> Instance for DenseTensorFile<Txn, FE, T>
+impl<Txn, FE, T> Instance for DenseFile<Txn, FE, T>
 where
     Self: Send + Sync,
 {
@@ -158,7 +158,7 @@ where
     }
 }
 
-impl<Txn, FE, T> TensorInstance for DenseTensorFile<Txn, FE, T>
+impl<Txn, FE, T> TensorInstance for DenseFile<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
@@ -174,7 +174,7 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE, T> TensorIO for DenseTensorFile<Txn, FE, T>
+impl<Txn, FE, T> TensorIO for DenseFile<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Buffer<T>> + FileLoad + ThreadSafe,
@@ -232,7 +232,7 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE, T> Persist<FE> for DenseTensorFile<Txn, FE, T>
+impl<Txn, FE, T> Persist<FE> for DenseFile<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: FileLoad + AsType<Buffer<T>> + ThreadSafe,
@@ -278,7 +278,7 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE, T> Transact for DenseTensorFile<Txn, FE, T>
+impl<Txn, FE, T> Transact for DenseFile<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Buffer<T>> + FileLoad,
@@ -371,7 +371,7 @@ where
     }
 }
 
-impl<Txn, FE, T> fmt::Debug for DenseTensorFile<Txn, FE, T>
+impl<Txn, FE, T> fmt::Debug for DenseFile<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Buffer<T>>,

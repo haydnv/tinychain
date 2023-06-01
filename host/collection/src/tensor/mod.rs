@@ -377,9 +377,6 @@ pub trait TensorTransform {
     /// A [`Tensor`] with an expanded dimension
     type Expand: TensorInstance;
 
-    /// A [`Tensor`] flipped around one axis
-    type Flip: TensorInstance;
-
     /// A reshaped [`Tensor`]
     type Reshape: TensorInstance;
 
@@ -395,11 +392,8 @@ pub trait TensorTransform {
     /// Cast this [`Tensor`] to the given `dtype`.
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast>;
 
-    /// Insert a new dimension of size 1 at the given `axis`.
-    fn expand_dims(self, axis: usize) -> TCResult<Self::Expand>;
-
-    /// Flip this [`Tensor`] around the given `axis`.
-    fn flip(self, axis: usize) -> TCResult<Self::Flip>;
+    /// Insert a new dimension of size 1 at each of the given `axes`.
+    fn expand(self, axes: Axes) -> TCResult<Self::Expand>;
 
     /// Change the shape of this [`Tensor`].
     fn reshape(self, shape: Shape) -> TCResult<Self::Reshape>;
