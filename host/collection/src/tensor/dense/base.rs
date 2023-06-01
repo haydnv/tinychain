@@ -6,12 +6,9 @@ use async_trait::async_trait;
 use collate::Collator;
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
-use fensor::{
-    Buffer, CDatatype, DenseAccess, DenseCow, DenseFile, DenseInstance, DenseSlice,
-    DenseWriteGuard, DenseWriteLock, TensorInstance,
-};
 use freqfs::{DirLock, FileLoad};
 use futures::TryFutureExt;
+use ha_ndarray::{Buffer, CDatatype};
 use log::debug;
 use safecast::{AsType, CastInto};
 
@@ -21,7 +18,10 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberInstance, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
-use crate::tensor::{Coord, Range, Shape, TensorIO, TensorType};
+use crate::tensor::{Coord, Range, Shape, TensorIO, TensorInstance, TensorType};
+
+use super::access::{DenseAccess, DenseCow, DenseSlice, DenseVersion};
+use super::{DenseInstance, DenseWriteGuard, DenseWriteLock};
 
 const CANON: Label = label("canon");
 
@@ -101,7 +101,7 @@ where
 
 pub struct DenseTensorFile<Txn, FE, T> {
     dir: DirLock<FE>,
-    canon: DenseFile<FE, T>,
+    canon: DenseVersion<FE, T>,
     state: Arc<RwLock<State<FE, T>>>,
     semaphore: Semaphore,
     phantom: PhantomData<Txn>,
@@ -125,7 +125,7 @@ where
     FE: AsType<Buffer<T>> + ThreadSafe,
     T: CDatatype,
 {
-    fn new(dir: DirLock<FE>, canon: DenseFile<FE, T>, versions: DirLock<FE>) -> Self {
+    fn new(dir: DirLock<FE>, canon: DenseVersion<FE, T>, versions: DirLock<FE>) -> Self {
         let semaphore = Semaphore::new(Arc::new(Collator::default()));
 
         let state = State {
@@ -158,7 +158,7 @@ where
     }
 }
 
-impl<Txn, FE, T> fensor::TensorInstance for DenseTensorFile<Txn, FE, T>
+impl<Txn, FE, T> TensorInstance for DenseTensorFile<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
@@ -252,7 +252,7 @@ where
             (canon, versions)
         };
 
-        let canon = DenseFile::constant(canon, shape, T::zero()).await?;
+        let canon = DenseVersion::constant(canon, shape, T::zero()).await?;
 
         Ok(Self::new(dir, canon, versions))
     }
@@ -267,7 +267,7 @@ where
             (canon, versions)
         };
 
-        let canon = DenseFile::load(canon, shape).await?;
+        let canon = DenseVersion::load(canon, shape).await?;
 
         Ok(Self::new(dir, canon, versions))
     }
@@ -376,7 +376,7 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Buffer<T>>,
     T: CDatatype + DType,
-    DenseFile<FE, T>: TensorInstance,
+    DenseVersion<FE, T>: TensorInstance,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "dense tensor file with shape {:?}", self.canon.shape())

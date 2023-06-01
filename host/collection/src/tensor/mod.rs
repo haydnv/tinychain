@@ -14,7 +14,7 @@ use tcgeneric::{
 
 pub use shape::{AxisRange, Range, Shape};
 
-// pub mod dense;
+pub mod dense;
 pub mod shape;
 pub mod sparse;
 
@@ -143,6 +143,16 @@ pub trait TensorInstance: Send + Sync + 'static {
 
     fn size(&self) -> u64 {
         self.shape().iter().product()
+    }
+}
+
+impl<T: TensorInstance> TensorInstance for Box<T> {
+    fn dtype(&self) -> NumberType {
+        (&**self).dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        (&**self).shape()
     }
 }
 
