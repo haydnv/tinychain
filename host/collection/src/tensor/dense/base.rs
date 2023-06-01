@@ -71,7 +71,7 @@ where
         canon: DenseAccess<FE, T>,
     ) -> TCResult<DenseCow<FE, DenseAccess<FE, T>>> {
         if self.commits.contains(&txn_id) {
-            return Err(conflict!("{} has already been committed", txn_id));
+            return Err(conflict!("{txn_id} has already been committed"));
         } else if self.finalized > Some(txn_id) {
             return Err(conflict!("dense tensor is already finalized at {txn_id}"));
         }

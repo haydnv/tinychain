@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use destream::{de, en};
 
 use tc_error::*;
-use tc_transact::{Transaction, TxnId};
+use tc_transact::TxnId;
 use tc_value::{Number, NumberType, ValueType};
 use tcgeneric::{
     label, path_label, Class, NativeClass, PathLabel, PathSegment, TCBoxTryFuture, TCPathBuf,
@@ -212,14 +212,11 @@ pub trait TensorCompareConst {
 
 /// [`Tensor`] linear algebra operations
 #[async_trait]
-pub trait TensorDiagonal<FE> {
-    /// The type of [`Transaction`] to expect
-    type Txn: Transaction<FE>;
-
+pub trait TensorDiagonal {
     /// The type of [`Tensor`] returned by `diagonal`
     type Diagonal: TensorInstance;
 
-    async fn diagonal(self, txn: Self::Txn) -> TCResult<Self::Diagonal>;
+    async fn diagonal(self) -> TCResult<Self::Diagonal>;
 }
 
 /// [`Tensor`] I/O operations
@@ -237,28 +234,9 @@ pub trait TensorIO {
 
 /// [`Tensor`] I/O operations which accept another [`Tensor`] as an argument
 #[async_trait]
-pub trait TensorDualIO<FE, O> {
-    /// The type of [`Transaction`] to expect
-    type Txn: Transaction<FE>;
-
+pub trait TensorDualIO<O> {
     /// Overwrite the slice of this [`Tensor`] given by [`Range`] with the given `value`.
-    async fn write(self, txn: Self::Txn, range: Range, value: O) -> TCResult<()>;
-}
-
-/// [`Tensor`] indexing operations
-#[async_trait]
-pub trait TensorIndex<FE> {
-    /// The type of [`Transaction`] to expect
-    type Txn: Transaction<FE>;
-
-    /// The type of [`Tensor`] returned by `argmax`.
-    type Index: TensorInstance;
-
-    /// Return the indices of the maximum values in this [`Tensor`] along the given `axis`.
-    async fn argmax(self, txn: Self::Txn, axis: usize) -> TCResult<Self::Index>;
-
-    /// Return the offset of the maximum value in this [`Tensor`].
-    async fn argmax_all(self, txn: Self::Txn) -> TCResult<u64>;
+    async fn write(self, txn_id: TxnId, range: Range, value: O) -> TCResult<()>;
 }
 
 /// [`Tensor`] math operations
@@ -326,10 +304,7 @@ pub trait TensorPersist: Sized {
 }
 
 /// [`Tensor`] reduction operations
-pub trait TensorReduce<FE> {
-    /// The type of [`Transaction`] to expect
-    type Txn: Transaction<FE>;
-
+pub trait TensorReduce {
     /// The result type of a reduce operation
     type Reduce: TensorInstance;
 
@@ -337,25 +312,25 @@ pub trait TensorReduce<FE> {
     fn max(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce>;
 
     /// Return the maximum element in this [`Tensor`].
-    fn max_all(&self, txn: Self::Txn) -> TCBoxTryFuture<Number>;
+    fn max_all(&self, txn_id: TxnId) -> TCBoxTryFuture<Number>;
 
     /// Return the minimum of this [`Tensor`] along the given `axis`.
     fn min(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce>;
 
     /// Return the minimum element in this [`Tensor`].
-    fn min_all(&self, txn: Self::Txn) -> TCBoxTryFuture<Number>;
+    fn min_all(&self, txn_id: TxnId) -> TCBoxTryFuture<Number>;
 
     /// Return the product of this [`Tensor`] along the given `axis`.
     fn product(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce>;
 
     /// Return the product of all elements in this [`Tensor`].
-    fn product_all(&self, txn: Self::Txn) -> TCBoxTryFuture<Number>;
+    fn product_all(&self, txn_id: TxnId) -> TCBoxTryFuture<Number>;
 
     /// Return the sum of this [`Tensor`] along the given `axis`.
     fn sum(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce>;
 
     /// Return the sum of all elements in this [`Tensor`].
-    fn sum_all(&self, txn: Self::Txn) -> TCBoxTryFuture<Number>;
+    fn sum_all(&self, txn_id: TxnId) -> TCBoxTryFuture<Number>;
 }
 
 /// [`Tensor`] transforms
@@ -406,10 +381,7 @@ pub trait TensorTransform {
 
 /// Unary [`Tensor`] operations
 #[async_trait]
-pub trait TensorUnary<FE> {
-    /// The type of [`Transaction`] to expect
-    type Txn: Transaction<FE>;
-
+pub trait TensorUnary {
     /// The return type of a unary operation
     type Unary: TensorInstance;
 
@@ -426,10 +398,10 @@ pub trait TensorUnary<FE> {
     fn round(&self) -> TCResult<Self::Unary>;
 
     /// Return `true` if all elements in this [`Tensor`] are nonzero.
-    async fn all(self, txn: Self::Txn) -> TCResult<bool>;
+    async fn all(self, txn_id: TxnId) -> TCResult<bool>;
 
     /// Return `true` if any element in this [`Tensor`] is nonzero.
-    async fn any(self, txn: Self::Txn) -> TCResult<bool>;
+    async fn any(self, txn_id: TxnId) -> TCResult<bool>;
 
     /// Element-wise logical not
     fn not(&self) -> TCResult<Self::Unary>;
