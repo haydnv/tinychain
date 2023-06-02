@@ -26,7 +26,7 @@ use super::stream::BlockResize;
 use super::{BlockShape, BlockStream, DenseCacheFile};
 
 pub enum DenseAccess<FE, T> {
-    File(DenseVersion<FE, T>),
+    File(DenseFile<FE, T>),
     Broadcast(Box<DenseBroadcast<Self>>),
     Cast(Box<DenseCast<FE, T>>),
     Cow(Box<DenseCow<FE, Self>>),
@@ -124,7 +124,7 @@ impl<FE, T: DType> fmt::Debug for DenseAccess<FE, T> {
     }
 }
 
-pub struct DenseVersion<FE, T> {
+pub struct DenseFile<FE, T> {
     dir: DirLock<FE>,
     block_map: ArrayBase<Vec<u64>>,
     block_size: usize,
@@ -132,7 +132,7 @@ pub struct DenseVersion<FE, T> {
     dtype: PhantomData<T>,
 }
 
-impl<FE, T> Clone for DenseVersion<FE, T> {
+impl<FE, T> Clone for DenseFile<FE, T> {
     fn clone(&self) -> Self {
         Self {
             dir: self.dir.clone(),
@@ -144,7 +144,7 @@ impl<FE, T> Clone for DenseVersion<FE, T> {
     }
 }
 
-impl<FE, T> DenseVersion<FE, T>
+impl<FE, T> DenseFile<FE, T>
 where
     FE: DenseCacheFile + AsType<Buffer<T>>,
     T: CDatatype + DType + NumberInstance,
@@ -313,7 +313,7 @@ where
     }
 }
 
-impl<FE, T> TensorInstance for DenseVersion<FE, T>
+impl<FE, T> TensorInstance for DenseFile<FE, T>
 where
     FE: Send + Sync + 'static,
     T: DType + Send + Sync + 'static,
@@ -328,7 +328,7 @@ where
 }
 
 #[async_trait]
-impl<FE, T> DenseInstance for DenseVersion<FE, T>
+impl<FE, T> DenseInstance for DenseFile<FE, T>
 where
     FE: FileLoad + AsType<Buffer<T>>,
     T: CDatatype + DType + 'static,
@@ -386,7 +386,7 @@ where
 }
 
 #[async_trait]
-impl<'a, FE, T> DenseWrite for DenseVersion<FE, T>
+impl<'a, FE, T> DenseWrite for DenseFile<FE, T>
 where
     FE: FileLoad + AsType<Buffer<T>>,
     T: CDatatype + DType + 'static,
@@ -439,7 +439,7 @@ where
 }
 
 #[async_trait]
-impl<'a, FE, T> DenseWriteLock<'a> for DenseVersion<FE, T>
+impl<'a, FE, T> DenseWriteLock<'a> for DenseFile<FE, T>
 where
     FE: FileLoad + AsType<Buffer<T>>,
     T: CDatatype + DType + 'static,
@@ -458,13 +458,13 @@ where
     }
 }
 
-impl<FE, T> From<DenseVersion<FE, T>> for DenseAccess<FE, T> {
-    fn from(file: DenseVersion<FE, T>) -> Self {
+impl<FE, T> From<DenseFile<FE, T>> for DenseAccess<FE, T> {
+    fn from(file: DenseFile<FE, T>) -> Self {
         Self::File(file)
     }
 }
 
-impl<FE, T> fmt::Debug for DenseVersion<FE, T> {
+impl<FE, T> fmt::Debug for DenseFile<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "dense tensor with shape {:?}", self.shape)
     }

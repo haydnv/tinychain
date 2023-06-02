@@ -19,14 +19,13 @@ use tensor::TensorType;
 mod base;
 mod schema;
 
-pub use btree::{BTree, Node};
+pub use btree::{BTree, BTreeFile, Node};
 pub use table::Table;
 
 pub mod btree;
 pub mod table;
 pub mod tensor;
 
-use crate::btree::BTreeFile;
 pub use base::{CollectionBase, CollectionVisitor};
 pub use schema::Schema;
 

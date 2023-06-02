@@ -148,7 +148,6 @@ where
     A: DenseInstance,
 {
     type Broadcast = DenseTensor<DenseBroadcast<A>>;
-    type Cast = DenseTensor<DenseReshape<A>>; // TODO
     type Expand = DenseTensor<DenseReshape<A>>;
     type Reshape = DenseTensor<DenseReshape<A>>;
     type Slice = DenseTensor<DenseSlice<A>>;
@@ -156,10 +155,6 @@ where
 
     fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
         DenseBroadcast::new(self.accessor, shape).map(DenseTensor::from)
-    }
-
-    fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
-        Err(not_implemented!("cast dense tensor into {dtype}"))
     }
 
     fn expand(self, mut axes: Axes) -> TCResult<Self::Expand> {

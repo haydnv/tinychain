@@ -18,14 +18,12 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberInstance, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
-use crate::tensor::{Coord, Range, Shape, TensorIO, TensorInstance, TensorType};
+use crate::tensor::{Coord, Range, Semaphore, Shape, TensorIO, TensorInstance, TensorType};
 
-use super::access::{DenseAccess, DenseCow, DenseSlice, DenseVersion};
+use super::access::{DenseAccess, DenseCow, DenseFile, DenseSlice};
 use super::{DenseCacheFile, DenseInstance, DenseWriteGuard, DenseWriteLock};
 
 const CANON: Label = label("canon");
-
-type Semaphore = tc_transact::lock::Semaphore<Collator<u64>, Range>;
 
 struct State<FE, T> {
     commits: OrdHashSet<TxnId>,
@@ -99,15 +97,15 @@ where
     }
 }
 
-pub struct DenseFile<Txn, FE, T> {
+pub struct DenseBase<Txn, FE, T> {
     dir: DirLock<FE>,
-    canon: DenseVersion<FE, T>,
+    canon: DenseFile<FE, T>,
     state: Arc<RwLock<State<FE, T>>>,
     semaphore: Semaphore,
     phantom: PhantomData<Txn>,
 }
 
-impl<Txn, FE, T> Clone for DenseFile<Txn, FE, T> {
+impl<Txn, FE, T> Clone for DenseBase<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
             dir: self.dir.clone(),
@@ -119,13 +117,13 @@ impl<Txn, FE, T> Clone for DenseFile<Txn, FE, T> {
     }
 }
 
-impl<Txn, FE, T> DenseFile<Txn, FE, T>
+impl<Txn, FE, T> DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Buffer<T>> + ThreadSafe,
     T: CDatatype,
 {
-    fn new(dir: DirLock<FE>, canon: DenseVersion<FE, T>, versions: DirLock<FE>) -> Self {
+    fn new(dir: DirLock<FE>, canon: DenseFile<FE, T>, versions: DirLock<FE>) -> Self {
         let semaphore = Semaphore::new(Arc::new(Collator::default()));
 
         let state = State {
@@ -147,7 +145,7 @@ where
     }
 }
 
-impl<Txn, FE, T> Instance for DenseFile<Txn, FE, T>
+impl<Txn, FE, T> Instance for DenseBase<Txn, FE, T>
 where
     Self: Send + Sync,
 {
@@ -158,7 +156,7 @@ where
     }
 }
 
-impl<Txn, FE, T> TensorInstance for DenseFile<Txn, FE, T>
+impl<Txn, FE, T> TensorInstance for DenseBase<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
@@ -174,7 +172,7 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE, T> TensorIO for DenseFile<Txn, FE, T>
+impl<Txn, FE, T> TensorIO for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + 'static,
@@ -232,7 +230,7 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE, T> Persist<FE> for DenseFile<Txn, FE, T>
+impl<Txn, FE, T> Persist<FE> for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + ThreadSafe,
@@ -252,7 +250,7 @@ where
             (canon, versions)
         };
 
-        let canon = DenseVersion::constant(canon, shape, T::zero()).await?;
+        let canon = DenseFile::constant(canon, shape, T::zero()).await?;
 
         Ok(Self::new(dir, canon, versions))
     }
@@ -267,7 +265,7 @@ where
             (canon, versions)
         };
 
-        let canon = DenseVersion::load(canon, shape).await?;
+        let canon = DenseFile::load(canon, shape).await?;
 
         Ok(Self::new(dir, canon, versions))
     }
@@ -278,7 +276,7 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE, T> Transact for DenseFile<Txn, FE, T>
+impl<Txn, FE, T> Transact for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Buffer<T>> + FileLoad,
@@ -371,12 +369,12 @@ where
     }
 }
 
-impl<Txn, FE, T> fmt::Debug for DenseFile<Txn, FE, T>
+impl<Txn, FE, T> fmt::Debug for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Buffer<T>>,
     T: CDatatype + DType,
-    DenseVersion<FE, T>: TensorInstance,
+    DenseFile<FE, T>: TensorInstance,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "dense tensor file with shape {:?}", self.canon.shape())

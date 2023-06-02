@@ -38,8 +38,8 @@ pub trait SparseWrite<'a>: SparseInstance {
 pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
     async fn merge<FE>(
         &mut self,
-        filled: SparseVersion<FE, T>,
-        zeros: SparseVersion<FE, T>,
+        filled: SparseFile<FE, T>,
+        zeros: SparseFile<FE, T>,
     ) -> Result<(), TCError>
     where
         FE: AsType<Node> + Send + Sync + 'static,
@@ -72,7 +72,7 @@ pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
 }
 
 pub enum SparseAccess<FE, T> {
-    Table(SparseVersion<FE, T>),
+    Table(SparseFile<FE, T>),
     Broadcast(Box<SparseBroadcast<FE, T>>),
     BroadcastAxis(Box<SparseBroadcastAxis<Self>>),
     Cast(Box<SparseCast<FE, T>>),
@@ -220,12 +220,12 @@ impl<FE, T: DType> fmt::Debug for SparseAccess<FE, T> {
     }
 }
 
-pub struct SparseVersion<FE, T> {
+pub struct SparseFile<FE, T> {
     table: TableLock<Schema, IndexSchema, NumberCollator, FE>,
     dtype: PhantomData<T>,
 }
 
-impl<FE, T> Clone for SparseVersion<FE, T> {
+impl<FE, T> Clone for SparseFile<FE, T> {
     fn clone(&self) -> Self {
         Self {
             table: self.table.clone(),
@@ -234,7 +234,7 @@ impl<FE, T> Clone for SparseVersion<FE, T> {
     }
 }
 
-impl<FE, T> SparseVersion<FE, T> {
+impl<FE, T> SparseFile<FE, T> {
     pub fn collator(&self) -> &Arc<Collator<NumberCollator>> {
         self.table.collator()
     }
@@ -244,7 +244,7 @@ impl<FE, T> SparseVersion<FE, T> {
     }
 }
 
-impl<FE: AsType<Node> + Send + Sync, T> SparseVersion<FE, T> {
+impl<FE: AsType<Node> + Send + Sync, T> SparseFile<FE, T> {
     pub fn create(dir: DirLock<FE>, shape: Shape) -> Result<Self, TCError> {
         let schema = Schema::new(shape);
         let collator = NumberCollator::default();
@@ -268,7 +268,7 @@ impl<FE: AsType<Node> + Send + Sync, T> SparseVersion<FE, T> {
     }
 }
 
-impl<FE, T> TensorInstance for SparseVersion<FE, T>
+impl<FE, T> TensorInstance for SparseFile<FE, T>
 where
     FE: Send + Sync + 'static,
     T: DType + Send + Sync + 'static,
@@ -283,7 +283,7 @@ where
 }
 
 #[async_trait]
-impl<FE, T> SparseInstance for SparseVersion<FE, T>
+impl<FE, T> SparseInstance for SparseFile<FE, T>
 where
     FE: AsType<Node> + Send + Sync + 'static,
     T: CDatatype + DType,
@@ -325,7 +325,7 @@ where
 }
 
 #[async_trait]
-impl<'a, FE, T> SparseWrite<'a> for SparseVersion<FE, T>
+impl<'a, FE, T> SparseWrite<'a> for SparseFile<FE, T>
 where
     FE: AsType<Node> + Send + Sync + 'static,
     T: CDatatype + DType + fmt::Debug,
@@ -342,13 +342,13 @@ where
     }
 }
 
-impl<FE, T> From<SparseVersion<FE, T>> for SparseAccess<FE, T> {
-    fn from(table: SparseVersion<FE, T>) -> Self {
+impl<FE, T> From<SparseFile<FE, T>> for SparseAccess<FE, T> {
+    fn from(table: SparseFile<FE, T>) -> Self {
         Self::Table(table)
     }
 }
 
-impl<FE, T> fmt::Debug for SparseVersion<FE, T> {
+impl<FE, T> fmt::Debug for SparseFile<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -1008,8 +1008,8 @@ impl<FE, T: DType> fmt::Debug for SparseCast<FE, T> {
 
 pub struct SparseCow<FE, T, S> {
     source: S,
-    filled: SparseVersion<FE, T>,
-    zeros: SparseVersion<FE, T>,
+    filled: SparseFile<FE, T>,
+    zeros: SparseFile<FE, T>,
 }
 
 impl<FE, T, S: Clone> Clone for SparseCow<FE, T, S> {
@@ -1023,7 +1023,7 @@ impl<FE, T, S: Clone> Clone for SparseCow<FE, T, S> {
 }
 
 impl<FE, T, S> SparseCow<FE, T, S> {
-    pub fn create(source: S, filled: SparseVersion<FE, T>, zeros: SparseVersion<FE, T>) -> Self {
+    pub fn create(source: S, filled: SparseFile<FE, T>, zeros: SparseFile<FE, T>) -> Self {
         Self {
             source,
             filled,
@@ -1031,7 +1031,7 @@ impl<FE, T, S> SparseCow<FE, T, S> {
         }
     }
 
-    pub fn into_deltas(self) -> (SparseVersion<FE, T>, SparseVersion<FE, T>) {
+    pub fn into_deltas(self) -> (SparseFile<FE, T>, SparseFile<FE, T>) {
         (self.filled, self.zeros)
     }
 }

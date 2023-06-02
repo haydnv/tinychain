@@ -3,9 +3,11 @@ use std::fmt;
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
+use collate::Collator;
 use destream::{de, en};
 
 use tc_error::*;
+use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::TxnId;
 use tc_value::{Number, NumberType, ValueType};
 use tcgeneric::{
@@ -32,6 +34,8 @@ pub type Axes = Vec<usize>;
 pub type Coord = Vec<u64>;
 
 pub type Strides = Vec<u64>;
+
+type Semaphore = tc_transact::lock::Semaphore<Collator<u64>, Range>;
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct Schema {
@@ -81,6 +85,12 @@ impl<'en> en::ToStream<'en> for Schema {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         en::IntoStream::into_stream((ValueType::from(self.dtype).path(), &self.shape), encoder)
     }
+}
+
+pub trait AccessPermit {
+    fn read_permit(&self, txn_id: TxnId) -> PermitRead<Range>;
+
+    fn write_permit(&self, txn_id: TxnId) -> PermitWrite<Range>;
 }
 
 /// The [`Class`] of a [`Tensor`]
@@ -371,9 +381,6 @@ pub trait TensorTransform {
     /// A broadcast [`Tensor`]
     type Broadcast: TensorInstance;
 
-    /// A type-cast [`Tensor`]
-    type Cast: TensorInstance;
-
     /// A [`Tensor`] with an expanded dimension
     type Expand: TensorInstance;
 
@@ -388,9 +395,6 @@ pub trait TensorTransform {
 
     /// Broadcast this [`Tensor`] to the given `shape`.
     fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast>;
-
-    /// Cast this [`Tensor`] to the given `dtype`.
-    fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast>;
 
     /// Insert a new dimension of size 1 at each of the given `axes`.
     fn expand(self, axes: Axes) -> TCResult<Self::Expand>;

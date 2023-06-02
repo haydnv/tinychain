@@ -17,21 +17,20 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
-use crate::tensor::{Coord, Range, Shape, TensorIO, TensorInstance, TensorType};
+use crate::tensor::{Coord, Range, Semaphore, Shape, TensorIO, TensorInstance, TensorType};
 
-use super::access::{SparseAccess, SparseCow, SparseVersion, SparseWrite, SparseWriteGuard};
+use super::access::{SparseAccess, SparseCow, SparseFile, SparseWrite, SparseWriteGuard};
 use super::{Node, Schema, SparseInstance};
 
 const CANON: Label = label("canon");
 const FILLED: Label = label("filled");
 const ZEROS: Label = label("zeros");
 
-type Semaphore = tc_transact::lock::Semaphore<Collator<u64>, Range>;
 type Version<FE, T> = SparseCow<FE, T, SparseAccess<FE, T>>;
 
 struct Delta<FE, T> {
-    filled: SparseVersion<FE, T>,
-    zeros: SparseVersion<FE, T>,
+    filled: SparseFile<FE, T>,
+    zeros: SparseFile<FE, T>,
 }
 
 impl<FE, T> Clone for Delta<FE, T> {
@@ -114,8 +113,8 @@ where
             let mut dir = dir.try_write()?;
             let filled = dir.create_dir(FILLED.to_string())?;
             let zeros = dir.create_dir(ZEROS.to_string())?;
-            let filled = SparseVersion::create(filled, canon.shape().clone())?;
-            let zeros = SparseVersion::create(zeros, canon.shape().clone())?;
+            let filled = SparseFile::create(filled, canon.shape().clone())?;
+            let zeros = SparseFile::create(zeros, canon.shape().clone())?;
             let delta = Delta { filled, zeros };
 
             self.pending.insert(txn_id, delta.clone());
@@ -126,15 +125,15 @@ where
 }
 
 /// A tensor to hold sparse data, based on [`b_table::Table`]
-pub struct SparseTensorTable<Txn, FE, T> {
+pub struct SparseBase<Txn, FE, T> {
     dir: DirLock<FE>,
-    canon: SparseVersion<FE, T>,
+    canon: SparseFile<FE, T>,
     state: Arc<RwLock<State<FE, T>>>,
     semaphore: Semaphore,
     phantom: PhantomData<(Txn, T)>,
 }
 
-impl<Txn, FE, T> Clone for SparseTensorTable<Txn, FE, T> {
+impl<Txn, FE, T> Clone for SparseBase<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
             dir: self.dir.clone(),
@@ -146,12 +145,12 @@ impl<Txn, FE, T> Clone for SparseTensorTable<Txn, FE, T> {
     }
 }
 
-impl<Txn, FE, T> SparseTensorTable<Txn, FE, T>
+impl<Txn, FE, T> SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    fn new(dir: DirLock<FE>, canon: SparseVersion<FE, T>, versions: DirLock<FE>) -> Self {
+    fn new(dir: DirLock<FE>, canon: SparseFile<FE, T>, versions: DirLock<FE>) -> Self {
         let semaphore = Semaphore::new(Arc::new(Collator::default()));
 
         let state = State {
@@ -172,7 +171,7 @@ where
     }
 }
 
-impl<Txn, FE, T> Instance for SparseTensorTable<Txn, FE, T>
+impl<Txn, FE, T> Instance for SparseBase<Txn, FE, T>
 where
     Self: Send + Sync,
 {
@@ -183,7 +182,7 @@ where
     }
 }
 
-impl<Txn, FE, T> TensorInstance for SparseTensorTable<Txn, FE, T>
+impl<Txn, FE, T> TensorInstance for SparseBase<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
@@ -199,7 +198,7 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE, T> TensorIO for SparseTensorTable<Txn, FE, T>
+impl<Txn, FE, T> TensorIO for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
@@ -257,7 +256,7 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE, T> Persist<FE> for SparseTensorTable<Txn, FE, T>
+impl<Txn, FE, T> Persist<FE> for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
@@ -272,7 +271,7 @@ where
             let mut dir = dir.write().await;
             let versions = dir.create_dir(VERSIONS.to_string())?;
             let canon = dir.create_dir(CANON.to_string())?;
-            let canon = SparseVersion::create(canon, schema.shape().clone())?;
+            let canon = SparseFile::create(canon, schema.shape().clone())?;
             (canon, versions)
         };
 
@@ -286,7 +285,7 @@ where
             let mut dir = dir.write().await;
             let versions = dir.get_or_create_dir(VERSIONS.to_string())?;
             let canon = dir.get_or_create_dir(CANON.to_string())?;
-            let canon = SparseVersion::load(canon, schema.shape().clone())?;
+            let canon = SparseFile::load(canon, schema.shape().clone())?;
             (canon, versions)
         };
 
@@ -299,7 +298,7 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE, T> Transact for SparseTensorTable<Txn, FE, T>
+impl<Txn, FE, T> Transact for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + FileLoad,

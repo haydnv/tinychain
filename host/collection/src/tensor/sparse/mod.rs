@@ -24,7 +24,7 @@ use access::{
 
 const BLOCK_SIZE: usize = 4_096;
 
-pub use base::SparseTensorTable;
+pub use base::SparseBase;
 pub use schema::{IndexSchema, Schema};
 
 pub type Blocks<C, V> = Pin<Box<dyn Stream<Item = Result<(C, V), TCError>> + Send>>;
@@ -108,7 +108,6 @@ where
     A: SparseInstance + Into<SparseAccess<FE, T>>,
 {
     type Broadcast = SparseTensor<FE, T, SparseBroadcast<FE, T>>;
-    type Cast = SparseTensor<FE, T, SparseExpand<A>>; // TODO
     type Expand = SparseTensor<FE, T, SparseExpand<A>>;
     type Reshape = SparseTensor<FE, T, SparseReshape<A>>;
     type Slice = SparseTensor<FE, T, SparseSlice<A>>;
@@ -121,10 +120,6 @@ where
             accessor,
             phantom: PhantomData,
         })
-    }
-
-    fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
-        Err(not_implemented!("cast sparse tensor into {dtype}"))
     }
 
     fn expand(self, axes: Axes) -> TCResult<Self::Expand> {
