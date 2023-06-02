@@ -21,7 +21,7 @@ use tcgeneric::{label, Instance, Label, ThreadSafe};
 use crate::tensor::{Coord, Range, Shape, TensorIO, TensorInstance, TensorType};
 
 use super::access::{DenseAccess, DenseCow, DenseSlice, DenseVersion};
-use super::{DenseInstance, DenseWriteGuard, DenseWriteLock};
+use super::{DenseCacheFile, DenseInstance, DenseWriteGuard, DenseWriteLock};
 
 const CANON: Label = label("canon");
 
@@ -38,7 +38,7 @@ struct State<FE, T> {
 
 impl<FE, T> State<FE, T>
 where
-    FE: AsType<Buffer<T>> + FileLoad + ThreadSafe,
+    FE: DenseCacheFile + AsType<Buffer<T>> + 'static,
     T: CDatatype + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
@@ -177,7 +177,7 @@ where
 impl<Txn, FE, T> TensorIO for DenseFile<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Buffer<T>> + FileLoad + ThreadSafe,
+    FE: DenseCacheFile + AsType<Buffer<T>> + 'static,
     T: CDatatype + DType,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
@@ -235,7 +235,7 @@ where
 impl<Txn, FE, T> Persist<FE> for DenseFile<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: FileLoad + AsType<Buffer<T>> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Buffer<T>> + ThreadSafe,
     T: CDatatype + DType + NumberInstance,
     Buffer<T>: de::FromStream<Context = ()>,
 {

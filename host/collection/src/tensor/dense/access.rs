@@ -4,8 +4,10 @@ use std::{fmt, io};
 
 use async_trait::async_trait;
 use destream::de;
-use freqfs::{DirLock, DirReadGuard, FileLoad, FileReadGuardOwned, FileWriteGuardOwned};
-use futures::future::{Future, TryFutureExt};
+use freqfs::{
+    DirLock, DirReadGuard, FileLoad, FileReadGuard, FileReadGuardOwned, FileWriteGuardOwned,
+};
+use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use ha_ndarray::*;
 use safecast::AsType;
@@ -21,11 +23,12 @@ use crate::tensor::{
 };
 
 use super::stream::BlockResize;
-use super::{BlockShape, BlockStream};
+use super::{BlockShape, BlockStream, DenseCacheFile};
 
 pub enum DenseAccess<FE, T> {
     File(DenseVersion<FE, T>),
     Broadcast(Box<DenseBroadcast<Self>>),
+    Cast(Box<DenseCast<FE, T>>),
     Cow(Box<DenseCow<FE, Self>>),
     Reshape(Box<DenseReshape<Self>>),
     Slice(Box<DenseSlice<Self>>),
@@ -37,6 +40,7 @@ impl<FE, T> Clone for DenseAccess<FE, T> {
         match self {
             Self::File(file) => Self::File(file.clone()),
             Self::Broadcast(broadcast) => Self::Broadcast(broadcast.clone()),
+            Self::Cast(cast) => Self::Cast(cast.clone()),
             Self::Cow(cow) => Self::Cow(cow.clone()),
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
             Self::Slice(slice) => Self::Slice(slice.clone()),
@@ -50,6 +54,7 @@ macro_rules! array_dispatch {
         match $this {
             Self::File($var) => $call,
             Self::Broadcast($var) => $call,
+            Self::Cast($var) => $call,
             Self::Cow($var) => $call,
             Self::Reshape($var) => $call,
             Self::Slice($var) => $call,
@@ -61,7 +66,7 @@ macro_rules! array_dispatch {
 impl<FE, T> TensorInstance for DenseAccess<FE, T>
 where
     FE: Send + Sync + 'static,
-    T: DType + Send + Sync + 'static,
+    T: CDatatype + DType,
 {
     fn dtype(&self) -> NumberType {
         T::dtype()
@@ -75,7 +80,7 @@ where
 #[async_trait]
 impl<FE, T> DenseInstance for DenseAccess<FE, T>
 where
-    FE: FileLoad + AsType<Buffer<T>> + Send + Sync,
+    FE: DenseCacheFile + AsType<Buffer<T>>,
     T: CDatatype + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
@@ -96,6 +101,7 @@ where
 
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
         match self {
+            Self::Cast(cast) => Ok(Box::pin(cast.read_blocks().await?)),
             Self::File(file) => Ok(Box::pin(file.read_blocks().await?.map_ok(Array::from))),
             Self::Broadcast(broadcast) => {
                 Ok(Box::pin(broadcast.read_blocks().await?.map_ok(Array::from)))
@@ -112,7 +118,7 @@ where
     }
 }
 
-impl<FE, T> fmt::Debug for DenseAccess<FE, T> {
+impl<FE, T: DType> fmt::Debug for DenseAccess<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         array_dispatch!(self, this, this.fmt(f))
     }
@@ -140,7 +146,7 @@ impl<FE, T> Clone for DenseVersion<FE, T> {
 
 impl<FE, T> DenseVersion<FE, T>
 where
-    FE: FileLoad + AsType<Buffer<T>> + Send + Sync,
+    FE: DenseCacheFile + AsType<Buffer<T>>,
     T: CDatatype + DType + NumberInstance,
     Buffer<T>: de::FromStream<Context = ()>,
 {
@@ -161,7 +167,7 @@ where
                 .get_file(&0)
                 .ok_or_else(|| TCError::not_found("block 0"))?;
 
-            let block = block.read().await?;
+            let block: FileReadGuard<Buffer<T>> = block.read().await?;
             size += block.len() as u64;
             block.len()
         };
@@ -174,7 +180,7 @@ where
                 .get_file(&block_id)
                 .ok_or_else(|| TCError::not_found(format!("block {block_id}")))?;
 
-            let block = block.read().await?;
+            let block: FileReadGuard<Buffer<T>> = block.read().await?;
             if block.len() == block_size {
                 size += block.len() as u64;
             } else {
@@ -193,7 +199,7 @@ where
                 .get_file(&block_id)
                 .ok_or_else(|| bad_request!("block {block_id}"))?;
 
-            let block = block.read().await?;
+            let block: FileReadGuard<Buffer<T>> = block.read().await?;
             size += block.len() as u64;
         }
 
@@ -263,7 +269,7 @@ where
             let mut dir = dir.write().await;
 
             for block_id in 0..num_blocks {
-                dir.create_file(
+                dir.create_file::<Buffer<T>>(
                     block_id.to_string(),
                     vec![value; block_size].into(),
                     block_size * dtype_size,
@@ -272,13 +278,13 @@ where
 
             let last_block_id = num_blocks - 1;
             if size % block_size as u64 == 0 {
-                dir.create_file(
+                dir.create_file::<Buffer<T>>(
                     last_block_id.to_string(),
                     vec![value; block_size].into(),
                     block_size * dtype_size,
                 )
             } else {
-                dir.create_file(
+                dir.create_file::<Buffer<T>>(
                     last_block_id.to_string(),
                     vec![value; block_size].into(),
                     block_size * dtype_size,
@@ -682,6 +688,158 @@ impl<S: fmt::Debug> fmt::Debug for DenseBroadcast<S> {
     }
 }
 
+pub enum DenseCastSource<FE> {
+    F32(DenseAccess<FE, f32>),
+    F64(DenseAccess<FE, f64>),
+    I16(DenseAccess<FE, i16>),
+    I32(DenseAccess<FE, i32>),
+    I64(DenseAccess<FE, i64>),
+    U8(DenseAccess<FE, u8>),
+    U16(DenseAccess<FE, u16>),
+    U32(DenseAccess<FE, u32>),
+    U64(DenseAccess<FE, u64>),
+}
+
+impl<FE> Clone for DenseCastSource<FE> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::F32(access) => Self::F32(access.clone()),
+            Self::F64(access) => Self::F64(access.clone()),
+            Self::I16(access) => Self::I16(access.clone()),
+            Self::I32(access) => Self::I32(access.clone()),
+            Self::I64(access) => Self::I64(access.clone()),
+            Self::U8(access) => Self::U8(access.clone()),
+            Self::U16(access) => Self::U16(access.clone()),
+            Self::U32(access) => Self::U32(access.clone()),
+            Self::U64(access) => Self::U64(access.clone()),
+        }
+    }
+}
+
+macro_rules! cast_source {
+    ($t:ty, $var:ident) => {
+        impl<FE> From<DenseAccess<FE, $t>> for DenseCastSource<FE> {
+            fn from(access: DenseAccess<FE, $t>) -> Self {
+                Self::$var(access)
+            }
+        }
+    };
+}
+
+cast_source!(f32, F32);
+cast_source!(f64, F64);
+cast_source!(i16, I16);
+cast_source!(i32, I32);
+cast_source!(i64, I64);
+cast_source!(u8, U8);
+cast_source!(u16, U16);
+cast_source!(u32, U32);
+cast_source!(u64, U64);
+
+macro_rules! cast_dispatch {
+    ($this:ident, $var:ident, $call:expr) => {
+        match $this {
+            DenseCastSource::F32($var) => $call,
+            DenseCastSource::F64($var) => $call,
+            DenseCastSource::I16($var) => $call,
+            DenseCastSource::I32($var) => $call,
+            DenseCastSource::I64($var) => $call,
+            DenseCastSource::U8($var) => $call,
+            DenseCastSource::U16($var) => $call,
+            DenseCastSource::U32($var) => $call,
+            DenseCastSource::U64($var) => $call,
+        }
+    };
+}
+
+impl<FE> fmt::Debug for DenseCastSource<FE> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        cast_dispatch!(self, this, this.fmt(f))
+    }
+}
+
+pub struct DenseCast<FE, T> {
+    source: DenseCastSource<FE>,
+    dtype: PhantomData<T>,
+}
+
+impl<FE, T> Clone for DenseCast<FE, T> {
+    fn clone(&self) -> Self {
+        Self {
+            source: self.source.clone(),
+            dtype: self.dtype,
+        }
+    }
+}
+
+impl<FE, T> DenseCast<FE, T> {
+    pub fn new<S: Into<DenseCastSource<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            dtype: PhantomData,
+        }
+    }
+}
+
+impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseCast<FE, T> {
+    fn dtype(&self) -> NumberType {
+        T::dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        let source = &self.source;
+        cast_dispatch!(source, this, this.shape())
+    }
+}
+
+#[async_trait]
+impl<FE, T> DenseInstance for DenseCast<FE, T>
+where
+    FE: DenseCacheFile + AsType<Buffer<T>>,
+    T: CDatatype + DType,
+    Buffer<T>: de::FromStream<Context = ()>,
+{
+    type Block = Array<T>;
+    type DType = T;
+
+    fn block_size(&self) -> usize {
+        let source = &self.source;
+        cast_dispatch!(source, this, this.block_size())
+    }
+
+    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+        let source = &self.source;
+
+        cast_dispatch!(
+            source,
+            this,
+            this.read_block(block_id)
+                .map(|result| result
+                    .and_then(|block| block.cast().map(Array::from).map_err(TCError::from)))
+                .await
+        )
+    }
+
+    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+        let source = self.source;
+
+        cast_dispatch!(source, this, {
+            let source_blocks = this.read_blocks().await?;
+            let blocks = source_blocks.map(|result| {
+                result.and_then(|block| block.cast().map(Array::from).map_err(TCError::from))
+            });
+
+            Ok(Box::pin(blocks))
+        })
+    }
+}
+
+impl<FE, T: DType> fmt::Debug for DenseCast<FE, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "cast {:?} into {:?}", self.source, T::dtype())
+    }
+}
+
 pub struct DenseCow<FE, S> {
     source: S,
     dir: DirLock<FE>,
@@ -696,13 +854,7 @@ impl<FE, S: Clone> Clone for DenseCow<FE, S> {
     }
 }
 
-impl<FE, S> DenseCow<FE, S>
-where
-    FE: AsType<Buffer<S::DType>> + FileLoad + Send + Sync + 'static,
-    S: DenseInstance + Clone,
-    Array<S::DType>: From<S::Block>,
-    Buffer<S::DType>: de::FromStream<Context = ()>,
-{
+impl<FE, S> DenseCow<FE, S> {
     pub fn create(source: S, dir: DirLock<FE>) -> Self {
         Self { source, dir }
     }
@@ -710,7 +862,7 @@ where
 
 impl<FE, S> DenseCow<FE, S>
 where
-    FE: AsType<Buffer<S::DType>> + FileLoad + Send + Sync + 'static,
+    FE: DenseCacheFile + AsType<Buffer<S::DType>> + 'static,
     S: DenseInstance + Clone,
     Array<S::DType>: From<S::Block>,
     Buffer<S::DType>: de::FromStream<Context = ()>,
@@ -756,7 +908,7 @@ where
 #[async_trait]
 impl<FE, S> DenseInstance for DenseCow<FE, S>
 where
-    FE: AsType<Buffer<S::DType>> + FileLoad + Send + Sync + 'static,
+    FE: DenseCacheFile + AsType<Buffer<S::DType>> + 'static,
     S: DenseInstance + Clone,
     Array<S::DType>: From<S::Block>,
     Buffer<S::DType>: de::FromStream<Context = ()>,
@@ -773,7 +925,7 @@ where
 
         if let Some(block) = dir.get_file(&block_id) {
             let buffer: Buffer<S::DType> = block
-                .read_owned()
+                .read_owned::<Buffer<S::DType>>()
                 .map_ok(|block| block.clone().into())
                 .map_err(TCError::from)
                 .await?;
@@ -806,7 +958,7 @@ where
 #[async_trait]
 impl<FE, S> DenseWrite for DenseCow<FE, S>
 where
-    FE: AsType<Buffer<S::DType>> + FileLoad + Send + Sync + 'static,
+    FE: DenseCacheFile + AsType<Buffer<S::DType>> + 'static,
     S: DenseInstance + Clone,
     Array<S::DType>: From<S::Block>,
     Buffer<S::DType>: de::FromStream<Context = ()>,
@@ -835,7 +987,7 @@ where
 #[async_trait]
 impl<'a, FE, S> DenseWriteLock<'a> for DenseCow<FE, S>
 where
-    FE: AsType<Buffer<S::DType>> + FileLoad + Send + Sync + 'static,
+    FE: DenseCacheFile + AsType<Buffer<S::DType>> + 'static,
     S: DenseInstance + Clone,
     Array<S::DType>: From<S::Block>,
     Buffer<S::DType>: de::FromStream<Context = ()>,
@@ -872,7 +1024,7 @@ pub struct DenseCowWriteGuard<'a, FE, S> {
 #[async_trait]
 impl<'a, FE, S> DenseWriteGuard<S::DType> for DenseCowWriteGuard<'a, FE, S>
 where
-    FE: AsType<Buffer<S::DType>> + FileLoad + Send + Sync + 'static,
+    FE: DenseCacheFile + AsType<Buffer<S::DType>> + 'static,
     S: DenseInstance + Clone,
     Array<S::DType>: From<S::Block>,
     Buffer<S::DType>: de::FromStream<Context = ()>,

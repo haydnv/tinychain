@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use b_table::b_tree::Collator;
 use b_table::{TableLock, TableWriteGuard};
 use freqfs::DirLock;
+use futures::future::TryFutureExt;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 use ha_ndarray::*;
@@ -16,7 +17,7 @@ use rayon::prelude::*;
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
-use tc_value::{DType, Number, NumberCollator, NumberInstance, NumberType};
+use tc_value::{DType, Number, NumberCollator, NumberType};
 
 use crate::tensor::{
     offset_of, strides_for, validate_order, validate_transpose, Axes, AxisRange, Coord, Range,
@@ -74,6 +75,7 @@ pub enum SparseAccess<FE, T> {
     Table(SparseVersion<FE, T>),
     Broadcast(Box<SparseBroadcast<FE, T>>),
     BroadcastAxis(Box<SparseBroadcastAxis<Self>>),
+    Cast(Box<SparseCast<FE, T>>),
     Cow(Box<SparseCow<FE, T, Self>>),
     Expand(Box<SparseExpand<Self>>),
     Reshape(Box<SparseReshape<Self>>),
@@ -87,6 +89,7 @@ impl<FE, T> Clone for SparseAccess<FE, T> {
             Self::Table(table) => Self::Table(table.clone()),
             Self::Broadcast(broadcast) => Self::Broadcast(broadcast.clone()),
             Self::BroadcastAxis(broadcast) => Self::BroadcastAxis(broadcast.clone()),
+            Self::Cast(cast) => Self::Cast(cast.clone()),
             Self::Cow(cow) => Self::Cow(cow.clone()),
             Self::Expand(expand) => Self::Expand(expand.clone()),
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
@@ -102,6 +105,7 @@ macro_rules! array_dispatch {
             Self::Table($var) => $call,
             Self::Broadcast($var) => $call,
             Self::BroadcastAxis($var) => $call,
+            Self::Cast($var) => $call,
             Self::Cow($var) => $call,
             Self::Expand($var) => $call,
             Self::Reshape($var) => $call,
@@ -125,8 +129,8 @@ impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for SparseA
 impl<FE, T> SparseInstance for SparseAccess<FE, T>
 where
     FE: AsType<Node> + Send + Sync + 'static,
-    T: CDatatype + DType + NumberInstance,
-    Number: CastInto<T>,
+    T: CDatatype + DType + fmt::Debug,
+    Number: From<T> + CastInto<T>,
 {
     type CoordBlock = Array<u64>;
     type ValueBlock = Array<T>;
@@ -151,6 +155,13 @@ where
             }
             Self::BroadcastAxis(broadcast) => {
                 let blocks = broadcast.blocks(range, order).await?;
+                let blocks =
+                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
+
+                Ok(Box::pin(blocks))
+            }
+            Self::Cast(cast) => {
+                let blocks = cast.blocks(range, order).await?;
                 let blocks =
                     blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
 
@@ -203,7 +214,7 @@ where
     }
 }
 
-impl<FE, T> fmt::Debug for SparseAccess<FE, T> {
+impl<FE, T: DType> fmt::Debug for SparseAccess<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         array_dispatch!(self, this, this.fmt(f))
     }
@@ -317,8 +328,8 @@ where
 impl<'a, FE, T> SparseWrite<'a> for SparseVersion<FE, T>
 where
     FE: AsType<Node> + Send + Sync + 'static,
-    T: CDatatype + DType + NumberInstance,
-    Number: CastInto<T>,
+    T: CDatatype + DType + fmt::Debug,
+    Number: From<T> + CastInto<T>,
 {
     type Guard = SparseTableWriteGuard<'a, FE, T>;
 
@@ -357,12 +368,13 @@ pub struct SparseTableWriteGuard<'a, FE, T> {
 impl<'a, FE, T> SparseWriteGuard<T> for SparseTableWriteGuard<'a, FE, T>
 where
     FE: AsType<Node> + Send + Sync + 'static,
-    T: CDatatype + DType + NumberInstance,
+    T: CDatatype + DType + fmt::Debug,
+    Number: From<T>,
 {
     async fn write_value(&mut self, coord: Coord, value: T) -> Result<(), TCError> {
         self.shape.validate_coord(&coord)?;
 
-        let coord = coord.into_iter().map(Number::from).collect();
+        let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
 
         if value == T::zero() {
             self.table.delete(&coord).await?;
@@ -436,8 +448,8 @@ impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for SparseB
 impl<FE, T> SparseInstance for SparseBroadcast<FE, T>
 where
     FE: AsType<Node> + Send + Sync + 'static,
-    T: CDatatype + DType + NumberInstance,
-    Number: CastInto<T>,
+    T: CDatatype + DType + fmt::Debug,
+    Number: From<T> + CastInto<T>,
 {
     type CoordBlock = ArrayBase<Vec<u64>>;
     type ValueBlock = ArrayBase<Vec<Self::DType>>;
@@ -739,6 +751,261 @@ impl<S: fmt::Debug> fmt::Debug for SparseBroadcastAxis<S> {
     }
 }
 
+pub enum SparseCastSource<FE> {
+    F32(SparseAccess<FE, f32>),
+    F64(SparseAccess<FE, f64>),
+    I16(SparseAccess<FE, i16>),
+    I32(SparseAccess<FE, i32>),
+    I64(SparseAccess<FE, i64>),
+    U8(SparseAccess<FE, u8>),
+    U16(SparseAccess<FE, u16>),
+    U32(SparseAccess<FE, u32>),
+    U64(SparseAccess<FE, u64>),
+}
+
+impl<FE> Clone for SparseCastSource<FE> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::F32(access) => Self::F32(access.clone()),
+            Self::F64(access) => Self::F64(access.clone()),
+            Self::I16(access) => Self::I16(access.clone()),
+            Self::I32(access) => Self::I32(access.clone()),
+            Self::I64(access) => Self::I64(access.clone()),
+            Self::U8(access) => Self::U8(access.clone()),
+            Self::U16(access) => Self::U16(access.clone()),
+            Self::U32(access) => Self::U32(access.clone()),
+            Self::U64(access) => Self::U64(access.clone()),
+        }
+    }
+}
+
+macro_rules! cast_source {
+    ($t:ty, $var:ident) => {
+        impl<FE> From<SparseAccess<FE, $t>> for SparseCastSource<FE> {
+            fn from(access: SparseAccess<FE, $t>) -> Self {
+                Self::$var(access)
+            }
+        }
+    };
+}
+
+cast_source!(f32, F32);
+cast_source!(f64, F64);
+cast_source!(i16, I16);
+cast_source!(i32, I32);
+cast_source!(i64, I64);
+cast_source!(u8, U8);
+cast_source!(u16, U16);
+cast_source!(u32, U32);
+cast_source!(u64, U64);
+
+macro_rules! cast_dispatch {
+    ($this:ident, $var:ident, $call:expr) => {
+        match $this {
+            SparseCastSource::F32($var) => $call,
+            SparseCastSource::F64($var) => $call,
+            SparseCastSource::I16($var) => $call,
+            SparseCastSource::I32($var) => $call,
+            SparseCastSource::I64($var) => $call,
+            SparseCastSource::U8($var) => $call,
+            SparseCastSource::U16($var) => $call,
+            SparseCastSource::U32($var) => $call,
+            SparseCastSource::U64($var) => $call,
+        }
+    };
+}
+
+impl<FE> fmt::Debug for SparseCastSource<FE> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        cast_dispatch!(self, this, this.fmt(f))
+    }
+}
+
+pub struct SparseCast<FE, T> {
+    source: SparseCastSource<FE>,
+    dtype: PhantomData<T>,
+}
+
+impl<FE, T> Clone for SparseCast<FE, T> {
+    fn clone(&self) -> Self {
+        Self {
+            source: self.source.clone(),
+            dtype: self.dtype,
+        }
+    }
+}
+
+impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for SparseCast<FE, T> {
+    fn dtype(&self) -> NumberType {
+        T::dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        let source = &self.source;
+        cast_dispatch!(source, this, this.shape())
+    }
+}
+
+#[async_trait]
+impl<FE, T> SparseInstance for SparseCast<FE, T>
+where
+    FE: AsType<Node> + Send + Sync + 'static,
+    T: CDatatype + DType + fmt::Debug,
+    Number: From<T> + CastInto<T>,
+{
+    type CoordBlock = Array<u64>;
+    type ValueBlock = Array<T>;
+    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type DType = T;
+
+    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        match self.source {
+            SparseCastSource::F32(access) => {
+                let source_blocks = access.blocks(range, order).await?;
+                let blocks = source_blocks.map(|result| {
+                    result.and_then(|(coords, values)| {
+                        let values = values.cast().map(Array::<T>::from)?;
+                        Ok((coords, values))
+                    })
+                });
+
+                Ok(Box::pin(blocks))
+            }
+            SparseCastSource::F64(access) => {
+                let source_blocks = access.blocks(range, order).await?;
+                let blocks = source_blocks.map(|result| {
+                    result.and_then(|(coords, values)| {
+                        let values = values.cast().map(Array::<T>::from)?;
+                        Ok((coords, values))
+                    })
+                });
+
+                Ok(Box::pin(blocks))
+            }
+            SparseCastSource::I16(access) => {
+                let source_blocks = access.blocks(range, order).await?;
+                let blocks = source_blocks.map(|result| {
+                    result.and_then(|(coords, values)| {
+                        let values = values.cast().map(Array::<T>::from)?;
+                        Ok((coords, values))
+                    })
+                });
+
+                Ok(Box::pin(blocks))
+            }
+            SparseCastSource::I32(access) => {
+                let source_blocks = access.blocks(range, order).await?;
+                let blocks = source_blocks.map(|result| {
+                    result.and_then(|(coords, values)| {
+                        let values = values.cast().map(Array::<T>::from)?;
+                        Ok((coords, values))
+                    })
+                });
+
+                Ok(Box::pin(blocks))
+            }
+            SparseCastSource::I64(access) => {
+                let source_blocks = access.blocks(range, order).await?;
+                let blocks = source_blocks.map(|result| {
+                    result.and_then(|(coords, values)| {
+                        let values = values.cast().map(Array::<T>::from)?;
+                        Ok((coords, values))
+                    })
+                });
+
+                Ok(Box::pin(blocks))
+            }
+            SparseCastSource::U8(access) => {
+                let source_blocks = access.blocks(range, order).await?;
+                let blocks = source_blocks.map(|result| {
+                    result.and_then(|(coords, values)| {
+                        let values = values.cast().map(Array::<T>::from)?;
+                        Ok((coords, values))
+                    })
+                });
+
+                Ok(Box::pin(blocks))
+            }
+            SparseCastSource::U16(access) => {
+                let source_blocks = access.blocks(range, order).await?;
+                let blocks = source_blocks.map(|result| {
+                    result.and_then(|(coords, values)| {
+                        let values = values.cast().map(Array::<T>::from)?;
+                        Ok((coords, values))
+                    })
+                });
+
+                Ok(Box::pin(blocks))
+            }
+            SparseCastSource::U32(access) => {
+                let source_blocks = access.blocks(range, order).await?;
+                let blocks = source_blocks.map(|result| {
+                    result.and_then(|(coords, values)| {
+                        let values = values.cast().map(Array::<T>::from)?;
+                        Ok((coords, values))
+                    })
+                });
+
+                Ok(Box::pin(blocks))
+            }
+            SparseCastSource::U64(access) => {
+                let source_blocks = access.blocks(range, order).await?;
+                let blocks = source_blocks.map(|result| {
+                    result.and_then(|(coords, values)| {
+                        let values = values.cast().map(Array::<T>::from)?;
+                        Ok((coords, values))
+                    })
+                });
+
+                Ok(Box::pin(blocks))
+            }
+        }
+    }
+
+    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+        let ndim = self.ndim();
+
+        let context = ha_ndarray::Context::default()?;
+        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
+
+        let blocks = self.blocks(range, order).await?;
+
+        let elements = blocks
+            .map(move |result| {
+                let (coords, values) = result?;
+                let coords = coords.read(&queue)?.to_slice()?;
+                let values = values.read(&queue)?.to_slice()?;
+                let tuples = coords
+                    .as_ref()
+                    .into_par_iter()
+                    .copied()
+                    .chunks(ndim)
+                    .zip(values.as_ref().into_par_iter().copied())
+                    .map(Ok)
+                    .collect::<Vec<_>>();
+
+                Result::<_, TCError>::Ok(futures::stream::iter(tuples))
+            })
+            .try_flatten();
+
+        Ok(Box::pin(elements))
+    }
+
+    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+        let source = &self.source;
+        cast_dispatch!(source, this, {
+            let value: Number = this.read_value(coord).map_ok(|n| n.into()).await?;
+            Ok(value.cast_into())
+        })
+    }
+}
+
+impl<FE, T: DType> fmt::Debug for SparseCast<FE, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "cast {:?} into {:?}", self.source, T::dtype())
+    }
+}
+
 pub struct SparseCow<FE, T, S> {
     source: S,
     filled: SparseVersion<FE, T>,
@@ -788,7 +1055,7 @@ where
 impl<FE, T, S> SparseInstance for SparseCow<FE, T, S>
 where
     FE: AsType<Node> + Send + Sync + 'static,
-    T: CDatatype + DType + NumberInstance,
+    T: CDatatype + DType + fmt::Debug,
     S: SparseInstance<DType = T>,
     Number: CastInto<T>,
 {
@@ -890,9 +1157,9 @@ where
 impl<'a, FE, T, S> SparseWrite<'a> for SparseCow<FE, T, S>
 where
     FE: AsType<Node> + Send + Sync + 'static,
-    T: CDatatype + DType + NumberInstance,
+    T: CDatatype + DType + fmt::Debug,
     S: SparseInstance<DType = T>,
-    Number: CastInto<T>,
+    Number: From<T> + CastInto<T>,
 {
     type Guard = SparseCowWriteGuard<'a, FE, T>;
 
@@ -932,7 +1199,8 @@ pub struct SparseCowWriteGuard<'a, FE, T> {
 impl<'a, FE, T> SparseWriteGuard<T> for SparseCowWriteGuard<'a, FE, T>
 where
     FE: AsType<Node> + Send + Sync + 'static,
-    T: CDatatype + DType + NumberInstance,
+    T: CDatatype + DType + fmt::Debug,
+    Number: From<T>,
 {
     async fn write_value(&mut self, coord: Coord, value: T) -> Result<(), TCError> {
         let inverse = if value == T::zero() {
@@ -1422,7 +1690,6 @@ where
 impl<'a, S> SparseWrite<'a> for SparseSlice<S>
 where
     S: SparseWrite<'a>,
-    S::DType: NumberInstance,
 {
     type Guard = SparseSliceWriteGuard<'a, S::Guard, S::DType>;
 

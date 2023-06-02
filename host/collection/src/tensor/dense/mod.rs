@@ -2,8 +2,10 @@ use std::fmt;
 use std::pin::Pin;
 
 use async_trait::async_trait;
+use freqfs::FileLoad;
 use futures::stream::Stream;
-use ha_ndarray::{Array, CDatatype, NDArrayRead, NDArrayTransform, NDArrayWrite};
+use ha_ndarray::{Array, Buffer, CDatatype, NDArrayRead, NDArrayTransform, NDArrayWrite};
+use safecast::AsType;
 
 use tc_error::*;
 use tc_value::{DType, NumberType};
@@ -18,6 +20,38 @@ use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransfor
 
 type BlockShape = ha_ndarray::Shape;
 type BlockStream<Block> = Pin<Box<dyn Stream<Item = TCResult<Block>> + Send>>;
+
+pub trait DenseCacheFile:
+    FileLoad
+    + AsType<Buffer<f32>>
+    + AsType<Buffer<f64>>
+    + AsType<Buffer<i16>>
+    + AsType<Buffer<i32>>
+    + AsType<Buffer<i64>>
+    + AsType<Buffer<u8>>
+    + AsType<Buffer<u16>>
+    + AsType<Buffer<u32>>
+    + AsType<Buffer<u64>>
+    + Send
+    + Sync
+{
+}
+
+impl<FE> DenseCacheFile for FE where
+    FE: FileLoad
+        + AsType<Buffer<f32>>
+        + AsType<Buffer<f64>>
+        + AsType<Buffer<i16>>
+        + AsType<Buffer<i32>>
+        + AsType<Buffer<i64>>
+        + AsType<Buffer<u8>>
+        + AsType<Buffer<u16>>
+        + AsType<Buffer<u32>>
+        + AsType<Buffer<u64>>
+        + Send
+        + Sync
+{
+}
 
 #[async_trait]
 pub trait DenseInstance: TensorInstance + fmt::Debug + Send + Sync + 'static {

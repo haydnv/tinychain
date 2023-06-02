@@ -1,3 +1,4 @@
+use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, RwLock};
 
@@ -13,7 +14,7 @@ use safecast::{AsType, CastInto};
 use tc_error::*;
 use tc_transact::fs::{Dir, Inner, Persist, VERSIONS};
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{DType, Number, NumberInstance, NumberType};
+use tc_value::{DType, Number, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
 use crate::tensor::{Coord, Range, Shape, TensorIO, TensorInstance, TensorType};
@@ -202,7 +203,7 @@ impl<Txn, FE, T> TensorIO for SparseTensorTable<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType + NumberInstance,
+    T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
@@ -302,8 +303,8 @@ impl<Txn, FE, T> Transact for SparseTensorTable<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + FileLoad,
-    T: CDatatype + DType + NumberInstance,
-    Number: CastInto<T>,
+    T: CDatatype + DType + fmt::Debug,
+    Number: From<T> + CastInto<T>,
 {
     type Commit = ();
 
