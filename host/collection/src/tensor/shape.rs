@@ -170,13 +170,16 @@ impl TryFrom<AxisRange> for ha_ndarray::AxisBound {
                     .start
                     .try_into()
                     .map_err(|cause| bad_request!("bad range start: {cause}"))?;
+
                 let stop = range
                     .end
                     .try_into()
                     .map_err(|cause| bad_request!("bad range start: {cause}"))?;
+
                 let step = step
                     .try_into()
                     .map_err(|cause| bad_request!("bad range start: {cause}"))?;
+
                 Ok(ha_ndarray::AxisBound::In(start, stop, step))
             }
 

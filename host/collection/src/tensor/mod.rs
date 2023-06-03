@@ -19,6 +19,7 @@ pub use shape::{AxisRange, Range, Shape};
 pub mod dense;
 pub mod shape;
 pub mod sparse;
+mod transform;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
@@ -87,10 +88,11 @@ impl<'en> en::ToStream<'en> for Schema {
     }
 }
 
+#[async_trait]
 pub trait AccessPermit {
-    fn read_permit(&self, txn_id: TxnId) -> PermitRead<Range>;
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>>;
 
-    fn write_permit(&self, txn_id: TxnId) -> PermitWrite<Range>;
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>>;
 }
 
 /// The [`Class`] of a [`Tensor`]
