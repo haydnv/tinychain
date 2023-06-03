@@ -19,9 +19,9 @@ use safecast::{AsType, CastInto};
 use tc_error::*;
 use tc_value::{DType, Number, NumberCollator, NumberType};
 
+use crate::tensor::transform::{Expand, Reshape, Slice, Transpose};
 use crate::tensor::{
-    offset_of, strides_for, validate_order, validate_transpose, Axes, AxisRange, Coord, Range,
-    Shape, Strides, TensorInstance,
+    strides_for, validate_order, Axes, AxisRange, Coord, Range, Shape, TensorInstance,
 };
 
 use super::schema::{IndexSchema, Schema};
@@ -301,7 +301,7 @@ where
     }
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        debug_assert!(self.shape().validate_range(&range).is_ok());
+        self.shape().validate_range(&range)?;
         debug_assert!(validate_order(&order, self.ndim()));
 
         let range = table_range(&range)?;
@@ -474,7 +474,7 @@ where
             return self.inner.elements(range, order).await;
         }
 
-        debug_assert!(self.shape.validate_range(&range).is_ok());
+        self.shape.validate_range(&range)?;
         debug_assert!(validate_order(&order, ndim));
 
         let mut inner_range = Vec::with_capacity(self.inner.ndim());
@@ -607,7 +607,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
         range: Range,
         mut order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
-        debug_assert!(self.shape.validate_range(&range).is_ok());
+        self.shape.validate_range(&range)?;
         debug_assert!(validate_order(&order, self.ndim()));
 
         let axis = self.axis;
@@ -1220,32 +1220,12 @@ where
 #[derive(Clone)]
 pub struct SparseExpand<S> {
     source: S,
-    shape: Shape,
-    axes: Axes,
+    transform: Expand,
 }
 
 impl<S: TensorInstance + fmt::Debug> SparseExpand<S> {
-    pub fn new(source: S, mut axes: Axes) -> Result<Self, TCError> {
-        axes.sort();
-
-        let mut shape = source.shape().to_vec();
-        for x in axes.iter().rev().copied() {
-            shape.insert(x, 1);
-        }
-
-        if Some(source.ndim()) > axes.last().copied() {
-            Ok(Self {
-                source,
-                shape: shape.into(),
-                axes,
-            })
-        } else {
-            Err(bad_request!(
-                "cannot expand axes {:?} of {:?}",
-                axes,
-                source
-            ))
-        }
+    pub fn new(source: S, axes: Axes) -> Result<Self, TCError> {
+        Expand::new(source.shape().clone(), axes).map(|transform| Self { source, transform })
     }
 }
 
@@ -1255,7 +1235,7 @@ impl<S: TensorInstance> TensorInstance for SparseExpand<S> {
     }
 
     fn shape(&self) -> &Shape {
-        &self.shape
+        self.transform.shape()
     }
 }
 
@@ -1273,23 +1253,23 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
     }
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        debug_assert!(self.shape.validate_range(&range).is_ok());
+        self.shape().validate_range(&range)?;
         debug_assert!(validate_order(&order, self.ndim()));
 
         let mut source_range = range;
-        for x in self.axes.iter().rev().copied() {
+        for x in self.transform.expand_axes().iter().rev().copied() {
             if x < source_range.len() {
                 source_range.remove(x);
             }
         }
 
         let mut source_order = order;
-        for x in self.axes.iter().rev().copied() {
+        for x in self.transform.expand_axes().iter().rev().copied() {
             source_order.remove(x);
         }
 
         let ndim = self.ndim();
-        let axes = self.axes;
+        let axes = self.transform.expand_axes().to_vec();
         debug_assert_eq!(self.source.ndim() + 1, ndim);
 
         let source_elements = self.source.elements(source_range, source_order).await?;
@@ -1308,14 +1288,10 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
         Ok(Box::pin(elements))
     }
 
-    async fn read_value(&self, mut coord: Coord) -> Result<Self::DType, TCError> {
-        self.shape.validate_coord(&coord)?;
-
-        for x in self.axes.iter().rev() {
-            coord.remove(*x);
-        }
-
-        self.source.read_value(coord).await
+    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+        self.shape().validate_coord(&coord)?;
+        let source_coord = self.transform.invert_coord(coord);
+        self.source.read_value(source_coord).await
     }
 }
 
@@ -1323,41 +1299,31 @@ impl<FE, T, S: Into<SparseAccess<FE, T>>> From<SparseExpand<S>> for SparseAccess
     fn from(expand: SparseExpand<S>) -> Self {
         Self::Expand(Box::new(SparseExpand {
             source: expand.source.into(),
-            shape: expand.shape,
-            axes: expand.axes,
+            transform: expand.transform,
         }))
     }
 }
 
 impl<S: fmt::Debug> fmt::Debug for SparseExpand<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "expand axes {:?} of {:?}", self.axes, self.source)
+        write!(
+            f,
+            "expand axes {:?} of {:?}",
+            self.transform.expand_axes(),
+            self.source
+        )
     }
 }
 
 #[derive(Clone)]
 pub struct SparseReshape<S> {
     source: S,
-    source_strides: Strides,
-    shape: Shape,
-    strides: Strides,
+    transform: Reshape,
 }
 
 impl<S: SparseInstance> SparseReshape<S> {
     pub fn new(source: S, shape: Shape) -> Result<Self, TCError> {
-        if source.shape().iter().product::<u64>() != shape.iter().product::<u64>() {
-            return Err(bad_request!("cannot reshape {:?} into {:?}", source, shape));
-        }
-
-        let source_strides = strides_for(source.shape(), source.ndim());
-        let strides = strides_for(&shape, shape.len());
-
-        Ok(Self {
-            source,
-            source_strides,
-            shape,
-            strides,
-        })
+        Reshape::new(source.shape().clone(), shape).map(|transform| Self { source, transform })
     }
 }
 
@@ -1367,7 +1333,7 @@ impl<S: TensorInstance> TensorInstance for SparseReshape<S> {
     }
 
     fn shape(&self) -> &Shape {
-        &self.shape
+        self.transform.shape()
     }
 }
 
@@ -1379,7 +1345,7 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
     type DType = S::DType;
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
-        debug_assert!(self.shape.validate_range(&range).is_ok());
+        self.shape().validate_range(&range)?;
         debug_assert!(validate_order(&order, self.ndim()));
 
         let source_range = if range.is_empty() {
@@ -1405,12 +1371,14 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
 
         let source_ndim = self.source.ndim();
         let source_blocks = self.source.blocks(source_range, source_order).await?;
-        let source_strides =
-            ArrayBase::<Arc<Vec<_>>>::new(vec![source_ndim], Arc::new(self.source_strides))?;
+        let source_strides = Arc::new(self.transform.source_strides().to_vec());
+        let source_strides = ArrayBase::<Arc<Vec<_>>>::new(vec![source_ndim], source_strides)?;
 
-        let ndim = self.shape.len();
-        let strides = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], Arc::new(self.strides))?;
-        let shape = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], Arc::new(self.shape.into()))?;
+        let ndim = self.transform.shape().len();
+        let strides = Arc::new(self.transform.strides().to_vec());
+        let strides = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], strides)?;
+        let shape = Arc::new(self.transform.shape().to_vec());
+        let shape = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], shape)?;
 
         let blocks = source_blocks.map(move |result| {
             let (source_coords, values) = result?;
@@ -1443,7 +1411,7 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
     }
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        let ndim = self.shape.len();
+        let ndim = self.ndim();
 
         let context = ha_ndarray::Context::default()?;
         let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
@@ -1470,16 +1438,8 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
     }
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
-        self.shape.validate_coord(&coord)?;
-        let offset = offset_of(coord, &self.shape);
-        let source_coord = self
-            .source_strides
-            .iter()
-            .copied()
-            .zip(self.source.shape().iter().copied())
-            .map(|(stride, dim)| (offset / stride) % dim)
-            .collect();
-
+        self.shape().validate_coord(&coord)?;
+        let source_coord = self.transform.invert_coord(coord);
         self.source.read_value(source_coord).await
     }
 }
@@ -1488,24 +1448,26 @@ impl<FE, T, S: Into<SparseAccess<FE, T>>> From<SparseReshape<S>> for SparseAcces
     fn from(reshape: SparseReshape<S>) -> Self {
         Self::Reshape(Box::new(SparseReshape {
             source: reshape.source.into(),
-            source_strides: reshape.source_strides,
-            shape: reshape.shape,
-            strides: reshape.strides,
+            transform: reshape.transform,
         }))
     }
 }
 
 impl<S: fmt::Debug> fmt::Debug for SparseReshape<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "reshape {:?} into {:?}", self.source, self.shape)
+        write!(
+            f,
+            "reshape {:?} into {:?}",
+            self.source,
+            self.transform.shape()
+        )
     }
 }
 
 #[derive(Clone)]
 pub struct SparseSlice<S> {
     source: S,
-    range: Range,
-    shape: Shape,
+    transform: Slice,
 }
 
 impl<S> SparseSlice<S>
@@ -1513,112 +1475,14 @@ where
     S: TensorInstance + fmt::Debug,
 {
     pub fn new(source: S, range: Range) -> Result<Self, TCError> {
-        source.shape().validate_range(&range)?;
-
-        let mut shape = Vec::with_capacity(source.ndim());
-        for (x, bound) in range.iter().enumerate() {
-            match bound {
-                AxisRange::At(_) => {} // no-op
-                AxisRange::In(axis_range, 1) => {
-                    shape.push(axis_range.end - axis_range.start);
-                }
-                axis_bound => {
-                    return Err(bad_request!(
-                        "invalid bound for sparse tensor axis {}: {:?}",
-                        x,
-                        axis_bound
-                    ));
-                }
-            }
-        }
-
-        shape.extend_from_slice(&source.shape()[range.len()..]);
-
-        Ok(Self {
-            source,
-            range,
-            shape: shape.into(),
-        })
-    }
-
-    fn source_range(&self, range: Range) -> Result<Range, TCError> {
-        let mut source_range = Vec::with_capacity(self.source.ndim());
-        let mut axis = 0;
-
-        for axis_range in self.range.iter() {
-            let axis_range = match axis_range {
-                AxisRange::At(i) => AxisRange::At(*i),
-                AxisRange::In(source_range, source_step) => match &range[axis] {
-                    AxisRange::At(i) => {
-                        debug_assert!(source_range.start + (i * source_step) < source_range.end);
-                        AxisRange::At(source_range.start + (i * source_step))
-                    }
-                    AxisRange::In(axis_range, step) => {
-                        debug_assert!(source_range.start + axis_range.start <= source_range.end);
-                        debug_assert!(source_range.start + axis_range.end <= source_range.end);
-
-                        let (source_start, source_end, source_step) = (
-                            axis_range.start + source_range.start,
-                            axis_range.end + source_range.start,
-                            step * source_step,
-                        );
-
-                        AxisRange::In(source_start..source_end, source_step)
-                    }
-                    AxisRange::Of(indices) => {
-                        let indices = indices
-                            .iter()
-                            .copied()
-                            .map(|i| source_range.start + i)
-                            .collect::<Vec<u64>>();
-                        debug_assert!(indices.iter().copied().all(|i| i < source_range.end));
-                        AxisRange::Of(indices)
-                    }
-                },
-                AxisRange::Of(source_indices) => match &range[axis] {
-                    AxisRange::At(i) => AxisRange::At(source_indices[*i as usize]),
-                    AxisRange::In(axis_range, step) => {
-                        debug_assert!(axis_range.start as usize <= source_indices.len());
-                        debug_assert!(axis_range.end as usize <= source_indices.len());
-
-                        let indices = source_indices
-                            [(axis_range.start as usize)..(axis_range.end as usize)]
-                            .iter()
-                            .step_by(*step as usize)
-                            .copied()
-                            .collect();
-
-                        AxisRange::Of(indices)
-                    }
-                    AxisRange::Of(indices) => {
-                        let indices = indices
-                            .iter()
-                            .copied()
-                            .map(|i| source_indices[i as usize])
-                            .collect();
-
-                        AxisRange::Of(indices)
-                    }
-                },
-            };
-
-            if !axis_range.is_index() {
-                axis += 1;
-            }
-
-            source_range.push(axis_range);
-        }
-
-        source_range.extend(self.range.iter().skip(range.len()).cloned());
-
-        Ok(source_range.into())
+        Slice::new(source.shape().clone(), range).map(|transform| Self { source, transform })
     }
 
     fn source_order(&self, order: Axes) -> Result<Axes, TCError> {
         debug_assert!(validate_order(&order, self.ndim()));
 
         let mut source_axes = Vec::with_capacity(self.ndim());
-        for (x, bound) in self.range.iter().enumerate() {
+        for (x, bound) in self.transform.range().iter().enumerate() {
             if !bound.is_index() {
                 source_axes.push(x);
             }
@@ -1637,7 +1501,7 @@ where
     }
 
     fn shape(&self) -> &Shape {
-        &self.shape
+        self.transform.shape()
     }
 }
 
@@ -1652,36 +1516,26 @@ where
     type DType = S::DType;
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
-        debug_assert!(self.shape.validate_range(&range).is_ok());
+        self.shape().validate_range(&range)?;
 
         let source_order = self.source_order(order)?;
-
-        let source_range = if range.is_empty() {
-            self.range
-        } else {
-            self.source_range(range)?
-        };
+        let source_range = self.transform.invert_range(range);
 
         self.source.blocks(source_range, source_order).await
     }
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        debug_assert!(self.shape.validate_range(&range).is_ok());
+        self.shape().validate_range(&range)?;
 
         let source_order = self.source_order(order)?;
-
-        let source_range = if range.is_empty() {
-            self.range
-        } else {
-            self.source_range(range)?
-        };
+        let source_range = self.transform.invert_range(range);
 
         self.source.elements(source_range, source_order).await
     }
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
-        self.shape.validate_coord(&coord)?;
-        let source_coord = self.range.invert_coord(coord)?;
+        self.shape().validate_coord(&coord)?;
+        let source_coord = self.transform.invert_coord(coord)?;
         self.source.read_value(source_coord).await
     }
 }
@@ -1695,8 +1549,7 @@ where
 
     async fn write(&'a self) -> SparseSliceWriteGuard<'a, S::Guard, S::DType> {
         SparseSliceWriteGuard {
-            shape: &self.shape,
-            range: &self.range,
+            transform: &self.transform,
             guard: self.source.write().await,
             dtype: PhantomData,
         }
@@ -1707,21 +1560,24 @@ impl<FE, T, S: Into<SparseAccess<FE, T>>> From<SparseSlice<S>> for SparseAccess<
     fn from(slice: SparseSlice<S>) -> Self {
         Self::Slice(Box::new(SparseSlice {
             source: slice.source.into(),
-            range: slice.range,
-            shape: slice.shape,
+            transform: slice.transform,
         }))
     }
 }
 
 impl<S: fmt::Debug> fmt::Debug for SparseSlice<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "slice of {:?} with range {:?}", self.source, self.range)
+        write!(
+            f,
+            "slice of {:?} with range {:?}",
+            self.source,
+            self.transform.range()
+        )
     }
 }
 
 pub struct SparseSliceWriteGuard<'a, G, T> {
-    shape: &'a Shape,
-    range: &'a Range,
+    transform: &'a Slice,
     guard: G,
     dtype: PhantomData<T>,
 }
@@ -1733,8 +1589,8 @@ where
     T: CDatatype + DType,
 {
     async fn write_value(&mut self, coord: Coord, value: T) -> Result<(), TCError> {
-        self.shape.validate_coord(&coord)?;
-        let coord = self.range.invert_coord(coord)?;
+        self.transform.shape().validate_coord(&coord)?;
+        let coord = self.transform.invert_coord(coord)?;
         self.guard.write_value(coord, value).await
     }
 }
@@ -1742,25 +1598,13 @@ where
 #[derive(Clone)]
 pub struct SparseTranspose<S> {
     source: S,
-    permutation: Axes,
-    shape: Shape,
+    transform: Transpose,
 }
 
 impl<S: SparseInstance> SparseTranspose<S> {
     pub fn new(source: S, permutation: Option<Axes>) -> Result<Self, TCError> {
-        let permutation = validate_transpose(permutation, source.shape())?;
-
-        let shape = permutation
-            .iter()
-            .copied()
-            .map(|x| source.shape()[x])
-            .collect();
-
-        Ok(Self {
-            source,
-            permutation,
-            shape,
-        })
+        Transpose::new(source.shape().clone(), permutation)
+            .map(|transform| Self { source, transform })
     }
 }
 
@@ -1773,7 +1617,7 @@ where
     }
 
     fn shape(&self) -> &Shape {
-        &self.shape
+        self.transform.shape()
     }
 }
 
@@ -1789,22 +1633,21 @@ where
     type DType = S::DType;
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
-        debug_assert!(self.shape.validate_range(&range).is_ok());
+        self.shape().validate_range(&range)?;
         debug_assert!(validate_order(&order, self.ndim()));
 
         let range = range.normalize(self.shape());
         debug_assert_eq!(range.len(), self.ndim());
 
-        let permutation = self.permutation;
-        let mut source_range = Range::all(self.source.shape());
-        for axis in 0..range.len() {
-            source_range[permutation[axis]] = range[axis].clone();
-        }
-
-        let source_order = order.into_iter().map(|x| permutation[x]).collect();
+        let source_order = order
+            .into_iter()
+            .map(|x| self.transform.axes()[x])
+            .collect();
+        let source_range = self.transform.invert_range(&range);
 
         let source_blocks = self.source.blocks(source_range, source_order).await?;
 
+        let permutation = self.transform.axes().to_vec();
         let blocks = source_blocks.map(move |result| {
             let (source_coords, values) = result?;
             let coords = source_coords.transpose(Some(permutation.to_vec()))?;
@@ -1844,13 +1687,8 @@ where
     }
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
-        self.shape.validate_coord(&coord)?;
-
-        let mut source_coord = vec![0; coord.len()];
-        for (i, x) in self.permutation.iter().copied().enumerate() {
-            source_coord[x] = coord[i];
-        }
-
+        self.shape().validate_coord(&coord)?;
+        let source_coord = self.transform.invert_coord(coord);
         self.source.read_value(source_coord).await
     }
 }
@@ -1859,8 +1697,7 @@ impl<FE, T, S: Into<SparseAccess<FE, T>>> From<SparseTranspose<S>> for SparseAcc
     fn from(transpose: SparseTranspose<S>) -> Self {
         Self::Transpose(Box::new(SparseTranspose {
             source: transpose.source.into(),
-            permutation: transpose.permutation,
-            shape: transpose.shape,
+            transform: transpose.transform,
         }))
     }
 }
@@ -1870,7 +1707,8 @@ impl<S: fmt::Debug> fmt::Debug for SparseTranspose<S> {
         write!(
             f,
             "transpose of {:?} with permutation {:?}",
-            self.source, self.permutation
+            self.source,
+            self.transform.axes()
         )
     }
 }

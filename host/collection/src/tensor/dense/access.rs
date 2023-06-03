@@ -17,9 +17,9 @@ use tc_value::{DType, NumberClass, NumberInstance, NumberType};
 
 use super::{DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock};
 
+use crate::tensor::transform::{Broadcast, Reshape, Slice, Transpose};
 use crate::tensor::{
-    offset_of, validate_transpose, Axes, AxisRange, Coord, Range, Shape, TensorInstance,
-    IDEAL_BLOCK_SIZE,
+    offset_of, Axes, AxisRange, Coord, Range, Shape, TensorInstance, IDEAL_BLOCK_SIZE,
 };
 
 use super::stream::BlockResize;
@@ -571,13 +571,15 @@ where
 #[derive(Clone)]
 pub struct DenseBroadcast<S> {
     source: S,
-    shape: Shape,
+    transform: Broadcast,
     block_map: ArrayBase<Vec<u64>>,
     block_size: usize,
 }
 
 impl<S: DenseInstance> DenseBroadcast<S> {
     pub fn new(source: S, shape: Shape) -> TCResult<Self> {
+        let transform = Broadcast::new(source.shape().clone(), shape)?;
+
         let num_blocks = div_ceil(source.size(), source.block_size() as u64);
         let block_axis = block_axis_for(source.shape(), source.block_size());
         let source_block_shape = block_shape_for(block_axis, source.shape(), source.block_size());
@@ -585,7 +587,8 @@ impl<S: DenseInstance> DenseBroadcast<S> {
         let mut block_shape = BlockShape::with_capacity(source_block_shape.len());
         block_shape.push(source_block_shape[0]);
         block_shape.extend(
-            shape
+            transform
+                .shape()
                 .iter()
                 .rev()
                 .take(source_block_shape.len() - 1)
@@ -598,20 +601,21 @@ impl<S: DenseInstance> DenseBroadcast<S> {
 
         let mut block_map_shape = BlockShape::with_capacity(source.ndim());
         block_map_shape.extend(
-            shape
+            transform
+                .shape()
                 .iter()
                 .take(block_axis)
                 .copied()
                 .map(|dim| dim as usize),
         );
-        block_map_shape.push(shape[block_axis] as usize / source_block_shape[0]);
+        block_map_shape.push(transform.shape()[block_axis] as usize / source_block_shape[0]);
 
         let block_map =
             ArrayBase::<Vec<_>>::new(block_map_shape, (0..num_blocks).into_iter().collect())?;
 
         Ok(Self {
             source,
-            shape,
+            transform,
             block_map,
             block_size,
         })
@@ -624,7 +628,7 @@ impl<S: TensorInstance> TensorInstance for DenseBroadcast<S> {
     }
 
     fn shape(&self) -> &Shape {
-        &self.shape
+        self.transform.shape()
     }
 }
 
@@ -644,15 +648,15 @@ where
 
     async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
         let source_block_id = source_block_id_for(&self.block_map, block_id)?;
-        let block_axis = block_axis_for(&self.shape, self.block_size);
-        let block_shape = block_shape_for(block_axis, &self.shape, self.block_size);
+        let block_axis = block_axis_for(self.shape(), self.block_size);
+        let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
         let source_block = self.source.read_block(source_block_id).await?;
         source_block.broadcast(block_shape).map_err(TCError::from)
     }
 
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        let block_axis = block_axis_for(&self.shape, self.block_size);
-        let block_shape = block_shape_for(block_axis, &self.shape, self.block_size);
+        let block_axis = block_axis_for(self.shape(), self.block_size);
+        let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
 
         let blocks = stream::iter(self.block_map.into_inner())
             .map(move |block_id| {
@@ -675,7 +679,7 @@ impl<FE, T, S: Into<DenseAccess<FE, T>>> From<DenseBroadcast<S>> for DenseAccess
     fn from(broadcast: DenseBroadcast<S>) -> Self {
         Self::Broadcast(Box::new(DenseBroadcast {
             source: broadcast.source.into(),
-            shape: broadcast.shape,
+            transform: broadcast.transform.clone(),
             block_map: broadcast.block_map,
             block_size: broadcast.block_size,
         }))
@@ -684,7 +688,12 @@ impl<FE, T, S: Into<DenseAccess<FE, T>>> From<DenseBroadcast<S>> for DenseAccess
 
 impl<S: fmt::Debug> fmt::Debug for DenseBroadcast<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "broadcast of {:?} into {:?}", self.source, self.shape)
+        write!(
+            f,
+            "broadcast of {:?} into {:?}",
+            self.source,
+            self.transform.shape()
+        )
     }
 }
 
@@ -1072,16 +1081,12 @@ where
 #[derive(Clone)]
 pub struct DenseReshape<S> {
     source: S,
-    shape: Shape,
+    transform: Reshape,
 }
 
 impl<S: DenseInstance> DenseReshape<S> {
     pub fn new(source: S, shape: Shape) -> TCResult<Self> {
-        if shape.iter().product::<u64>() == source.size() {
-            Ok(Self { source, shape })
-        } else {
-            Err(bad_request!("cannot reshape {:?} into {:?}", source, shape))
-        }
+        Reshape::new(source.shape().clone(), shape).map(|transform| Self { source, transform })
     }
 }
 
@@ -1091,7 +1096,7 @@ impl<S: TensorInstance> TensorInstance for DenseReshape<S> {
     }
 
     fn shape(&self) -> &Shape {
-        self.source.shape()
+        self.transform.shape()
     }
 }
 
@@ -1151,29 +1156,33 @@ impl<FE, T, S: Into<DenseAccess<FE, T>>> From<DenseReshape<S>> for DenseAccess<F
     fn from(reshape: DenseReshape<S>) -> Self {
         Self::Reshape(Box::new(DenseReshape {
             source: reshape.source.into(),
-            shape: reshape.shape,
+            transform: reshape.transform,
         }))
     }
 }
 
 impl<S: fmt::Debug> fmt::Debug for DenseReshape<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "reshape {:?} into {:?}", self.source, self.shape)
+        write!(
+            f,
+            "reshape {:?} into {:?}",
+            self.source,
+            self.transform.shape()
+        )
     }
 }
 
 #[derive(Clone)]
 pub struct DenseSlice<S> {
     source: S,
-    range: Range,
-    shape: Shape,
+    transform: Slice,
     block_map: ArrayBase<Vec<u64>>,
     block_size: usize,
 }
 
 impl<S: DenseInstance> DenseSlice<S> {
     pub fn new(source: S, range: Range) -> TCResult<Self> {
-        source.shape().validate_range(&range)?;
+        let transform = Slice::new(source.shape().clone(), range)?;
 
         let block_axis = block_axis_for(source.shape(), source.block_size());
         let block_shape = block_shape_for(block_axis, source.shape(), source.block_size());
@@ -1199,13 +1208,13 @@ impl<S: DenseInstance> DenseSlice<S> {
         )?;
 
         let mut block_map_bounds = Vec::with_capacity(block_axis + 1);
-        for axis_range in range.iter().take(block_axis).cloned() {
+        for axis_range in transform.range().iter().take(block_axis).cloned() {
             let bound = axis_range.try_into()?;
             block_map_bounds.push(bound);
         }
 
-        if range.len() > block_axis {
-            let bound = match &range[block_axis] {
+        if transform.range().len() > block_axis {
+            let bound = match &transform.range()[block_axis] {
                 AxisRange::At(i) => {
                     let stride = block_map.shape().last().expect("stride");
                     let i = usize::try_from(*i)
@@ -1245,43 +1254,11 @@ impl<S: DenseInstance> DenseSlice<S> {
         let block_map = block_map.slice(block_map_bounds)?;
         let block_map = ArrayBase::<Vec<u64>>::copy(&block_map)?;
 
-        let mut shape = Vec::with_capacity(source.ndim());
-        for (bound, dim) in range.iter().zip(source.shape().iter()) {
-            match bound {
-                AxisRange::At(i) => {
-                    if i > dim {
-                        return Err(bad_request!(
-                            "index {} is out of bounds for dimension {}",
-                            i,
-                            dim
-                        ));
-                    }
-                }
-                AxisRange::In(axis_range, step) => {
-                    if axis_range.start < axis_range.end {
-                        shape.push((axis_range.end - axis_range.start) / step);
-                    }
-                }
-                AxisRange::Of(indices) => {
-                    if indices.iter().all(|i| i < dim) {
-                        shape.push(indices.len() as u64);
-                    } else {
-                        return Err(bad_request!(
-                            "indices {:?} are out of bounds for dimension {}",
-                            indices,
-                            dim
-                        ));
-                    }
-                }
-            }
-        }
-
-        let block_size = shape.iter().product::<u64>() as usize / num_blocks;
+        let block_size = transform.shape().iter().product::<u64>() as usize / num_blocks;
 
         Ok(Self {
             source,
-            range,
-            shape: shape.into(),
+            transform,
             block_map,
             block_size,
         })
@@ -1291,35 +1268,36 @@ impl<S: DenseInstance> DenseSlice<S> {
     fn block_bounds(&self, block_id: u64) -> TCResult<(u64, Vec<ha_ndarray::AxisBound>)> {
         let source_block_id = source_block_id_for(&self.block_map, block_id)?;
 
-        let block_axis = block_axis_for(&self.shape, self.block_size);
-        let block_shape = block_shape_for(block_axis, &self.shape, self.block_size);
+        let block_axis = block_axis_for(self.shape(), self.block_size);
+        let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
 
-        let local_bound = match ha_ndarray::AxisBound::try_from(self.range[block_axis].clone())? {
-            ha_ndarray::AxisBound::At(i) => ha_ndarray::AxisBound::At(i),
-            ha_ndarray::AxisBound::In(start, stop, step) => {
-                let stride = block_shape[0];
+        let local_bound =
+            match ha_ndarray::AxisBound::try_from(self.transform.range()[block_axis].clone())? {
+                ha_ndarray::AxisBound::At(i) => ha_ndarray::AxisBound::At(i),
+                ha_ndarray::AxisBound::In(start, stop, step) => {
+                    let stride = block_shape[0];
 
-                if source_block_id == 0 {
-                    ha_ndarray::AxisBound::In(start, stride, step)
-                } else if source_block_id == self.block_map.size() as u64 - 1 {
-                    ha_ndarray::AxisBound::In(stop - (stop % stride), stop, step)
-                } else {
-                    let start = source_block_id as usize * stride;
-                    ha_ndarray::AxisBound::In(start, start + stride, step)
+                    if source_block_id == 0 {
+                        ha_ndarray::AxisBound::In(start, stride, step)
+                    } else if source_block_id == self.block_map.size() as u64 - 1 {
+                        ha_ndarray::AxisBound::In(stop - (stop % stride), stop, step)
+                    } else {
+                        let start = source_block_id as usize * stride;
+                        ha_ndarray::AxisBound::In(start, start + stride, step)
+                    }
                 }
-            }
-            ha_ndarray::AxisBound::Of(indices) => {
-                if source_block_id < indices.len() as u64 {
-                    let i = indices[source_block_id as usize] as usize;
-                    ha_ndarray::AxisBound::At(i)
-                } else {
-                    return Err(bad_request!("block id {} is out of range", block_id));
+                ha_ndarray::AxisBound::Of(indices) => {
+                    if source_block_id < indices.len() as u64 {
+                        let i = indices[source_block_id as usize] as usize;
+                        ha_ndarray::AxisBound::At(i)
+                    } else {
+                        return Err(bad_request!("block id {} is out of range", block_id));
+                    }
                 }
-            }
-        };
+            };
 
         let mut block_bounds = Vec::with_capacity(self.ndim());
-        for bound in self.range.iter().take(block_axis).cloned() {
+        for bound in self.transform.range().iter().take(block_axis).cloned() {
             block_bounds.push(bound.try_into()?);
         }
 
@@ -1343,13 +1321,14 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
         Fut: Future<Output = TCResult<Block>>,
         Block: NDArrayTransform,
     {
+        let ndim = self.ndim();
+        let transform = self.transform;
+        let range = transform.range();
         let block_map = self.block_map;
-        let range = self.range;
-        let ndim = self.shape.len();
         let source = self.source;
 
-        let block_axis = block_axis_for(&self.shape, self.block_size);
-        let block_shape = block_shape_for(block_axis, &self.shape, self.block_size);
+        let block_axis = block_axis_for(transform.shape(), self.block_size);
+        let block_shape = block_shape_for(block_axis, transform.shape(), self.block_size);
 
         let local_bounds = match ha_ndarray::AxisBound::try_from(range[block_axis].clone())? {
             ha_ndarray::AxisBound::At(i) => {
@@ -1419,7 +1398,7 @@ impl<S: TensorInstance> TensorInstance for DenseSlice<S> {
     }
 
     fn shape(&self) -> &Shape {
-        &self.shape
+        self.transform.shape()
     }
 }
 
@@ -1500,8 +1479,7 @@ impl<FE, T, S: Into<DenseAccess<FE, T>>> From<DenseSlice<S>> for DenseAccess<FE,
     fn from(slice: DenseSlice<S>) -> Self {
         Self::Slice(Box::new(DenseSlice {
             source: slice.source.into(),
-            range: slice.range,
-            shape: slice.shape,
+            transform: slice.transform,
             block_map: slice.block_map,
             block_size: slice.block_size,
         }))
@@ -1510,7 +1488,12 @@ impl<FE, T, S: Into<DenseAccess<FE, T>>> From<DenseSlice<S>> for DenseAccess<FE,
 
 impl<S: fmt::Debug> fmt::Debug for DenseSlice<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "slice {:?} from {:?}", self.range, self.source)
+        write!(
+            f,
+            "slice {:?} from {:?}",
+            self.transform.range(),
+            self.source
+        )
     }
 }
 
@@ -1555,7 +1538,7 @@ where
     }
 
     async fn write_value(&self, coord: Coord, value: S::DType) -> TCResult<()> {
-        let source_coord = self.dest.range.invert_coord(coord)?;
+        let source_coord = self.dest.transform.invert_coord(coord)?;
         let source = self.dest.source.write().await;
         source.write_value(source_coord, value).await
     }
@@ -1564,20 +1547,14 @@ where
 #[derive(Clone)]
 pub struct DenseTranspose<S> {
     source: S,
-    shape: Shape,
-    permutation: Axes,
+    transform: Transpose,
     block_map: ArrayBase<Vec<u64>>,
+    block_axes: Axes,
 }
 
 impl<S: DenseInstance> DenseTranspose<S> {
     pub fn new(source: S, permutation: Option<Axes>) -> TCResult<Self> {
-        let permutation = validate_transpose(permutation, source.shape())?;
-
-        let shape = permutation
-            .iter()
-            .copied()
-            .map(|x| source.shape()[x])
-            .collect();
+        let transform = Transpose::new(source.shape().clone(), permutation)?;
 
         let num_blocks = div_ceil(source.size(), source.block_size() as u64);
         let block_axis = block_axis_for(source.shape(), source.block_size());
@@ -1590,14 +1567,15 @@ impl<S: DenseInstance> DenseTranspose<S> {
             .map(|dim| dim as usize)
             .collect();
 
-        let (map_axes, permutation) = permutation.split_at(block_axis);
+        let permutation = transform.axes().to_vec();
+        let (map_axes, block_axes) = permutation.split_at(block_axis);
 
         if map_axes.iter().copied().any(|x| x >= block_axis)
-            || permutation.iter().copied().any(|x| x <= block_axis)
+            || block_axes.iter().copied().any(|x| x <= block_axis)
         {
             return Err(bad_request!(
                 "cannot transpose axes {:?} of {:?} without copying",
-                permutation,
+                block_axes,
                 source
             ));
         }
@@ -1608,9 +1586,9 @@ impl<S: DenseInstance> DenseTranspose<S> {
 
         Ok(Self {
             source,
-            shape,
-            permutation: permutation.to_vec(),
+            transform,
             block_map,
+            block_axes: block_axes.to_vec(),
         })
     }
 }
@@ -1621,7 +1599,7 @@ impl<S: TensorInstance> TensorInstance for DenseTranspose<S> {
     }
 
     fn shape(&self) -> &Shape {
-        &self.shape
+        self.transform.shape()
     }
 }
 
@@ -1643,12 +1621,12 @@ where
         let source_block_id = source_block_id_for(&self.block_map, block_id)?;
         let block = self.source.read_block(source_block_id).await?;
         block
-            .transpose(Some(self.permutation.to_vec()))
+            .transpose(Some(self.transform.axes().to_vec()))
             .map_err(TCError::from)
     }
 
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        let permutation = self.permutation;
+        let block_axes = self.block_axes;
 
         let blocks = stream::iter(self.block_map.into_inner())
             .map(move |block_id| {
@@ -1660,7 +1638,7 @@ where
                 let block = result?;
 
                 block
-                    .transpose(Some(permutation.to_vec()))
+                    .transpose(Some(block_axes.to_vec()))
                     .map_err(TCError::from)
             });
 
@@ -1672,9 +1650,9 @@ impl<FE, T, S: Into<DenseAccess<FE, T>>> From<DenseTranspose<S>> for DenseAccess
     fn from(transpose: DenseTranspose<S>) -> Self {
         Self::Transpose(Box::new(DenseTranspose {
             source: transpose.source.into(),
-            shape: transpose.shape,
-            permutation: transpose.permutation.into(),
+            transform: transpose.transform,
             block_map: transpose.block_map,
+            block_axes: transpose.block_axes,
         }))
     }
 }
@@ -1684,7 +1662,8 @@ impl<S: fmt::Debug> fmt::Debug for DenseTranspose<S> {
         write!(
             f,
             "transpose axes {:?} of {:?}",
-            self.permutation, self.source
+            self.transform.axes(),
+            self.source
         )
     }
 }

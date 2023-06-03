@@ -517,20 +517,3 @@ fn strides_for(shape: &[u64], ndim: usize) -> Strides {
 fn validate_order(order: &[usize], ndim: usize) -> bool {
     order.len() == ndim && order.iter().all(|x| x < &ndim)
 }
-
-#[inline]
-fn validate_transpose(permutation: Option<Axes>, shape: &[u64]) -> Result<Axes, TCError> {
-    if let Some(axes) = permutation {
-        if axes.len() == shape.len() && (0..shape.len()).into_iter().all(|x| axes.contains(&x)) {
-            Ok(axes)
-        } else {
-            Err(bad_request!(
-                "invalid permutation for shape {:?}: {:?}",
-                shape,
-                axes
-            ))
-        }
-    } else {
-        Ok((0..shape.len()).into_iter().rev().collect())
-    }
-}

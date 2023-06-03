@@ -288,52 +288,6 @@ impl Range {
         Some(coord)
     }
 
-    /// Given a coordinate in this range basis, return the same coordinate in the source basis.
-    pub fn invert_coord(&self, coord: Coord) -> Result<Coord, TCError> {
-        if coord.len() < self.len() {
-            return Err(bad_request!("{:?} does not contain {:?}", self, coord));
-        }
-
-        let mut source_coord = Coord::with_capacity(self.len() + coord.len());
-
-        let mut axis = 0;
-        for range in &self.axes {
-            match range {
-                AxisRange::At(i) => source_coord.push(*i),
-                AxisRange::In(range, step) => {
-                    let i = range.start + (coord[axis] * step);
-                    if i < range.end {
-                        source_coord.push(i);
-                    } else {
-                        return Err(bad_request!(
-                            "{} is out of range at axis {}",
-                            coord[axis],
-                            axis
-                        ));
-                    }
-
-                    axis += 1;
-                }
-                AxisRange::Of(indices) => {
-                    if coord[axis] < indices.len() as u64 {
-                        source_coord.push(indices[coord[axis] as usize]);
-                        axis += 1;
-                    } else {
-                        return Err(bad_request!(
-                            "{} is out of range at axis {}",
-                            coord[axis],
-                            axis
-                        ));
-                    }
-                }
-            }
-        }
-
-        source_coord.extend(coord.into_iter().skip(source_coord.len()));
-
-        Ok(source_coord)
-    }
-
     /// Return `true` if this `Range` consists of `shape.len()` number of `AxisRange::At` items.
     pub fn is_coord(&self, shape: &[u64]) -> bool {
         self.len() == shape.len() && self.axes.iter().all(|bound| bound.is_index())

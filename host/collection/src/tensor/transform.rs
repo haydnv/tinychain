@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use std::iter;
 
 use log::warn;
@@ -129,8 +128,9 @@ pub struct Expand {
 }
 
 impl Expand {
-    pub fn new(source_shape: Shape, expand: Axes) -> TCResult<Expand> {
+    pub fn new(source_shape: Shape, mut expand: Axes) -> TCResult<Expand> {
         source_shape.validate_axes(&expand)?;
+        expand.sort();
 
         let mut shape = source_shape.to_vec();
         for x in expand.iter().rev().copied() {
@@ -304,6 +304,14 @@ impl Reshape {
         &self.shape
     }
 
+    pub fn strides(&self) -> &[u64] {
+        &self.strides
+    }
+
+    pub fn source_strides(&self) -> &[u64] {
+        &self.source_strides
+    }
+
     pub fn invert_coord(&self, coord: Coord) -> Coord {
         assert_eq!(coord.len(), self.shape.len());
 
@@ -327,27 +335,20 @@ pub struct Slice {
     source_shape: Shape,
     shape: Shape,
     range: Range,
-    offset: HashMap<usize, u64>,
-    elided: HashMap<usize, u64>,
 }
 
 impl Slice {
     pub fn new(source_shape: Shape, range: Range) -> TCResult<Slice> {
         source_shape.validate_range(&range)?;
 
-        let mut shape: Coord = Vec::with_capacity(source_shape.len());
-        let mut offset = HashMap::new();
-        let mut elided = HashMap::new();
+        let mut shape = Vec::with_capacity(source_shape.len());
 
-        for axis in 0..range.len() {
-            match &range[axis] {
-                AxisRange::At(c) => {
-                    elided.insert(axis, *c);
-                }
+        for bound in range.iter() {
+            match bound {
+                AxisRange::At(_) => {} // no-op
                 AxisRange::In(range, step) => {
                     let dim = (range.end - range.start) / step;
                     shape.push(dim);
-                    offset.insert(axis, range.start);
                 }
                 AxisRange::Of(indices) => {
                     shape.push(indices.len() as u64);
@@ -355,18 +356,12 @@ impl Slice {
             }
         }
 
-        for axis in range.len()..source_shape.len() {
-            shape.push(source_shape[axis]);
-        }
-
-        let shape: Shape = shape.into();
+        shape.extend_from_slice(&source_shape[range.len()..]);
 
         Ok(Slice {
             source_shape,
-            shape,
+            shape: shape.into(),
             range,
-            offset,
-            elided,
         })
     }
 
@@ -386,80 +381,134 @@ impl Slice {
         self.shape.size()
     }
 
-    pub fn invert_range(&self, mut range: Range) -> Range {
+    pub fn invert_range(&self, range: Range) -> Range {
         let range = range.normalize(&self.shape);
 
         if range.is_empty() || range == Range::all(self.shape()) {
             return self.range.clone();
         }
 
-        let mut source_range = Vec::with_capacity(self.source_shape.len());
-        let mut source_axis = 0;
+        let mut source_range = Vec::with_capacity(self.shape.len());
         let mut axis = 0;
-        while source_axis < self.source_shape.len() {
-            if let Some(c) = self.elided.get(&source_axis) {
-                source_axis += 1;
-                source_range.push(AxisRange::At(*c));
-                continue;
-            }
 
-            match &range[axis] {
-                AxisRange::In(range, step) => {
-                    if source_axis < self.range.len() {
-                        if let AxisRange::In(source_axis_range, source_step) =
-                            &self.range[source_axis]
-                        {
-                            let start = range.start + source_axis_range.start;
-                            let end = start + (range.end - range.start);
-                            let step = step * source_step;
-                            source_range.push(AxisRange::In(start..end, step));
-                        } else {
-                            assert_eq!(range.start, 0);
-                            source_range.push(self.range[source_axis].clone());
-                        }
-                    } else {
-                        source_range.push(AxisRange::In(range.clone(), *step));
+        for axis_range in self.range.iter() {
+            let axis_range = match axis_range {
+                AxisRange::At(i) => AxisRange::At(*i),
+                AxisRange::In(source_range, source_step) => match &range[axis] {
+                    AxisRange::At(i) => {
+                        debug_assert!(source_range.start + (i * source_step) < source_range.end);
+                        AxisRange::At(source_range.start + (i * source_step))
                     }
-                }
-                AxisRange::Of(indices) => {
-                    let offset = self.offset.get(&source_axis).unwrap_or(&0);
-                    source_range.push(
-                        indices
+                    AxisRange::In(axis_range, step) => {
+                        debug_assert!(source_range.start + axis_range.start <= source_range.end);
+                        debug_assert!(source_range.start + axis_range.end <= source_range.end);
+
+                        let (source_start, source_end, source_step) = (
+                            axis_range.start + source_range.start,
+                            axis_range.end + source_range.start,
+                            step * source_step,
+                        );
+
+                        AxisRange::In(source_start..source_end, source_step)
+                    }
+                    AxisRange::Of(indices) => {
+                        let indices = indices
                             .iter()
-                            .map(|i| i + offset)
-                            .collect::<Vec<u64>>()
-                            .into(),
-                    )
-                }
-                AxisRange::At(i) => {
-                    let offset = self.offset.get(&source_axis).unwrap_or(&0);
-                    source_range.push((i + offset).into())
-                }
+                            .copied()
+                            .map(|i| source_range.start + i)
+                            .collect::<Vec<u64>>();
+
+                        debug_assert!(indices.iter().copied().all(|i| i < source_range.end));
+
+                        AxisRange::Of(indices)
+                    }
+                },
+                AxisRange::Of(source_indices) => match &range[axis] {
+                    AxisRange::At(i) => AxisRange::At(source_indices[*i as usize]),
+                    AxisRange::In(axis_range, step) => {
+                        debug_assert!(axis_range.start as usize <= source_indices.len());
+                        debug_assert!(axis_range.end as usize <= source_indices.len());
+
+                        let indices = source_indices
+                            [(axis_range.start as usize)..(axis_range.end as usize)]
+                            .iter()
+                            .step_by(*step as usize)
+                            .copied()
+                            .collect();
+
+                        AxisRange::Of(indices)
+                    }
+                    AxisRange::Of(indices) => {
+                        let indices = indices
+                            .iter()
+                            .copied()
+                            .map(|i| source_indices[i as usize])
+                            .collect();
+
+                        AxisRange::Of(indices)
+                    }
+                },
+            };
+
+            if !axis_range.is_index() {
+                axis += 1;
             }
 
-            source_axis += 1;
-            axis += 1;
+            source_range.push(axis_range);
         }
+
+        source_range.extend(self.range.iter().skip(range.len()).cloned());
 
         source_range.into()
     }
 
-    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
-        assert_eq!(coord.len(), self.shape.len());
+    pub fn invert_coord(&self, coord: Coord) -> TCResult<Coord> {
+        if coord.len() < self.shape.len() {
+            return Err(bad_request!(
+                "{:?} does not contain {:?}",
+                self.range,
+                coord
+            ));
+        }
 
-        let mut source_coord = Vec::with_capacity(self.source_shape.len());
-        let mut source_axis = 0;
-        for axis in 0..self.source_shape.len() {
-            if let Some(elided) = self.elided.get(&axis) {
-                source_coord.push(*elided);
-            } else {
-                let offset = self.offset.get(&axis).unwrap_or(&0);
-                source_coord.push(coord[source_axis] + *offset);
-                source_axis += 1;
+        let mut source_coord = Coord::with_capacity(self.range.len() + coord.len());
+
+        let mut axis = 0;
+        for range in self.range.iter() {
+            match range {
+                AxisRange::At(i) => source_coord.push(*i),
+                AxisRange::In(range, step) => {
+                    let i = range.start + (coord[axis] * step);
+                    if i < range.end {
+                        source_coord.push(i);
+                    } else {
+                        return Err(bad_request!(
+                            "{} is out of range at axis {}",
+                            coord[axis],
+                            axis
+                        ));
+                    }
+
+                    axis += 1;
+                }
+                AxisRange::Of(indices) => {
+                    if coord[axis] < indices.len() as u64 {
+                        source_coord.push(indices[coord[axis] as usize]);
+                        axis += 1;
+                    } else {
+                        return Err(bad_request!(
+                            "{} is out of range at axis {}",
+                            coord[axis],
+                            axis
+                        ));
+                    }
+                }
             }
         }
 
-        source_coord
+        source_coord.extend(coord.into_iter().skip(source_coord.len()));
+
+        Ok(source_coord)
     }
 }
 
@@ -468,61 +517,47 @@ pub struct Transpose {
     source_shape: Shape,
     shape: Shape,
     permutation: Axes,
-    inverse_permutation: Axes,
 }
 
 impl Transpose {
     pub fn new(source_shape: Shape, permutation: Option<Vec<usize>>) -> TCResult<Transpose> {
         let ndim = source_shape.len();
 
-        let permutation = if let Some(permutation) = permutation {
-            permutation
+        let permutation = if let Some(axes) = permutation {
+            if axes.len() == source_shape.len()
+                && (0..source_shape.len())
+                    .into_iter()
+                    .all(|x| axes.contains(&x))
+            {
+                Ok(axes)
+            } else {
+                Err(bad_request!(
+                    "invalid permutation for shape {:?}: {:?}",
+                    source_shape,
+                    axes
+                ))
+            }
         } else {
-            (0..ndim).rev().collect()
-        };
-
-        source_shape.validate_axes(&permutation)?;
-
-        if permutation.len() != ndim {
-            return Err(bad_request!(
-                "tensor with shape {:?} cannot transpose axes {:?}",
-                source_shape,
-                permutation
-            ));
-        } else if permutation.iter().max().expect("transpose last axis") > &ndim {
-            return Err(bad_request!(
-                "shape {:?} has no axis {}",
-                source_shape,
-                permutation.iter().max().unwrap()
-            ));
-        } else if permutation.iter().cloned().collect::<HashSet<_>>().len() != permutation.len() {
-            return Err(bad_request!(
-                "cannot transpose the same axis twice: {:?}",
-                permutation
-            ));
-        }
+            Ok((0..source_shape.len()).into_iter().rev().collect())
+        }?;
 
         let mut shape = Coord::with_capacity(ndim);
         for axis in permutation.iter().copied() {
             shape.push(source_shape[axis]);
         }
 
-        let shape = Shape::from(shape);
-
-        let mut inverse_permutation = vec![0; ndim];
-        for (i, x) in permutation.iter().copied().enumerate() {
-            inverse_permutation[x] = i;
-        }
-
         Ok(Transpose {
             source_shape,
-            shape,
+            shape: shape.into(),
             permutation,
-            inverse_permutation,
         })
     }
 
-    pub fn shape(&'_ self) -> &'_ Shape {
+    pub fn axes(&self) -> &[usize] {
+        &self.permutation
+    }
+
+    pub fn shape(&self) -> &Shape {
         &self.shape
     }
 
