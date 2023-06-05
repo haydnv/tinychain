@@ -104,7 +104,7 @@ impl<FE, T> Clone for SparseAccess<FE, T> {
     }
 }
 
-macro_rules! array_dispatch {
+macro_rules! access_dispatch {
     ($this:ident, $var:ident, $call:expr) => {
         match $this {
             Self::Table($var) => $call,
@@ -123,11 +123,11 @@ macro_rules! array_dispatch {
 
 impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for SparseAccess<FE, T> {
     fn dtype(&self) -> NumberType {
-        array_dispatch!(self, this, this.dtype())
+        access_dispatch!(self, this, this.dtype())
     }
 
     fn shape(&self) -> &Shape {
-        array_dispatch!(self, this, this.shape())
+        access_dispatch!(self, this, this.shape())
     }
 }
 
@@ -219,11 +219,11 @@ where
     }
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        array_dispatch!(self, this, this.elements(range, order).await)
+        access_dispatch!(self, this, this.elements(range, order).await)
     }
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
-        array_dispatch!(self, this, this.read_value(coord).await)
+        access_dispatch!(self, this, this.read_value(coord).await)
     }
 }
 
@@ -264,7 +264,7 @@ where
 
 impl<FE, T: DType> fmt::Debug for SparseAccess<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        array_dispatch!(self, this, this.fmt(f))
+        access_dispatch!(self, this, this.fmt(f))
     }
 }
 

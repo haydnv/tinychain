@@ -19,7 +19,7 @@ use tc_value::{DType, NumberClass, NumberInstance, NumberType};
 
 use super::{DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock};
 
-use crate::tensor::transform::{Broadcast, Reshape, Slice, Transpose};
+use crate::tensor::transform::{Broadcast, Expand, Reshape, Slice, Transpose};
 use crate::tensor::{
     offset_of, AccessPermit, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
     ERR_READ_ONLY, IDEAL_BLOCK_SIZE,
@@ -33,6 +33,7 @@ pub enum DenseAccess<FE, T> {
     Broadcast(Box<DenseBroadcast<Self>>),
     Cast(Box<DenseCast<FE, T>>),
     Cow(Box<DenseCow<FE, Self>>),
+    Expand(Box<DenseExpand<Self>>),
     Reshape(Box<DenseReshape<Self>>),
     Slice(Box<DenseSlice<Self>>),
     Transpose(Box<DenseTranspose<Self>>),
@@ -46,6 +47,7 @@ impl<FE, T> Clone for DenseAccess<FE, T> {
             Self::Broadcast(broadcast) => Self::Broadcast(broadcast.clone()),
             Self::Cast(cast) => Self::Cast(cast.clone()),
             Self::Cow(cow) => Self::Cow(cow.clone()),
+            Self::Expand(expand) => Self::Expand(expand.clone()),
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
             Self::Slice(slice) => Self::Slice(slice.clone()),
             Self::Transpose(transpose) => Self::Transpose(transpose.clone()),
@@ -54,13 +56,14 @@ impl<FE, T> Clone for DenseAccess<FE, T> {
     }
 }
 
-macro_rules! array_dispatch {
+macro_rules! access_dispatch {
     ($this:ident, $var:ident, $call:expr) => {
         match $this {
             Self::File($var) => $call,
             Self::Broadcast($var) => $call,
             Self::Cast($var) => $call,
             Self::Cow($var) => $call,
+            Self::Expand($var) => $call,
             Self::Reshape($var) => $call,
             Self::Slice($var) => $call,
             Self::Transpose($var) => $call,
@@ -79,7 +82,7 @@ where
     }
 
     fn shape(&self) -> &Shape {
-        array_dispatch!(self, this, this.shape())
+        access_dispatch!(self, this, this.shape())
     }
 }
 
@@ -94,11 +97,11 @@ where
     type DType = T;
 
     fn block_size(&self) -> usize {
-        array_dispatch!(self, this, this.block_size())
+        access_dispatch!(self, this, this.block_size())
     }
 
     async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
-        array_dispatch!(
+        access_dispatch!(
             self,
             this,
             this.read_block(block_id).map_ok(Array::from).await
@@ -113,6 +116,7 @@ where
                 Ok(Box::pin(broadcast.read_blocks().await?.map_ok(Array::from)))
             }
             Self::Cow(cow) => Ok(Box::pin(cow.read_blocks().await?.map_ok(Array::from))),
+            Self::Expand(expand) => Ok(Box::pin(expand.read_blocks().await?.map_ok(Array::from))),
             Self::Reshape(reshape) => {
                 Ok(Box::pin(reshape.read_blocks().await?.map_ok(Array::from)))
             }
@@ -138,6 +142,7 @@ where
             Self::Broadcast(broadcast) => broadcast.read_permit(txn_id, range).await,
             Self::Cast(cast) => cast.read_permit(txn_id, range).await,
             Self::Cow(cow) => cow.read_permit(txn_id, range).await,
+            Self::Expand(expand) => expand.read_permit(txn_id, range).await,
             Self::Reshape(reshape) => reshape.read_permit(txn_id, range).await,
             Self::Slice(slice) => slice.read_permit(txn_id, range).await,
             Self::Transpose(transpose) => transpose.read_permit(txn_id, range).await,
@@ -164,7 +169,7 @@ where
 
 impl<FE, T: DType> fmt::Debug for DenseAccess<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        array_dispatch!(self, this, this.fmt(f))
+        access_dispatch!(self, this, this.fmt(f))
     }
 }
 
@@ -1261,6 +1266,70 @@ where
         buffer
             .write_value_at(block_offset as usize, value)
             .map_err(TCError::from)
+    }
+}
+
+#[derive(Clone)]
+pub struct DenseExpand<S> {
+    source: S,
+    transform: Expand,
+}
+
+impl<S: DenseInstance> DenseExpand<S> {
+    pub fn new(source: S, axes: Axes) -> TCResult<Self> {
+        Expand::new(source.shape().clone(), axes).map(|transform| Self { source, transform })
+    }
+}
+
+impl<S: TensorInstance> TensorInstance for DenseExpand<S> {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.transform.shape()
+    }
+}
+
+#[async_trait]
+impl<S: DenseInstance> DenseInstance for DenseExpand<S> {
+    type Block = S::Block;
+    type DType = S::DType;
+
+    fn block_size(&self) -> usize {
+        self.source.block_size()
+    }
+
+    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+        self.source.read_block(block_id).await
+    }
+
+    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+        self.source.read_blocks().await
+    }
+}
+
+#[async_trait]
+impl<S: AccessPermit + fmt::Debug> AccessPermit for DenseExpand<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        self.transform.shape().validate_range(&range)?;
+        let range = self.transform.invert_range(range);
+        self.source.read_permit(txn_id, range).await
+    }
+
+    async fn write_permit(&self, _txn_id: TxnId, _range: Range) -> TCResult<PermitWrite<Range>> {
+        Err(bad_request!("{:?} is {}", self, ERR_READ_ONLY))
+    }
+}
+
+impl<S: fmt::Debug> fmt::Debug for DenseExpand<S> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "expand axes {:?} of {:?}",
+            self.transform.expand_axes(),
+            self.source,
+        )
     }
 }
 
