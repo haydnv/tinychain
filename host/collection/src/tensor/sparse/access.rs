@@ -17,18 +17,21 @@ use rayon::prelude::*;
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
+use tc_transact::lock::{PermitRead, PermitWrite};
+use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberCollator, NumberType};
 
 use crate::tensor::transform::{Expand, Reshape, Slice, Transpose};
 use crate::tensor::{
-    strides_for, validate_order, Axes, AxisRange, Coord, Range, Shape, TensorInstance,
+    strides_for, validate_order, AccessPermit, Axes, AxisRange, Coord, Range, Semaphore, Shape,
+    TensorInstance, ERR_READ_ONLY,
 };
 
 use super::schema::{IndexSchema, Schema};
 use super::{stream, Blocks, Elements, Node, SparseInstance};
 
 #[async_trait]
-pub trait SparseWrite<'a>: SparseInstance {
+pub trait SparseWriteLock<'a>: SparseInstance {
     type Guard: SparseWriteGuard<Self::DType>;
 
     async fn write(&'a self) -> Self::Guard;
@@ -81,6 +84,7 @@ pub enum SparseAccess<FE, T> {
     Reshape(Box<SparseReshape<Self>>),
     Slice(Box<SparseSlice<Self>>),
     Transpose(Box<SparseTranspose<Self>>),
+    Version(SparseVersion<FE, T>),
 }
 
 impl<FE, T> Clone for SparseAccess<FE, T> {
@@ -95,6 +99,7 @@ impl<FE, T> Clone for SparseAccess<FE, T> {
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
             Self::Slice(slice) => Self::Slice(slice.clone()),
             Self::Transpose(transpose) => Self::Transpose(transpose.clone()),
+            Self::Version(version) => Self::Version(version.clone()),
         }
     }
 }
@@ -111,6 +116,7 @@ macro_rules! array_dispatch {
             Self::Reshape($var) => $call,
             Self::Slice($var) => $call,
             Self::Transpose($var) => $call,
+            Self::Version($var) => $call,
         }
     };
 }
@@ -202,6 +208,13 @@ where
 
                 Ok(Box::pin(blocks))
             }
+            Self::Version(version) => {
+                let blocks = version.blocks(range, order).await?;
+                let blocks =
+                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
+
+                Ok(Box::pin(blocks))
+            }
         }
     }
 
@@ -211,6 +224,41 @@ where
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
         array_dispatch!(self, this, this.read_value(coord).await)
+    }
+}
+
+#[async_trait]
+impl<FE, T> AccessPermit for SparseAccess<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        match self {
+            Self::Broadcast(broadcast) => broadcast.read_permit(txn_id, range).await,
+            Self::BroadcastAxis(broadcast) => broadcast.read_permit(txn_id, range).await,
+            Self::Cow(cow) => cow.read_permit(txn_id, range).await,
+            Self::Expand(expand) => expand.read_permit(txn_id, range).await,
+            Self::Reshape(reshape) => reshape.read_permit(txn_id, range).await,
+            Self::Slice(slice) => slice.read_permit(txn_id, range).await,
+            Self::Transpose(transpose) => transpose.read_permit(txn_id, range).await,
+            Self::Version(version) => version.read_permit(txn_id, range).await,
+            other => Err(bad_request!(
+                "{:?} does not support transactional reads",
+                other
+            )),
+        }
+    }
+
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
+        match self {
+            Self::Slice(slice) => slice.write_permit(txn_id, range).await,
+            Self::Version(version) => version.write_permit(txn_id, range).await,
+            other => Err(bad_request!(
+                "{:?} does not support transactional writes",
+                other
+            )),
+        }
     }
 }
 
@@ -325,7 +373,7 @@ where
 }
 
 #[async_trait]
-impl<'a, FE, T> SparseWrite<'a> for SparseFile<FE, T>
+impl<'a, FE, T> SparseWriteLock<'a> for SparseFile<FE, T>
 where
     FE: AsType<Node> + Send + Sync + 'static,
     T: CDatatype + DType + fmt::Debug,
@@ -383,6 +431,104 @@ where
         }
 
         Ok(())
+    }
+}
+
+pub struct SparseVersion<FE, T> {
+    file: SparseFile<FE, T>,
+    semaphore: Semaphore,
+}
+
+impl<FE, T> Clone for SparseVersion<FE, T> {
+    fn clone(&self) -> Self {
+        Self {
+            file: self.file.clone(),
+            semaphore: self.semaphore.clone(),
+        }
+    }
+}
+
+impl<FE, T> TensorInstance for SparseVersion<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+    SparseFile<FE, T>: TensorInstance,
+{
+    fn dtype(&self) -> NumberType {
+        self.file.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.file.shape()
+    }
+}
+
+#[async_trait]
+impl<FE, T> SparseInstance for SparseVersion<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+    SparseFile<FE, T>: SparseInstance,
+{
+    type CoordBlock = <SparseFile<FE, T> as SparseInstance>::CoordBlock;
+    type ValueBlock = <SparseFile<FE, T> as SparseInstance>::ValueBlock;
+    type Blocks = <SparseFile<FE, T> as SparseInstance>::Blocks;
+    type DType = <SparseFile<FE, T> as SparseInstance>::DType;
+
+    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        self.file.blocks(range, order).await
+    }
+
+    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+        self.file.elements(range, order).await
+    }
+
+    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+        self.file.read_value(coord).await
+    }
+}
+
+#[async_trait]
+impl<FE, T> AccessPermit for SparseVersion<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        self.semaphore
+            .read(txn_id, range)
+            .map_err(TCError::from)
+            .await
+    }
+
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
+        self.semaphore
+            .write(txn_id, range)
+            .map_err(TCError::from)
+            .await
+    }
+}
+
+#[async_trait]
+impl<'a, FE, T> SparseWriteLock<'a> for SparseVersion<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+    SparseFile<FE, T>: SparseWriteLock<'a>,
+{
+    type Guard = <SparseFile<FE, T> as SparseWriteLock<'a>>::Guard;
+
+    async fn write(&'a self) -> Self::Guard {
+        self.file.write().await
+    }
+}
+
+impl<FE, T> fmt::Debug for SparseVersion<FE, T>
+where
+    SparseFile<FE, T>: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "transactional version of {:?}", self.file)
     }
 }
 
@@ -529,6 +675,26 @@ where
         }
 
         self.inner.read_value(coord).await
+    }
+}
+
+#[async_trait]
+impl<FE, T> AccessPermit for SparseBroadcast<FE, T>
+where
+    SparseAccess<FE, T>: AccessPermit,
+{
+    async fn read_permit(&self, txn_id: TxnId, mut range: Range) -> TCResult<PermitRead<Range>> {
+        self.shape.validate_range(&range)?;
+
+        while range.len() > self.shape.len() {
+            range.remove(0);
+        }
+
+        self.inner.read_permit(txn_id, range).await
+    }
+
+    async fn write_permit(&self, _txn_id: TxnId, _range: Range) -> TCResult<PermitWrite<Range>> {
+        Err(bad_request!("{:?} is {}", self, ERR_READ_ONLY))
     }
 }
 
@@ -731,6 +897,23 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
         self.shape.validate_coord(&coord)?;
         coord[self.axis] = 0;
         self.source.read_value(coord).await
+    }
+}
+
+#[async_trait]
+impl<S: AccessPermit + fmt::Debug> AccessPermit for SparseBroadcastAxis<S> {
+    async fn read_permit(&self, txn_id: TxnId, mut range: Range) -> TCResult<PermitRead<Range>> {
+        self.shape.validate_range(&range)?;
+
+        if range.len() > self.axis {
+            range[self.axis] = AxisRange::At(0);
+        }
+
+        self.source.read_permit(txn_id, range).await
+    }
+
+    async fn write_permit(&self, _txn_id: TxnId, _range: Range) -> TCResult<PermitWrite<Range>> {
+        Err(bad_request!("{:?} is {}", self, ERR_READ_ONLY))
     }
 }
 
@@ -1154,7 +1337,23 @@ where
 }
 
 #[async_trait]
-impl<'a, FE, T, S> SparseWrite<'a> for SparseCow<FE, T, S>
+impl<FE, T, S> AccessPermit for SparseCow<FE, T, S>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+    S: AccessPermit,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        self.source.read_permit(txn_id, range).await
+    }
+
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
+        self.source.write_permit(txn_id, range).await
+    }
+}
+
+#[async_trait]
+impl<'a, FE, T, S> SparseWriteLock<'a> for SparseCow<FE, T, S>
 where
     FE: AsType<Node> + Send + Sync + 'static,
     T: CDatatype + DType + fmt::Debug,
@@ -1292,6 +1491,19 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
         self.shape().validate_coord(&coord)?;
         let source_coord = self.transform.invert_coord(coord);
         self.source.read_value(source_coord).await
+    }
+}
+
+#[async_trait]
+impl<S: AccessPermit + fmt::Debug> AccessPermit for SparseExpand<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        self.transform.shape().validate_range(&range)?;
+        let range = self.transform.invert_range(range);
+        self.source.read_permit(txn_id, range).await
+    }
+
+    async fn write_permit(&self, _txn_id: TxnId, _range: Range) -> TCResult<PermitWrite<Range>> {
+        Err(bad_request!("{:?} is {}", self, ERR_READ_ONLY))
     }
 }
 
@@ -1444,6 +1656,25 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
     }
 }
 
+#[async_trait]
+impl<S: AccessPermit + fmt::Debug> AccessPermit for SparseReshape<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        if range.is_empty() || range == Range::all(self.transform.shape()) {
+            self.source.read_permit(txn_id, Range::default()).await
+        } else {
+            Err(bad_request!(
+                "cannot lock range {:?} of {:?} for reading (consider making a copy first)",
+                range,
+                self
+            ))
+        }
+    }
+
+    async fn write_permit(&self, _txn_id: TxnId, _range: Range) -> TCResult<PermitWrite<Range>> {
+        Err(bad_request!("{:?} is {}", self, ERR_READ_ONLY))
+    }
+}
+
 impl<FE, T, S: Into<SparseAccess<FE, T>>> From<SparseReshape<S>> for SparseAccess<FE, T> {
     fn from(reshape: SparseReshape<S>) -> Self {
         Self::Reshape(Box::new(SparseReshape {
@@ -1541,9 +1772,24 @@ where
 }
 
 #[async_trait]
-impl<'a, S> SparseWrite<'a> for SparseSlice<S>
+impl<S: AccessPermit> AccessPermit for SparseSlice<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        self.transform.shape().validate_range(&range)?;
+        let range = self.transform.invert_range(range);
+        self.source.read_permit(txn_id, range).await
+    }
+
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
+        self.transform.shape().validate_range(&range)?;
+        let range = self.transform.invert_range(range);
+        self.source.write_permit(txn_id, range).await
+    }
+}
+
+#[async_trait]
+impl<'a, S> SparseWriteLock<'a> for SparseSlice<S>
 where
-    S: SparseWrite<'a>,
+    S: SparseWriteLock<'a>,
 {
     type Guard = SparseSliceWriteGuard<'a, S::Guard, S::DType>;
 
@@ -1643,6 +1889,7 @@ where
             .into_iter()
             .map(|x| self.transform.axes()[x])
             .collect();
+
         let source_range = self.transform.invert_range(&range);
 
         let source_blocks = self.source.blocks(source_range, source_order).await?;
@@ -1690,6 +1937,19 @@ where
         self.shape().validate_coord(&coord)?;
         let source_coord = self.transform.invert_coord(coord);
         self.source.read_value(source_coord).await
+    }
+}
+
+#[async_trait]
+impl<S: AccessPermit + fmt::Debug> AccessPermit for SparseTranspose<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        self.transform.shape().validate_range(&range)?;
+        let range = self.transform.invert_range(&range);
+        self.source.read_permit(txn_id, range).await
+    }
+
+    async fn write_permit(&self, _txn_id: TxnId, _range: Range) -> TCResult<PermitWrite<Range>> {
+        Err(bad_request!("{:?} is {}", self, ERR_READ_ONLY))
     }
 }
 

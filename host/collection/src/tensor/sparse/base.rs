@@ -19,7 +19,7 @@ use tcgeneric::{label, Instance, Label, ThreadSafe};
 
 use crate::tensor::{Coord, Range, Semaphore, Shape, TensorIO, TensorInstance, TensorType};
 
-use super::access::{SparseAccess, SparseCow, SparseFile, SparseWrite, SparseWriteGuard};
+use super::access::{SparseAccess, SparseCow, SparseFile, SparseWriteGuard, SparseWriteLock};
 use super::{Node, Schema, SparseInstance};
 
 const CANON: Label = label("canon");

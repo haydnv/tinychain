@@ -382,11 +382,11 @@ impl Slice {
     }
 
     pub fn invert_range(&self, range: Range) -> Range {
-        let range = range.normalize(&self.shape);
-
-        if range.is_empty() || range == Range::all(self.shape()) {
+        let range = if range.is_empty() || range == Range::all(self.shape()) {
             return self.range.clone();
-        }
+        } else {
+            range.normalize(&self.shape)
+        };
 
         let mut source_range = Vec::with_capacity(self.shape.len());
         let mut axis = 0;

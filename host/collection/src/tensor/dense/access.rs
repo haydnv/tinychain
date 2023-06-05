@@ -13,13 +13,16 @@ use ha_ndarray::*;
 use safecast::AsType;
 
 use tc_error::*;
+use tc_transact::lock::{PermitRead, PermitWrite};
+use tc_transact::TxnId;
 use tc_value::{DType, NumberClass, NumberInstance, NumberType};
 
 use super::{DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock};
 
 use crate::tensor::transform::{Broadcast, Reshape, Slice, Transpose};
 use crate::tensor::{
-    offset_of, Axes, AxisRange, Coord, Range, Shape, TensorInstance, IDEAL_BLOCK_SIZE,
+    offset_of, AccessPermit, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
+    ERR_READ_ONLY, IDEAL_BLOCK_SIZE,
 };
 
 use super::stream::BlockResize;
@@ -33,6 +36,7 @@ pub enum DenseAccess<FE, T> {
     Reshape(Box<DenseReshape<Self>>),
     Slice(Box<DenseSlice<Self>>),
     Transpose(Box<DenseTranspose<Self>>),
+    Version(DenseVersion<FE, T>),
 }
 
 impl<FE, T> Clone for DenseAccess<FE, T> {
@@ -45,6 +49,7 @@ impl<FE, T> Clone for DenseAccess<FE, T> {
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
             Self::Slice(slice) => Self::Slice(slice.clone()),
             Self::Transpose(transpose) => Self::Transpose(transpose.clone()),
+            Self::Version(version) => Self::Version(version.clone()),
         }
     }
 }
@@ -59,6 +64,7 @@ macro_rules! array_dispatch {
             Self::Reshape($var) => $call,
             Self::Slice($var) => $call,
             Self::Transpose($var) => $call,
+            Self::Version($var) => $call,
         }
     };
 }
@@ -114,6 +120,44 @@ where
             Self::Transpose(transpose) => {
                 Ok(Box::pin(transpose.read_blocks().await?.map_ok(Array::from)))
             }
+            Self::Version(version) => {
+                Ok(Box::pin(version.read_blocks().await?.map_ok(Array::from)))
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl<FE, T> AccessPermit for DenseAccess<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        match self {
+            Self::Broadcast(broadcast) => broadcast.read_permit(txn_id, range).await,
+            Self::Cast(cast) => cast.read_permit(txn_id, range).await,
+            Self::Cow(cow) => cow.read_permit(txn_id, range).await,
+            Self::Reshape(reshape) => reshape.read_permit(txn_id, range).await,
+            Self::Slice(slice) => slice.read_permit(txn_id, range).await,
+            Self::Transpose(transpose) => transpose.read_permit(txn_id, range).await,
+            Self::Version(version) => version.read_permit(txn_id, range).await,
+
+            other => Err(bad_request!(
+                "{:?} does not support transactional locking",
+                other
+            )),
+        }
+    }
+
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
+        match self {
+            Self::Slice(slice) => slice.write_permit(txn_id, range).await,
+            Self::Version(version) => version.write_permit(txn_id, range).await,
+            other => Err(bad_request!(
+                "{:?} does not support transactional writes",
+                other
+            )),
         }
     }
 }
@@ -445,12 +489,12 @@ where
     T: CDatatype + DType + 'static,
     Buffer<T>: de::FromStream<Context = ()>,
 {
-    type WriteGuard = DenseAccessWriteGuard<'a, FE>;
+    type WriteGuard = DenseFileWriteGuard<'a, FE>;
 
     async fn write(&'a self) -> Self::WriteGuard {
         let dir = self.dir.read().await;
 
-        DenseAccessWriteGuard {
+        DenseFileWriteGuard {
             dir: Arc::new(dir),
             block_size: self.block_size,
             shape: &self.shape,
@@ -470,13 +514,13 @@ impl<FE, T> fmt::Debug for DenseFile<FE, T> {
     }
 }
 
-pub struct DenseAccessWriteGuard<'a, FE> {
+pub struct DenseFileWriteGuard<'a, FE> {
     dir: Arc<DirReadGuard<'a, FE>>,
     block_size: usize,
     shape: &'a Shape,
 }
 
-impl<'a, FE> DenseAccessWriteGuard<'a, FE> {
+impl<'a, FE> DenseFileWriteGuard<'a, FE> {
     pub async fn merge<T>(&self, other: DirLock<FE>) -> TCResult<()>
     where
         FE: FileLoad + AsType<Buffer<T>>,
@@ -506,7 +550,7 @@ impl<'a, FE> DenseAccessWriteGuard<'a, FE> {
 }
 
 #[async_trait]
-impl<'a, FE, T> DenseWriteGuard<T> for DenseAccessWriteGuard<'a, FE>
+impl<'a, FE, T> DenseWriteGuard<T> for DenseFileWriteGuard<'a, FE>
 where
     FE: FileLoad + AsType<Buffer<T>>,
     T: CDatatype + DType + 'static,
@@ -565,6 +609,100 @@ where
         block.write_value_at((offset % self.block_size as u64) as usize, value)?;
 
         Ok(())
+    }
+}
+
+pub struct DenseVersion<FE, T> {
+    file: DenseFile<FE, T>,
+    semaphore: Semaphore,
+}
+
+impl<FE, T> Clone for DenseVersion<FE, T> {
+    fn clone(&self) -> Self {
+        Self {
+            file: self.file.clone(),
+            semaphore: self.semaphore.clone(),
+        }
+    }
+}
+
+impl<FE, T> TensorInstance for DenseVersion<FE, T>
+where
+    DenseFile<FE, T>: TensorInstance,
+{
+    fn dtype(&self) -> NumberType {
+        self.file.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.file.shape()
+    }
+}
+
+#[async_trait]
+impl<FE, T> DenseInstance for DenseVersion<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+    DenseFile<FE, T>: DenseInstance,
+{
+    type Block = <DenseFile<FE, T> as DenseInstance>::Block;
+    type DType = <DenseFile<FE, T> as DenseInstance>::DType;
+
+    fn block_size(&self) -> usize {
+        self.file.block_size()
+    }
+
+    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+        self.file.read_block(block_id).await
+    }
+
+    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+        self.file.read_blocks().await
+    }
+}
+
+#[async_trait]
+impl<FE, T> AccessPermit for DenseVersion<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        self.semaphore
+            .read(txn_id, range)
+            .map_err(TCError::from)
+            .await
+    }
+
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
+        self.semaphore
+            .write(txn_id, range)
+            .map_err(TCError::from)
+            .await
+    }
+}
+
+#[async_trait]
+impl<'a, FE, T> DenseWriteLock<'a> for DenseVersion<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+    DenseFile<FE, T>: DenseWriteLock<'a>,
+{
+    type WriteGuard = <DenseFile<FE, T> as DenseWriteLock<'a>>::WriteGuard;
+
+    async fn write(&'a self) -> Self::WriteGuard {
+        self.file.write().await
+    }
+}
+
+impl<FE, T> fmt::Debug for DenseVersion<FE, T>
+where
+    DenseFile<FE, T>: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "transactional version of {:?}", self.file)
     }
 }
 
@@ -672,6 +810,21 @@ where
             });
 
         Ok(Box::pin(blocks))
+    }
+}
+
+#[async_trait]
+impl<S: AccessPermit> AccessPermit for DenseBroadcast<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        self.transform.shape().validate_range(&range)?;
+        let range = self.transform.invert_range(range);
+        self.source.read_permit(txn_id, range).await
+    }
+
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
+        self.transform.shape().validate_range(&range)?;
+        let range = self.transform.invert_range(range);
+        self.source.write_permit(txn_id, range).await
     }
 }
 
@@ -843,6 +996,24 @@ where
     }
 }
 
+#[async_trait]
+impl<FE, T> AccessPermit for DenseCast<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+    DenseAccess<FE, T>: AccessPermit,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        let source = &self.source;
+        cast_dispatch!(source, this, this.read_permit(txn_id, range).await)
+    }
+
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
+        let source = &self.source;
+        cast_dispatch!(source, this, this.write_permit(txn_id, range).await)
+    }
+}
+
 impl<FE, T: DType> fmt::Debug for DenseCast<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "cast {:?} into {:?}", self.source, T::dtype())
@@ -961,6 +1132,21 @@ where
             .buffered(num_cpus::get());
 
         Ok(Box::pin(blocks))
+    }
+}
+
+#[async_trait]
+impl<FE, S> AccessPermit for DenseCow<FE, S>
+where
+    FE: Send + Sync,
+    S: AccessPermit,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        self.source.read_permit(txn_id, range).await
+    }
+
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
+        self.source.write_permit(txn_id, range).await
     }
 }
 
@@ -1152,6 +1338,25 @@ where
     }
 }
 
+#[async_trait]
+impl<S: AccessPermit + fmt::Debug> AccessPermit for DenseReshape<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        if range.is_empty() || range == Range::all(self.transform.shape()) {
+            self.read_permit(txn_id, Range::default()).await
+        } else {
+            Err(bad_request!(
+                "cannot lock range {:?} of {:?} for reading (consider making a copy first)",
+                range,
+                self
+            ))
+        }
+    }
+
+    async fn write_permit(&self, _txn_id: TxnId, _range: Range) -> TCResult<PermitWrite<Range>> {
+        Err(bad_request!("{:?} is {}", self, ERR_READ_ONLY))
+    }
+}
+
 impl<FE, T, S: Into<DenseAccess<FE, T>>> From<DenseReshape<S>> for DenseAccess<FE, T> {
     fn from(reshape: DenseReshape<S>) -> Self {
         Self::Reshape(Box::new(DenseReshape {
@@ -1165,7 +1370,7 @@ impl<S: fmt::Debug> fmt::Debug for DenseReshape<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "reshape {:?} into {:?}",
+            "reshape of {:?} into {:?}",
             self.source,
             self.transform.shape()
         )
@@ -1432,6 +1637,21 @@ where
 }
 
 #[async_trait]
+impl<S: AccessPermit> AccessPermit for DenseSlice<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        self.transform.shape().validate_range(&range)?;
+        let range = self.transform.invert_range(range);
+        self.source.read_permit(txn_id, range).await
+    }
+
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
+        self.transform.shape().validate_range(&range)?;
+        let range = self.transform.invert_range(range);
+        self.source.write_permit(txn_id, range).await
+    }
+}
+
+#[async_trait]
 impl<'a, S: DenseWrite + Clone> DenseWrite for DenseSlice<S>
 where
     S::Block: NDArrayTransform,
@@ -1620,6 +1840,7 @@ where
     async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
         let source_block_id = source_block_id_for(&self.block_map, block_id)?;
         let block = self.source.read_block(source_block_id).await?;
+
         block
             .transpose(Some(self.transform.axes().to_vec()))
             .map_err(TCError::from)
@@ -1643,6 +1864,21 @@ where
             });
 
         Ok(Box::pin(blocks))
+    }
+}
+
+#[async_trait]
+impl<S: AccessPermit> AccessPermit for DenseTranspose<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+        self.transform.shape().validate_range(&range)?;
+        let range = self.transform.invert_range(&range);
+        self.source.read_permit(txn_id, range).await
+    }
+
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
+        self.transform.shape().validate_range(&range)?;
+        let range = self.transform.invert_range(&range);
+        self.source.write_permit(txn_id, range).await
     }
 }
 
