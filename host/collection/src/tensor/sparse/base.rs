@@ -17,9 +17,13 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
-use crate::tensor::{Coord, Range, Semaphore, Shape, TensorIO, TensorInstance, TensorType};
+use crate::tensor::{
+    AccessPermit, Coord, Range, Semaphore, Shape, TensorIO, TensorInstance, TensorType,
+};
 
-use super::access::{SparseAccess, SparseCow, SparseFile, SparseWriteGuard, SparseWriteLock};
+use super::access::{
+    SparseAccess, SparseCow, SparseFile, SparseVersion, SparseWriteGuard, SparseWriteLock,
+};
 use super::{Node, Schema, SparseInstance};
 
 const CANON: Label = label("canon");
@@ -127,9 +131,8 @@ where
 /// A tensor to hold sparse data, based on [`b_table::Table`]
 pub struct SparseBase<Txn, FE, T> {
     dir: DirLock<FE>,
-    canon: SparseFile<FE, T>,
+    canon: SparseVersion<FE, T>,
     state: Arc<RwLock<State<FE, T>>>,
-    semaphore: Semaphore,
     phantom: PhantomData<(Txn, T)>,
 }
 
@@ -139,7 +142,6 @@ impl<Txn, FE, T> Clone for SparseBase<Txn, FE, T> {
             dir: self.dir.clone(),
             canon: self.canon.clone(),
             state: self.state.clone(),
-            semaphore: self.semaphore.clone(),
             phantom: PhantomData,
         }
     }
@@ -164,8 +166,7 @@ where
         Self {
             dir,
             state: Arc::new(RwLock::new(state)),
-            canon,
-            semaphore,
+            canon: SparseVersion::new(canon, semaphore),
             phantom: PhantomData,
         }
     }
@@ -193,7 +194,7 @@ where
     }
 
     fn shape(&self) -> &Shape {
-        self.canon.schema().shape()
+        self.canon.shape()
     }
 }
 
@@ -206,7 +207,10 @@ where
     Number: From<T> + CastInto<T>,
 {
     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
-        let _permit = self.semaphore.read(txn_id, coord.to_vec().into()).await?;
+        let _permit = self
+            .canon
+            .read_permit(txn_id, coord.to_vec().into())
+            .await?;
 
         let version = {
             let state = self.state.read().expect("sparse state");
@@ -221,7 +225,11 @@ where
     }
 
     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
-        let _permit = self.semaphore.write(txn_id, range.clone().into()).await?;
+        let _permit = self
+            .canon
+            .write_permit(txn_id, range.clone().into())
+            .await?;
+
         let value = value.cast_into();
 
         let version = {
@@ -239,7 +247,10 @@ where
     }
 
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        let _permit = self.semaphore.write(txn_id, coord.to_vec().into()).await?;
+        let _permit = self
+            .canon
+            .write_permit(txn_id, coord.to_vec().into())
+            .await?;
 
         let version = {
             let mut state = self.state.write().expect("sparse state");
@@ -320,7 +331,7 @@ where
             state.deltas.insert(txn_id, delta);
         }
 
-        self.semaphore.finalize(&txn_id, false);
+        self.canon.commit(&txn_id);
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
@@ -336,7 +347,7 @@ where
 
         state.pending.remove(txn_id);
 
-        self.semaphore.finalize(txn_id, false);
+        self.canon.rollback(txn_id);
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -390,6 +401,6 @@ where
                 .expect("write dense tensor delta");
         }
 
-        self.semaphore.finalize(txn_id, true);
+        self.canon.finalize(txn_id);
     }
 }

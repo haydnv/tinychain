@@ -448,6 +448,24 @@ impl<FE, T> Clone for SparseVersion<FE, T> {
     }
 }
 
+impl<FE, T> SparseVersion<FE, T> {
+    pub fn new(file: SparseFile<FE, T>, semaphore: Semaphore) -> Self {
+        Self { file, semaphore }
+    }
+
+    pub fn commit(&self, txn_id: &TxnId) {
+        self.semaphore.finalize(txn_id, false);
+    }
+
+    pub fn rollback(&self, txn_id: &TxnId) {
+        self.semaphore.finalize(txn_id, false);
+    }
+
+    pub fn finalize(&self, txn_id: &TxnId) {
+        self.semaphore.finalize(txn_id, true);
+    }
+}
+
 impl<FE, T> TensorInstance for SparseVersion<FE, T>
 where
     FE: Send + Sync,
@@ -520,6 +538,12 @@ where
 
     async fn write(&'a self) -> Self::Guard {
         self.file.write().await
+    }
+}
+
+impl<FE, T> From<SparseVersion<FE, T>> for SparseAccess<FE, T> {
+    fn from(version: SparseVersion<FE, T>) -> Self {
+        Self::Version(version)
     }
 }
 

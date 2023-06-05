@@ -18,9 +18,11 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberInstance, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
-use crate::tensor::{Coord, Range, Semaphore, Shape, TensorIO, TensorInstance, TensorType};
+use crate::tensor::{
+    AccessPermit, Coord, Range, Semaphore, Shape, TensorIO, TensorInstance, TensorType,
+};
 
-use super::access::{DenseAccess, DenseCow, DenseFile, DenseSlice};
+use super::access::{DenseAccess, DenseCow, DenseFile, DenseSlice, DenseVersion};
 use super::{DenseCacheFile, DenseInstance, DenseWriteGuard, DenseWriteLock};
 
 const CANON: Label = label("canon");
@@ -99,9 +101,8 @@ where
 
 pub struct DenseBase<Txn, FE, T> {
     dir: DirLock<FE>,
-    canon: DenseFile<FE, T>,
+    canon: DenseVersion<FE, T>,
     state: Arc<RwLock<State<FE, T>>>,
-    semaphore: Semaphore,
     phantom: PhantomData<Txn>,
 }
 
@@ -111,7 +112,6 @@ impl<Txn, FE, T> Clone for DenseBase<Txn, FE, T> {
             dir: self.dir.clone(),
             canon: self.canon.clone(),
             state: self.state.clone(),
-            semaphore: self.semaphore.clone(),
             phantom: self.phantom,
         }
     }
@@ -138,8 +138,7 @@ where
         Self {
             dir,
             state: Arc::new(RwLock::new(state)),
-            canon,
-            semaphore,
+            canon: DenseVersion::new(canon, semaphore),
             phantom: PhantomData,
         }
     }
@@ -181,7 +180,10 @@ where
     Number: From<T> + CastInto<T>,
 {
     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
-        let _permit = self.semaphore.read(txn_id, coord.to_vec().into()).await?;
+        let _permit = self
+            .canon
+            .read_permit(txn_id, coord.to_vec().into())
+            .await?;
 
         let version = {
             let state = self.state.read().expect("dense state");
@@ -196,7 +198,10 @@ where
     }
 
     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
-        let _permit = self.semaphore.write(txn_id, range.clone().into()).await?;
+        let _permit = self
+            .canon
+            .write_permit(txn_id, range.clone().into())
+            .await?;
 
         let version = {
             let mut state = self.state.write().expect("dense state");
@@ -213,7 +218,10 @@ where
     }
 
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        let _permit = self.semaphore.write(txn_id, coord.to_vec().into()).await?;
+        let _permit = self
+            .canon
+            .write_permit(txn_id, coord.to_vec().into())
+            .await?;
 
         let version = {
             let mut state = self.state.write().expect("dense state");
@@ -222,6 +230,7 @@ where
         };
 
         let version = version.write().await;
+
         version
             .write_value(coord, value.cast_into())
             .map_err(TCError::from)
@@ -298,7 +307,7 @@ where
             state.deltas.insert(txn_id, delta);
         }
 
-        self.semaphore.finalize(&txn_id, false);
+        self.canon.commit(&txn_id);
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
@@ -314,7 +323,7 @@ where
 
         state.pending.remove(txn_id);
 
-        self.semaphore.finalize(txn_id, false);
+        self.canon.rollback(txn_id);
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
@@ -365,7 +374,7 @@ where
             canon.merge(delta).await.expect("write dense tensor delta");
         }
 
-        self.semaphore.finalize(txn_id, true);
+        self.canon.finalize(txn_id);
     }
 }
 

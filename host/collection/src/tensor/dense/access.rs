@@ -631,6 +631,24 @@ impl<FE, T> Clone for DenseVersion<FE, T> {
     }
 }
 
+impl<FE, T> DenseVersion<FE, T> {
+    pub fn new(file: DenseFile<FE, T>, semaphore: Semaphore) -> Self {
+        Self { file, semaphore }
+    }
+
+    pub fn commit(&self, txn_id: &TxnId) {
+        self.semaphore.finalize(txn_id, false)
+    }
+
+    pub fn rollback(&self, txn_id: &TxnId) {
+        self.semaphore.finalize(txn_id, false)
+    }
+
+    pub fn finalize(&self, txn_id: &TxnId) {
+        self.semaphore.finalize(txn_id, true)
+    }
+}
+
 impl<FE, T> TensorInstance for DenseVersion<FE, T>
 where
     DenseFile<FE, T>: TensorInstance,
@@ -699,6 +717,12 @@ where
 
     async fn write(&'a self) -> Self::WriteGuard {
         self.file.write().await
+    }
+}
+
+impl<FE, T> From<DenseVersion<FE, T>> for DenseAccess<FE, T> {
+    fn from(version: DenseVersion<FE, T>) -> Self {
+        Self::Version(version)
     }
 }
 
