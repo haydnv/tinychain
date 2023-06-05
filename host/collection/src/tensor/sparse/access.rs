@@ -1603,7 +1603,7 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
                 .broadcast(vec![values.size(), source_ndim])?;
 
             let offsets = source_coords.mul(source_strides)?;
-            let offsets = offsets.sum_axis(1)?;
+            let offsets = offsets.sum_axis(1, false)?;
 
             let broadcast = vec![offsets.size(), ndim];
             let strides = strides.clone().broadcast(broadcast.to_vec())?;
@@ -1989,7 +1989,7 @@ where
             let (coords, values) = result?;
 
             let strides = strides.clone().broadcast(coords.shape().to_vec())?;
-            let offsets = coords.mul(strides)?.sum_axis(0)?;
+            let offsets = coords.mul(strides)?.sum_axis(0, false)?;
             let offsets = offsets.read(&queue)?.to_slice()?.into_vec();
 
             let values = values.read(&queue)?.to_slice()?.into_vec();
