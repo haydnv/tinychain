@@ -23,8 +23,6 @@ mod transform;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
-const ERR_READ_ONLY: &'static str = "a read-only tensor view";
-
 #[cfg(debug_assertions)]
 const IDEAL_BLOCK_SIZE: usize = 24;
 
@@ -91,9 +89,12 @@ impl<'en> en::ToStream<'en> for Schema {
 }
 
 #[async_trait]
-pub trait AccessPermit: Send + Sync {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>>;
+pub trait TensorPermitRead: Send + Sync {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>>;
+}
 
+#[async_trait]
+pub trait TensorPermitWrite: Send + Sync {
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>>;
 }
 

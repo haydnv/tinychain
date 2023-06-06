@@ -23,8 +23,8 @@ use tc_value::{DType, Number, NumberCollator, NumberType};
 
 use crate::tensor::transform::{Expand, Reshape, Slice, Transpose};
 use crate::tensor::{
-    strides_for, validate_order, AccessPermit, Axes, AxisRange, Coord, Range, Semaphore, Shape,
-    TensorInstance, ERR_READ_ONLY,
+    strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
+    TensorPermitRead, TensorPermitWrite,
 };
 
 use super::schema::{IndexSchema, Schema};
@@ -228,12 +228,12 @@ where
 }
 
 #[async_trait]
-impl<FE, T> AccessPermit for SparseAccess<FE, T>
+impl<FE, T> TensorPermitRead for SparseAccess<FE, T>
 where
     FE: Send + Sync,
     T: CDatatype + DType,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         match self {
             Self::Broadcast(broadcast) => broadcast.read_permit(txn_id, range).await,
             Self::BroadcastAxis(broadcast) => broadcast.read_permit(txn_id, range).await,
@@ -249,7 +249,14 @@ where
             )),
         }
     }
+}
 
+#[async_trait]
+impl<FE, T> TensorPermitWrite for SparseAccess<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+{
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
         match self {
             Self::Slice(slice) => slice.write_permit(txn_id, range).await,
@@ -507,18 +514,26 @@ where
 }
 
 #[async_trait]
-impl<FE, T> AccessPermit for SparseVersion<FE, T>
+impl<FE, T> TensorPermitRead for SparseVersion<FE, T>
 where
     FE: Send + Sync,
     T: CDatatype + DType,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.semaphore
             .read(txn_id, range)
+            .map_ok(|permit| vec![permit])
             .map_err(TCError::from)
             .await
     }
+}
 
+#[async_trait]
+impl<FE, T> TensorPermitWrite for SparseVersion<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+{
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
         self.semaphore
             .write(txn_id, range)
@@ -703,11 +718,15 @@ where
 }
 
 #[async_trait]
-impl<FE, T> AccessPermit for SparseBroadcast<FE, T>
+impl<FE, T> TensorPermitRead for SparseBroadcast<FE, T>
 where
-    SparseAccess<FE, T>: AccessPermit,
+    SparseAccess<FE, T>: TensorPermitRead,
 {
-    async fn read_permit(&self, txn_id: TxnId, mut range: Range) -> TCResult<PermitRead<Range>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        mut range: Range,
+    ) -> TCResult<Vec<PermitRead<Range>>> {
         self.shape.validate_range(&range)?;
 
         while range.len() > self.shape.len() {
@@ -715,10 +734,6 @@ where
         }
 
         self.inner.read_permit(txn_id, range).await
-    }
-
-    async fn write_permit(&self, _txn_id: TxnId, _range: Range) -> TCResult<PermitWrite<Range>> {
-        Err(bad_request!("{:?} is {}", self, ERR_READ_ONLY))
     }
 }
 
@@ -925,8 +940,12 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
 }
 
 #[async_trait]
-impl<S: AccessPermit + fmt::Debug> AccessPermit for SparseBroadcastAxis<S> {
-    async fn read_permit(&self, txn_id: TxnId, mut range: Range) -> TCResult<PermitRead<Range>> {
+impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for SparseBroadcastAxis<S> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        mut range: Range,
+    ) -> TCResult<Vec<PermitRead<Range>>> {
         self.shape.validate_range(&range)?;
 
         if range.len() > self.axis {
@@ -934,10 +953,6 @@ impl<S: AccessPermit + fmt::Debug> AccessPermit for SparseBroadcastAxis<S> {
         }
 
         self.source.read_permit(txn_id, range).await
-    }
-
-    async fn write_permit(&self, _txn_id: TxnId, _range: Range) -> TCResult<PermitWrite<Range>> {
-        Err(bad_request!("{:?} is {}", self, ERR_READ_ONLY))
     }
 }
 
@@ -1361,16 +1376,24 @@ where
 }
 
 #[async_trait]
-impl<FE, T, S> AccessPermit for SparseCow<FE, T, S>
+impl<FE, T, S> TensorPermitRead for SparseCow<FE, T, S>
 where
     FE: Send + Sync,
     T: CDatatype + DType,
-    S: AccessPermit,
+    S: TensorPermitRead,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.source.read_permit(txn_id, range).await
     }
+}
 
+#[async_trait]
+impl<FE, T, S> TensorPermitWrite for SparseCow<FE, T, S>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+    S: TensorPermitWrite,
+{
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
         self.source.write_permit(txn_id, range).await
     }
@@ -1519,15 +1542,11 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
 }
 
 #[async_trait]
-impl<S: AccessPermit + fmt::Debug> AccessPermit for SparseExpand<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for SparseExpand<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, range).await
-    }
-
-    async fn write_permit(&self, _txn_id: TxnId, _range: Range) -> TCResult<PermitWrite<Range>> {
-        Err(bad_request!("{:?} is {}", self, ERR_READ_ONLY))
     }
 }
 
@@ -1681,8 +1700,8 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
 }
 
 #[async_trait]
-impl<S: AccessPermit + fmt::Debug> AccessPermit for SparseReshape<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for SparseReshape<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         if range.is_empty() || range == Range::all(self.transform.shape()) {
             self.source.read_permit(txn_id, Range::default()).await
         } else {
@@ -1692,10 +1711,6 @@ impl<S: AccessPermit + fmt::Debug> AccessPermit for SparseReshape<S> {
                 self
             ))
         }
-    }
-
-    async fn write_permit(&self, _txn_id: TxnId, _range: Range) -> TCResult<PermitWrite<Range>> {
-        Err(bad_request!("{:?} is {}", self, ERR_READ_ONLY))
     }
 }
 
@@ -1796,13 +1811,16 @@ where
 }
 
 #[async_trait]
-impl<S: AccessPermit> AccessPermit for SparseSlice<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+impl<S: TensorPermitRead> TensorPermitRead for SparseSlice<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, range).await
     }
+}
 
+#[async_trait]
+impl<S: TensorPermitWrite> TensorPermitWrite for SparseSlice<S> {
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
@@ -1965,15 +1983,11 @@ where
 }
 
 #[async_trait]
-impl<S: AccessPermit + fmt::Debug> AccessPermit for SparseTranspose<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for SparseTranspose<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(&range);
         self.source.read_permit(txn_id, range).await
-    }
-
-    async fn write_permit(&self, _txn_id: TxnId, _range: Range) -> TCResult<PermitWrite<Range>> {
-        Err(bad_request!("{:?} is {}", self, ERR_READ_ONLY))
     }
 }
 

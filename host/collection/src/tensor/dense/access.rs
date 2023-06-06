@@ -22,8 +22,8 @@ use super::{DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock};
 
 use crate::tensor::transform::{Broadcast, Expand, Reshape, Slice, Transpose};
 use crate::tensor::{
-    offset_of, AccessPermit, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
-    ERR_READ_ONLY, IDEAL_BLOCK_SIZE,
+    offset_of, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead,
+    TensorPermitWrite, IDEAL_BLOCK_SIZE,
 };
 
 use super::stream::BlockResize;
@@ -34,6 +34,7 @@ pub enum DenseAccess<FE, T: CDatatype> {
     Broadcast(Box<DenseBroadcast<Self>>),
     Cast(Box<DenseCast<FE, T>>),
     Combine(Box<DenseCombine<Self, Self, T, T>>),
+    Const(Box<DenseConst<Self, T, T>>),
     Cow(Box<DenseCow<FE, Self>>),
     Expand(Box<DenseExpand<Self>>),
     Reshape(Box<DenseReshape<Self>>),
@@ -49,6 +50,7 @@ impl<FE, T: CDatatype> Clone for DenseAccess<FE, T> {
             Self::Broadcast(broadcast) => Self::Broadcast(broadcast.clone()),
             Self::Cast(cast) => Self::Cast(cast.clone()),
             Self::Combine(combine) => Self::Combine(combine.clone()),
+            Self::Const(combine) => Self::Const(combine.clone()),
             Self::Cow(cow) => Self::Cow(cow.clone()),
             Self::Expand(expand) => Self::Expand(expand.clone()),
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
@@ -66,6 +68,7 @@ macro_rules! access_dispatch {
             Self::Broadcast($var) => $call,
             Self::Cast($var) => $call,
             Self::Combine($var) => $call,
+            Self::Const($var) => $call,
             Self::Cow($var) => $call,
             Self::Expand($var) => $call,
             Self::Reshape($var) => $call,
@@ -114,15 +117,14 @@ where
 
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
         match self {
-            Self::Cast(cast) => Ok(Box::pin(cast.read_blocks().await?)),
+            Self::Cast(cast) => cast.read_blocks().await,
             Self::File(file) => Ok(Box::pin(file.read_blocks().await?.map_ok(Array::from))),
             Self::Broadcast(broadcast) => {
                 Ok(Box::pin(broadcast.read_blocks().await?.map_ok(Array::from)))
             }
-            Self::Combine(combine) => {
-                Ok(Box::pin(combine.read_blocks().await?.map_ok(Array::from)))
-            }
-            Self::Cow(cow) => Ok(Box::pin(cow.read_blocks().await?.map_ok(Array::from))),
+            Self::Combine(combine) => combine.read_blocks().await,
+            Self::Const(combine) => combine.read_blocks().await,
+            Self::Cow(cow) => cow.read_blocks().await,
             Self::Expand(expand) => Ok(Box::pin(expand.read_blocks().await?.map_ok(Array::from))),
             Self::Reshape(reshape) => {
                 Ok(Box::pin(reshape.read_blocks().await?.map_ok(Array::from)))
@@ -139,15 +141,17 @@ where
 }
 
 #[async_trait]
-impl<FE, T> AccessPermit for DenseAccess<FE, T>
+impl<FE, T> TensorPermitRead for DenseAccess<FE, T>
 where
     FE: Send + Sync,
     T: CDatatype + DType,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         match self {
             Self::Broadcast(broadcast) => broadcast.read_permit(txn_id, range).await,
             Self::Cast(cast) => cast.read_permit(txn_id, range).await,
+            Self::Combine(combine) => combine.read_permit(txn_id, range).await,
+            Self::Const(combine) => combine.read_permit(txn_id, range).await,
             Self::Cow(cow) => cow.read_permit(txn_id, range).await,
             Self::Expand(expand) => expand.read_permit(txn_id, range).await,
             Self::Reshape(reshape) => reshape.read_permit(txn_id, range).await,
@@ -161,7 +165,14 @@ where
             )),
         }
     }
+}
 
+#[async_trait]
+impl<FE, T> TensorPermitWrite for DenseAccess<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+{
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
         match self {
             Self::Slice(slice) => slice.write_permit(txn_id, range).await,
@@ -693,18 +704,26 @@ where
 }
 
 #[async_trait]
-impl<FE, T> AccessPermit for DenseVersion<FE, T>
+impl<FE, T> TensorPermitRead for DenseVersion<FE, T>
 where
     FE: Send + Sync,
     T: CDatatype + DType,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.semaphore
             .read(txn_id, range)
+            .map_ok(|permit| vec![permit])
             .map_err(TCError::from)
             .await
     }
+}
 
+#[async_trait]
+impl<FE, T> TensorPermitWrite for DenseVersion<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+{
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
         self.semaphore
             .write(txn_id, range)
@@ -850,17 +869,11 @@ where
 }
 
 #[async_trait]
-impl<S: AccessPermit> AccessPermit for DenseBroadcast<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+impl<S: TensorPermitRead> TensorPermitRead for DenseBroadcast<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, range).await
-    }
-
-    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
-        self.transform.shape().validate_range(&range)?;
-        let range = self.transform.invert_range(range);
-        self.source.write_permit(txn_id, range).await
     }
 }
 
@@ -1033,20 +1046,15 @@ where
 }
 
 #[async_trait]
-impl<FE, T> AccessPermit for DenseCast<FE, T>
+impl<FE, T> TensorPermitRead for DenseCast<FE, T>
 where
     FE: Send + Sync,
     T: CDatatype + DType,
-    DenseAccess<FE, T>: AccessPermit,
+    DenseAccess<FE, T>: TensorPermitRead,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         let source = &self.source;
         cast_dispatch!(source, this, this.read_permit(txn_id, range).await)
-    }
-
-    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
-        let source = &self.source;
-        cast_dispatch!(source, this, this.write_permit(txn_id, range).await)
     }
 }
 
@@ -1172,15 +1180,22 @@ where
 }
 
 #[async_trait]
-impl<FE, S> AccessPermit for DenseCow<FE, S>
+impl<FE, S> TensorPermitRead for DenseCow<FE, S>
 where
     FE: Send + Sync,
-    S: AccessPermit,
+    S: TensorPermitRead,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.source.read_permit(txn_id, range).await
     }
+}
 
+#[async_trait]
+impl<FE, S> TensorPermitWrite for DenseCow<FE, S>
+where
+    FE: Send + Sync,
+    S: TensorPermitWrite,
+{
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
         self.source.write_permit(txn_id, range).await
     }
@@ -1342,15 +1357,11 @@ impl<S: DenseInstance> DenseInstance for DenseExpand<S> {
 }
 
 #[async_trait]
-impl<S: AccessPermit + fmt::Debug> AccessPermit for DenseExpand<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for DenseExpand<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, range).await
-    }
-
-    async fn write_permit(&self, _txn_id: TxnId, _range: Range) -> TCResult<PermitWrite<Range>> {
-        Err(bad_request!("{:?} is {}", self, ERR_READ_ONLY))
     }
 }
 
@@ -1455,6 +1466,23 @@ where
     }
 }
 
+#[async_trait]
+impl<L, R, IT, OT> TensorPermitRead for DenseCombine<L, R, IT, OT>
+where
+    L: TensorPermitRead,
+    R: TensorPermitRead,
+    IT: CDatatype,
+    OT: CDatatype,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        // always acquire these locks in the same order, to avoid the risk of a deadlock
+        let mut left = self.left.read_permit(txn_id, range.clone()).await?;
+        let right = self.right.read_permit(txn_id, range).await?;
+        left.extend(right);
+        Ok(left)
+    }
+}
+
 impl<L, R, IT, OT> fmt::Debug for DenseCombine<L, R, IT, OT>
 where
     L: fmt::Debug,
@@ -1464,6 +1492,98 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} with {:?}", self.left, self.right)
+    }
+}
+
+#[derive(Clone)]
+pub struct DenseConst<L, IT: CDatatype, OT: CDatatype> {
+    left: L,
+    right: IT,
+    op: fn(Array<IT>, IT) -> TCResult<Array<OT>>,
+    value_op: fn(IT, IT) -> OT,
+}
+
+impl<L, IT: CDatatype, OT: CDatatype> DenseConst<L, IT, OT> {
+    pub fn new(
+        left: L,
+        right: IT,
+        op: fn(Array<IT>, IT) -> TCResult<Array<OT>>,
+        value_op: fn(IT, IT) -> OT,
+    ) -> Self {
+        Self {
+            left,
+            right,
+            op,
+            value_op,
+        }
+    }
+}
+
+impl<L, IT, OT> TensorInstance for DenseConst<L, IT, OT>
+where
+    L: TensorInstance,
+    IT: CDatatype + DType,
+    OT: CDatatype + DType,
+{
+    fn dtype(&self) -> NumberType {
+        OT::dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.left.shape()
+    }
+}
+
+#[async_trait]
+impl<L, IT, OT> DenseInstance for DenseConst<L, IT, OT>
+where
+    L: DenseInstance<DType = IT> + fmt::Debug,
+    IT: CDatatype + DType,
+    OT: CDatatype + DType,
+{
+    type Block = Array<OT>;
+    type DType = OT;
+
+    fn block_size(&self) -> usize {
+        self.left.block_size()
+    }
+
+    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+        self.left
+            .read_block(block_id)
+            .map(move |result| result.and_then(|block| (self.op)(block.into(), self.right)))
+            .await
+    }
+
+    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+        let left = self.left.read_blocks().await?;
+        let blocks =
+            left.map(move |result| result.and_then(|block| (self.op)(block.into(), self.right)));
+
+        Ok(Box::pin(blocks))
+    }
+}
+
+#[async_trait]
+impl<L, IT, OT> TensorPermitRead for DenseConst<L, IT, OT>
+where
+    L: TensorPermitRead,
+    IT: CDatatype,
+    OT: CDatatype,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        self.left.read_permit(txn_id, range).await
+    }
+}
+
+impl<L, IT, OT> fmt::Debug for DenseConst<L, IT, OT>
+where
+    L: fmt::Debug,
+    IT: CDatatype,
+    OT: CDatatype,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "dual constant operation on {:?}", self.left)
     }
 }
 
@@ -1542,8 +1662,8 @@ where
 }
 
 #[async_trait]
-impl<S: AccessPermit + fmt::Debug> AccessPermit for DenseReshape<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for DenseReshape<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         if range.is_empty() || range == Range::all(self.transform.shape()) {
             self.read_permit(txn_id, Range::default()).await
         } else {
@@ -1553,10 +1673,6 @@ impl<S: AccessPermit + fmt::Debug> AccessPermit for DenseReshape<S> {
                 self
             ))
         }
-    }
-
-    async fn write_permit(&self, _txn_id: TxnId, _range: Range) -> TCResult<PermitWrite<Range>> {
-        Err(bad_request!("{:?} is {}", self, ERR_READ_ONLY))
     }
 }
 
@@ -1840,13 +1956,16 @@ where
 }
 
 #[async_trait]
-impl<S: AccessPermit> AccessPermit for DenseSlice<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+impl<S: TensorPermitRead> TensorPermitRead for DenseSlice<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, range).await
     }
+}
 
+#[async_trait]
+impl<S: TensorPermitWrite> TensorPermitWrite for DenseSlice<S> {
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
@@ -2071,17 +2190,11 @@ where
 }
 
 #[async_trait]
-impl<S: AccessPermit> AccessPermit for DenseTranspose<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitRead<Range>> {
+impl<S: TensorPermitRead> TensorPermitRead for DenseTranspose<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(&range);
         self.source.read_permit(txn_id, range).await
-    }
-
-    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
-        self.transform.shape().validate_range(&range)?;
-        let range = self.transform.invert_range(&range);
-        self.source.write_permit(txn_id, range).await
     }
 }
 

@@ -19,7 +19,8 @@ use tc_value::{DType, Number, NumberInstance, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
 use crate::tensor::{
-    AccessPermit, Coord, Range, Semaphore, Shape, TensorIO, TensorInstance, TensorType,
+    Coord, Range, Semaphore, Shape, TensorIO, TensorInstance, TensorPermitRead, TensorPermitWrite,
+    TensorType,
 };
 
 use super::access::{DenseAccess, DenseCow, DenseFile, DenseSlice, DenseVersion};

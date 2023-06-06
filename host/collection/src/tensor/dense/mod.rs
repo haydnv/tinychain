@@ -6,16 +6,18 @@ use async_trait::async_trait;
 use freqfs::FileLoad;
 use futures::stream::Stream;
 use ha_ndarray::{Array, Buffer, CDatatype, NDArrayRead, NDArrayTransform, NDArrayWrite};
-use safecast::AsType;
+use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
-use tc_value::{DType, NumberType};
+use tc_value::{DType, Number, NumberType};
 
-use crate::tensor::TensorBoolean;
+use crate::tensor::{TensorBoolean, TensorBooleanConst};
 
 use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
 
-use access::{DenseBroadcast, DenseCombine, DenseExpand, DenseReshape, DenseSlice, DenseTranspose};
+use access::{
+    DenseBroadcast, DenseCombine, DenseConst, DenseExpand, DenseReshape, DenseSlice, DenseTranspose,
+};
 
 mod access;
 mod base;
@@ -209,6 +211,80 @@ where
         }
 
         DenseCombine::new(self.accessor, other.accessor, xor_block, xor).map(DenseTensor::from)
+    }
+}
+
+impl<A: DenseInstance> TensorBooleanConst for DenseTensor<A>
+where
+    A::DType: CDatatype + CastFrom<Number>,
+{
+    type Combine = DenseTensor<DenseConst<A, A::DType, u8>>;
+    type DenseCombine = DenseTensor<DenseConst<A, A::DType, u8>>;
+
+    fn and_const(self, other: Number) -> TCResult<Self::Combine> {
+        let other = other.cast_into();
+
+        fn and_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayBooleanConst::and_const(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn and<T: CDatatype>(l: T, r: T) -> u8 {
+            if l != T::zero() && r != T::zero() {
+                1
+            } else {
+                0
+            }
+        }
+
+        Ok(DenseTensor {
+            accessor: DenseConst::new(self.accessor, other, and_block, and),
+        })
+    }
+
+    fn or_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        let other = other.cast_into();
+
+        fn or_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayBooleanConst::or_const(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn or<T: CDatatype>(l: T, r: T) -> u8 {
+            if l != T::zero() || r != T::zero() {
+                1
+            } else {
+                0
+            }
+        }
+
+        Ok(DenseTensor {
+            accessor: DenseConst::new(self.accessor, other, or_block, or),
+        })
+    }
+
+    fn xor_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        let other = other.cast_into();
+
+        fn xor_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayBooleanConst::xor_const(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn xor<T: CDatatype>(l: T, r: T) -> u8 {
+            if (l != T::zero()).bitxor(r != T::zero()) {
+                1
+            } else {
+                0
+            }
+        }
+
+        Ok(DenseTensor {
+            accessor: DenseConst::new(self.accessor, other, xor_block, xor),
+        })
     }
 }
 

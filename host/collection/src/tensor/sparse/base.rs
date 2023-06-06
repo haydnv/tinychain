@@ -18,7 +18,8 @@ use tc_value::{DType, Number, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
 use crate::tensor::{
-    AccessPermit, Coord, Range, Semaphore, Shape, TensorIO, TensorInstance, TensorType,
+    Coord, Range, Semaphore, Shape, TensorIO, TensorInstance, TensorPermitRead, TensorPermitWrite,
+    TensorType,
 };
 
 use super::access::{
