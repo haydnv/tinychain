@@ -11,7 +11,7 @@ use safecast::{AsType, CastFrom, CastInto};
 use tc_error::*;
 use tc_value::{DType, Number, NumberType};
 
-use crate::tensor::{TensorBoolean, TensorBooleanConst};
+use crate::tensor::{TensorBoolean, TensorBooleanConst, TensorCompare};
 
 use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
 
@@ -285,6 +285,124 @@ where
         Ok(DenseTensor {
             accessor: DenseConst::new(self.accessor, other, xor_block, xor),
         })
+    }
+}
+
+impl<L, R, T> TensorCompare<DenseTensor<R>> for DenseTensor<L>
+where
+    L: DenseInstance<DType = T>,
+    R: DenseInstance<DType = T>,
+    T: CDatatype + DType,
+{
+    type Compare = DenseTensor<DenseCombine<L, R, T, u8>>;
+    type Dense = DenseTensor<DenseCombine<L, R, T, u8>>;
+
+    fn eq(self, other: DenseTensor<R>) -> TCResult<Self::Dense> {
+        fn eq_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayCompare::eq(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn eq<T: CDatatype>(l: T, r: T) -> u8 {
+            if (l != T::zero()) == (r != T::zero()) {
+                1
+            } else {
+                0
+            }
+        }
+
+        DenseCombine::new(self.accessor, other.accessor, eq_block, eq).map(DenseTensor::from)
+    }
+
+    fn gt(self, other: DenseTensor<R>) -> TCResult<Self::Compare> {
+        fn gt_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayCompare::gt(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn gt<T: CDatatype>(l: T, r: T) -> u8 {
+            if (l != T::zero()) > (r != T::zero()) {
+                1
+            } else {
+                0
+            }
+        }
+
+        DenseCombine::new(self.accessor, other.accessor, gt_block, gt).map(DenseTensor::from)
+    }
+
+    fn ge(self, other: DenseTensor<R>) -> TCResult<Self::Dense> {
+        fn ge_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayCompare::ge(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn ge<T: CDatatype>(l: T, r: T) -> u8 {
+            if (l != T::zero()) >= (r != T::zero()) {
+                1
+            } else {
+                0
+            }
+        }
+
+        DenseCombine::new(self.accessor, other.accessor, ge_block, ge).map(DenseTensor::from)
+    }
+
+    fn lt(self, other: DenseTensor<R>) -> TCResult<Self::Compare> {
+        fn lt_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayCompare::lt(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn lt<T: CDatatype>(l: T, r: T) -> u8 {
+            if (l != T::zero()) < (r != T::zero()) {
+                1
+            } else {
+                0
+            }
+        }
+
+        DenseCombine::new(self.accessor, other.accessor, lt_block, lt).map(DenseTensor::from)
+    }
+
+    fn le(self, other: DenseTensor<R>) -> TCResult<Self::Dense> {
+        fn le_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayCompare::le(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn le<T: CDatatype>(l: T, r: T) -> u8 {
+            if (l != T::zero()) <= (r != T::zero()) {
+                1
+            } else {
+                0
+            }
+        }
+
+        DenseCombine::new(self.accessor, other.accessor, le_block, le).map(DenseTensor::from)
+    }
+
+    fn ne(self, other: DenseTensor<R>) -> TCResult<Self::Compare> {
+        fn ne_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayCompare::ne(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn ne<T: CDatatype>(l: T, r: T) -> u8 {
+            if (l != T::zero()) != (r != T::zero()) {
+                1
+            } else {
+                0
+            }
+        }
+
+        DenseCombine::new(self.accessor, other.accessor, ne_block, ne).map(DenseTensor::from)
     }
 }
 

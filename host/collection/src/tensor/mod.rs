@@ -228,13 +228,13 @@ pub trait TensorCompare<O> {
     fn gt(self, other: O) -> TCResult<Self::Compare>;
 
     /// Element-wise greater-or-equal
-    fn gte(self, other: O) -> TCResult<Self::Dense>;
+    fn ge(self, other: O) -> TCResult<Self::Dense>;
 
     /// Element-wise less-than
     fn lt(self, other: O) -> TCResult<Self::Compare>;
 
     /// Element-wise less-or-equal
-    fn lte(self, other: O) -> TCResult<Self::Dense>;
+    fn le(self, other: O) -> TCResult<Self::Dense>;
 
     /// Element-wise not-equal
     fn ne(self, other: O) -> TCResult<Self::Compare>;
