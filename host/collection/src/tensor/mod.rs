@@ -252,13 +252,13 @@ pub trait TensorCompareConst {
     fn gt_const(self, other: Number) -> TCResult<Self::Compare>;
 
     /// Element-wise greater-or-equal
-    fn gte_const(self, other: Number) -> TCResult<Self::Compare>;
+    fn ge_const(self, other: Number) -> TCResult<Self::Compare>;
 
     /// Element-wise less-than
     fn lt_const(self, other: Number) -> TCResult<Self::Compare>;
 
     /// Element-wise less-or-equal
-    fn lte_const(self, other: Number) -> TCResult<Self::Compare>;
+    fn le_const(self, other: Number) -> TCResult<Self::Compare>;
 
     /// Element-wise not-equal
     fn ne_const(self, other: Number) -> TCResult<Self::Compare>;

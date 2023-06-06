@@ -11,7 +11,7 @@ use safecast::{AsType, CastFrom, CastInto};
 use tc_error::*;
 use tc_value::{DType, Number, NumberType};
 
-use crate::tensor::{TensorBoolean, TensorBooleanConst, TensorCompare};
+use crate::tensor::{TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst};
 
 use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
 
@@ -403,6 +403,145 @@ where
         }
 
         DenseCombine::new(self.accessor, other.accessor, ne_block, ne).map(DenseTensor::from)
+    }
+}
+
+impl<A: DenseInstance> TensorCompareConst for DenseTensor<A>
+where
+    A::DType: CastFrom<Number>,
+{
+    type Compare = DenseTensor<DenseConst<A, A::DType, u8>>;
+
+    fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
+        let other = other.cast_into();
+
+        fn eq_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayCompareScalar::eq_scalar(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn eq<T: CDatatype>(l: T, r: T) -> u8 {
+            if l == r {
+                1
+            } else {
+                0
+            }
+        }
+
+        Ok(DenseTensor {
+            accessor: DenseConst::new(self.accessor, other, eq_block, eq),
+        })
+    }
+
+    fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
+        let other = other.cast_into();
+
+        fn gt_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayCompareScalar::gt_scalar(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn gt<T: CDatatype>(l: T, r: T) -> u8 {
+            if l > r {
+                1
+            } else {
+                0
+            }
+        }
+
+        Ok(DenseTensor {
+            accessor: DenseConst::new(self.accessor, other, gt_block, gt),
+        })
+    }
+
+    fn ge_const(self, other: Number) -> TCResult<Self::Compare> {
+        let other = other.cast_into();
+
+        fn ge_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayCompareScalar::ge_scalar(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn ge<T: CDatatype>(l: T, r: T) -> u8 {
+            if l >= r {
+                1
+            } else {
+                0
+            }
+        }
+
+        Ok(DenseTensor {
+            accessor: DenseConst::new(self.accessor, other, ge_block, ge),
+        })
+    }
+
+    fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
+        let other = other.cast_into();
+
+        fn lt_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayCompareScalar::lt_scalar(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn lt<T: CDatatype>(l: T, r: T) -> u8 {
+            if l < r {
+                1
+            } else {
+                0
+            }
+        }
+
+        Ok(DenseTensor {
+            accessor: DenseConst::new(self.accessor, other, lt_block, lt),
+        })
+    }
+
+    fn le_const(self, other: Number) -> TCResult<Self::Compare> {
+        let other = other.cast_into();
+
+        fn le_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayCompareScalar::le_scalar(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn le<T: CDatatype>(l: T, r: T) -> u8 {
+            if l <= r {
+                1
+            } else {
+                0
+            }
+        }
+
+        Ok(DenseTensor {
+            accessor: DenseConst::new(self.accessor, other, le_block, le),
+        })
+    }
+
+    fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
+        let other = other.cast_into();
+
+        fn ne_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayCompareScalar::ne_scalar(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn ne<T: CDatatype>(l: T, r: T) -> u8 {
+            if l != r {
+                1
+            } else {
+                0
+            }
+        }
+
+        Ok(DenseTensor {
+            accessor: DenseConst::new(self.accessor, other, ne_block, ne),
+        })
     }
 }
 
