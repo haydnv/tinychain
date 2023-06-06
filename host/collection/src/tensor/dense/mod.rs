@@ -1,4 +1,5 @@
 use std::fmt;
+use std::ops::BitXor;
 use std::pin::Pin;
 
 use async_trait::async_trait;
@@ -10,13 +11,15 @@ use safecast::AsType;
 use tc_error::*;
 use tc_value::{DType, NumberType};
 
-use access::{DenseBroadcast, DenseReshape, DenseSlice, DenseTranspose};
+use crate::tensor::TensorBoolean;
+
+use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
+
+use access::{DenseBroadcast, DenseCombine, DenseExpand, DenseReshape, DenseSlice, DenseTranspose};
 
 mod access;
 mod base;
 mod stream;
-
-use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
 
 type BlockShape = ha_ndarray::Shape;
 type BlockStream<Block> = Pin<Box<dyn Stream<Item = TCResult<Block>> + Send>>;
@@ -143,12 +146,75 @@ impl<A: TensorInstance> TensorInstance for DenseTensor<A> {
     }
 }
 
-impl<A> TensorTransform for DenseTensor<A>
+impl<L, R, T> TensorBoolean<DenseTensor<R>> for DenseTensor<L>
 where
-    A: DenseInstance,
+    L: DenseInstance<DType = T> + fmt::Debug,
+    R: DenseInstance<DType = T> + fmt::Debug,
+    T: CDatatype + DType,
+    DenseTensor<R>: fmt::Debug,
+    Self: fmt::Debug,
 {
+    type Combine = DenseTensor<DenseCombine<L, R, T, u8>>;
+    type LeftCombine = DenseTensor<DenseCombine<L, R, T, u8>>;
+
+    fn and(self, other: DenseTensor<R>) -> TCResult<Self::LeftCombine> {
+        fn and_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayBoolean::and(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn and<T: CDatatype>(l: T, r: T) -> u8 {
+            if l != T::zero() && r != T::zero() {
+                1
+            } else {
+                0
+            }
+        }
+
+        DenseCombine::new(self.accessor, other.accessor, and_block, and).map(DenseTensor::from)
+    }
+
+    fn or(self, other: DenseTensor<R>) -> TCResult<Self::Combine> {
+        fn or_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayBoolean::or(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn or<T: CDatatype>(l: T, r: T) -> u8 {
+            if l != T::zero() || r != T::zero() {
+                1
+            } else {
+                0
+            }
+        }
+
+        DenseCombine::new(self.accessor, other.accessor, or_block, or).map(DenseTensor::from)
+    }
+
+    fn xor(self, other: DenseTensor<R>) -> TCResult<Self::Combine> {
+        fn xor_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
+            ha_ndarray::NDArrayBoolean::xor(l, r)
+                .map(Array::from)
+                .map_err(TCError::from)
+        }
+
+        fn xor<T: CDatatype>(l: T, r: T) -> u8 {
+            if (l != T::zero()).bitxor(r != T::zero()) {
+                1
+            } else {
+                0
+            }
+        }
+
+        DenseCombine::new(self.accessor, other.accessor, xor_block, xor).map(DenseTensor::from)
+    }
+}
+
+impl<A: DenseInstance> TensorTransform for DenseTensor<A> {
     type Broadcast = DenseTensor<DenseBroadcast<A>>;
-    type Expand = DenseTensor<DenseReshape<A>>;
+    type Expand = DenseTensor<DenseExpand<A>>;
     type Reshape = DenseTensor<DenseReshape<A>>;
     type Slice = DenseTensor<DenseSlice<A>>;
     type Transpose = DenseTensor<DenseTranspose<A>>;
@@ -157,16 +223,8 @@ where
         DenseBroadcast::new(self.accessor, shape).map(DenseTensor::from)
     }
 
-    fn expand(self, mut axes: Axes) -> TCResult<Self::Expand> {
-        let mut shape = self.shape().to_vec();
-
-        axes.sort();
-
-        for x in axes.into_iter().rev() {
-            shape.insert(x, 1);
-        }
-
-        DenseReshape::new(self.accessor, shape.into()).map(DenseTensor::from)
+    fn expand(self, axes: Axes) -> TCResult<Self::Expand> {
+        DenseExpand::new(self.accessor, axes).map(DenseTensor::from)
     }
 
     fn reshape(self, shape: Shape) -> TCResult<Self::Reshape> {

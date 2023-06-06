@@ -206,6 +206,12 @@ pub trait TensorBooleanConst {
     fn xor_const(self, other: Number) -> TCResult<Self::DenseCombine>;
 }
 
+pub trait TensorCast {
+    type Cast;
+
+    fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast>;
+}
+
 /// Tensor comparison operations
 pub trait TensorCompare<O> {
     /// The result of a comparison operation

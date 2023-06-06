@@ -9,6 +9,7 @@ use freqfs::{
 };
 use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use futures::try_join;
 use ha_ndarray::*;
 use safecast::AsType;
 
@@ -28,10 +29,11 @@ use crate::tensor::{
 use super::stream::BlockResize;
 use super::{BlockShape, BlockStream, DenseCacheFile};
 
-pub enum DenseAccess<FE, T> {
+pub enum DenseAccess<FE, T: CDatatype> {
     File(DenseFile<FE, T>),
     Broadcast(Box<DenseBroadcast<Self>>),
     Cast(Box<DenseCast<FE, T>>),
+    Combine(Box<DenseCombine<Self, Self, T, T>>),
     Cow(Box<DenseCow<FE, Self>>),
     Expand(Box<DenseExpand<Self>>),
     Reshape(Box<DenseReshape<Self>>),
@@ -40,12 +42,13 @@ pub enum DenseAccess<FE, T> {
     Version(DenseVersion<FE, T>),
 }
 
-impl<FE, T> Clone for DenseAccess<FE, T> {
+impl<FE, T: CDatatype> Clone for DenseAccess<FE, T> {
     fn clone(&self) -> Self {
         match self {
             Self::File(file) => Self::File(file.clone()),
             Self::Broadcast(broadcast) => Self::Broadcast(broadcast.clone()),
             Self::Cast(cast) => Self::Cast(cast.clone()),
+            Self::Combine(combine) => Self::Combine(combine.clone()),
             Self::Cow(cow) => Self::Cow(cow.clone()),
             Self::Expand(expand) => Self::Expand(expand.clone()),
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
@@ -62,6 +65,7 @@ macro_rules! access_dispatch {
             Self::File($var) => $call,
             Self::Broadcast($var) => $call,
             Self::Cast($var) => $call,
+            Self::Combine($var) => $call,
             Self::Cow($var) => $call,
             Self::Expand($var) => $call,
             Self::Reshape($var) => $call,
@@ -115,6 +119,9 @@ where
             Self::Broadcast(broadcast) => {
                 Ok(Box::pin(broadcast.read_blocks().await?.map_ok(Array::from)))
             }
+            Self::Combine(combine) => {
+                Ok(Box::pin(combine.read_blocks().await?.map_ok(Array::from)))
+            }
             Self::Cow(cow) => Ok(Box::pin(cow.read_blocks().await?.map_ok(Array::from))),
             Self::Expand(expand) => Ok(Box::pin(expand.read_blocks().await?.map_ok(Array::from))),
             Self::Reshape(reshape) => {
@@ -167,7 +174,7 @@ where
     }
 }
 
-impl<FE, T: DType> fmt::Debug for DenseAccess<FE, T> {
+impl<FE, T: CDatatype + DType> fmt::Debug for DenseAccess<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         access_dispatch!(self, this, this.fmt(f))
     }
@@ -507,7 +514,7 @@ where
     }
 }
 
-impl<FE, T> From<DenseFile<FE, T>> for DenseAccess<FE, T> {
+impl<FE, T: CDatatype> From<DenseFile<FE, T>> for DenseAccess<FE, T> {
     fn from(file: DenseFile<FE, T>) -> Self {
         Self::File(file)
     }
@@ -720,7 +727,7 @@ where
     }
 }
 
-impl<FE, T> From<DenseVersion<FE, T>> for DenseAccess<FE, T> {
+impl<FE, T: CDatatype> From<DenseVersion<FE, T>> for DenseAccess<FE, T> {
     fn from(version: DenseVersion<FE, T>) -> Self {
         Self::Version(version)
     }
@@ -857,7 +864,7 @@ impl<S: AccessPermit> AccessPermit for DenseBroadcast<S> {
     }
 }
 
-impl<FE, T, S: Into<DenseAccess<FE, T>>> From<DenseBroadcast<S>> for DenseAccess<FE, T> {
+impl<FE, T: CDatatype, S: Into<DenseAccess<FE, T>>> From<DenseBroadcast<S>> for DenseAccess<FE, T> {
     fn from(broadcast: DenseBroadcast<S>) -> Self {
         Self::Broadcast(Box::new(DenseBroadcast {
             source: broadcast.source.into(),
@@ -1225,6 +1232,7 @@ where
 
 impl<'a, FE, S, T> From<DenseCow<FE, S>> for DenseAccess<FE, T>
 where
+    T: CDatatype,
     DenseAccess<FE, T>: From<S>,
 {
     fn from(cow: DenseCow<FE, S>) -> Self {
@@ -1358,6 +1366,108 @@ impl<S: fmt::Debug> fmt::Debug for DenseExpand<S> {
 }
 
 #[derive(Clone)]
+pub struct DenseCombine<L, R, IT: CDatatype, OT: CDatatype> {
+    left: L,
+    right: R,
+    op: fn(Array<IT>, Array<IT>) -> TCResult<Array<OT>>,
+    value_op: fn(IT, IT) -> OT,
+}
+
+impl<L, R, IT, OT> DenseCombine<L, R, IT, OT>
+where
+    L: DenseInstance + fmt::Debug,
+    R: DenseInstance + fmt::Debug,
+    IT: CDatatype + DType,
+    OT: CDatatype + DType,
+{
+    pub fn new(
+        left: L,
+        right: R,
+        op: fn(Array<IT>, Array<IT>) -> TCResult<Array<OT>>,
+        value_op: fn(IT, IT) -> OT,
+    ) -> TCResult<Self> {
+        if left.block_size() == right.block_size() && left.shape() == right.shape() {
+            Ok(Self {
+                left,
+                right,
+                op,
+                value_op,
+            })
+        } else {
+            Err(bad_request!("cannot combine {:?} with {:?}", left, right))
+        }
+    }
+}
+
+impl<L, R, IT, OT> TensorInstance for DenseCombine<L, R, IT, OT>
+where
+    L: TensorInstance,
+    R: TensorInstance,
+    IT: DType + CDatatype,
+    OT: DType + CDatatype,
+{
+    fn dtype(&self) -> NumberType {
+        OT::dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        debug_assert_eq!(self.left.shape(), self.right.shape());
+        self.left.shape()
+    }
+}
+
+#[async_trait]
+impl<L, R, IT, OT> DenseInstance for DenseCombine<L, R, IT, OT>
+where
+    L: DenseInstance<DType = IT>,
+    R: DenseInstance<DType = IT>,
+    IT: CDatatype + DType,
+    OT: CDatatype + DType,
+{
+    type Block = Array<OT>;
+    type DType = OT;
+
+    fn block_size(&self) -> usize {
+        self.left.block_size()
+    }
+
+    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+        let (left, right) = try_join!(
+            self.left.read_block(block_id),
+            self.right.read_block(block_id)
+        )?;
+
+        (self.op)(left.into(), right.into())
+    }
+
+    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+        let op = self.op;
+
+        let (left, right) = try_join!(self.left.read_blocks(), self.right.read_blocks())?;
+
+        let blocks = left.zip(right).map(move |(l, r)| {
+            let l = l?;
+            let r = r?;
+            (op)(l.into(), r.into())
+        });
+
+        Ok(Box::pin(blocks))
+    }
+}
+
+impl<L, R, IT, OT> fmt::Debug for DenseCombine<L, R, IT, OT>
+where
+    L: fmt::Debug,
+    R: fmt::Debug,
+    IT: CDatatype,
+    OT: CDatatype,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "combine {:?} with {:?}", self.left, self.right)
+    }
+}
+
+#[derive(Clone)]
 pub struct DenseReshape<S> {
     source: S,
     transform: Reshape,
@@ -1450,7 +1560,7 @@ impl<S: AccessPermit + fmt::Debug> AccessPermit for DenseReshape<S> {
     }
 }
 
-impl<FE, T, S: Into<DenseAccess<FE, T>>> From<DenseReshape<S>> for DenseAccess<FE, T> {
+impl<FE, T: CDatatype, S: Into<DenseAccess<FE, T>>> From<DenseReshape<S>> for DenseAccess<FE, T> {
     fn from(reshape: DenseReshape<S>) -> Self {
         Self::Reshape(Box::new(DenseReshape {
             source: reshape.source.into(),
@@ -1788,7 +1898,7 @@ where
     }
 }
 
-impl<FE, T, S: Into<DenseAccess<FE, T>>> From<DenseSlice<S>> for DenseAccess<FE, T> {
+impl<FE, T: CDatatype, S: Into<DenseAccess<FE, T>>> From<DenseSlice<S>> for DenseAccess<FE, T> {
     fn from(slice: DenseSlice<S>) -> Self {
         Self::Slice(Box::new(DenseSlice {
             source: slice.source.into(),
@@ -1975,7 +2085,7 @@ impl<S: AccessPermit> AccessPermit for DenseTranspose<S> {
     }
 }
 
-impl<FE, T, S: Into<DenseAccess<FE, T>>> From<DenseTranspose<S>> for DenseAccess<FE, T> {
+impl<FE, T: CDatatype, S: Into<DenseAccess<FE, T>>> From<DenseTranspose<S>> for DenseAccess<FE, T> {
     fn from(transpose: DenseTranspose<S>) -> Self {
         Self::Transpose(Box::new(DenseTranspose {
             source: transpose.source.into(),
