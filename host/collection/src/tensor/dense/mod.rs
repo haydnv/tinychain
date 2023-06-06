@@ -1,12 +1,12 @@
 use std::fmt;
-use std::ops::BitXor;
+use std::marker::PhantomData;
 use std::pin::Pin;
 
 use async_trait::async_trait;
 use freqfs::FileLoad;
 use futures::stream::Stream;
 use ha_ndarray::{Array, Buffer, CDatatype, NDArrayRead, NDArrayTransform, NDArrayWrite};
-use safecast::{AsType, CastFrom, CastInto};
+use safecast::AsType;
 
 use tc_error::*;
 use tc_value::{DType, Number, NumberType};
@@ -16,7 +16,8 @@ use crate::tensor::{TensorBoolean, TensorBooleanConst, TensorCompare, TensorComp
 use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
 
 use access::{
-    DenseBroadcast, DenseCombine, DenseConst, DenseExpand, DenseReshape, DenseSlice, DenseTranspose,
+    ArrayCastSource, DenseBroadcast, DenseCastSource, DenseCompare, DenseCompareConst, DenseExpand, DenseReshape,
+    DenseSlice, DenseTranspose,
 };
 
 mod access;
@@ -128,17 +129,18 @@ pub trait DenseWriteGuard<T>: Send + Sync {
 }
 
 #[derive(Clone)]
-pub struct DenseTensor<A> {
+pub struct DenseTensor<FE, A> {
     accessor: A,
+    phantom: PhantomData<FE>,
 }
 
-impl<A> DenseTensor<A> {
+impl<FE, A> DenseTensor<FE, A> {
     pub fn into_inner(self) -> A {
         self.accessor
     }
 }
 
-impl<A: TensorInstance> TensorInstance for DenseTensor<A> {
+impl<FE: Send + Sync + 'static, A: TensorInstance> TensorInstance for DenseTensor<FE, A> {
     fn dtype(&self) -> NumberType {
         self.accessor.dtype()
     }
@@ -148,409 +150,127 @@ impl<A: TensorInstance> TensorInstance for DenseTensor<A> {
     }
 }
 
-impl<L, R, T> TensorBoolean<DenseTensor<R>> for DenseTensor<L>
+impl<FE, L, R, T> TensorBoolean<DenseTensor<FE, R>> for DenseTensor<FE, L>
 where
-    L: DenseInstance<DType = T> + fmt::Debug,
-    R: DenseInstance<DType = T> + fmt::Debug,
+    FE: Send + Sync + 'static,
+    L: DenseInstance<DType = T> + Into<DenseCastSource<FE>> + fmt::Debug,
+    R: DenseInstance<DType = T> + Into<DenseCastSource<FE>> + fmt::Debug,
     T: CDatatype + DType,
-    DenseTensor<R>: fmt::Debug,
+    DenseTensor<FE, R>: fmt::Debug,
     Self: fmt::Debug,
 {
-    type Combine = DenseTensor<DenseCombine<L, R, T, u8>>;
-    type LeftCombine = DenseTensor<DenseCombine<L, R, T, u8>>;
+    type Combine = DenseTensor<FE, DenseCompare<FE, u8>>;
+    type LeftCombine = DenseTensor<FE, DenseCompare<FE, u8>>;
 
-    fn and(self, other: DenseTensor<R>) -> TCResult<Self::LeftCombine> {
-        fn and_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayBoolean::and(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn and<T: CDatatype>(l: T, r: T) -> u8 {
-            if l != T::zero() && r != T::zero() {
-                1
-            } else {
-                0
-            }
-        }
-
-        DenseCombine::new(self.accessor, other.accessor, and_block, and).map(DenseTensor::from)
+    fn and(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::and)
+            .map(DenseTensor::from)
     }
 
-    fn or(self, other: DenseTensor<R>) -> TCResult<Self::Combine> {
-        fn or_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayBoolean::or(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn or<T: CDatatype>(l: T, r: T) -> u8 {
-            if l != T::zero() || r != T::zero() {
-                1
-            } else {
-                0
-            }
-        }
-
-        DenseCombine::new(self.accessor, other.accessor, or_block, or).map(DenseTensor::from)
+    fn or(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::or).map(DenseTensor::from)
     }
 
-    fn xor(self, other: DenseTensor<R>) -> TCResult<Self::Combine> {
-        fn xor_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayBoolean::xor(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn xor<T: CDatatype>(l: T, r: T) -> u8 {
-            if (l != T::zero()).bitxor(r != T::zero()) {
-                1
-            } else {
-                0
-            }
-        }
-
-        DenseCombine::new(self.accessor, other.accessor, xor_block, xor).map(DenseTensor::from)
+    fn xor(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::xor)
+            .map(DenseTensor::from)
     }
 }
 
-impl<A: DenseInstance> TensorBooleanConst for DenseTensor<A>
+impl<FE, A> TensorBooleanConst for DenseTensor<FE, A>
 where
-    A::DType: CDatatype + CastFrom<Number>,
+    FE: Send + Sync + 'static,
+    A: DenseInstance + Into<DenseCastSource<FE>>,
 {
-    type Combine = DenseTensor<DenseConst<A, A::DType, u8>>;
-    type DenseCombine = DenseTensor<DenseConst<A, A::DType, u8>>;
+    type Combine = DenseTensor<FE, DenseCompareConst<FE, u8>>;
+    type DenseCombine = DenseTensor<FE, DenseCompareConst<FE, u8>>;
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
-        let other = other.cast_into();
-
-        fn and_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayBooleanConst::and_const(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn and<T: CDatatype>(l: T, r: T) -> u8 {
-            if l != T::zero() && r != T::zero() {
-                1
-            } else {
-                0
-            }
-        }
-
-        Ok(DenseTensor {
-            accessor: DenseConst::new(self.accessor, other, and_block, and),
-        })
+        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::and_scalar).into())
     }
 
     fn or_const(self, other: Number) -> TCResult<Self::DenseCombine> {
-        let other = other.cast_into();
-
-        fn or_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayBooleanConst::or_const(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn or<T: CDatatype>(l: T, r: T) -> u8 {
-            if l != T::zero() || r != T::zero() {
-                1
-            } else {
-                0
-            }
-        }
-
-        Ok(DenseTensor {
-            accessor: DenseConst::new(self.accessor, other, or_block, or),
-        })
+        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::or_scalar).into())
     }
 
     fn xor_const(self, other: Number) -> TCResult<Self::DenseCombine> {
-        let other = other.cast_into();
-
-        fn xor_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayBooleanConst::xor_const(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn xor<T: CDatatype>(l: T, r: T) -> u8 {
-            if (l != T::zero()).bitxor(r != T::zero()) {
-                1
-            } else {
-                0
-            }
-        }
-
-        Ok(DenseTensor {
-            accessor: DenseConst::new(self.accessor, other, xor_block, xor),
-        })
+        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::xor_scalar).into())
     }
 }
 
-impl<L, R, T> TensorCompare<DenseTensor<R>> for DenseTensor<L>
+impl<FE, L, R, T> TensorCompare<DenseTensor<FE, R>> for DenseTensor<FE, L>
 where
-    L: DenseInstance<DType = T>,
-    R: DenseInstance<DType = T>,
+    FE: Send + Sync + 'static,
+    L: DenseInstance<DType = T> + Into<DenseCastSource<FE>>,
+    R: DenseInstance<DType = T> + Into<DenseCastSource<FE>>,
     T: CDatatype + DType,
 {
-    type Compare = DenseTensor<DenseCombine<L, R, T, u8>>;
-    type Dense = DenseTensor<DenseCombine<L, R, T, u8>>;
+    type Compare = DenseTensor<FE, DenseCompare<FE, u8>>;
+    type Dense = DenseTensor<FE, DenseCompare<FE, u8>>;
 
-    fn eq(self, other: DenseTensor<R>) -> TCResult<Self::Dense> {
-        fn eq_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayCompare::eq(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn eq<T: CDatatype>(l: T, r: T) -> u8 {
-            if (l != T::zero()) == (r != T::zero()) {
-                1
-            } else {
-                0
-            }
-        }
-
-        DenseCombine::new(self.accessor, other.accessor, eq_block, eq).map(DenseTensor::from)
+    fn eq(self, other: DenseTensor<FE, R>) -> TCResult<Self::Dense> {
+        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::eq).map(DenseTensor::from)
     }
 
-    fn gt(self, other: DenseTensor<R>) -> TCResult<Self::Compare> {
-        fn gt_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayCompare::gt(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn gt<T: CDatatype>(l: T, r: T) -> u8 {
-            if (l != T::zero()) > (r != T::zero()) {
-                1
-            } else {
-                0
-            }
-        }
-
-        DenseCombine::new(self.accessor, other.accessor, gt_block, gt).map(DenseTensor::from)
+    fn gt(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
+        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::gt).map(DenseTensor::from)
     }
 
-    fn ge(self, other: DenseTensor<R>) -> TCResult<Self::Dense> {
-        fn ge_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayCompare::ge(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn ge<T: CDatatype>(l: T, r: T) -> u8 {
-            if (l != T::zero()) >= (r != T::zero()) {
-                1
-            } else {
-                0
-            }
-        }
-
-        DenseCombine::new(self.accessor, other.accessor, ge_block, ge).map(DenseTensor::from)
+    fn ge(self, other: DenseTensor<FE, R>) -> TCResult<Self::Dense> {
+        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::ge).map(DenseTensor::from)
     }
 
-    fn lt(self, other: DenseTensor<R>) -> TCResult<Self::Compare> {
-        fn lt_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayCompare::lt(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn lt<T: CDatatype>(l: T, r: T) -> u8 {
-            if (l != T::zero()) < (r != T::zero()) {
-                1
-            } else {
-                0
-            }
-        }
-
-        DenseCombine::new(self.accessor, other.accessor, lt_block, lt).map(DenseTensor::from)
+    fn lt(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
+        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::lt).map(DenseTensor::from)
     }
 
-    fn le(self, other: DenseTensor<R>) -> TCResult<Self::Dense> {
-        fn le_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayCompare::le(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn le<T: CDatatype>(l: T, r: T) -> u8 {
-            if (l != T::zero()) <= (r != T::zero()) {
-                1
-            } else {
-                0
-            }
-        }
-
-        DenseCombine::new(self.accessor, other.accessor, le_block, le).map(DenseTensor::from)
+    fn le(self, other: DenseTensor<FE, R>) -> TCResult<Self::Dense> {
+        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::le).map(DenseTensor::from)
     }
 
-    fn ne(self, other: DenseTensor<R>) -> TCResult<Self::Compare> {
-        fn ne_block<T: CDatatype>(l: Array<T>, r: Array<T>) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayCompare::ne(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn ne<T: CDatatype>(l: T, r: T) -> u8 {
-            if (l != T::zero()) != (r != T::zero()) {
-                1
-            } else {
-                0
-            }
-        }
-
-        DenseCombine::new(self.accessor, other.accessor, ne_block, ne).map(DenseTensor::from)
+    fn ne(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
+        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::ne).map(DenseTensor::from)
     }
 }
 
-impl<A: DenseInstance> TensorCompareConst for DenseTensor<A>
+impl<FE, A> TensorCompareConst for DenseTensor<FE, A>
 where
-    A::DType: CastFrom<Number>,
+    FE: Send + Sync + 'static,
+    A: DenseInstance + Into<DenseCastSource<FE>>,
 {
-    type Compare = DenseTensor<DenseConst<A, A::DType, u8>>;
+    type Compare = DenseTensor<FE, DenseCompareConst<FE, u8>>;
 
     fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
-        let other = other.cast_into();
-
-        fn eq_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayCompareScalar::eq_scalar(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn eq<T: CDatatype>(l: T, r: T) -> u8 {
-            if l == r {
-                1
-            } else {
-                0
-            }
-        }
-
-        Ok(DenseTensor {
-            accessor: DenseConst::new(self.accessor, other, eq_block, eq),
-        })
+        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::eq_scalar).into())
     }
 
     fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
-        let other = other.cast_into();
-
-        fn gt_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayCompareScalar::gt_scalar(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn gt<T: CDatatype>(l: T, r: T) -> u8 {
-            if l > r {
-                1
-            } else {
-                0
-            }
-        }
-
-        Ok(DenseTensor {
-            accessor: DenseConst::new(self.accessor, other, gt_block, gt),
-        })
+        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::gt_scalar).into())
     }
 
     fn ge_const(self, other: Number) -> TCResult<Self::Compare> {
-        let other = other.cast_into();
-
-        fn ge_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayCompareScalar::ge_scalar(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn ge<T: CDatatype>(l: T, r: T) -> u8 {
-            if l >= r {
-                1
-            } else {
-                0
-            }
-        }
-
-        Ok(DenseTensor {
-            accessor: DenseConst::new(self.accessor, other, ge_block, ge),
-        })
+        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::ge_scalar).into())
     }
 
     fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
-        let other = other.cast_into();
-
-        fn lt_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayCompareScalar::lt_scalar(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn lt<T: CDatatype>(l: T, r: T) -> u8 {
-            if l < r {
-                1
-            } else {
-                0
-            }
-        }
-
-        Ok(DenseTensor {
-            accessor: DenseConst::new(self.accessor, other, lt_block, lt),
-        })
+        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::lt_scalar).into())
     }
 
     fn le_const(self, other: Number) -> TCResult<Self::Compare> {
-        let other = other.cast_into();
-
-        fn le_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayCompareScalar::le_scalar(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn le<T: CDatatype>(l: T, r: T) -> u8 {
-            if l <= r {
-                1
-            } else {
-                0
-            }
-        }
-
-        Ok(DenseTensor {
-            accessor: DenseConst::new(self.accessor, other, le_block, le),
-        })
+        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::le_scalar).into())
     }
 
     fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
-        let other = other.cast_into();
-
-        fn ne_block<T: CDatatype>(l: Array<T>, r: T) -> TCResult<Array<u8>> {
-            ha_ndarray::NDArrayCompareScalar::ne_scalar(l, r)
-                .map(Array::from)
-                .map_err(TCError::from)
-        }
-
-        fn ne<T: CDatatype>(l: T, r: T) -> u8 {
-            if l != r {
-                1
-            } else {
-                0
-            }
-        }
-
-        Ok(DenseTensor {
-            accessor: DenseConst::new(self.accessor, other, ne_block, ne),
-        })
+        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::ne_scalar).into())
     }
 }
 
-impl<A: DenseInstance> TensorTransform for DenseTensor<A> {
-    type Broadcast = DenseTensor<DenseBroadcast<A>>;
-    type Expand = DenseTensor<DenseExpand<A>>;
-    type Reshape = DenseTensor<DenseReshape<A>>;
-    type Slice = DenseTensor<DenseSlice<A>>;
-    type Transpose = DenseTensor<DenseTranspose<A>>;
+impl<FE: Send + Sync + 'static, A: DenseInstance> TensorTransform for DenseTensor<FE, A> {
+    type Broadcast = DenseTensor<FE, DenseBroadcast<A>>;
+    type Expand = DenseTensor<FE, DenseExpand<A>>;
+    type Reshape = DenseTensor<FE, DenseReshape<A>>;
+    type Slice = DenseTensor<FE, DenseSlice<A>>;
+    type Transpose = DenseTensor<FE, DenseTranspose<A>>;
 
     fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
         DenseBroadcast::new(self.accessor, shape).map(DenseTensor::from)
@@ -573,8 +293,11 @@ impl<A: DenseInstance> TensorTransform for DenseTensor<A> {
     }
 }
 
-impl<A> From<A> for DenseTensor<A> {
+impl<FE, A> From<A> for DenseTensor<FE, A> {
     fn from(accessor: A) -> Self {
-        Self { accessor }
+        Self {
+            accessor,
+            phantom: PhantomData,
+        }
     }
 }
