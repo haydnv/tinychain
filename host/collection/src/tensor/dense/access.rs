@@ -505,7 +505,7 @@ pub enum DenseAccess<FE, T: CDatatype> {
     File(DenseFile<FE, T>),
     Broadcast(Box<DenseBroadcast<Self>>),
     Cast(Box<DenseCast<FE, T>>),
-    Combine(Box<DenseCombine<Self, Self, T, T>>),
+    Combine(Box<DenseCombine<Self, Self, T>>),
     Compare(Box<DenseCompare<FE, T>>),
     CompareConst(Box<DenseCompareConst<FE, T>>),
     Const(Box<DenseConst<Self, T, T>>),
@@ -1882,48 +1882,39 @@ impl<S: fmt::Debug> fmt::Debug for DenseExpand<S> {
 }
 
 #[derive(Clone)]
-pub struct DenseCombine<L, R, IT: CDatatype, OT: CDatatype> {
+pub struct DenseCombine<L, R, T: CDatatype> {
     left: L,
     right: R,
-    op: fn(Array<IT>, Array<IT>) -> TCResult<Array<OT>>,
-    value_op: fn(IT, IT) -> OT,
+    op: fn(Array<T>, Array<T>) -> TCResult<Array<T>>,
 }
 
-impl<L, R, IT, OT> DenseCombine<L, R, IT, OT>
+impl<L, R, T> DenseCombine<L, R, T>
 where
     L: DenseInstance + fmt::Debug,
     R: DenseInstance + fmt::Debug,
-    IT: CDatatype + DType,
-    OT: CDatatype + DType,
+    T: CDatatype + DType,
 {
     pub fn new(
         left: L,
         right: R,
-        op: fn(Array<IT>, Array<IT>) -> TCResult<Array<OT>>,
-        value_op: fn(IT, IT) -> OT,
+        op: fn(Array<T>, Array<T>) -> TCResult<Array<T>>,
     ) -> TCResult<Self> {
         if left.block_size() == right.block_size() && left.shape() == right.shape() {
-            Ok(Self {
-                left,
-                right,
-                op,
-                value_op,
-            })
+            Ok(Self { left, right, op })
         } else {
             Err(bad_request!("cannot combine {:?} with {:?}", left, right))
         }
     }
 }
 
-impl<L, R, IT, OT> TensorInstance for DenseCombine<L, R, IT, OT>
+impl<L, R, T> TensorInstance for DenseCombine<L, R, T>
 where
     L: TensorInstance,
     R: TensorInstance,
-    IT: DType + CDatatype,
-    OT: DType + CDatatype,
+    T: DType + CDatatype,
 {
     fn dtype(&self) -> NumberType {
-        OT::dtype()
+        T::dtype()
     }
 
     fn shape(&self) -> &Shape {
@@ -1933,15 +1924,14 @@ where
 }
 
 #[async_trait]
-impl<L, R, IT, OT> DenseInstance for DenseCombine<L, R, IT, OT>
+impl<L, R, T> DenseInstance for DenseCombine<L, R, T>
 where
-    L: DenseInstance<DType = IT>,
-    R: DenseInstance<DType = IT>,
-    IT: CDatatype + DType,
-    OT: CDatatype + DType,
+    L: DenseInstance<DType = T>,
+    R: DenseInstance<DType = T>,
+    T: CDatatype + DType,
 {
-    type Block = Array<OT>;
-    type DType = OT;
+    type Block = Array<T>;
+    type DType = T;
 
     fn block_size(&self) -> usize {
         self.left.block_size()
@@ -1972,12 +1962,11 @@ where
 }
 
 #[async_trait]
-impl<L, R, IT, OT> TensorPermitRead for DenseCombine<L, R, IT, OT>
+impl<L, R, T> TensorPermitRead for DenseCombine<L, R, T>
 where
     L: TensorPermitRead,
     R: TensorPermitRead,
-    IT: CDatatype,
-    OT: CDatatype,
+    T: CDatatype,
 {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         // always acquire these locks in the same order, to avoid the risk of a deadlock
@@ -1988,12 +1977,11 @@ where
     }
 }
 
-impl<L, R, IT, OT> fmt::Debug for DenseCombine<L, R, IT, OT>
+impl<L, R, T> fmt::Debug for DenseCombine<L, R, T>
 where
     L: fmt::Debug,
     R: fmt::Debug,
-    IT: CDatatype,
-    OT: CDatatype,
+    T: CDatatype,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} with {:?}", self.left, self.right)

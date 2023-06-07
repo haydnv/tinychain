@@ -5,7 +5,9 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use freqfs::FileLoad;
 use futures::stream::Stream;
-use ha_ndarray::{Array, Buffer, CDatatype, NDArrayRead, NDArrayTransform, NDArrayWrite};
+use ha_ndarray::{
+    Array, Buffer, CDatatype, NDArrayCast, NDArrayMath, NDArrayRead, NDArrayTransform, NDArrayWrite,
+};
 use safecast::AsType;
 
 use tc_error::*;
@@ -13,11 +15,12 @@ use tc_value::{DType, Number, NumberType};
 
 use crate::tensor::{
     TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal,
+    TensorMath,
 };
 
 use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
 
-use crate::tensor::dense::access::DenseDiagonal;
+use crate::tensor::dense::access::{DenseCombine, DenseDiagonal};
 use access::{
     ArrayCastSource, DenseBroadcast, DenseCastSource, DenseCompare, DenseCompareConst, DenseExpand,
     DenseReshape, DenseSlice, DenseTranspose,
@@ -274,6 +277,67 @@ impl<FE: Send + Sync + 'static, A: DenseInstance> TensorDiagonal for DenseTensor
 
     fn diagonal(self) -> TCResult<Self::Diagonal> {
         DenseDiagonal::new(self.accessor).map(DenseTensor::from)
+    }
+}
+
+impl<FE, L, R, T> TensorMath<DenseTensor<FE, R>> for DenseTensor<FE, L>
+where
+    FE: Send + Sync + 'static,
+    L: DenseInstance<DType = T>,
+    R: DenseInstance<DType = T>,
+    T: CDatatype + DType,
+{
+    type Combine = DenseTensor<FE, DenseCombine<L, R, T>>;
+    type LeftCombine = DenseTensor<FE, DenseCombine<L, R, T>>;
+
+    fn add(self, other: DenseTensor<FE, R>) -> TCResult<Self::Combine> {
+        fn add<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+            left.add(right).map(Array::from).map_err(TCError::from)
+        }
+
+        DenseCombine::new(self.accessor, other.accessor, add).map(DenseTensor::from)
+    }
+
+    fn div(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+        fn div<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+            left.div(right).map(Array::from).map_err(TCError::from)
+        }
+
+        DenseCombine::new(self.accessor, other.accessor, div).map(DenseTensor::from)
+    }
+
+    fn log(self, base: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+        fn log<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+            let right = right.cast()?;
+            left.log(right).map(Array::from).map_err(TCError::from)
+        }
+
+        DenseCombine::new(self.accessor, base.accessor, log).map(DenseTensor::from)
+    }
+
+    fn mul(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+        fn mul<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+            left.mul(right).map(Array::from).map_err(TCError::from)
+        }
+
+        DenseCombine::new(self.accessor, other.accessor, mul).map(DenseTensor::from)
+    }
+
+    fn pow(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+        fn pow<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+            let right = right.cast()?;
+            left.pow(right).map(Array::from).map_err(TCError::from)
+        }
+
+        DenseCombine::new(self.accessor, other.accessor, pow).map(DenseTensor::from)
+    }
+
+    fn sub(self, other: DenseTensor<FE, R>) -> TCResult<Self::Combine> {
+        fn sub<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+            left.sub(right).map(Array::from).map_err(TCError::from)
+        }
+
+        DenseCombine::new(self.accessor, other.accessor, sub).map(DenseTensor::from)
     }
 }
 
