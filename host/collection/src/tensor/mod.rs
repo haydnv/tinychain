@@ -265,12 +265,11 @@ pub trait TensorCompareConst {
 }
 
 /// [`Tensor`] linear algebra operations
-#[async_trait]
 pub trait TensorDiagonal {
     /// The type of [`Tensor`] returned by `diagonal`
     type Diagonal: TensorInstance;
 
-    async fn diagonal(self) -> TCResult<Self::Diagonal>;
+    fn diagonal(self) -> TCResult<Self::Diagonal>;
 }
 
 /// [`Tensor`] I/O operations

@@ -11,13 +11,16 @@ use safecast::AsType;
 use tc_error::*;
 use tc_value::{DType, Number, NumberType};
 
-use crate::tensor::{TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst};
+use crate::tensor::{
+    TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal,
+};
 
 use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
 
+use crate::tensor::dense::access::DenseDiagonal;
 use access::{
-    ArrayCastSource, DenseBroadcast, DenseCastSource, DenseCompare, DenseCompareConst, DenseExpand, DenseReshape,
-    DenseSlice, DenseTranspose,
+    ArrayCastSource, DenseBroadcast, DenseCastSource, DenseCompare, DenseCompareConst, DenseExpand,
+    DenseReshape, DenseSlice, DenseTranspose,
 };
 
 mod access;
@@ -70,6 +73,7 @@ pub trait DenseInstance: TensorInstance + fmt::Debug + Send + Sync + 'static {
 
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>>;
 
+    // TODO: remove this generic implementation
     async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
         self.shape().validate_coord(&coord)?;
 
@@ -262,6 +266,14 @@ where
 
     fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
         Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::ne_scalar).into())
+    }
+}
+
+impl<FE: Send + Sync + 'static, A: DenseInstance> TensorDiagonal for DenseTensor<FE, A> {
+    type Diagonal = DenseTensor<FE, DenseDiagonal<A>>;
+
+    fn diagonal(self) -> TCResult<Self::Diagonal> {
+        DenseDiagonal::new(self.accessor).map(DenseTensor::from)
     }
 }
 

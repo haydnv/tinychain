@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -509,6 +510,7 @@ pub enum DenseAccess<FE, T: CDatatype> {
     CompareConst(Box<DenseCompareConst<FE, T>>),
     Const(Box<DenseConst<Self, T, T>>),
     Cow(Box<DenseCow<FE, Self>>),
+    Diagonal(Box<DenseDiagonal<Self>>),
     Expand(Box<DenseExpand<Self>>),
     Reshape(Box<DenseReshape<Self>>),
     Slice(Box<DenseSlice<Self>>),
@@ -527,6 +529,7 @@ impl<FE, T: CDatatype> Clone for DenseAccess<FE, T> {
             Self::CompareConst(compare) => Self::CompareConst(compare.clone()),
             Self::Const(combine) => Self::Const(combine.clone()),
             Self::Cow(cow) => Self::Cow(cow.clone()),
+            Self::Diagonal(diag) => Self::Diagonal(diag.clone()),
             Self::Expand(expand) => Self::Expand(expand.clone()),
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
             Self::Slice(slice) => Self::Slice(slice.clone()),
@@ -547,6 +550,7 @@ macro_rules! access_dispatch {
             Self::CompareConst($var) => $call,
             Self::Const($var) => $call,
             Self::Cow($var) => $call,
+            Self::Diagonal($var) => $call,
             Self::Expand($var) => $call,
             Self::Reshape($var) => $call,
             Self::Slice($var) => $call,
@@ -604,6 +608,7 @@ where
             Self::CompareConst(compare) => compare.read_blocks().await,
             Self::Const(combine) => combine.read_blocks().await,
             Self::Cow(cow) => cow.read_blocks().await,
+            Self::Diagonal(diag) => Ok(Box::pin(diag.read_blocks().await?.map_ok(Array::from))),
             Self::Expand(expand) => Ok(Box::pin(expand.read_blocks().await?.map_ok(Array::from))),
             Self::Reshape(reshape) => {
                 Ok(Box::pin(reshape.read_blocks().await?.map_ok(Array::from)))
@@ -622,7 +627,7 @@ where
 #[async_trait]
 impl<FE, T> TensorPermitRead for DenseAccess<FE, T>
 where
-    FE: Send + Sync,
+    FE: Send + Sync + 'static,
     T: CDatatype + DType,
 {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
@@ -632,6 +637,7 @@ where
             Self::Combine(combine) => combine.read_permit(txn_id, range).await,
             Self::Const(combine) => combine.read_permit(txn_id, range).await,
             Self::Cow(cow) => cow.read_permit(txn_id, range).await,
+            Self::Diagonal(diag) => diag.read_permit(txn_id, range).await,
             Self::Expand(expand) => expand.read_permit(txn_id, range).await,
             Self::Reshape(reshape) => reshape.read_permit(txn_id, range).await,
             Self::Slice(slice) => slice.read_permit(txn_id, range).await,
@@ -1457,7 +1463,7 @@ where
 #[async_trait]
 impl<FE, T> TensorPermitRead for DenseCast<FE, T>
 where
-    FE: Send + Sync,
+    FE: Send + Sync + 'static,
     T: CDatatype + DType,
     DenseAccess<FE, T>: TensorPermitRead,
 {
@@ -1722,6 +1728,96 @@ where
         buffer
             .write_value_at(block_offset as usize, value)
             .map_err(TCError::from)
+    }
+}
+
+#[derive(Clone)]
+pub struct DenseDiagonal<S> {
+    source: S,
+    shape: Shape,
+}
+
+impl<S: TensorInstance + fmt::Debug> DenseDiagonal<S> {
+    pub fn new(source: S) -> TCResult<Self> {
+        if source.shape().len() >= 2
+            && source.shape().iter().nth_back(0) == source.shape().iter().nth_back(1)
+        {
+            let mut shape = source.shape().to_vec();
+            shape.pop();
+
+            Ok(Self {
+                source,
+                shape: shape.into(),
+            })
+        } else {
+            Err(bad_request!(
+                "matrix diagonal requires a square matrix or batch of square matrices, not {:?}",
+                source
+            ))
+        }
+    }
+}
+
+impl<S: TensorInstance> TensorInstance for DenseDiagonal<S> {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        &self.shape
+    }
+}
+
+#[async_trait]
+impl<S: DenseInstance> DenseInstance for DenseDiagonal<S> {
+    type Block = ArrayOp<ha_ndarray::ops::MatDiag<S::Block>>;
+    type DType = S::DType;
+
+    fn block_size(&self) -> usize {
+        let matrix_dim = self.shape.last().copied().expect("matrix dim") as usize;
+        self.source.block_size() / matrix_dim
+    }
+
+    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+        self.source
+            .read_block(block_id)
+            .map(|result| result.and_then(|block| block.diagonal().map_err(TCError::from)))
+            .await
+    }
+
+    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+        let source_blocks = self.source.read_blocks().await?;
+        let blocks = source_blocks
+            .map(|result| result.and_then(|block| block.diagonal().map_err(TCError::from)));
+
+        Ok(Box::pin(blocks))
+    }
+}
+
+#[async_trait]
+impl<S: TensorInstance + TensorPermitRead + fmt::Debug> TensorPermitRead for DenseDiagonal<S> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        mut range: Range,
+    ) -> TCResult<Vec<PermitRead<Range>>> {
+        let range = match range.len().cmp(&self.ndim()) {
+            Ordering::Less => Ok(range),
+            Ordering::Equal => {
+                let axis_range = range.last().cloned().expect("last axis range");
+                range.push(axis_range);
+                Ok(range)
+            }
+            Ordering::Greater => Err(bad_request!("invalid range for {:?}: {:?}", self, range)),
+        }?;
+
+        self.source.read_permit(txn_id, range).await
+    }
+}
+
+impl<S: fmt::Debug> fmt::Debug for DenseDiagonal<S> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "matrix diagonal of {:?}", self.source)
     }
 }
 
