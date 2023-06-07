@@ -508,7 +508,7 @@ pub enum DenseAccess<FE, T: CDatatype> {
     Combine(Box<DenseCombine<Self, Self, T>>),
     Compare(Box<DenseCompare<FE, T>>),
     CompareConst(Box<DenseCompareConst<FE, T>>),
-    Const(Box<DenseConst<Self, T, T>>),
+    Const(Box<DenseConst<Self, T>>),
     Cow(Box<DenseCow<FE, Self>>),
     Diagonal(Box<DenseDiagonal<Self>>),
     Expand(Box<DenseExpand<Self>>),
@@ -2148,37 +2148,25 @@ impl<FE, T: CDatatype> fmt::Debug for DenseCompareConst<FE, T> {
 }
 
 #[derive(Clone)]
-pub struct DenseConst<L, IT: CDatatype, OT: CDatatype> {
+pub struct DenseConst<L, T: CDatatype> {
     left: L,
-    right: IT,
-    op: fn(Array<IT>, IT) -> TCResult<Array<OT>>,
-    value_op: fn(IT, IT) -> OT,
+    right: T,
+    op: fn(Array<T>, T) -> TCResult<Array<T>>,
 }
 
-impl<L, IT: CDatatype, OT: CDatatype> DenseConst<L, IT, OT> {
-    pub fn new(
-        left: L,
-        right: IT,
-        op: fn(Array<IT>, IT) -> TCResult<Array<OT>>,
-        value_op: fn(IT, IT) -> OT,
-    ) -> Self {
-        Self {
-            left,
-            right,
-            op,
-            value_op,
-        }
+impl<L, T: CDatatype> DenseConst<L, T> {
+    pub fn new(left: L, right: T, op: fn(Array<T>, T) -> TCResult<Array<T>>) -> Self {
+        Self { left, right, op }
     }
 }
 
-impl<L, IT, OT> TensorInstance for DenseConst<L, IT, OT>
+impl<L, T> TensorInstance for DenseConst<L, T>
 where
     L: TensorInstance,
-    IT: CDatatype + DType,
-    OT: CDatatype + DType,
+    T: CDatatype + DType,
 {
     fn dtype(&self) -> NumberType {
-        OT::dtype()
+        T::dtype()
     }
 
     fn shape(&self) -> &Shape {
@@ -2187,14 +2175,13 @@ where
 }
 
 #[async_trait]
-impl<L, IT, OT> DenseInstance for DenseConst<L, IT, OT>
+impl<L, T> DenseInstance for DenseConst<L, T>
 where
-    L: DenseInstance<DType = IT> + fmt::Debug,
-    IT: CDatatype + DType,
-    OT: CDatatype + DType,
+    L: DenseInstance<DType = T> + fmt::Debug,
+    T: CDatatype + DType,
 {
-    type Block = Array<OT>;
-    type DType = OT;
+    type Block = Array<T>;
+    type DType = T;
 
     fn block_size(&self) -> usize {
         self.left.block_size()
@@ -2217,23 +2204,13 @@ where
 }
 
 #[async_trait]
-impl<L, IT, OT> TensorPermitRead for DenseConst<L, IT, OT>
-where
-    L: TensorPermitRead,
-    IT: CDatatype,
-    OT: CDatatype,
-{
+impl<L: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseConst<L, T> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.left.read_permit(txn_id, range).await
     }
 }
 
-impl<L, IT, OT> fmt::Debug for DenseConst<L, IT, OT>
-where
-    L: fmt::Debug,
-    IT: CDatatype,
-    OT: CDatatype,
-{
+impl<L: fmt::Debug, T: CDatatype> fmt::Debug for DenseConst<L, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "dual constant operation on {:?}", self.left)
     }

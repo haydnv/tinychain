@@ -6,21 +6,22 @@ use async_trait::async_trait;
 use freqfs::FileLoad;
 use futures::stream::Stream;
 use ha_ndarray::{
-    Array, Buffer, CDatatype, NDArrayCast, NDArrayMath, NDArrayRead, NDArrayTransform, NDArrayWrite,
+    Array, Buffer, CDatatype, NDArrayCast, NDArrayMath, NDArrayMathScalar, NDArrayRead,
+    NDArrayTransform, NDArrayWrite,
 };
-use safecast::AsType;
+use safecast::{AsType, CastInto};
 
 use tc_error::*;
 use tc_value::{DType, Number, NumberType};
 
 use crate::tensor::{
     TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal,
-    TensorMath,
+    TensorMath, TensorMathConst,
 };
 
 use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
 
-use crate::tensor::dense::access::{DenseCombine, DenseDiagonal};
+use crate::tensor::dense::access::{DenseCombine, DenseConst, DenseDiagonal};
 use access::{
     ArrayCastSource, DenseBroadcast, DenseCastSource, DenseCompare, DenseCompareConst, DenseExpand,
     DenseReshape, DenseSlice, DenseTranspose,
@@ -338,6 +339,80 @@ where
         }
 
         DenseCombine::new(self.accessor, other.accessor, sub).map(DenseTensor::from)
+    }
+}
+
+impl<FE: Send + Sync + 'static, A: DenseInstance> TensorMathConst for DenseTensor<FE, A>
+where
+    Number: CastInto<A::DType>,
+{
+    type Combine = DenseTensor<FE, DenseConst<A, A::DType>>;
+    type DenseCombine = DenseTensor<FE, DenseConst<A, A::DType>>;
+
+    fn add_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        let n = other.cast_into();
+
+        let accessor = DenseConst::new(self.accessor, n, |block, n| {
+            block.add_scalar(n).map(Array::from).map_err(TCError::from)
+        });
+
+        Ok(accessor.into())
+    }
+
+    fn div_const(self, other: Number) -> TCResult<Self::Combine> {
+        let n = other.cast_into();
+
+        let accessor = DenseConst::new(self.accessor, n, |block, n| {
+            block.div_scalar(n).map(Array::from).map_err(TCError::from)
+        });
+
+        Ok(accessor.into())
+    }
+
+    fn log_const(self, base: Number) -> TCResult<Self::Combine> {
+        let n = base.cast_into();
+
+        let accessor = DenseConst::new(self.accessor, n, |block, n| {
+            block
+                .log_scalar(n.to_f64())
+                .map(Array::from)
+                .map_err(TCError::from)
+        });
+
+        Ok(accessor.into())
+    }
+
+    fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
+        let n = other.cast_into();
+
+        let accessor = DenseConst::new(self.accessor, n, |block, n| {
+            block.mul_scalar(n).map(Array::from).map_err(TCError::from)
+        });
+
+        Ok(accessor.into())
+    }
+
+    fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
+        let n = other.cast_into();
+
+        let accessor = DenseConst::new(self.accessor, n, |block, n| {
+            block
+                .pow_scalar(n.to_f64())
+                .map(Array::from)
+                .map_err(TCError::from)
+        });
+
+        Ok(accessor.into())
+    }
+
+    fn sub_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        let n = other.cast_into();
+
+        let accessor = DenseConst::new(self.accessor, n, |block, n| {
+            block.sub_scalar(n).map(Array::from).map_err(TCError::from)
+        });
+
+        Ok(accessor.into())
     }
 }
 
