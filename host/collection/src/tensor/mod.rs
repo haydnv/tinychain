@@ -1,5 +1,6 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
 use std::fmt;
+use std::ops::{Div, Rem};
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
@@ -10,9 +11,7 @@ use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::TxnId;
 use tc_value::{Number, NumberType, ValueType};
-use tcgeneric::{
-    label, path_label, Class, NativeClass, PathLabel, PathSegment, TCBoxTryFuture, TCPathBuf,
-};
+use tcgeneric::{label, path_label, Class, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
 pub use shape::{AxisRange, Range, Shape};
 
@@ -345,45 +344,41 @@ pub trait TensorMathConst {
     fn sub_const(self, other: Number) -> TCResult<Self::DenseCombine>;
 }
 
-/// Methods to access this [`Tensor`] as a persistent type.
-pub trait TensorPersist: Sized {
-    type Persistent;
-
-    fn as_persistent(self) -> Option<Self::Persistent> {
-        None
-    }
-
-    fn is_persistent(&self) -> bool;
-}
-
 /// [`Tensor`] reduction operations
+#[async_trait]
 pub trait TensorReduce {
     /// The result type of a reduce operation
     type Reduce: TensorInstance;
 
+    /// Return `true` if all elements in this [`Tensor`] are nonzero.
+    async fn all(self, txn_id: TxnId) -> TCResult<bool>;
+
+    /// Return `true` if any element in this [`Tensor`] is nonzero.
+    async fn any(self, txn_id: TxnId) -> TCResult<bool>;
+
     /// Return the maximum of this [`Tensor`] along the given `axis`.
-    fn max(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce>;
+    fn max(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce>;
 
     /// Return the maximum element in this [`Tensor`].
-    fn max_all(&self, txn_id: TxnId) -> TCBoxTryFuture<Number>;
+    async fn max_all(self, txn_id: TxnId) -> TCResult<Number>;
 
     /// Return the minimum of this [`Tensor`] along the given `axis`.
-    fn min(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce>;
+    fn min(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce>;
 
     /// Return the minimum element in this [`Tensor`].
-    fn min_all(&self, txn_id: TxnId) -> TCBoxTryFuture<Number>;
+    async fn min_all(self, txn_id: TxnId) -> TCResult<Number>;
 
     /// Return the product of this [`Tensor`] along the given `axis`.
-    fn product(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce>;
+    fn product(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce>;
 
     /// Return the product of all elements in this [`Tensor`].
-    fn product_all(&self, txn_id: TxnId) -> TCBoxTryFuture<Number>;
+    async fn product_all(self, txn_id: TxnId) -> TCResult<Number>;
 
     /// Return the sum of this [`Tensor`] along the given `axis`.
-    fn sum(self, axis: usize, keepdims: bool) -> TCResult<Self::Reduce>;
+    fn sum(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce>;
 
     /// Return the sum of all elements in this [`Tensor`].
-    fn sum_all(&self, txn_id: TxnId) -> TCBoxTryFuture<Number>;
+    async fn sum_all(self, txn_id: TxnId) -> TCResult<Number>;
 }
 
 /// [`Tensor`] transforms
@@ -421,7 +416,6 @@ pub trait TensorTransform {
 }
 
 /// Unary [`Tensor`] operations
-#[async_trait]
 pub trait TensorUnary {
     /// The return type of a unary operation
     type Unary: TensorInstance;
@@ -437,12 +431,6 @@ pub trait TensorUnary {
 
     /// Element-wise round to the nearest integer
     fn round(&self) -> TCResult<Self::Unary>;
-
-    /// Return `true` if all elements in this [`Tensor`] are nonzero.
-    async fn all(self, txn_id: TxnId) -> TCResult<bool>;
-
-    /// Return `true` if any element in this [`Tensor`] is nonzero.
-    async fn any(self, txn_id: TxnId) -> TCResult<bool>;
 
     /// Element-wise logical not
     fn not(&self) -> TCResult<Self::Unary>;
@@ -489,6 +477,21 @@ pub trait TensorTrig {
 
     /// Element-wise hyperbolic arctangent
     fn atanh(&self) -> TCResult<Self::Unary>;
+}
+
+#[inline]
+fn coord_of<T: Copy + Div<Output = T> + Rem<Output = T>>(
+    offset: T,
+    strides: &[T],
+    shape: &[T],
+) -> Vec<T> {
+    strides
+        .iter()
+        .copied()
+        .map(|stride| offset / stride)
+        .zip(shape.iter().copied())
+        .map(|(axis_offset, dim)| axis_offset % dim)
+        .collect()
 }
 
 #[inline]

@@ -5,7 +5,7 @@ use log::warn;
 use tc_error::*;
 
 use super::shape::{AxisRange, Range, Shape};
-use super::{strides_for, Axes, Coord, Strides};
+use super::{coord_of, strides_for, Axes, Coord, Strides};
 
 #[derive(Clone)]
 pub struct Broadcast {
@@ -224,7 +224,11 @@ impl Reduce {
         })
     }
 
-    pub fn shape(&'_ self) -> &'_ Shape {
+    pub fn keepdims(&self) -> bool {
+        self.shape.len() == self.source_shape.len()
+    }
+
+    pub fn shape(&self) -> &Shape {
         &self.shape
     }
 
@@ -321,12 +325,7 @@ impl Reshape {
             .map(|(x, stride)| x * stride)
             .sum();
 
-        self.source_strides
-            .iter()
-            .map(|stride| offset / stride)
-            .zip(self.source_shape.iter())
-            .map(|(axis_offset, dim)| axis_offset % dim)
-            .collect()
+        coord_of(offset, &self.source_strides, &self.source_shape)
     }
 }
 

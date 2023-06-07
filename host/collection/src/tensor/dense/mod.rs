@@ -1,31 +1,29 @@
+use std::cmp::Ordering;
 use std::fmt;
 use std::marker::PhantomData;
 use std::pin::Pin;
 
 use async_trait::async_trait;
+use collate::Collate;
+use destream::de;
 use freqfs::FileLoad;
-use futures::stream::Stream;
-use ha_ndarray::{
-    Array, Buffer, CDatatype, NDArrayCast, NDArrayMath, NDArrayMathScalar, NDArrayRead,
-    NDArrayTransform, NDArrayWrite,
-};
+use futures::future;
+use futures::stream::{Stream, StreamExt, TryStreamExt};
+use ha_ndarray::*;
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
-use tc_value::{DType, Number, NumberType};
+use tc_transact::TxnId;
+use tc_value::{DType, Number, NumberCollator, NumberType};
 
 use crate::tensor::{
     TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal,
-    TensorMath, TensorMathConst,
+    TensorMath, TensorMathConst, TensorPermitRead, TensorReduce,
 };
 
 use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
 
-use crate::tensor::dense::access::{DenseCombine, DenseConst, DenseDiagonal};
-use access::{
-    ArrayCastSource, DenseBroadcast, DenseCastSource, DenseCompare, DenseCompareConst, DenseExpand,
-    DenseReshape, DenseSlice, DenseTranspose,
-};
+use access::*;
 
 mod access;
 mod base;
@@ -413,6 +411,130 @@ where
         });
 
         Ok(accessor.into())
+    }
+}
+
+#[async_trait]
+impl<FE, A> TensorReduce for DenseTensor<FE, A>
+where
+    FE: DenseCacheFile + AsType<Buffer<A::DType>>,
+    A: DenseInstance + TensorPermitRead + Into<DenseAccess<FE, A::DType>>,
+    Array<A::DType>: Clone,
+    Buffer<A::DType>: de::FromStream<Context = ()>,
+    Number: From<A::DType>,
+{
+    type Reduce = DenseTensor<FE, DenseReduce<DenseAccess<FE, A::DType>, A::DType>>;
+
+    async fn all(self, txn_id: TxnId) -> TCResult<bool> {
+        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
+        let mut blocks = self.accessor.read_blocks().await?;
+
+        while let Some(block) = blocks.try_next().await? {
+            if !block.all()? {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
+    async fn any(self, txn_id: TxnId) -> TCResult<bool> {
+        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
+        let mut blocks = self.accessor.read_blocks().await?;
+
+        while let Some(block) = blocks.try_next().await? {
+            if block.any()? {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    fn max(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
+        DenseReduce::max(self.accessor.into(), axes, keepdims).map(DenseTensor::from)
+    }
+
+    async fn max_all(self, txn_id: TxnId) -> TCResult<Number> {
+        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
+        let blocks = self.accessor.read_blocks().await?;
+        let collator = NumberCollator::default();
+
+        let max = blocks
+            .map(|result| result.and_then(|block| block.max().map_err(TCError::from)))
+            .map_ok(Number::from)
+            .try_fold(Number::from(A::DType::min()), |max, block_max| {
+                let max = match collator.cmp(&max, &block_max) {
+                    Ordering::Greater | Ordering::Equal => max,
+                    Ordering::Less => block_max,
+                };
+
+                future::ready(Ok(max))
+            })
+            .await?;
+
+        Ok(max.cast_into())
+    }
+
+    fn min(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
+        DenseReduce::min(self.accessor.into(), axes, keepdims).map(DenseTensor::from)
+    }
+
+    async fn min_all(self, txn_id: TxnId) -> TCResult<Number> {
+        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
+        let blocks = self.accessor.read_blocks().await?;
+        let collator = NumberCollator::default();
+
+        let min = blocks
+            .map(|result| result.and_then(|block| block.min().map_err(TCError::from)))
+            .map_ok(Number::from)
+            .try_fold(Number::from(A::DType::max()), |min, block_min| {
+                let max = match collator.cmp(&min, &block_min) {
+                    Ordering::Less | Ordering::Equal => min,
+                    Ordering::Greater => block_min,
+                };
+
+                future::ready(Ok(max))
+            })
+            .await?;
+
+        Ok(min.cast_into())
+    }
+
+    fn product(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
+        DenseReduce::product(self.accessor.into(), axes, keepdims).map(DenseTensor::from)
+    }
+
+    async fn product_all(self, txn_id: TxnId) -> TCResult<Number> {
+        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
+        let blocks = self.accessor.read_blocks().await?;
+
+        let product = blocks
+            .map(|result| result.and_then(|block| block.product().map_err(TCError::from)))
+            .try_fold(A::DType::one(), |product, block_product| {
+                future::ready(Ok(product * block_product))
+            })
+            .await?;
+
+        Ok(product.into())
+    }
+
+    fn sum(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
+        DenseReduce::sum(self.accessor.into(), axes, keepdims).map(DenseTensor::from)
+    }
+
+    async fn sum_all(self, txn_id: TxnId) -> TCResult<Number> {
+        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
+        let blocks = self.accessor.read_blocks().await?;
+
+        let sum = blocks
+            .map(|result| result.and_then(|block| block.sum().map_err(TCError::from)))
+            .try_fold(A::DType::zero(), |sum, block_sum| {
+                future::ready(Ok(sum + block_sum))
+            })
+            .await?;
+
+        Ok(sum.into())
     }
 }
 
