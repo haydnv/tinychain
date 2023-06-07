@@ -154,6 +154,20 @@ impl ArrayCastSource {
         )
     }
 
+    pub fn not(self) -> TCResult<Array<u8>> {
+        match self {
+            Self::F32(this) => this.not().map(Array::from).map_err(TCError::from),
+            Self::F64(this) => this.not().map(Array::from).map_err(TCError::from),
+            Self::I16(this) => this.not().map(Array::from).map_err(TCError::from),
+            Self::I32(this) => this.not().map(Array::from).map_err(TCError::from),
+            Self::I64(this) => this.not().map(Array::from).map_err(TCError::from),
+            Self::U8(this) => this.not().map(Array::from).map_err(TCError::from),
+            Self::U16(this) => this.not().map(Array::from).map_err(TCError::from),
+            Self::U32(this) => this.not().map(Array::from).map_err(TCError::from),
+            Self::U64(this) => this.not().map(Array::from).map_err(TCError::from),
+        }
+    }
+
     pub fn or(self, other: Self) -> TCResult<Array<u8>> {
         array_cmp!(
             self,
@@ -516,6 +530,8 @@ pub enum DenseAccess<FE, T: CDatatype> {
     Reshape(Box<DenseReshape<Self>>),
     Slice(Box<DenseSlice<Self>>),
     Transpose(Box<DenseTranspose<Self>>),
+    Unary(Box<DenseUnary<Self, T>>),
+    UnaryBoolean(Box<DenseUnaryBoolean<FE, T>>),
     Version(DenseVersion<FE, T>),
 }
 
@@ -536,6 +552,8 @@ impl<FE, T: CDatatype> Clone for DenseAccess<FE, T> {
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
             Self::Slice(slice) => Self::Slice(slice.clone()),
             Self::Transpose(transpose) => Self::Transpose(transpose.clone()),
+            Self::Unary(unary) => Self::Unary(unary.clone()),
+            Self::UnaryBoolean(unary) => Self::UnaryBoolean(unary.clone()),
             Self::Version(version) => Self::Version(version.clone()),
         }
     }
@@ -558,6 +576,8 @@ macro_rules! access_dispatch {
             Self::Reshape($var) => $call,
             Self::Slice($var) => $call,
             Self::Transpose($var) => $call,
+            Self::Unary($var) => $call,
+            Self::UnaryBoolean($var) => $call,
             Self::Version($var) => $call,
         }
     };
@@ -621,6 +641,8 @@ where
             Self::Transpose(transpose) => {
                 Ok(Box::pin(transpose.read_blocks().await?.map_ok(Array::from)))
             }
+            Self::Unary(unary) => unary.read_blocks().await,
+            Self::UnaryBoolean(unary) => unary.read_blocks().await,
             Self::Version(version) => {
                 Ok(Box::pin(version.read_blocks().await?.map_ok(Array::from)))
             }
@@ -2026,10 +2048,9 @@ impl<FE, T: CDatatype> DenseCompare<FE, T> {
     }
 }
 
-impl<FE: Send + Sync + 'static, T: CDatatype> TensorInstance for DenseCompare<FE, T> {
+impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseCompare<FE, T> {
     fn dtype(&self) -> NumberType {
-        let left = &self.left;
-        cast_dispatch!(left, this, this.dtype())
+        T::dtype()
     }
 
     fn shape(&self) -> &Shape {
@@ -2107,10 +2128,9 @@ impl<FE, T: CDatatype> DenseCompareConst<FE, T> {
     }
 }
 
-impl<FE: Send + Sync + 'static, T: CDatatype> TensorInstance for DenseCompareConst<FE, T> {
+impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseCompareConst<FE, T> {
     fn dtype(&self) -> NumberType {
-        let left = &self.left;
-        cast_dispatch!(left, this, this.dtype())
+        T::dtype()
     }
 
     fn shape(&self) -> &Shape {
@@ -3108,6 +3128,167 @@ impl<S: fmt::Debug> fmt::Debug for DenseTranspose<S> {
             self.transform.axes(),
             self.source
         )
+    }
+}
+
+#[derive(Clone)]
+pub struct DenseUnary<S, T: CDatatype> {
+    source: S,
+    op: fn(Array<T>) -> TCResult<Array<T>>,
+}
+
+impl<S: DenseInstance> DenseUnary<S, S::DType> {
+    fn new(source: S, op: fn(Array<S::DType>) -> TCResult<Array<S::DType>>) -> Self {
+        Self { source, op }
+    }
+
+    pub fn abs(source: S) -> Self {
+        Self::new(source, |block| {
+            block.abs().map(Array::from).map_err(TCError::from)
+        })
+    }
+
+    pub fn exp(source: S) -> Self {
+        Self::new(source, |block| {
+            block.exp().map(Array::from).map_err(TCError::from)
+        })
+    }
+
+    pub fn ln(source: S) -> Self {
+        Self::new(source, |block| {
+            block.ln().map(Array::from).map_err(TCError::from)
+        })
+    }
+
+    pub fn round(source: S) -> Self {
+        Self::new(source, |block| {
+            block.round().map(Array::from).map_err(TCError::from)
+        })
+    }
+}
+
+impl<S: TensorInstance, T: CDatatype> TensorInstance for DenseUnary<S, T> {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.source.shape()
+    }
+}
+
+#[async_trait]
+impl<S: DenseInstance> DenseInstance for DenseUnary<S, S::DType>
+where
+    Array<S::DType>: From<S::Block>,
+{
+    type Block = Array<S::DType>;
+    type DType = S::DType;
+
+    fn block_size(&self) -> usize {
+        self.source.block_size()
+    }
+
+    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+        self.source
+            .read_block(block_id)
+            .map_ok(Array::from)
+            .map(move |result| result.and_then(|block| (self.op)(block)))
+            .await
+    }
+
+    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+        let source_blocks = self.source.read_blocks().await?;
+        let blocks = source_blocks
+            .map_ok(Array::from)
+            .map(move |result| result.and_then(|block| (self.op)(block)));
+
+        Ok(Box::pin(blocks))
+    }
+}
+
+#[async_trait]
+impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseUnary<S, T> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        self.source.read_permit(txn_id, range).await
+    }
+}
+
+impl<S: fmt::Debug, T: CDatatype> fmt::Debug for DenseUnary<S, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "unary transform of {:?}", self.source)
+    }
+}
+
+pub struct DenseUnaryBoolean<FE, T: CDatatype> {
+    source: DenseCastSource<FE>,
+    op: fn(ArrayCastSource) -> TCResult<Array<T>>,
+}
+
+impl<FE, T: CDatatype> Clone for DenseUnaryBoolean<FE, T> {
+    fn clone(&self) -> Self {
+        Self {
+            source: self.source.clone(),
+            op: self.op,
+        }
+    }
+}
+
+impl<FE> DenseUnaryBoolean<FE, u8> {
+    pub fn not<S: Into<DenseCastSource<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: ArrayCastSource::not,
+        }
+    }
+}
+
+impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseUnaryBoolean<FE, T> {
+    fn dtype(&self) -> NumberType {
+        T::dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        let source = &self.source;
+        cast_dispatch!(source, this, this.shape())
+    }
+}
+
+#[async_trait]
+impl<FE: DenseCacheFile, T: CDatatype + DType> DenseInstance for DenseUnaryBoolean<FE, T> {
+    type Block = Array<T>;
+    type DType = T;
+
+    fn block_size(&self) -> usize {
+        let source = &self.source;
+        cast_dispatch!(source, this, this.block_size())
+    }
+
+    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+        self.source
+            .read_block(block_id)
+            .map(move |result| result.and_then(|block| (self.op)(block)))
+            .await
+    }
+
+    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+        let source_blocks = self.source.read_blocks().await?;
+        let blocks = source_blocks.map(move |result| result.and_then(|block| (self.op)(block)));
+        Ok(Box::pin(blocks))
+    }
+}
+
+#[async_trait]
+impl<FE: Send + Sync + 'static, T: CDatatype> TensorPermitRead for DenseUnaryBoolean<FE, T> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        let source = &self.source;
+        cast_dispatch!(source, this, this.read_permit(txn_id, range).await)
+    }
+}
+
+impl<FE, T: CDatatype> fmt::Debug for DenseUnaryBoolean<FE, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "unary boolean transform of {:?}", self.source)
     }
 }
 

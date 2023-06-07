@@ -18,7 +18,7 @@ use tc_value::{DType, Number, NumberCollator, NumberType};
 
 use crate::tensor::{
     TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal,
-    TensorMath, TensorMathConst, TensorPermitRead, TensorReduce,
+    TensorMath, TensorMathConst, TensorPermitRead, TensorReduce, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
@@ -563,6 +563,38 @@ impl<FE: Send + Sync + 'static, A: DenseInstance> TensorTransform for DenseTenso
 
     fn transpose(self, permutation: Option<Axes>) -> TCResult<Self::Transpose> {
         DenseTranspose::new(self.accessor, permutation).map(DenseTensor::from)
+    }
+}
+
+impl<FE: Send + Sync + 'static, A: DenseInstance> TensorUnary for DenseTensor<FE, A> {
+    type Unary = DenseTensor<FE, DenseUnary<A, A::DType>>;
+
+    fn abs(self) -> TCResult<Self::Unary> {
+        Ok(DenseUnary::abs(self.accessor).into())
+    }
+
+    fn exp(self) -> TCResult<Self::Unary> {
+        Ok(DenseUnary::exp(self.accessor).into())
+    }
+
+    fn ln(self) -> TCResult<Self::Unary> {
+        Ok(DenseUnary::ln(self.accessor).into())
+    }
+
+    fn round(self) -> TCResult<Self::Unary> {
+        Ok(DenseUnary::round(self.accessor).into())
+    }
+}
+
+impl<FE, A> TensorUnaryBoolean for DenseTensor<FE, A>
+where
+    FE: DenseCacheFile,
+    A: DenseInstance + Into<DenseCastSource<FE>>,
+{
+    type Unary = DenseTensor<FE, DenseUnaryBoolean<FE, u8>>;
+
+    fn not(self) -> TCResult<Self::Unary> {
+        Ok(DenseUnaryBoolean::not(self.accessor).into())
     }
 }
 

@@ -421,19 +421,25 @@ pub trait TensorUnary {
     type Unary: TensorInstance;
 
     /// Element-wise absolute value
-    fn abs(&self) -> TCResult<Self::Unary>;
+    fn abs(self) -> TCResult<Self::Unary>;
 
     /// Element-wise exponentiation
-    fn exp(&self) -> TCResult<Self::Unary>;
+    fn exp(self) -> TCResult<Self::Unary>;
 
     /// Element-wise natural logarithm
-    fn ln(&self) -> TCResult<Self::Unary>;
+    fn ln(self) -> TCResult<Self::Unary>;
 
     /// Element-wise round to the nearest integer
-    fn round(&self) -> TCResult<Self::Unary>;
+    fn round(self) -> TCResult<Self::Unary>;
+}
+
+/// Unary [`Tensor`] operations
+pub trait TensorUnaryBoolean {
+    /// The return type of a unary operation
+    type Unary: TensorInstance;
 
     /// Element-wise logical not
-    fn not(&self) -> TCResult<Self::Unary>;
+    fn not(self) -> TCResult<Self::Unary>;
 }
 
 /// Trigonometric [`Tensor`] operations
