@@ -18,13 +18,15 @@ use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::TxnId;
 use tc_value::{DType, Float, Int, Number, NumberClass, NumberInstance, NumberType, UInt};
 
-use super::{DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock};
+use super::{
+    div_ceil, ideal_block_size_for, DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock,
+};
 
 use crate::tensor::sparse::{Node, SparseAccess, SparseInstance};
 use crate::tensor::transform::{Broadcast, Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
     coord_of, offset_of, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
-    TensorPermitRead, TensorPermitWrite, IDEAL_BLOCK_SIZE,
+    TensorPermitRead, TensorPermitWrite,
 };
 
 use super::stream::{BlockResize, ValueStream};
@@ -837,25 +839,9 @@ where
     pub async fn constant(dir: DirLock<FE>, shape: Shape, value: T) -> TCResult<Self> {
         shape.validate()?;
 
-        let ndim = shape.len();
-        let size = shape.iter().product();
+        let size = shape.iter().product::<u64>();
 
-        let ideal_block_size = IDEAL_BLOCK_SIZE as u64;
-        let (block_size, num_blocks) = if size < (2 * ideal_block_size) {
-            (size as usize, 1)
-        } else if ndim == 1 && size % ideal_block_size == 0 {
-            (IDEAL_BLOCK_SIZE, (size / ideal_block_size) as usize)
-        } else if ndim == 1
-            || (shape.iter().rev().take(2).product::<u64>() > (2 * ideal_block_size))
-        {
-            let num_blocks = div_ceil(size, ideal_block_size) as usize;
-            (IDEAL_BLOCK_SIZE, num_blocks as usize)
-        } else {
-            let matrix_size = shape.iter().rev().take(2).product::<u64>();
-            let block_size = ideal_block_size + (matrix_size - (ideal_block_size % matrix_size));
-            let num_blocks = div_ceil(size, ideal_block_size);
-            (block_size as usize, num_blocks as usize)
-        };
+        let (block_size, num_blocks) = ideal_block_size_for(&shape);
 
         debug_assert!(block_size > 0);
 
@@ -2950,6 +2936,15 @@ where
 #[derive(Clone)]
 pub struct DenseSparse<S> {
     source: S,
+    block_size: usize,
+}
+
+impl<S: TensorInstance> DenseSparse<S> {
+    fn new(source: S) -> Self {
+        let (block_size, _) = ideal_block_size_for(source.shape());
+
+        Self { source, block_size }
+    }
 }
 
 impl<S: TensorInstance> TensorInstance for DenseSparse<S> {
@@ -2968,11 +2963,7 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
-        if self.size() > IDEAL_BLOCK_SIZE as u64 {
-            IDEAL_BLOCK_SIZE
-        } else {
-            self.size() as usize
-        }
+        self.block_size
     }
 
     async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
@@ -3031,7 +3022,7 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
         let elements = self.source.elements(Range::default(), order).await?;
         let values = ValueStream::new(elements, range, S::DType::zero());
         let blocks = values
-            .try_chunks(IDEAL_BLOCK_SIZE)
+            .try_chunks(self.block_size)
             .map_err(|cause| bad_request!("dense conversion error: {}", cause))
             .map(move |result| {
                 result.and_then(|block| {
@@ -3674,15 +3665,6 @@ fn block_shape_for(axis: usize, shape: &[u64], block_size: usize) -> BlockShape 
         debug_assert!(!block_shape.is_empty());
 
         block_shape
-    }
-}
-
-#[inline]
-fn div_ceil(num: u64, denom: u64) -> u64 {
-    if num % denom == 0 {
-        num / denom
-    } else {
-        (num / denom) + 1
     }
 }
 

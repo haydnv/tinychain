@@ -21,6 +21,7 @@ use crate::tensor::sparse::Node;
 use crate::tensor::{
     TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal,
     TensorMath, TensorMathConst, TensorPermitRead, TensorReduce, TensorUnary, TensorUnaryBoolean,
+    IDEAL_BLOCK_SIZE,
 };
 
 use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
@@ -603,5 +604,35 @@ impl<FE, A> From<A> for DenseTensor<FE, A> {
             accessor,
             phantom: PhantomData,
         }
+    }
+}
+
+#[inline]
+fn div_ceil(num: u64, denom: u64) -> u64 {
+    if num % denom == 0 {
+        num / denom
+    } else {
+        (num / denom) + 1
+    }
+}
+
+#[inline]
+fn ideal_block_size_for(shape: &[u64]) -> (usize, usize) {
+    let ideal = IDEAL_BLOCK_SIZE as u64;
+    let size = shape.iter().product::<u64>();
+    let ndim = shape.len();
+
+    if size < (2 * ideal) {
+        (size as usize, 1)
+    } else if ndim == 1 && size % ideal == 0 {
+        (IDEAL_BLOCK_SIZE, (size / ideal) as usize)
+    } else if ndim == 1 || (shape.iter().rev().take(2).product::<u64>() > (2 * ideal)) {
+        let num_blocks = div_ceil(size, ideal) as usize;
+        (IDEAL_BLOCK_SIZE, num_blocks as usize)
+    } else {
+        let matrix_size = shape.iter().rev().take(2).product::<u64>();
+        let block_size = ideal + (matrix_size - (ideal % matrix_size));
+        let num_blocks = div_ceil(size, ideal);
+        (block_size as usize, num_blocks as usize)
     }
 }
