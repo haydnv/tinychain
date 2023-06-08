@@ -20,13 +20,14 @@ use tc_value::{DType, Float, Int, Number, NumberClass, NumberInstance, NumberTyp
 
 use super::{DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock};
 
+use crate::tensor::sparse::SparseInstance;
 use crate::tensor::transform::{Broadcast, Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
     coord_of, offset_of, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
     TensorPermitRead, TensorPermitWrite, IDEAL_BLOCK_SIZE,
 };
 
-use super::stream::BlockResize;
+use super::stream::{BlockResize, ValueStream};
 use super::{BlockShape, BlockStream, DenseCacheFile};
 
 pub enum Block {
@@ -2929,6 +2930,122 @@ where
         let source_coord = self.dest.transform.invert_coord(coord)?;
         let source = self.dest.source.write().await;
         source.write_value(source_coord, value).await
+    }
+}
+
+#[derive(Clone)]
+pub struct DenseSparse<S> {
+    source: S,
+}
+
+impl<S: TensorInstance> TensorInstance for DenseSparse<S> {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.source.shape()
+    }
+}
+
+#[async_trait]
+impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
+    type Block = ArrayBase<Vec<S::DType>>;
+    type DType = S::DType;
+
+    fn block_size(&self) -> usize {
+        if self.size() > IDEAL_BLOCK_SIZE as u64 {
+            IDEAL_BLOCK_SIZE
+        } else {
+            self.size() as usize
+        }
+    }
+
+    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+        let start = block_id * self.block_size() as u64;
+        let stop = if (start + self.block_size() as u64) < self.size() {
+            start + self.block_size() as u64
+        } else {
+            self.size()
+        };
+
+        let ndim = self.ndim();
+        let strides = self
+            .shape()
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(x, dim)| {
+                if dim == 1 {
+                    0
+                } else {
+                    self.shape().iter().rev().take(ndim - 1 - x).product()
+                }
+            })
+            .collect::<Vec<u64>>();
+
+        let start = coord_of(start, &strides, self.shape());
+        let stop = coord_of(stop, &strides, self.shape());
+
+        let range: Range = start
+            .into_iter()
+            .zip(stop)
+            .map(|(from, to)| AxisRange::In(from..to, 1))
+            .collect();
+
+        let shape = range
+            .shape()
+            .into_vec()
+            .into_iter()
+            .map(|dim| dim as usize)
+            .collect();
+
+        let order = (0..self.ndim()).into_iter().collect();
+        let elements = self.source.clone().elements(range, order).await?;
+        let values = ValueStream::new(elements, Range::all(self.source.shape()), S::DType::zero());
+        let block = values.try_collect().await?;
+
+        ArrayBase::<Vec<S::DType>>::new(shape, block).map_err(TCError::from)
+    }
+
+    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+        let block_axis = block_axis_for(self.shape(), self.block_size());
+        let block_shape = block_shape_for(block_axis, self.shape(), self.block_size());
+
+        let range = Range::all(self.shape());
+        let order = (0..self.ndim()).into_iter().collect();
+        let elements = self.source.elements(Range::default(), order).await?;
+        let values = ValueStream::new(elements, range, S::DType::zero());
+        let blocks = values
+            .try_chunks(IDEAL_BLOCK_SIZE)
+            .map_err(|cause| bad_request!("dense conversion error: {}", cause))
+            .map(move |result| {
+                result.and_then(|block| {
+                    debug_assert_eq!(
+                        block.len() % block_shape.iter().skip(1).product::<usize>(),
+                        0
+                    );
+
+                    let mut block_shape = block_shape.to_vec();
+                    block_shape[0] = block.len() / block_shape.iter().skip(1).product::<usize>();
+                    ArrayBase::<Vec<_>>::new(block_shape, block).map_err(TCError::from)
+                })
+            });
+
+        Ok(Box::pin(blocks))
+    }
+}
+
+#[async_trait]
+impl<S: TensorPermitRead> TensorPermitRead for DenseSparse<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        self.source.read_permit(txn_id, range).await
+    }
+}
+
+impl<S: fmt::Debug> fmt::Debug for DenseSparse<S> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "dense view of {:?}", self.source)
     }
 }
 
