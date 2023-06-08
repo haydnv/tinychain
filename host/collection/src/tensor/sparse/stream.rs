@@ -538,6 +538,7 @@ pub struct OuterJoin<L, R, T> {
     #[pin]
     right: Fuse<R>,
 
+    zero: T,
     pending_left: Option<(u64, T)>,
     pending_right: Option<(u64, T)>,
 }
@@ -547,10 +548,11 @@ where
     L: Stream<Item = Result<(u64, T), TCError>>,
     R: Stream<Item = Result<(u64, T), TCError>>,
 {
-    pub fn new(left: L, right: R) -> Self {
+    pub fn new(left: L, right: R, zero: T) -> Self {
         Self {
             left: left.fuse(),
             right: right.fuse(),
+            zero,
             pending_left: None,
             pending_right: None,
         }
@@ -561,7 +563,7 @@ impl<L, R, T> Stream for OuterJoin<L, R, T>
 where
     L: Stream<Item = Result<(u64, T), TCError>>,
     R: Stream<Item = Result<(u64, T), TCError>>,
-    T: CDatatype,
+    T: Copy + Eq,
 {
     type Item = Result<(u64, T, T), TCError>;
 
@@ -611,19 +613,19 @@ where
                     }
                     Ordering::Less => {
                         let (offset, l_value) = this.pending_left.take().unwrap();
-                        Some(Ok((offset, l_value, T::zero())))
+                        Some(Ok((offset, l_value, *this.zero)))
                     }
                     Ordering::Greater => {
                         let (offset, r_value) = this.pending_right.take().unwrap();
-                        Some(Ok((offset, T::zero(), r_value)))
+                        Some(Ok((offset, *this.zero, r_value)))
                     }
                 };
             } else if right_done && this.pending_left.is_some() {
                 let (offset, l_value) = this.pending_left.take().unwrap();
-                break Some(Ok((offset, l_value, T::zero())));
+                break Some(Ok((offset, l_value, *this.zero)));
             } else if left_done && this.pending_right.is_some() {
                 let (offset, r_value) = this.pending_right.take().unwrap();
-                break Some(Ok((offset, T::zero(), r_value)));
+                break Some(Ok((offset, *this.zero, r_value)));
             } else if left_done && right_done {
                 break None;
             }

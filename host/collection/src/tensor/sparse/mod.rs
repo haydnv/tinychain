@@ -25,6 +25,7 @@ use access::{
 
 const BLOCK_SIZE: usize = 4_096;
 
+use crate::tensor::sparse::access::SparseAccessCast;
 pub use base::SparseBase;
 pub use schema::{IndexSchema, Schema};
 
@@ -104,12 +105,12 @@ where
 impl<FE, L, R> TensorBoolean<SparseTensor<FE, R>> for SparseTensor<FE, L>
 where
     FE: AsType<Node> + Send + Sync + 'static,
-    L: SparseInstance,
-    R: SparseInstance<DType = L::DType>,
+    L: SparseInstance + Into<SparseAccessCast<FE>>,
+    R: SparseInstance<DType = L::DType> + Into<SparseAccessCast<FE>>,
     Number: From<L::DType> + From<R::DType>,
 {
-    type Combine = SparseTensor<FE, SparseCombine<L, R, u8>>;
-    type LeftCombine = SparseTensor<FE, SparseLeftCombine<L, R, u8>>;
+    type Combine = SparseTensor<FE, SparseCombine<FE, u8>>;
+    type LeftCombine = SparseTensor<FE, SparseLeftCombine<FE, u8>>;
 
     fn and(self, other: SparseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
         let access = SparseLeftCombine::new(self.accessor, other.accessor, |l, r| {

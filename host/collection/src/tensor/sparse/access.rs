@@ -19,7 +19,7 @@ use safecast::{AsType, CastInto};
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::TxnId;
-use tc_value::{DType, Number, NumberCollator, NumberType};
+use tc_value::{DType, Number, NumberClass, NumberCollator, NumberType};
 
 use crate::tensor::transform::{Expand, Reshape, Slice, Transpose};
 use crate::tensor::{
@@ -74,11 +74,178 @@ pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
     async fn write_value(&mut self, coord: Coord, value: T) -> Result<(), TCError>;
 }
 
+pub enum SparseAccessCast<FE> {
+    F32(SparseAccess<FE, f32>),
+    F64(SparseAccess<FE, f64>),
+    I16(SparseAccess<FE, i16>),
+    I32(SparseAccess<FE, i32>),
+    I64(SparseAccess<FE, i64>),
+    U8(SparseAccess<FE, u8>),
+    U16(SparseAccess<FE, u16>),
+    U32(SparseAccess<FE, u32>),
+    U64(SparseAccess<FE, u64>),
+}
+
+impl<FE> Clone for SparseAccessCast<FE> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::F32(access) => Self::F32(access.clone()),
+            Self::F64(access) => Self::F64(access.clone()),
+            Self::I16(access) => Self::I16(access.clone()),
+            Self::I32(access) => Self::I32(access.clone()),
+            Self::I64(access) => Self::I64(access.clone()),
+            Self::U8(access) => Self::U8(access.clone()),
+            Self::U16(access) => Self::U16(access.clone()),
+            Self::U32(access) => Self::U32(access.clone()),
+            Self::U64(access) => Self::U64(access.clone()),
+        }
+    }
+}
+
+macro_rules! access_cast_dispatch {
+    ($this:ident, $var:ident, $call:expr) => {
+        match $this {
+            SparseAccessCast::F32($var) => $call,
+            SparseAccessCast::F64($var) => $call,
+            SparseAccessCast::I16($var) => $call,
+            SparseAccessCast::I32($var) => $call,
+            SparseAccessCast::I64($var) => $call,
+            SparseAccessCast::U8($var) => $call,
+            SparseAccessCast::U16($var) => $call,
+            SparseAccessCast::U32($var) => $call,
+            SparseAccessCast::U64($var) => $call,
+        }
+    };
+}
+
+impl<FE> SparseAccessCast<FE>
+where
+    FE: AsType<Node> + Send + Sync + 'static,
+{
+    pub fn dtype(&self) -> NumberType {
+        access_cast_dispatch!(self, this, this.dtype())
+    }
+
+    pub fn shape(&self) -> &Shape {
+        access_cast_dispatch!(self, this, this.shape())
+    }
+
+    pub async fn read_value(&self, coord: Coord) -> TCResult<Number> {
+        access_cast_dispatch!(
+            self,
+            this,
+            this.read_value(coord).map_ok(Number::from).await
+        )
+    }
+
+    pub async fn elements(self, range: Range, order: Axes) -> TCResult<Elements<Number>> {
+        access_cast_dispatch!(self, this, {
+            let elements = this.elements(range, order).await?;
+            Ok(Box::pin(
+                elements.map_ok(|(coord, value)| (coord, Number::from(value))),
+            ))
+        })
+    }
+
+    pub async fn inner_join(
+        self,
+        other: Self,
+        range: Range,
+        order: Axes,
+    ) -> TCResult<Elements<(Number, Number)>> {
+        let shape = self.shape().to_vec();
+        let strides = strides_for(&shape, shape.len());
+
+        let this_shape = self.shape().to_vec();
+        let that_shape = other.shape().to_vec();
+
+        let (this, that) = try_join!(
+            self.elements(range.clone(), order.to_vec()),
+            other.elements(range, order)
+        )?;
+
+        let this = this.map_ok(move |(coord, value)| (offset_of(coord, &this_shape), value));
+        let that = that.map_ok(move |(coord, value)| (offset_of(coord, &that_shape), value));
+
+        let elements = stream::InnerJoin::new(this, that).map_ok(move |(offset, left, right)| {
+            let coord = coord_of(offset, &strides, &shape);
+            (coord, (left, right))
+        });
+
+        Ok(Box::pin(elements))
+    }
+
+    pub async fn outer_join(
+        self,
+        other: Self,
+        range: Range,
+        order: Axes,
+    ) -> TCResult<Elements<(Number, Number)>> {
+        let zero = self.dtype().zero();
+        let shape = self.shape().to_vec();
+        let strides = strides_for(&shape, shape.len());
+
+        let this_shape = self.shape().to_vec();
+        let that_shape = other.shape().to_vec();
+
+        let (this, that) = try_join!(
+            self.elements(range.clone(), order.to_vec()),
+            other.elements(range, order)
+        )?;
+
+        let this = this.map_ok(move |(coord, value)| (offset_of(coord, &this_shape), value));
+        let that = that.map_ok(move |(coord, value)| (offset_of(coord, &that_shape), value));
+
+        let elements =
+            stream::OuterJoin::new(this, that, zero).map_ok(move |(offset, left, right)| {
+                let coord = coord_of(offset, &strides, &shape);
+                (coord, (left, right))
+            });
+
+        Ok(Box::pin(elements))
+    }
+}
+
+#[async_trait]
+impl<FE: Send + Sync + 'static> TensorPermitRead for SparseAccessCast<FE> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        access_cast_dispatch!(self, this, this.read_permit(txn_id, range).await)
+    }
+}
+
+macro_rules! access_cast_from {
+    ($t:ty, $var:ident) => {
+        impl<FE> From<SparseAccess<FE, $t>> for SparseAccessCast<FE> {
+            fn from(access: SparseAccess<FE, $t>) -> Self {
+                Self::$var(access)
+            }
+        }
+    };
+}
+
+access_cast_from!(f32, F32);
+access_cast_from!(f64, F64);
+access_cast_from!(i16, I16);
+access_cast_from!(i32, I32);
+access_cast_from!(i64, I64);
+access_cast_from!(u8, U8);
+access_cast_from!(u16, U16);
+access_cast_from!(u32, U32);
+access_cast_from!(u64, U64);
+
+impl<FE> fmt::Debug for SparseAccessCast<FE> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        access_cast_dispatch!(self, this, this.fmt(f))
+    }
+}
+
 pub enum SparseAccess<FE, T> {
     Table(SparseFile<FE, T>),
     Broadcast(Box<SparseBroadcast<FE, T>>),
     BroadcastAxis(Box<SparseBroadcastAxis<Self>>),
     Cast(Box<SparseCast<FE, T>>),
+    Combine(Box<SparseCombine<FE, T>>),
+    CombineLeft(Box<SparseLeftCombine<FE, T>>),
     Cow(Box<SparseCow<FE, T, Self>>),
     Expand(Box<SparseExpand<Self>>),
     Reshape(Box<SparseReshape<Self>>),
@@ -94,6 +261,8 @@ impl<FE, T> Clone for SparseAccess<FE, T> {
             Self::Broadcast(broadcast) => Self::Broadcast(broadcast.clone()),
             Self::BroadcastAxis(broadcast) => Self::BroadcastAxis(broadcast.clone()),
             Self::Cast(cast) => Self::Cast(cast.clone()),
+            Self::Combine(combine) => Self::Combine(combine.clone()),
+            Self::CombineLeft(combine) => Self::CombineLeft(combine.clone()),
             Self::Cow(cow) => Self::Cow(cow.clone()),
             Self::Expand(expand) => Self::Expand(expand.clone()),
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
@@ -111,6 +280,8 @@ macro_rules! access_dispatch {
             Self::Broadcast($var) => $call,
             Self::BroadcastAxis($var) => $call,
             Self::Cast($var) => $call,
+            Self::Combine($var) => $call,
+            Self::CombineLeft($var) => $call,
             Self::Cow($var) => $call,
             Self::Expand($var) => $call,
             Self::Reshape($var) => $call,
@@ -121,7 +292,11 @@ macro_rules! access_dispatch {
     };
 }
 
-impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for SparseAccess<FE, T> {
+impl<FE, T> TensorInstance for SparseAccess<FE, T>
+where
+    FE: AsType<Node> + Send + Sync + 'static,
+    T: CDatatype + DType,
+{
     fn dtype(&self) -> NumberType {
         access_dispatch!(self, this, this.dtype())
     }
@@ -168,6 +343,20 @@ where
             }
             Self::Cast(cast) => {
                 let blocks = cast.blocks(range, order).await?;
+                let blocks =
+                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
+
+                Ok(Box::pin(blocks))
+            }
+            Self::Combine(combine) => {
+                let blocks = combine.blocks(range, order).await?;
+                let blocks =
+                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
+
+                Ok(Box::pin(blocks))
+            }
+            Self::CombineLeft(combine) => {
+                let blocks = combine.blocks(range, order).await?;
                 let blocks =
                     blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
 
@@ -230,7 +419,7 @@ where
 #[async_trait]
 impl<FE, T> TensorPermitRead for SparseAccess<FE, T>
 where
-    FE: Send + Sync,
+    FE: Send + Sync + 'static,
     T: CDatatype + DType,
 {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
@@ -238,6 +427,8 @@ where
             Self::Broadcast(broadcast) => broadcast.read_permit(txn_id, range).await,
             Self::BroadcastAxis(broadcast) => broadcast.read_permit(txn_id, range).await,
             Self::Cow(cow) => cow.read_permit(txn_id, range).await,
+            Self::Combine(combine) => combine.read_permit(txn_id, range).await,
+            Self::CombineLeft(combine) => combine.read_permit(txn_id, range).await,
             Self::Expand(expand) => expand.read_permit(txn_id, range).await,
             Self::Reshape(reshape) => reshape.read_permit(txn_id, range).await,
             Self::Slice(slice) => slice.read_permit(txn_id, range).await,
@@ -585,7 +776,11 @@ impl<FE, T> Clone for SparseBroadcast<FE, T> {
     }
 }
 
-impl<FE: Send + Sync + 'static, T: CDatatype + DType> SparseBroadcast<FE, T> {
+impl<FE, T> SparseBroadcast<FE, T>
+where
+    FE: AsType<Node> + Send + Sync + 'static,
+    T: CDatatype + DType,
+{
     pub fn new<S>(source: S, shape: Shape) -> Result<Self, TCError>
     where
         S: TensorInstance + Into<SparseAccess<FE, T>>,
@@ -1057,7 +1252,11 @@ impl<FE, T> Clone for SparseCast<FE, T> {
     }
 }
 
-impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for SparseCast<FE, T> {
+impl<FE, T> TensorInstance for SparseCast<FE, T>
+where
+    FE: AsType<Node> + Send + Sync + 'static,
+    T: CDatatype + DType,
+{
     fn dtype(&self) -> NumberType {
         T::dtype()
     }
@@ -1228,23 +1427,36 @@ impl<FE, T: DType> fmt::Debug for SparseCast<FE, T> {
     }
 }
 
-#[derive(Clone)]
-pub struct SparseCombine<L, R, T> {
-    left: L,
-    right: R,
+pub struct SparseCombine<FE, T> {
+    left: SparseAccessCast<FE>,
+    right: SparseAccessCast<FE>,
     op: fn(Number, Number) -> T,
-    dtype: PhantomData<T>,
 }
 
-impl<L: TensorInstance + fmt::Debug, R: TensorInstance + fmt::Debug, T> SparseCombine<L, R, T> {
-    pub fn new(left: L, right: R, op: fn(Number, Number) -> T) -> TCResult<Self> {
+impl<FE, T> Clone for SparseCombine<FE, T> {
+    fn clone(&self) -> Self {
+        Self {
+            left: self.left.clone(),
+            right: self.right.clone(),
+            op: self.op,
+        }
+    }
+}
+
+impl<FE, T> SparseCombine<FE, T>
+where
+    FE: AsType<Node> + Send + Sync + 'static,
+{
+    pub fn new<L, R>(left: L, right: R, op: fn(Number, Number) -> T) -> TCResult<Self>
+    where
+        L: Into<SparseAccessCast<FE>>,
+        R: Into<SparseAccessCast<FE>>,
+    {
+        let left = left.into();
+        let right = right.into();
+
         if left.shape() == right.shape() {
-            Ok(Self {
-                left,
-                right,
-                op,
-                dtype: PhantomData,
-            })
+            Ok(Self { left, right, op })
         } else {
             Err(bad_request!(
                 "cannot combine {:?} with {:?} (wrong shape)",
@@ -1255,10 +1467,9 @@ impl<L: TensorInstance + fmt::Debug, R: TensorInstance + fmt::Debug, T> SparseCo
     }
 }
 
-impl<L, R, T> TensorInstance for SparseCombine<L, R, T>
+impl<FE, T> TensorInstance for SparseCombine<FE, T>
 where
-    L: TensorInstance,
-    R: TensorInstance,
+    FE: AsType<Node> + Send + Sync + 'static,
     T: CDatatype + DType,
 {
     fn dtype(&self) -> NumberType {
@@ -1272,12 +1483,10 @@ where
 }
 
 #[async_trait]
-impl<L, R, T> SparseInstance for SparseCombine<L, R, T>
+impl<FE, T> SparseInstance for SparseCombine<FE, T>
 where
-    L: SparseInstance,
-    R: SparseInstance<DType = L::DType>,
+    FE: AsType<Node> + Send + Sync + 'static,
     T: CDatatype + DType,
-    Number: From<L::DType> + From<R::DType>,
 {
     type CoordBlock = ArrayBase<Vec<u64>>;
     type ValueBlock = ArrayBase<Vec<T>>;
@@ -1291,26 +1500,11 @@ where
     }
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        let shape = self.shape().to_vec();
-        let strides = strides_for(&shape, shape.len());
-
-        let left_shape = self.left.shape().to_vec();
-        let right_shape = self.right.shape().to_vec();
-
-        let (left, right) = try_join!(
-            self.left.elements(range.clone(), order.to_vec()),
-            self.right.elements(range, order)
-        )?;
-
-        let left = left.map_ok(move |(coord, value)| (offset_of(coord, &left_shape), value));
-        let right = right.map_ok(move |(coord, value)| (offset_of(coord, &right_shape), value));
-
-        let elements = stream::OuterJoin::new(left, right).map_ok(move |(offset, left, right)| {
-            let coord = coord_of(offset, &strides, &shape);
-            (coord, (self.op)(left.into(), right.into()))
-        });
-
-        Ok(Box::pin(elements))
+        let elements = self.left.outer_join(self.right, range, order).await?;
+        Ok(Box::pin(elements.map_ok(move |(coord, (l, r))| {
+            let value = (self.op)(l, r);
+            (coord, value)
+        })))
     }
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1319,33 +1513,57 @@ where
             self.right.read_value(coord)
         )?;
 
-        Ok((self.op)(left.into(), right.into()))
+        Ok((self.op)(left, right))
     }
 }
 
-impl<L: fmt::Debug, R: fmt::Debug, T> fmt::Debug for SparseCombine<L, R, T> {
+#[async_trait]
+impl<FE: Send + Sync + 'static, T> TensorPermitRead for SparseCombine<FE, T> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        // always acquire these in-order to avoid the risk of a deadlock
+        let mut left = self.left.read_permit(txn_id, range.clone()).await?;
+        let right = self.right.read_permit(txn_id, range).await?;
+        left.extend(right);
+        Ok(left)
+    }
+}
+
+impl<FE, T> fmt::Debug for SparseCombine<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} and {:?}", self.left, self.right)
     }
 }
 
-#[derive(Clone)]
-pub struct SparseLeftCombine<L, R, T> {
-    left: L,
-    right: R,
+pub struct SparseLeftCombine<FE, T> {
+    left: SparseAccessCast<FE>,
+    right: SparseAccessCast<FE>,
     op: fn(Number, Number) -> T,
-    dtype: PhantomData<T>,
 }
 
-impl<L: TensorInstance + fmt::Debug, R: TensorInstance + fmt::Debug, T> SparseLeftCombine<L, R, T> {
-    pub fn new(left: L, right: R, op: fn(Number, Number) -> T) -> TCResult<Self> {
+impl<FE, T> Clone for SparseLeftCombine<FE, T> {
+    fn clone(&self) -> Self {
+        Self {
+            left: self.left.clone(),
+            right: self.right.clone(),
+            op: self.op,
+        }
+    }
+}
+
+impl<FE, T> SparseLeftCombine<FE, T>
+where
+    FE: AsType<Node> + Send + Sync + 'static,
+{
+    pub fn new<L, R>(left: L, right: R, op: fn(Number, Number) -> T) -> TCResult<Self>
+    where
+        L: Into<SparseAccessCast<FE>>,
+        R: Into<SparseAccessCast<FE>>,
+    {
+        let left = left.into();
+        let right = right.into();
+
         if left.shape() == right.shape() {
-            Ok(Self {
-                left,
-                right,
-                op,
-                dtype: PhantomData,
-            })
+            Ok(Self { left, right, op })
         } else {
             Err(bad_request!(
                 "cannot combine {:?} with {:?} (wrong shape)",
@@ -1356,10 +1574,9 @@ impl<L: TensorInstance + fmt::Debug, R: TensorInstance + fmt::Debug, T> SparseLe
     }
 }
 
-impl<L, R, T> TensorInstance for SparseLeftCombine<L, R, T>
+impl<FE, T> TensorInstance for SparseLeftCombine<FE, T>
 where
-    L: TensorInstance,
-    R: TensorInstance,
+    FE: AsType<Node> + Send + Sync + 'static,
     T: CDatatype + DType,
 {
     fn dtype(&self) -> NumberType {
@@ -1373,12 +1590,10 @@ where
 }
 
 #[async_trait]
-impl<L, R, T> SparseInstance for SparseLeftCombine<L, R, T>
+impl<FE, T> SparseInstance for SparseLeftCombine<FE, T>
 where
-    L: SparseInstance,
-    R: SparseInstance<DType = L::DType>,
+    FE: AsType<Node> + Send + Sync + 'static,
     T: CDatatype + DType,
-    Number: From<L::DType> + From<R::DType>,
 {
     type CoordBlock = ArrayBase<Vec<u64>>;
     type ValueBlock = ArrayBase<Vec<T>>;
@@ -1392,26 +1607,11 @@ where
     }
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        let shape = self.shape().to_vec();
-        let strides = strides_for(&shape, shape.len());
-
-        let left_shape = self.left.shape().to_vec();
-        let right_shape = self.right.shape().to_vec();
-
-        let (left, right) = try_join!(
-            self.left.elements(range.clone(), order.to_vec()),
-            self.right.elements(range, order)
-        )?;
-
-        let left = left.map_ok(move |(coord, value)| (offset_of(coord, &left_shape), value));
-        let right = right.map_ok(move |(coord, value)| (offset_of(coord, &right_shape), value));
-
-        let elements = stream::InnerJoin::new(left, right).map_ok(move |(offset, left, right)| {
-            let coord = coord_of(offset, &strides, &shape);
-            (coord, (self.op)(left.into(), right.into()))
-        });
-
-        Ok(Box::pin(elements))
+        let elements = self.left.inner_join(self.right, range, order).await?;
+        Ok(Box::pin(elements.map_ok(move |(coord, (l, r))| {
+            let value = (self.op)(l, r);
+            (coord, value)
+        })))
     }
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1420,11 +1620,22 @@ where
             self.right.read_value(coord)
         )?;
 
-        Ok((self.op)(left.into(), right.into()))
+        Ok((self.op)(left, right))
     }
 }
 
-impl<L: fmt::Debug, R: fmt::Debug, T> fmt::Debug for SparseLeftCombine<L, R, T> {
+#[async_trait]
+impl<FE: Send + Sync + 'static, T> TensorPermitRead for SparseLeftCombine<FE, T> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        // always acquire these locks in-order to avoid the risk of a deadlock
+        let mut left = self.left.read_permit(txn_id, range.clone()).await?;
+        let right = self.right.read_permit(txn_id, range.clone()).await?;
+        left.extend(right);
+        Ok(left)
+    }
+}
+
+impl<FE, T> fmt::Debug for SparseLeftCombine<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} and {:?}", self.left, self.right)
     }

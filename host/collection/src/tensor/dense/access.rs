@@ -383,22 +383,6 @@ impl<FE> Clone for DenseAccessCast<FE> {
     }
 }
 
-macro_rules! access_cast_dispatch {
-    ($this:ident, $var:ident, $call:expr) => {
-        match $this {
-            DenseAccessCast::F32($var) => $call,
-            DenseAccessCast::F64($var) => $call,
-            DenseAccessCast::I16($var) => $call,
-            DenseAccessCast::I32($var) => $call,
-            DenseAccessCast::I64($var) => $call,
-            DenseAccessCast::U8($var) => $call,
-            DenseAccessCast::U16($var) => $call,
-            DenseAccessCast::U32($var) => $call,
-            DenseAccessCast::U64($var) => $call,
-        }
-    };
-}
-
 impl<FE> DenseAccessCast<FE>
 where
     FE: DenseCacheFile,
@@ -495,7 +479,7 @@ where
     }
 }
 
-macro_rules! cast_source {
+macro_rules! access_cast_from {
     ($t:ty, $var:ident) => {
         impl<FE> From<DenseAccess<FE, $t>> for DenseAccessCast<FE> {
             fn from(access: DenseAccess<FE, $t>) -> Self {
@@ -505,17 +489,17 @@ macro_rules! cast_source {
     };
 }
 
-cast_source!(f32, F32);
-cast_source!(f64, F64);
-cast_source!(i16, I16);
-cast_source!(i32, I32);
-cast_source!(i64, I64);
-cast_source!(u8, U8);
-cast_source!(u16, U16);
-cast_source!(u32, U32);
-cast_source!(u64, U64);
+access_cast_from!(f32, F32);
+access_cast_from!(f64, F64);
+access_cast_from!(i16, I16);
+access_cast_from!(i32, I32);
+access_cast_from!(i64, I64);
+access_cast_from!(u8, U8);
+access_cast_from!(u16, U16);
+access_cast_from!(u32, U32);
+access_cast_from!(u64, U64);
 
-macro_rules! access_dispatch {
+macro_rules! access_cast_dispatch {
     ($this:ident, $var:ident, $call:expr) => {
         match $this {
             DenseAccessCast::F32($var) => $call,
@@ -531,9 +515,16 @@ macro_rules! access_dispatch {
     };
 }
 
+#[async_trait]
+impl<FE: Send + Sync + 'static> TensorPermitRead for DenseAccessCast<FE> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        access_cast_dispatch!(self, this, this.read_permit(txn_id, range).await)
+    }
+}
+
 impl<FE> fmt::Debug for DenseAccessCast<FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        access_dispatch!(self, this, this.fmt(f))
+        access_cast_dispatch!(self, this, this.fmt(f))
     }
 }
 
@@ -678,6 +669,8 @@ where
         match self {
             Self::Broadcast(broadcast) => broadcast.read_permit(txn_id, range).await,
             Self::Combine(combine) => combine.read_permit(txn_id, range).await,
+            Self::Compare(compare) => compare.read_permit(txn_id, range).await,
+            Self::CompareConst(compare) => compare.read_permit(txn_id, range).await,
             Self::Const(combine) => combine.read_permit(txn_id, range).await,
             Self::Cow(cow) => cow.read_permit(txn_id, range).await,
             Self::Diagonal(diag) => diag.read_permit(txn_id, range).await,
@@ -2014,6 +2007,17 @@ impl<FE: DenseCacheFile, T: CDatatype + DType> DenseInstance for DenseCompare<FE
     }
 }
 
+#[async_trait]
+impl<FE: Send + Sync + 'static, T: CDatatype> TensorPermitRead for DenseCompare<FE, T> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        // always acquire these permits in-order to avoid the risk of a deadlock
+        let mut left = self.left.read_permit(txn_id, range.clone()).await?;
+        let right = self.right.read_permit(txn_id, range).await?;
+        left.extend(right);
+        Ok(left)
+    }
+}
+
 impl<FE, T: CDatatype> fmt::Debug for DenseCompare<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "compare {:?} with {:?}", self.left, self.right)
@@ -2084,6 +2088,13 @@ impl<FE: DenseCacheFile, T: CDatatype + DType> DenseInstance for DenseCompareCon
         let left = self.left.read_blocks().await?;
         let blocks = left.map(move |result| result.and_then(|block| (self.cmp)(block, self.right)));
         Ok(Box::pin(blocks))
+    }
+}
+
+#[async_trait]
+impl<FE: Send + Sync + 'static, T: CDatatype> TensorPermitRead for DenseCompareConst<FE, T> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        self.left.read_permit(txn_id, range).await
     }
 }
 
