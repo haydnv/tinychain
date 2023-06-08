@@ -15,7 +15,9 @@ use safecast::{AsType, CastInto};
 use tc_error::*;
 use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberCollator, NumberType};
+use tcgeneric::ThreadSafe;
 
+use crate::tensor::sparse::Node;
 use crate::tensor::{
     TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal,
     TensorMath, TensorMathConst, TensorPermitRead, TensorReduce, TensorUnary, TensorUnaryBoolean,
@@ -43,8 +45,7 @@ pub trait DenseCacheFile:
     + AsType<Buffer<u16>>
     + AsType<Buffer<u32>>
     + AsType<Buffer<u64>>
-    + Send
-    + Sync
+    + ThreadSafe
 {
 }
 
@@ -59,8 +60,7 @@ impl<FE> DenseCacheFile for FE where
         + AsType<Buffer<u16>>
         + AsType<Buffer<u32>>
         + AsType<Buffer<u64>>
-        + Send
-        + Sync
+        + ThreadSafe
 {
 }
 
@@ -415,11 +415,12 @@ where
 #[async_trait]
 impl<FE, A> TensorReduce for DenseTensor<FE, A>
 where
-    FE: DenseCacheFile + AsType<Buffer<A::DType>>,
+    FE: DenseCacheFile + AsType<Buffer<A::DType>> + AsType<Node>,
     A: DenseInstance + TensorPermitRead + Into<DenseAccess<FE, A::DType>>,
+    A::DType: fmt::Debug,
     Array<A::DType>: Clone,
     Buffer<A::DType>: de::FromStream<Context = ()>,
-    Number: From<A::DType>,
+    Number: From<A::DType> + CastInto<A::DType>,
 {
     type Reduce = DenseTensor<FE, DenseReduce<DenseAccess<FE, A::DType>, A::DType>>;
 
@@ -471,7 +472,7 @@ where
             })
             .await?;
 
-        Ok(max.cast_into())
+        Ok(max)
     }
 
     fn min(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
@@ -496,7 +497,7 @@ where
             })
             .await?;
 
-        Ok(min.cast_into())
+        Ok(min)
     }
 
     fn product(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {

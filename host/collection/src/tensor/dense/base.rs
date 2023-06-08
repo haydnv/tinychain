@@ -18,6 +18,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberInstance, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
+use crate::tensor::sparse::Node;
 use crate::tensor::{
     Coord, Range, Semaphore, Shape, TensorDualIO, TensorIO, TensorInstance, TensorPermitRead,
     TensorPermitWrite, TensorType,
@@ -175,8 +176,8 @@ where
 impl<Txn, FE, T> TensorIO for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Buffer<T>> + 'static,
-    T: CDatatype + DType,
+    FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + 'static,
+    T: CDatatype + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -243,10 +244,11 @@ where
 impl<Txn, FE, T, A> TensorDualIO<DenseTensor<FE, A>> for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Buffer<T>> + 'static,
-    T: CDatatype + DType,
+    FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + 'static,
+    T: CDatatype + DType + fmt::Debug,
     A: DenseInstance<DType = T>,
     Buffer<T>: de::FromStream<Context = ()>,
+    Number: From<T> + CastInto<T>,
 {
     async fn write(self, txn_id: TxnId, range: Range, value: DenseTensor<FE, A>) -> TCResult<()> {
         let _permit = self.canon.write_permit(txn_id, range.clone()).await?;
@@ -271,7 +273,7 @@ where
 impl<Txn, FE, T> Persist<FE> for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Buffer<T>> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Buffer<T>> + ThreadSafe + Clone,
     T: CDatatype + DType + NumberInstance,
     Buffer<T>: de::FromStream<Context = ()>,
 {

@@ -361,7 +361,7 @@ where
 }
 
 #[async_trait]
-impl<T: Transact + ThreadSafe> Transact for Dir<T>
+impl<T: Transact + ThreadSafe + Clone> Transact for Dir<T>
 where
     DirEntry<T>: Clone,
 {

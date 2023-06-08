@@ -610,7 +610,7 @@ where
 impl<Txn, FE> Persist<FE> for TableFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + Clone,
 {
     type Txn = Txn;
     type Schema = TableSchema;
@@ -655,7 +655,7 @@ where
 impl<Txn, FE, T> CopyFrom<FE, T> for TableFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + Clone,
     T: TableStream + 'static,
 {
     async fn copy_from(
@@ -729,7 +729,7 @@ where
 impl<Txn, FE> Restore<FE> for TableFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + Clone,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         debug!("Table::restore");

@@ -100,7 +100,7 @@ where
 impl<Txn, FE> Persist<FE> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + Clone,
     Node: freqfs::FileLoad,
 {
     type Txn = Txn;
@@ -150,7 +150,7 @@ where
 impl<Txn, FE> CopyFrom<FE, Collection<Txn, FE>> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + Clone,
     Node: freqfs::FileLoad,
 {
     async fn copy_from(txn: &Txn, store: Dir<FE>, instance: Collection<Txn, FE>) -> TCResult<Self> {
@@ -173,7 +173,7 @@ where
 impl<Txn, FE> Restore<FE> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + Clone,
     Node: freqfs::FileLoad,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {

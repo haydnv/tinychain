@@ -11,7 +11,7 @@ use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 use ha_ndarray::*;
-use safecast::AsType;
+use safecast::{AsType, CastInto};
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
@@ -20,7 +20,7 @@ use tc_value::{DType, Float, Int, Number, NumberClass, NumberInstance, NumberTyp
 
 use super::{DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock};
 
-use crate::tensor::sparse::SparseInstance;
+use crate::tensor::sparse::{Node, SparseAccess, SparseInstance};
 use crate::tensor::transform::{Broadcast, Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
     coord_of, offset_of, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
@@ -386,7 +386,7 @@ impl<FE> Clone for DenseAccessCast<FE> {
 
 impl<FE> DenseAccessCast<FE>
 where
-    FE: DenseCacheFile,
+    FE: DenseCacheFile + AsType<Node>,
 {
     async fn read_block(&self, block_id: u64) -> TCResult<Block> {
         match self {
@@ -542,6 +542,7 @@ pub enum DenseAccess<FE, T: CDatatype> {
     Reduce(Box<DenseReduce<Self, T>>),
     Reshape(Box<DenseReshape<Self>>),
     Slice(Box<DenseSlice<Self>>),
+    Sparse(DenseSparse<SparseAccess<FE, T>>),
     Transpose(Box<DenseTranspose<Self>>),
     Unary(Box<DenseUnary<Self, T>>),
     UnaryCast(Box<DenseUnaryCast<FE, T>>),
@@ -563,6 +564,7 @@ impl<FE, T: CDatatype> Clone for DenseAccess<FE, T> {
             Self::Reduce(reduce) => Self::Reduce(reduce.clone()),
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
             Self::Slice(slice) => Self::Slice(slice.clone()),
+            Self::Sparse(sparse) => Self::Sparse(sparse.clone()),
             Self::Transpose(transpose) => Self::Transpose(transpose.clone()),
             Self::Unary(unary) => Self::Unary(unary.clone()),
             Self::UnaryCast(unary) => Self::UnaryCast(unary.clone()),
@@ -586,6 +588,7 @@ macro_rules! access_dispatch {
             DenseAccess::Reduce($var) => $call,
             DenseAccess::Reshape($var) => $call,
             DenseAccess::Slice($var) => $call,
+            DenseAccess::Sparse($var) => $call,
             DenseAccess::Transpose($var) => $call,
             DenseAccess::Unary($var) => $call,
             DenseAccess::UnaryCast($var) => $call,
@@ -611,9 +614,10 @@ where
 #[async_trait]
 impl<FE, T> DenseInstance for DenseAccess<FE, T>
 where
-    FE: DenseCacheFile + AsType<Buffer<T>>,
-    T: CDatatype + DType,
+    FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
+    T: CDatatype + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
+    Number: From<T> + CastInto<T>,
 {
     type Block = Array<T>;
     type DType = T;
@@ -648,6 +652,7 @@ where
                 Ok(Box::pin(reshape.read_blocks().await?.map_ok(Array::from)))
             }
             Self::Slice(slice) => Ok(Box::pin(slice.read_blocks().await?.map_ok(Array::from))),
+            Self::Sparse(sparse) => Ok(Box::pin(sparse.read_blocks().await?.map_ok(Array::from))),
             Self::Transpose(transpose) => {
                 Ok(Box::pin(transpose.read_blocks().await?.map_ok(Array::from)))
             }
@@ -1978,7 +1983,12 @@ impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseCo
 }
 
 #[async_trait]
-impl<FE: DenseCacheFile, T: CDatatype + DType> DenseInstance for DenseCompare<FE, T> {
+impl<FE, T> DenseInstance for DenseCompare<FE, T>
+where
+    FE: DenseCacheFile + AsType<Node>,
+    T: CDatatype + DType + fmt::Debug,
+    Number: From<T> + CastInto<T>,
+{
     type Block = Array<T>;
     type DType = T;
 
@@ -2069,7 +2079,11 @@ impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseCo
 }
 
 #[async_trait]
-impl<FE: DenseCacheFile, T: CDatatype + DType> DenseInstance for DenseCompareConst<FE, T> {
+impl<FE, T> DenseInstance for DenseCompareConst<FE, T>
+where
+    FE: DenseCacheFile + AsType<Node>,
+    T: CDatatype + DType + fmt::Debug,
+{
     type Block = Array<T>;
     type DType = T;
 
@@ -3582,7 +3596,12 @@ impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseUn
 }
 
 #[async_trait]
-impl<FE: DenseCacheFile, T: CDatatype + DType> DenseInstance for DenseUnaryCast<FE, T> {
+impl<FE, T> DenseInstance for DenseUnaryCast<FE, T>
+where
+    FE: DenseCacheFile + AsType<Node>,
+    T: CDatatype + DType + fmt::Debug,
+    Number: From<T> + CastInto<T>,
+{
     type Block = Array<T>;
     type DType = T;
 

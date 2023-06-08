@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use collate::Collator;
 use ds_ext::{OrdHashMap, OrdHashSet};
-use freqfs::{DirLock, FileLoad};
+use freqfs::DirLock;
 use futures::TryFutureExt;
 use ha_ndarray::CDatatype;
 use log::debug;
@@ -271,7 +271,7 @@ where
 impl<Txn, FE, T> Persist<FE> for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + Clone,
 {
     type Txn = Txn;
     type Schema = Schema;
@@ -313,7 +313,7 @@ where
 impl<Txn, FE, T> Transact for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + FileLoad + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {

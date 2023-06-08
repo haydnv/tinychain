@@ -19,9 +19,11 @@ use tcgeneric::ThreadSafe;
 
 use super::{Axes, Coord, Range, Shape, TensorBoolean, TensorInstance, TensorTransform};
 
+pub use access::SparseAccess;
+
 use access::{
-    SparseAccess, SparseAccessCast, SparseBroadcast, SparseCombine, SparseExpand,
-    SparseLeftCombine, SparseReshape, SparseSlice, SparseTranspose,
+    SparseAccessCast, SparseBroadcast, SparseCombine, SparseExpand, SparseLeftCombine,
+    SparseReshape, SparseSlice, SparseTranspose,
 };
 
 const BLOCK_SIZE: usize = 4_096;

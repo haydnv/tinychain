@@ -546,7 +546,7 @@ where
 impl<Txn, FE> Persist<FE> for BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + Clone,
     Node: FileLoad,
 {
     type Txn = Txn;
@@ -595,7 +595,7 @@ where
 impl<Txn, FE, I> CopyFrom<FE, I> for BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + Clone,
     I: BTreeInstance + 'static,
     Node: freqfs::FileLoad,
 {
@@ -673,7 +673,7 @@ where
 impl<Txn, FE> Restore<FE> for BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + Clone,
     Node: freqfs::FileLoad,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
