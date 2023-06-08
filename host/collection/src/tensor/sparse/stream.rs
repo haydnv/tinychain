@@ -343,7 +343,7 @@ impl<T, S: Stream<Item = Result<(Coord, T), TCError>>> Stream for FilledAt<S> {
 
 // Based on: https://github.com/rust-lang/futures-rs/blob/master/futures-util/src/stream/select.rs
 #[pin_project]
-struct InnerJoin<L, R, T> {
+pub struct InnerJoin<L, R, T> {
     #[pin]
     left: Fuse<L>,
     #[pin]
@@ -532,7 +532,7 @@ where
 
 // Based on: https://github.com/rust-lang/futures-rs/blob/master/futures-util/src/stream/select.rs
 #[pin_project]
-struct OuterJoin<L, R, T> {
+pub struct OuterJoin<L, R, T> {
     #[pin]
     left: Fuse<L>,
     #[pin]

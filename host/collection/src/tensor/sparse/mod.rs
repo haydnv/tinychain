@@ -16,10 +16,11 @@ use safecast::{AsType, CastFrom};
 use tc_error::*;
 use tc_value::{DType, Number, NumberType};
 
-use super::{Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
+use super::{Axes, Coord, Range, Shape, TensorBoolean, TensorInstance, TensorTransform};
 
 use access::{
-    SparseAccess, SparseBroadcast, SparseExpand, SparseReshape, SparseSlice, SparseTranspose,
+    SparseAccess, SparseBroadcast, SparseCombine, SparseExpand, SparseLeftCombine, SparseReshape,
+    SparseSlice, SparseTranspose,
 };
 
 const BLOCK_SIZE: usize = 4_096;
@@ -100,6 +101,53 @@ where
     }
 }
 
+impl<FE, L, R> TensorBoolean<SparseTensor<FE, R>> for SparseTensor<FE, L>
+where
+    FE: AsType<Node> + Send + Sync + 'static,
+    L: SparseInstance,
+    R: SparseInstance<DType = L::DType>,
+    Number: From<L::DType> + From<R::DType>,
+{
+    type Combine = SparseTensor<FE, SparseCombine<L, R, u8>>;
+    type LeftCombine = SparseTensor<FE, SparseLeftCombine<L, R, u8>>;
+
+    fn and(self, other: SparseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+        let access = SparseLeftCombine::new(self.accessor, other.accessor, |l, r| {
+            if bool::cast_from(l) && bool::cast_from(r) {
+                1
+            } else {
+                0
+            }
+        })?;
+
+        Ok(SparseTensor::from(access))
+    }
+
+    fn or(self, other: SparseTensor<FE, R>) -> TCResult<Self::Combine> {
+        let access = SparseCombine::new(self.accessor, other.accessor, |l, r| {
+            if bool::cast_from(l) && bool::cast_from(r) {
+                1
+            } else {
+                0
+            }
+        })?;
+
+        Ok(SparseTensor::from(access))
+    }
+
+    fn xor(self, other: SparseTensor<FE, R>) -> TCResult<Self::Combine> {
+        let access = SparseCombine::new(self.accessor, other.accessor, |l, r| {
+            if bool::cast_from(l) && bool::cast_from(r) {
+                1
+            } else {
+                0
+            }
+        })?;
+
+        Ok(SparseTensor::from(access))
+    }
+}
+
 impl<FE, A> TensorTransform for SparseTensor<FE, A>
 where
     FE: AsType<Node> + Send + Sync + 'static,
@@ -159,13 +207,13 @@ where
     }
 }
 
-impl<FE, A> From<A> for SparseTensor<FE, SparseAccess<FE, A::DType>>
+impl<FE, A> From<A> for SparseTensor<FE, A>
 where
-    A: SparseInstance + Into<SparseAccess<FE, A::DType>>,
+    A: SparseInstance,
 {
     fn from(accessor: A) -> Self {
         Self {
-            accessor: accessor.into(),
+            accessor,
             phantom: PhantomData,
         }
     }

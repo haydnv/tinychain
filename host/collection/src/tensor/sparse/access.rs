@@ -23,8 +23,8 @@ use tc_value::{DType, Number, NumberCollator, NumberType};
 
 use crate::tensor::transform::{Expand, Reshape, Slice, Transpose};
 use crate::tensor::{
-    strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
-    TensorPermitRead, TensorPermitWrite,
+    coord_of, offset_of, strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore,
+    Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
 };
 
 use super::schema::{IndexSchema, Schema};
@@ -1225,6 +1225,208 @@ where
 impl<FE, T: DType> fmt::Debug for SparseCast<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "cast {:?} into {:?}", self.source, T::dtype())
+    }
+}
+
+#[derive(Clone)]
+pub struct SparseCombine<L, R, T> {
+    left: L,
+    right: R,
+    op: fn(Number, Number) -> T,
+    dtype: PhantomData<T>,
+}
+
+impl<L: TensorInstance + fmt::Debug, R: TensorInstance + fmt::Debug, T> SparseCombine<L, R, T> {
+    pub fn new(left: L, right: R, op: fn(Number, Number) -> T) -> TCResult<Self> {
+        if left.shape() == right.shape() {
+            Ok(Self {
+                left,
+                right,
+                op,
+                dtype: PhantomData,
+            })
+        } else {
+            Err(bad_request!(
+                "cannot combine {:?} with {:?} (wrong shape)",
+                left,
+                right
+            ))
+        }
+    }
+}
+
+impl<L, R, T> TensorInstance for SparseCombine<L, R, T>
+where
+    L: TensorInstance,
+    R: TensorInstance,
+    T: CDatatype + DType,
+{
+    fn dtype(&self) -> NumberType {
+        T::dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        debug_assert_eq!(self.left.shape(), self.right.shape());
+        self.left.shape()
+    }
+}
+
+#[async_trait]
+impl<L, R, T> SparseInstance for SparseCombine<L, R, T>
+where
+    L: SparseInstance,
+    R: SparseInstance<DType = L::DType>,
+    T: CDatatype + DType,
+    Number: From<L::DType> + From<R::DType>,
+{
+    type CoordBlock = ArrayBase<Vec<u64>>;
+    type ValueBlock = ArrayBase<Vec<T>>;
+    type Blocks = stream::BlockCoords<Elements<Self::DType>, T>;
+    type DType = T;
+
+    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        let ndim = self.ndim();
+        let elements = self.elements(range, order).await?;
+        Ok(stream::BlockCoords::new(elements, ndim))
+    }
+
+    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+        let shape = self.shape().to_vec();
+        let strides = strides_for(&shape, shape.len());
+
+        let left_shape = self.left.shape().to_vec();
+        let right_shape = self.right.shape().to_vec();
+
+        let (left, right) = try_join!(
+            self.left.elements(range.clone(), order.to_vec()),
+            self.right.elements(range, order)
+        )?;
+
+        let left = left.map_ok(move |(coord, value)| (offset_of(coord, &left_shape), value));
+        let right = right.map_ok(move |(coord, value)| (offset_of(coord, &right_shape), value));
+
+        let elements = stream::OuterJoin::new(left, right).map_ok(move |(offset, left, right)| {
+            let coord = coord_of(offset, &strides, &shape);
+            (coord, (self.op)(left.into(), right.into()))
+        });
+
+        Ok(Box::pin(elements))
+    }
+
+    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+        let (left, right) = try_join!(
+            self.left.read_value(coord.to_vec()),
+            self.right.read_value(coord)
+        )?;
+
+        Ok((self.op)(left.into(), right.into()))
+    }
+}
+
+impl<L: fmt::Debug, R: fmt::Debug, T> fmt::Debug for SparseCombine<L, R, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "combine {:?} and {:?}", self.left, self.right)
+    }
+}
+
+#[derive(Clone)]
+pub struct SparseLeftCombine<L, R, T> {
+    left: L,
+    right: R,
+    op: fn(Number, Number) -> T,
+    dtype: PhantomData<T>,
+}
+
+impl<L: TensorInstance + fmt::Debug, R: TensorInstance + fmt::Debug, T> SparseLeftCombine<L, R, T> {
+    pub fn new(left: L, right: R, op: fn(Number, Number) -> T) -> TCResult<Self> {
+        if left.shape() == right.shape() {
+            Ok(Self {
+                left,
+                right,
+                op,
+                dtype: PhantomData,
+            })
+        } else {
+            Err(bad_request!(
+                "cannot combine {:?} with {:?} (wrong shape)",
+                left,
+                right
+            ))
+        }
+    }
+}
+
+impl<L, R, T> TensorInstance for SparseLeftCombine<L, R, T>
+where
+    L: TensorInstance,
+    R: TensorInstance,
+    T: CDatatype + DType,
+{
+    fn dtype(&self) -> NumberType {
+        T::dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        debug_assert_eq!(self.left.shape(), self.right.shape());
+        self.left.shape()
+    }
+}
+
+#[async_trait]
+impl<L, R, T> SparseInstance for SparseLeftCombine<L, R, T>
+where
+    L: SparseInstance,
+    R: SparseInstance<DType = L::DType>,
+    T: CDatatype + DType,
+    Number: From<L::DType> + From<R::DType>,
+{
+    type CoordBlock = ArrayBase<Vec<u64>>;
+    type ValueBlock = ArrayBase<Vec<T>>;
+    type Blocks = stream::BlockCoords<Elements<Self::DType>, T>;
+    type DType = T;
+
+    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        let ndim = self.ndim();
+        let elements = self.elements(range, order).await?;
+        Ok(stream::BlockCoords::new(elements, ndim))
+    }
+
+    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+        let shape = self.shape().to_vec();
+        let strides = strides_for(&shape, shape.len());
+
+        let left_shape = self.left.shape().to_vec();
+        let right_shape = self.right.shape().to_vec();
+
+        let (left, right) = try_join!(
+            self.left.elements(range.clone(), order.to_vec()),
+            self.right.elements(range, order)
+        )?;
+
+        let left = left.map_ok(move |(coord, value)| (offset_of(coord, &left_shape), value));
+        let right = right.map_ok(move |(coord, value)| (offset_of(coord, &right_shape), value));
+
+        let elements = stream::InnerJoin::new(left, right).map_ok(move |(offset, left, right)| {
+            let coord = coord_of(offset, &strides, &shape);
+            (coord, (self.op)(left.into(), right.into()))
+        });
+
+        Ok(Box::pin(elements))
+    }
+
+    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+        let (left, right) = try_join!(
+            self.left.read_value(coord.to_vec()),
+            self.right.read_value(coord)
+        )?;
+
+        Ok((self.op)(left.into(), right.into()))
+    }
+}
+
+impl<L: fmt::Debug, R: fmt::Debug, T> fmt::Debug for SparseLeftCombine<L, R, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "combine {:?} and {:?}", self.left, self.right)
     }
 }
 
