@@ -6,9 +6,7 @@ use std::{fmt, io};
 
 use async_trait::async_trait;
 use destream::de;
-use freqfs::{
-    DirLock, DirReadGuard, FileLoad, FileReadGuard, FileReadGuardOwned, FileWriteGuardOwned,
-};
+use freqfs::*;
 use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
@@ -31,7 +29,7 @@ use crate::tensor::{
 use super::stream::BlockResize;
 use super::{BlockShape, BlockStream, DenseCacheFile};
 
-pub enum ArrayCastSource {
+pub enum Block {
     F32(Array<f32>),
     F64(Array<f64>),
     I16(Array<i16>),
@@ -43,7 +41,23 @@ pub enum ArrayCastSource {
     U64(Array<u64>),
 }
 
-macro_rules! array_cmp {
+macro_rules! block_dispatch {
+    ($this:ident, $var:ident, $call:expr) => {
+        match $this {
+            Self::F32($var) => $call,
+            Self::F64($var) => $call,
+            Self::I16($var) => $call,
+            Self::I32($var) => $call,
+            Self::I64($var) => $call,
+            Self::U8($var) => $call,
+            Self::U16($var) => $call,
+            Self::U32($var) => $call,
+            Self::U64($var) => $call,
+        }
+    };
+}
+
+macro_rules! block_cmp {
     ($self:ident, $other:ident, $this:ident, $that:ident, $call:expr) => {
         match ($self, $other) {
             (Self::F32($this), Self::F32($that)) => {
@@ -78,7 +92,7 @@ macro_rules! array_cmp {
     };
 }
 
-macro_rules! array_cmp_scalar {
+macro_rules! block_cmp_scalar {
     ($self:ident, $other:ident, $this:ident, $that:ident, $call:expr) => {
         match ($self, $other) {
             (Self::F32($this), Number::Float(Float::F32($that))) => $this
@@ -131,9 +145,9 @@ macro_rules! array_cmp_scalar {
     };
 }
 
-impl ArrayCastSource {
+impl Block {
     pub fn and(self, other: Self) -> TCResult<Array<u8>> {
-        array_cmp!(
+        block_cmp!(
             self,
             other,
             this,
@@ -143,7 +157,7 @@ impl ArrayCastSource {
     }
 
     pub fn and_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        array_cmp_scalar!(
+        block_cmp_scalar!(
             self,
             other,
             this,
@@ -155,21 +169,15 @@ impl ArrayCastSource {
     }
 
     pub fn not(self) -> TCResult<Array<u8>> {
-        match self {
-            Self::F32(this) => this.not().map(Array::from).map_err(TCError::from),
-            Self::F64(this) => this.not().map(Array::from).map_err(TCError::from),
-            Self::I16(this) => this.not().map(Array::from).map_err(TCError::from),
-            Self::I32(this) => this.not().map(Array::from).map_err(TCError::from),
-            Self::I64(this) => this.not().map(Array::from).map_err(TCError::from),
-            Self::U8(this) => this.not().map(Array::from).map_err(TCError::from),
-            Self::U16(this) => this.not().map(Array::from).map_err(TCError::from),
-            Self::U32(this) => this.not().map(Array::from).map_err(TCError::from),
-            Self::U64(this) => this.not().map(Array::from).map_err(TCError::from),
-        }
+        block_dispatch!(
+            self,
+            this,
+            this.not().map(Array::from).map_err(TCError::from)
+        )
     }
 
     pub fn or(self, other: Self) -> TCResult<Array<u8>> {
-        array_cmp!(
+        block_cmp!(
             self,
             other,
             this,
@@ -179,7 +187,7 @@ impl ArrayCastSource {
     }
 
     pub fn or_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        array_cmp_scalar!(
+        block_cmp_scalar!(
             self,
             other,
             this,
@@ -189,7 +197,7 @@ impl ArrayCastSource {
     }
 
     pub fn xor(self, other: Self) -> TCResult<Array<u8>> {
-        array_cmp!(
+        block_cmp!(
             self,
             other,
             this,
@@ -199,7 +207,7 @@ impl ArrayCastSource {
     }
 
     pub fn xor_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        array_cmp_scalar!(
+        block_cmp_scalar!(
             self,
             other,
             this,
@@ -211,7 +219,7 @@ impl ArrayCastSource {
     }
 
     pub fn eq(self, other: Self) -> TCResult<Array<u8>> {
-        array_cmp!(
+        block_cmp!(
             self,
             other,
             this,
@@ -221,7 +229,7 @@ impl ArrayCastSource {
     }
 
     pub fn eq_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        array_cmp_scalar!(
+        block_cmp_scalar!(
             self,
             other,
             this,
@@ -231,7 +239,7 @@ impl ArrayCastSource {
     }
 
     pub fn gt(self, other: Self) -> TCResult<Array<u8>> {
-        array_cmp!(
+        block_cmp!(
             self,
             other,
             this,
@@ -241,7 +249,7 @@ impl ArrayCastSource {
     }
 
     pub fn gt_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        array_cmp_scalar!(
+        block_cmp_scalar!(
             self,
             other,
             this,
@@ -251,7 +259,7 @@ impl ArrayCastSource {
     }
 
     pub fn ge(self, other: Self) -> TCResult<Array<u8>> {
-        array_cmp!(
+        block_cmp!(
             self,
             other,
             this,
@@ -261,7 +269,7 @@ impl ArrayCastSource {
     }
 
     pub fn ge_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        array_cmp_scalar!(
+        block_cmp_scalar!(
             self,
             other,
             this,
@@ -271,7 +279,7 @@ impl ArrayCastSource {
     }
 
     pub fn lt(self, other: Self) -> TCResult<Array<u8>> {
-        array_cmp!(
+        block_cmp!(
             self,
             other,
             this,
@@ -281,7 +289,7 @@ impl ArrayCastSource {
     }
 
     pub fn lt_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        array_cmp_scalar!(
+        block_cmp_scalar!(
             self,
             other,
             this,
@@ -291,7 +299,7 @@ impl ArrayCastSource {
     }
 
     pub fn le(self, other: Self) -> TCResult<Array<u8>> {
-        array_cmp!(
+        block_cmp!(
             self,
             other,
             this,
@@ -301,7 +309,7 @@ impl ArrayCastSource {
     }
 
     pub fn le_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        array_cmp_scalar!(
+        block_cmp_scalar!(
             self,
             other,
             this,
@@ -311,7 +319,7 @@ impl ArrayCastSource {
     }
 
     pub fn ne(self, other: Self) -> TCResult<Array<u8>> {
-        array_cmp!(
+        block_cmp!(
             self,
             other,
             this,
@@ -321,7 +329,7 @@ impl ArrayCastSource {
     }
 
     pub fn ne_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        array_cmp_scalar!(
+        block_cmp_scalar!(
             self,
             other,
             this,
@@ -331,7 +339,7 @@ impl ArrayCastSource {
     }
 }
 
-impl fmt::Debug for ArrayCastSource {
+impl fmt::Debug for Block {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::F32(this) => this.fmt(f),
@@ -347,7 +355,7 @@ impl fmt::Debug for ArrayCastSource {
     }
 }
 
-pub enum DenseCastSource<FE> {
+pub enum DenseAccessCast<FE> {
     F32(DenseAccess<FE, f32>),
     F64(DenseAccess<FE, f64>),
     I16(DenseAccess<FE, i16>),
@@ -359,7 +367,7 @@ pub enum DenseCastSource<FE> {
     U64(DenseAccess<FE, u64>),
 }
 
-impl<FE> Clone for DenseCastSource<FE> {
+impl<FE> Clone for DenseAccessCast<FE> {
     fn clone(&self) -> Self {
         match self {
             Self::F32(access) => Self::F32(access.clone()),
@@ -375,32 +383,46 @@ impl<FE> Clone for DenseCastSource<FE> {
     }
 }
 
-impl<FE> DenseCastSource<FE>
+macro_rules! access_cast_dispatch {
+    ($this:ident, $var:ident, $call:expr) => {
+        match $this {
+            DenseAccessCast::F32($var) => $call,
+            DenseAccessCast::F64($var) => $call,
+            DenseAccessCast::I16($var) => $call,
+            DenseAccessCast::I32($var) => $call,
+            DenseAccessCast::I64($var) => $call,
+            DenseAccessCast::U8($var) => $call,
+            DenseAccessCast::U16($var) => $call,
+            DenseAccessCast::U32($var) => $call,
+            DenseAccessCast::U64($var) => $call,
+        }
+    };
+}
+
+impl<FE> DenseAccessCast<FE>
 where
     FE: DenseCacheFile,
 {
-    async fn read_block(&self, block_id: u64) -> TCResult<ArrayCastSource> {
+    async fn read_block(&self, block_id: u64) -> TCResult<Block> {
         match self {
-            Self::F32(this) => this.read_block(block_id).map_ok(ArrayCastSource::F32).await,
-            Self::F64(this) => this.read_block(block_id).map_ok(ArrayCastSource::F64).await,
-            Self::I16(this) => this.read_block(block_id).map_ok(ArrayCastSource::I16).await,
-            Self::I32(this) => this.read_block(block_id).map_ok(ArrayCastSource::I32).await,
-            Self::I64(this) => this.read_block(block_id).map_ok(ArrayCastSource::I64).await,
-            Self::U8(this) => this.read_block(block_id).map_ok(ArrayCastSource::U8).await,
-            Self::U16(this) => this.read_block(block_id).map_ok(ArrayCastSource::U16).await,
-            Self::U32(this) => this.read_block(block_id).map_ok(ArrayCastSource::U32).await,
-            Self::U64(this) => this.read_block(block_id).map_ok(ArrayCastSource::U64).await,
+            Self::F32(this) => this.read_block(block_id).map_ok(Block::F32).await,
+            Self::F64(this) => this.read_block(block_id).map_ok(Block::F64).await,
+            Self::I16(this) => this.read_block(block_id).map_ok(Block::I16).await,
+            Self::I32(this) => this.read_block(block_id).map_ok(Block::I32).await,
+            Self::I64(this) => this.read_block(block_id).map_ok(Block::I64).await,
+            Self::U8(this) => this.read_block(block_id).map_ok(Block::U8).await,
+            Self::U16(this) => this.read_block(block_id).map_ok(Block::U16).await,
+            Self::U32(this) => this.read_block(block_id).map_ok(Block::U32).await,
+            Self::U64(this) => this.read_block(block_id).map_ok(Block::U64).await,
         }
     }
 
-    async fn read_blocks(
-        self,
-    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<ArrayCastSource>> + Send>>> {
+    async fn read_blocks(self) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<Block>> + Send>>> {
         match self {
             Self::F32(this) => {
                 let blocks = this
                     .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(ArrayCastSource::F32))
+                    .map_ok(|blocks| blocks.map_ok(Block::F32))
                     .await?;
 
                 Ok(Box::pin(blocks))
@@ -408,7 +430,7 @@ where
             Self::F64(this) => {
                 let blocks = this
                     .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(ArrayCastSource::F64))
+                    .map_ok(|blocks| blocks.map_ok(Block::F64))
                     .await?;
 
                 Ok(Box::pin(blocks))
@@ -416,7 +438,7 @@ where
             Self::I16(this) => {
                 let blocks = this
                     .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(ArrayCastSource::I16))
+                    .map_ok(|blocks| blocks.map_ok(Block::I16))
                     .await?;
 
                 Ok(Box::pin(blocks))
@@ -424,7 +446,7 @@ where
             Self::I32(this) => {
                 let blocks = this
                     .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(ArrayCastSource::I32))
+                    .map_ok(|blocks| blocks.map_ok(Block::I32))
                     .await?;
 
                 Ok(Box::pin(blocks))
@@ -432,7 +454,7 @@ where
             Self::I64(this) => {
                 let blocks = this
                     .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(ArrayCastSource::I64))
+                    .map_ok(|blocks| blocks.map_ok(Block::I64))
                     .await?;
 
                 Ok(Box::pin(blocks))
@@ -440,7 +462,7 @@ where
             Self::U8(this) => {
                 let blocks = this
                     .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(ArrayCastSource::U8))
+                    .map_ok(|blocks| blocks.map_ok(Block::U8))
                     .await?;
 
                 Ok(Box::pin(blocks))
@@ -448,7 +470,7 @@ where
             Self::U16(this) => {
                 let blocks = this
                     .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(ArrayCastSource::U16))
+                    .map_ok(|blocks| blocks.map_ok(Block::U16))
                     .await?;
 
                 Ok(Box::pin(blocks))
@@ -456,7 +478,7 @@ where
             Self::U32(this) => {
                 let blocks = this
                     .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(ArrayCastSource::U32))
+                    .map_ok(|blocks| blocks.map_ok(Block::U32))
                     .await?;
 
                 Ok(Box::pin(blocks))
@@ -464,7 +486,7 @@ where
             Self::U64(this) => {
                 let blocks = this
                     .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(ArrayCastSource::U64))
+                    .map_ok(|blocks| blocks.map_ok(Block::U64))
                     .await?;
 
                 Ok(Box::pin(blocks))
@@ -475,7 +497,7 @@ where
 
 macro_rules! cast_source {
     ($t:ty, $var:ident) => {
-        impl<FE> From<DenseAccess<FE, $t>> for DenseCastSource<FE> {
+        impl<FE> From<DenseAccess<FE, $t>> for DenseAccessCast<FE> {
             fn from(access: DenseAccess<FE, $t>) -> Self {
                 Self::$var(access)
             }
@@ -493,32 +515,31 @@ cast_source!(u16, U16);
 cast_source!(u32, U32);
 cast_source!(u64, U64);
 
-macro_rules! cast_dispatch {
+macro_rules! access_dispatch {
     ($this:ident, $var:ident, $call:expr) => {
         match $this {
-            DenseCastSource::F32($var) => $call,
-            DenseCastSource::F64($var) => $call,
-            DenseCastSource::I16($var) => $call,
-            DenseCastSource::I32($var) => $call,
-            DenseCastSource::I64($var) => $call,
-            DenseCastSource::U8($var) => $call,
-            DenseCastSource::U16($var) => $call,
-            DenseCastSource::U32($var) => $call,
-            DenseCastSource::U64($var) => $call,
+            DenseAccessCast::F32($var) => $call,
+            DenseAccessCast::F64($var) => $call,
+            DenseAccessCast::I16($var) => $call,
+            DenseAccessCast::I32($var) => $call,
+            DenseAccessCast::I64($var) => $call,
+            DenseAccessCast::U8($var) => $call,
+            DenseAccessCast::U16($var) => $call,
+            DenseAccessCast::U32($var) => $call,
+            DenseAccessCast::U64($var) => $call,
         }
     };
 }
 
-impl<FE> fmt::Debug for DenseCastSource<FE> {
+impl<FE> fmt::Debug for DenseAccessCast<FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        cast_dispatch!(self, this, this.fmt(f))
+        access_dispatch!(self, this, this.fmt(f))
     }
 }
 
 pub enum DenseAccess<FE, T: CDatatype> {
     File(DenseFile<FE, T>),
     Broadcast(Box<DenseBroadcast<Self>>),
-    Cast(Box<DenseCast<FE, T>>),
     Combine(Box<DenseCombine<Self, Self, T>>),
     Compare(Box<DenseCompare<FE, T>>),
     CompareConst(Box<DenseCompareConst<FE, T>>),
@@ -531,7 +552,7 @@ pub enum DenseAccess<FE, T: CDatatype> {
     Slice(Box<DenseSlice<Self>>),
     Transpose(Box<DenseTranspose<Self>>),
     Unary(Box<DenseUnary<Self, T>>),
-    UnaryBoolean(Box<DenseUnaryBoolean<FE, T>>),
+    UnaryCast(Box<DenseUnaryCast<FE, T>>),
     Version(DenseVersion<FE, T>),
 }
 
@@ -540,7 +561,6 @@ impl<FE, T: CDatatype> Clone for DenseAccess<FE, T> {
         match self {
             Self::File(file) => Self::File(file.clone()),
             Self::Broadcast(broadcast) => Self::Broadcast(broadcast.clone()),
-            Self::Cast(cast) => Self::Cast(cast.clone()),
             Self::Combine(combine) => Self::Combine(combine.clone()),
             Self::Compare(compare) => Self::Compare(compare.clone()),
             Self::CompareConst(compare) => Self::CompareConst(compare.clone()),
@@ -553,7 +573,7 @@ impl<FE, T: CDatatype> Clone for DenseAccess<FE, T> {
             Self::Slice(slice) => Self::Slice(slice.clone()),
             Self::Transpose(transpose) => Self::Transpose(transpose.clone()),
             Self::Unary(unary) => Self::Unary(unary.clone()),
-            Self::UnaryBoolean(unary) => Self::UnaryBoolean(unary.clone()),
+            Self::UnaryCast(unary) => Self::UnaryCast(unary.clone()),
             Self::Version(version) => Self::Version(version.clone()),
         }
     }
@@ -562,23 +582,22 @@ impl<FE, T: CDatatype> Clone for DenseAccess<FE, T> {
 macro_rules! access_dispatch {
     ($this:ident, $var:ident, $call:expr) => {
         match $this {
-            Self::File($var) => $call,
-            Self::Broadcast($var) => $call,
-            Self::Cast($var) => $call,
-            Self::Combine($var) => $call,
-            Self::Compare($var) => $call,
-            Self::CompareConst($var) => $call,
-            Self::Const($var) => $call,
-            Self::Cow($var) => $call,
-            Self::Diagonal($var) => $call,
-            Self::Expand($var) => $call,
-            Self::Reduce($var) => $call,
-            Self::Reshape($var) => $call,
-            Self::Slice($var) => $call,
-            Self::Transpose($var) => $call,
-            Self::Unary($var) => $call,
-            Self::UnaryBoolean($var) => $call,
-            Self::Version($var) => $call,
+            DenseAccess::File($var) => $call,
+            DenseAccess::Broadcast($var) => $call,
+            DenseAccess::Combine($var) => $call,
+            DenseAccess::Compare($var) => $call,
+            DenseAccess::CompareConst($var) => $call,
+            DenseAccess::Const($var) => $call,
+            DenseAccess::Cow($var) => $call,
+            DenseAccess::Diagonal($var) => $call,
+            DenseAccess::Expand($var) => $call,
+            DenseAccess::Reduce($var) => $call,
+            DenseAccess::Reshape($var) => $call,
+            DenseAccess::Slice($var) => $call,
+            DenseAccess::Transpose($var) => $call,
+            DenseAccess::Unary($var) => $call,
+            DenseAccess::UnaryCast($var) => $call,
+            DenseAccess::Version($var) => $call,
         }
     };
 }
@@ -621,7 +640,6 @@ where
 
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
         match self {
-            Self::Cast(cast) => cast.read_blocks().await,
             Self::File(file) => Ok(Box::pin(file.read_blocks().await?.map_ok(Array::from))),
             Self::Broadcast(broadcast) => {
                 Ok(Box::pin(broadcast.read_blocks().await?.map_ok(Array::from)))
@@ -642,7 +660,7 @@ where
                 Ok(Box::pin(transpose.read_blocks().await?.map_ok(Array::from)))
             }
             Self::Unary(unary) => unary.read_blocks().await,
-            Self::UnaryBoolean(unary) => unary.read_blocks().await,
+            Self::UnaryCast(unary) => unary.read_blocks().await,
             Self::Version(version) => {
                 Ok(Box::pin(version.read_blocks().await?.map_ok(Array::from)))
             }
@@ -659,7 +677,6 @@ where
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         match self {
             Self::Broadcast(broadcast) => broadcast.read_permit(txn_id, range).await,
-            Self::Cast(cast) => cast.read_permit(txn_id, range).await,
             Self::Combine(combine) => combine.read_permit(txn_id, range).await,
             Self::Const(combine) => combine.read_permit(txn_id, range).await,
             Self::Cow(cow) => cow.read_permit(txn_id, range).await,
@@ -668,6 +685,8 @@ where
             Self::Reshape(reshape) => reshape.read_permit(txn_id, range).await,
             Self::Slice(slice) => slice.read_permit(txn_id, range).await,
             Self::Transpose(transpose) => transpose.read_permit(txn_id, range).await,
+            Self::Unary(unary) => unary.read_permit(txn_id, range).await,
+            Self::UnaryCast(unary) => unary.read_permit(txn_id, range).await,
             Self::Version(version) => version.read_permit(txn_id, range).await,
 
             other => Err(bad_request!(
@@ -1410,101 +1429,6 @@ impl<S: fmt::Debug> fmt::Debug for DenseBroadcast<S> {
     }
 }
 
-pub struct DenseCast<FE, T> {
-    source: DenseCastSource<FE>,
-    dtype: PhantomData<T>,
-}
-
-impl<FE, T> Clone for DenseCast<FE, T> {
-    fn clone(&self) -> Self {
-        Self {
-            source: self.source.clone(),
-            dtype: self.dtype,
-        }
-    }
-}
-
-impl<FE, T> DenseCast<FE, T> {
-    pub fn new<S: Into<DenseCastSource<FE>>>(source: S) -> Self {
-        Self {
-            source: source.into(),
-            dtype: PhantomData,
-        }
-    }
-}
-
-impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseCast<FE, T> {
-    fn dtype(&self) -> NumberType {
-        T::dtype()
-    }
-
-    fn shape(&self) -> &Shape {
-        let source = &self.source;
-        cast_dispatch!(source, this, this.shape())
-    }
-}
-
-#[async_trait]
-impl<FE, T> DenseInstance for DenseCast<FE, T>
-where
-    FE: DenseCacheFile + AsType<Buffer<T>>,
-    T: CDatatype + DType,
-    Buffer<T>: de::FromStream<Context = ()>,
-{
-    type Block = Array<T>;
-    type DType = T;
-
-    fn block_size(&self) -> usize {
-        let source = &self.source;
-        cast_dispatch!(source, this, this.block_size())
-    }
-
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
-        let source = &self.source;
-
-        cast_dispatch!(
-            source,
-            this,
-            this.read_block(block_id)
-                .map(|result| result
-                    .and_then(|block| block.cast().map(Array::from).map_err(TCError::from)))
-                .await
-        )
-    }
-
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        let source = self.source;
-
-        cast_dispatch!(source, this, {
-            let source_blocks = this.read_blocks().await?;
-            let blocks = source_blocks.map(|result| {
-                result.and_then(|block| block.cast().map(Array::from).map_err(TCError::from))
-            });
-
-            Ok(Box::pin(blocks))
-        })
-    }
-}
-
-#[async_trait]
-impl<FE, T> TensorPermitRead for DenseCast<FE, T>
-where
-    FE: Send + Sync + 'static,
-    T: CDatatype + DType,
-    DenseAccess<FE, T>: TensorPermitRead,
-{
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
-        let source = &self.source;
-        cast_dispatch!(source, this, this.read_permit(txn_id, range).await)
-    }
-}
-
-impl<FE, T: DType> fmt::Debug for DenseCast<FE, T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "cast {:?} into {:?}", self.source, T::dtype())
-    }
-}
-
 pub struct DenseCow<FE, S> {
     source: S,
     dir: DirLock<FE>,
@@ -2012,11 +1936,11 @@ where
     }
 }
 
-type ArrayCmp<T> = fn(ArrayCastSource, ArrayCastSource) -> TCResult<Array<T>>;
+type ArrayCmp<T> = fn(Block, Block) -> TCResult<Array<T>>;
 
 pub struct DenseCompare<FE, T: CDatatype> {
-    left: DenseCastSource<FE>,
-    right: DenseCastSource<FE>,
+    left: DenseAccessCast<FE>,
+    right: DenseAccessCast<FE>,
     cmp: ArrayCmp<T>,
 }
 
@@ -2033,8 +1957,8 @@ impl<FE, T: CDatatype> Clone for DenseCompare<FE, T> {
 impl<FE, T: CDatatype> DenseCompare<FE, T> {
     pub fn new<L, R>(left: L, right: R, cmp: ArrayCmp<T>) -> TCResult<Self>
     where
-        L: DenseInstance + Into<DenseCastSource<FE>> + fmt::Debug,
-        R: DenseInstance + Into<DenseCastSource<FE>> + fmt::Debug,
+        L: DenseInstance + Into<DenseAccessCast<FE>> + fmt::Debug,
+        R: DenseInstance + Into<DenseAccessCast<FE>> + fmt::Debug,
     {
         if left.block_size() == right.block_size() && left.shape() == right.shape() {
             Ok(Self {
@@ -2055,7 +1979,7 @@ impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseCo
 
     fn shape(&self) -> &Shape {
         let left = &self.left;
-        cast_dispatch!(left, this, this.shape())
+        access_cast_dispatch!(left, this, this.shape())
     }
 }
 
@@ -2066,7 +1990,7 @@ impl<FE: DenseCacheFile, T: CDatatype + DType> DenseInstance for DenseCompare<FE
 
     fn block_size(&self) -> usize {
         let left = &self.left;
-        cast_dispatch!(left, this, this.block_size())
+        access_cast_dispatch!(left, this, this.block_size())
     }
 
     async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
@@ -2096,10 +2020,10 @@ impl<FE, T: CDatatype> fmt::Debug for DenseCompare<FE, T> {
     }
 }
 
-type ArrayCmpScalar<T> = fn(ArrayCastSource, Number) -> TCResult<Array<T>>;
+type ArrayCmpScalar<T> = fn(Block, Number) -> TCResult<Array<T>>;
 
 pub struct DenseCompareConst<FE, T: CDatatype> {
-    left: DenseCastSource<FE>,
+    left: DenseAccessCast<FE>,
     right: Number,
     cmp: ArrayCmpScalar<T>,
 }
@@ -2117,7 +2041,7 @@ impl<FE, T: CDatatype> Clone for DenseCompareConst<FE, T> {
 impl<FE, T: CDatatype> DenseCompareConst<FE, T> {
     pub fn new<L, R>(left: L, right: R, cmp: ArrayCmpScalar<T>) -> Self
     where
-        L: Into<DenseCastSource<FE>>,
+        L: Into<DenseAccessCast<FE>>,
         R: Into<Number>,
     {
         Self {
@@ -2135,7 +2059,7 @@ impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseCo
 
     fn shape(&self) -> &Shape {
         let left = &self.left;
-        cast_dispatch!(left, this, this.shape())
+        access_cast_dispatch!(left, this, this.shape())
     }
 }
 
@@ -2146,7 +2070,7 @@ impl<FE: DenseCacheFile, T: CDatatype + DType> DenseInstance for DenseCompareCon
 
     fn block_size(&self) -> usize {
         let left = &self.left;
-        cast_dispatch!(left, this, this.block_size())
+        access_cast_dispatch!(left, this, this.block_size())
     }
 
     async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
@@ -3220,12 +3144,12 @@ impl<S: fmt::Debug, T: CDatatype> fmt::Debug for DenseUnary<S, T> {
     }
 }
 
-pub struct DenseUnaryBoolean<FE, T: CDatatype> {
-    source: DenseCastSource<FE>,
-    op: fn(ArrayCastSource) -> TCResult<Array<T>>,
+pub struct DenseUnaryCast<FE, T: CDatatype> {
+    source: DenseAccessCast<FE>,
+    op: fn(Block) -> TCResult<Array<T>>,
 }
 
-impl<FE, T: CDatatype> Clone for DenseUnaryBoolean<FE, T> {
+impl<FE, T: CDatatype> Clone for DenseUnaryCast<FE, T> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
@@ -3234,40 +3158,49 @@ impl<FE, T: CDatatype> Clone for DenseUnaryBoolean<FE, T> {
     }
 }
 
-impl<FE> DenseUnaryBoolean<FE, u8> {
-    pub fn not<S: Into<DenseCastSource<FE>>>(source: S) -> Self {
+impl<FE, T: CDatatype> DenseUnaryCast<FE, T> {
+    fn new<S: Into<DenseAccessCast<FE>>>(source: S, op: fn(Block) -> TCResult<Array<T>>) -> Self {
         Self {
             source: source.into(),
-            op: ArrayCastSource::not,
+            op,
         }
     }
 }
 
-impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseUnaryBoolean<FE, T> {
+impl<FE> DenseUnaryCast<FE, u8> {
+    pub fn not<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: Block::not,
+        }
+    }
+}
+
+impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseUnaryCast<FE, T> {
     fn dtype(&self) -> NumberType {
         T::dtype()
     }
 
     fn shape(&self) -> &Shape {
         let source = &self.source;
-        cast_dispatch!(source, this, this.shape())
+        access_cast_dispatch!(source, this, this.shape())
     }
 }
 
 #[async_trait]
-impl<FE: DenseCacheFile, T: CDatatype + DType> DenseInstance for DenseUnaryBoolean<FE, T> {
+impl<FE: DenseCacheFile, T: CDatatype + DType> DenseInstance for DenseUnaryCast<FE, T> {
     type Block = Array<T>;
     type DType = T;
 
     fn block_size(&self) -> usize {
         let source = &self.source;
-        cast_dispatch!(source, this, this.block_size())
+        access_cast_dispatch!(source, this, this.block_size())
     }
 
     async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
         self.source
             .read_block(block_id)
-            .map(move |result| result.and_then(|block| (self.op)(block)))
+            .map(|result| result.and_then(|block| (self.op)(block)))
             .await
     }
 
@@ -3279,16 +3212,16 @@ impl<FE: DenseCacheFile, T: CDatatype + DType> DenseInstance for DenseUnaryBoole
 }
 
 #[async_trait]
-impl<FE: Send + Sync + 'static, T: CDatatype> TensorPermitRead for DenseUnaryBoolean<FE, T> {
+impl<FE: Send + Sync + 'static, T: CDatatype> TensorPermitRead for DenseUnaryCast<FE, T> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         let source = &self.source;
-        cast_dispatch!(source, this, this.read_permit(txn_id, range).await)
+        access_cast_dispatch!(source, this, this.read_permit(txn_id, range).await)
     }
 }
 
-impl<FE, T: CDatatype> fmt::Debug for DenseUnaryBoolean<FE, T> {
+impl<FE, T: CDatatype> fmt::Debug for DenseUnaryCast<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "unary boolean transform of {:?}", self.source)
+        write!(f, "unary transform/cast of {:?}", self.source)
     }
 }
 

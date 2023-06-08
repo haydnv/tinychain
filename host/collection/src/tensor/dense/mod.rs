@@ -159,8 +159,8 @@ impl<FE: Send + Sync + 'static, A: TensorInstance> TensorInstance for DenseTenso
 impl<FE, L, R, T> TensorBoolean<DenseTensor<FE, R>> for DenseTensor<FE, L>
 where
     FE: Send + Sync + 'static,
-    L: DenseInstance<DType = T> + Into<DenseCastSource<FE>> + fmt::Debug,
-    R: DenseInstance<DType = T> + Into<DenseCastSource<FE>> + fmt::Debug,
+    L: DenseInstance<DType = T> + Into<DenseAccessCast<FE>> + fmt::Debug,
+    R: DenseInstance<DType = T> + Into<DenseAccessCast<FE>> + fmt::Debug,
     T: CDatatype + DType,
     DenseTensor<FE, R>: fmt::Debug,
     Self: fmt::Debug,
@@ -169,105 +169,103 @@ where
     type LeftCombine = DenseTensor<FE, DenseCompare<FE, u8>>;
 
     fn and(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
-        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::and)
-            .map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::and).map(DenseTensor::from)
     }
 
     fn or(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
-        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::or).map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::or).map(DenseTensor::from)
     }
 
     fn xor(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
-        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::xor)
-            .map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::xor).map(DenseTensor::from)
     }
 }
 
 impl<FE, A> TensorBooleanConst for DenseTensor<FE, A>
 where
     FE: Send + Sync + 'static,
-    A: DenseInstance + Into<DenseCastSource<FE>>,
+    A: DenseInstance + Into<DenseAccessCast<FE>>,
 {
     type Combine = DenseTensor<FE, DenseCompareConst<FE, u8>>;
     type DenseCombine = DenseTensor<FE, DenseCompareConst<FE, u8>>;
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
-        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::and_scalar).into())
+        Ok(DenseCompareConst::new(self.accessor, other, Block::and_scalar).into())
     }
 
     fn or_const(self, other: Number) -> TCResult<Self::DenseCombine> {
-        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::or_scalar).into())
+        Ok(DenseCompareConst::new(self.accessor, other, Block::or_scalar).into())
     }
 
     fn xor_const(self, other: Number) -> TCResult<Self::DenseCombine> {
-        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::xor_scalar).into())
+        Ok(DenseCompareConst::new(self.accessor, other, Block::xor_scalar).into())
     }
 }
 
 impl<FE, L, R, T> TensorCompare<DenseTensor<FE, R>> for DenseTensor<FE, L>
 where
     FE: Send + Sync + 'static,
-    L: DenseInstance<DType = T> + Into<DenseCastSource<FE>>,
-    R: DenseInstance<DType = T> + Into<DenseCastSource<FE>>,
+    L: DenseInstance<DType = T> + Into<DenseAccessCast<FE>>,
+    R: DenseInstance<DType = T> + Into<DenseAccessCast<FE>>,
     T: CDatatype + DType,
 {
     type Compare = DenseTensor<FE, DenseCompare<FE, u8>>;
     type Dense = DenseTensor<FE, DenseCompare<FE, u8>>;
 
     fn eq(self, other: DenseTensor<FE, R>) -> TCResult<Self::Dense> {
-        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::eq).map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::eq).map(DenseTensor::from)
     }
 
     fn gt(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
-        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::gt).map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::gt).map(DenseTensor::from)
     }
 
     fn ge(self, other: DenseTensor<FE, R>) -> TCResult<Self::Dense> {
-        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::ge).map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::ge).map(DenseTensor::from)
     }
 
     fn lt(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
-        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::lt).map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::lt).map(DenseTensor::from)
     }
 
     fn le(self, other: DenseTensor<FE, R>) -> TCResult<Self::Dense> {
-        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::le).map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::le).map(DenseTensor::from)
     }
 
     fn ne(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
-        DenseCompare::new(self.accessor, other.accessor, ArrayCastSource::ne).map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::ne).map(DenseTensor::from)
     }
 }
 
 impl<FE, A> TensorCompareConst for DenseTensor<FE, A>
 where
     FE: Send + Sync + 'static,
-    A: DenseInstance + Into<DenseCastSource<FE>>,
+    A: DenseInstance + Into<DenseAccessCast<FE>>,
 {
     type Compare = DenseTensor<FE, DenseCompareConst<FE, u8>>;
 
     fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
-        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::eq_scalar).into())
+        Ok(DenseCompareConst::new(self.accessor, other, Block::eq_scalar).into())
     }
 
     fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
-        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::gt_scalar).into())
+        Ok(DenseCompareConst::new(self.accessor, other, Block::gt_scalar).into())
     }
 
     fn ge_const(self, other: Number) -> TCResult<Self::Compare> {
-        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::ge_scalar).into())
+        Ok(DenseCompareConst::new(self.accessor, other, Block::ge_scalar).into())
     }
 
     fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
-        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::lt_scalar).into())
+        Ok(DenseCompareConst::new(self.accessor, other, Block::lt_scalar).into())
     }
 
     fn le_const(self, other: Number) -> TCResult<Self::Compare> {
-        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::le_scalar).into())
+        Ok(DenseCompareConst::new(self.accessor, other, Block::le_scalar).into())
     }
 
     fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
-        Ok(DenseCompareConst::new(self.accessor, other, ArrayCastSource::ne_scalar).into())
+        Ok(DenseCompareConst::new(self.accessor, other, Block::ne_scalar).into())
     }
 }
 
@@ -372,7 +370,7 @@ where
 
         let accessor = DenseConst::new(self.accessor, n, |block, n| {
             block
-                .log_scalar(n.to_f64())
+                .log_scalar(n.to_float())
                 .map(Array::from)
                 .map_err(TCError::from)
         });
@@ -395,7 +393,7 @@ where
 
         let accessor = DenseConst::new(self.accessor, n, |block, n| {
             block
-                .pow_scalar(n.to_f64())
+                .pow_scalar(n.to_float())
                 .map(Array::from)
                 .map_err(TCError::from)
         });
@@ -589,12 +587,12 @@ impl<FE: Send + Sync + 'static, A: DenseInstance> TensorUnary for DenseTensor<FE
 impl<FE, A> TensorUnaryBoolean for DenseTensor<FE, A>
 where
     FE: DenseCacheFile,
-    A: DenseInstance + Into<DenseCastSource<FE>>,
+    A: DenseInstance + Into<DenseAccessCast<FE>>,
 {
-    type Unary = DenseTensor<FE, DenseUnaryBoolean<FE, u8>>;
+    type Unary = DenseTensor<FE, DenseUnaryCast<FE, u8>>;
 
     fn not(self) -> TCResult<Self::Unary> {
-        Ok(DenseUnaryBoolean::not(self.accessor).into())
+        Ok(DenseUnaryCast::not(self.accessor).into())
     }
 }
 
