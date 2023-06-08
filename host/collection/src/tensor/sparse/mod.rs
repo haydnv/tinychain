@@ -11,7 +11,7 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use futures::{Stream, TryFutureExt};
 use ha_ndarray::{CDatatype, NDArrayMath, NDArrayRead, NDArrayTransform};
-use safecast::AsType;
+use safecast::{AsType, CastFrom};
 
 use tc_error::*;
 use tc_value::{DType, Number, NumberType};
@@ -66,18 +66,18 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError>;
 }
 
-pub struct SparseTensor<FE, T, A> {
+pub struct SparseTensor<FE, A> {
     accessor: A,
-    phantom: PhantomData<(FE, T)>,
+    phantom: PhantomData<FE>,
 }
 
-impl<FE, T, A> SparseTensor<FE, T, A> {
+impl<FE, A> SparseTensor<FE, A> {
     pub fn into_inner(self) -> A {
         self.accessor
     }
 }
 
-impl<FE, T, A: Clone> Clone for SparseTensor<FE, T, A> {
+impl<FE, A: Clone> Clone for SparseTensor<FE, A> {
     fn clone(&self) -> Self {
         Self {
             accessor: self.accessor.clone(),
@@ -86,14 +86,13 @@ impl<FE, T, A: Clone> Clone for SparseTensor<FE, T, A> {
     }
 }
 
-impl<FE, T, A> TensorInstance for SparseTensor<FE, T, A>
+impl<FE, A> TensorInstance for SparseTensor<FE, A>
 where
     FE: Send + Sync + 'static,
-    T: CDatatype + DType,
-    A: TensorInstance,
+    A: SparseInstance,
 {
     fn dtype(&self) -> NumberType {
-        T::dtype()
+        self.accessor.dtype()
     }
 
     fn shape(&self) -> &Shape {
@@ -101,17 +100,18 @@ where
     }
 }
 
-impl<FE, T, A> TensorTransform for SparseTensor<FE, T, A>
+impl<FE, A> TensorTransform for SparseTensor<FE, A>
 where
     FE: AsType<Node> + Send + Sync + 'static,
-    T: CDatatype + DType,
-    A: SparseInstance + Into<SparseAccess<FE, T>>,
+    A: SparseInstance + Into<SparseAccess<FE, A::DType>>,
+    A::DType: CastFrom<Number> + fmt::Debug,
+    Number: From<A::DType>,
 {
-    type Broadcast = SparseTensor<FE, T, SparseBroadcast<FE, T>>;
-    type Expand = SparseTensor<FE, T, SparseExpand<A>>;
-    type Reshape = SparseTensor<FE, T, SparseReshape<A>>;
-    type Slice = SparseTensor<FE, T, SparseSlice<A>>;
-    type Transpose = SparseTensor<FE, T, SparseTranspose<A>>;
+    type Broadcast = SparseTensor<FE, SparseBroadcast<FE, A::DType>>;
+    type Expand = SparseTensor<FE, SparseExpand<A>>;
+    type Reshape = SparseTensor<FE, SparseReshape<A>>;
+    type Slice = SparseTensor<FE, SparseSlice<A>>;
+    type Transpose = SparseTensor<FE, SparseTranspose<A>>;
 
     fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
         let accessor = SparseBroadcast::new(self.accessor, shape)?;
@@ -159,7 +159,10 @@ where
     }
 }
 
-impl<FE, T, A: Into<SparseAccess<FE, T>>> From<A> for SparseTensor<FE, T, SparseAccess<FE, T>> {
+impl<FE, A> From<A> for SparseTensor<FE, SparseAccess<FE, A::DType>>
+where
+    A: SparseInstance + Into<SparseAccess<FE, A::DType>>,
+{
     fn from(accessor: A) -> Self {
         Self {
             accessor: accessor.into(),
