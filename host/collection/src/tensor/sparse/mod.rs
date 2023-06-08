@@ -15,6 +15,7 @@ use safecast::{AsType, CastFrom};
 
 use tc_error::*;
 use tc_value::{DType, Number, NumberType};
+use tcgeneric::ThreadSafe;
 
 use super::{Axes, Coord, Range, Shape, TensorBoolean, TensorInstance, TensorTransform};
 
@@ -104,7 +105,7 @@ where
 
 impl<FE, L, R> TensorBoolean<SparseTensor<FE, R>> for SparseTensor<FE, L>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: AsType<Node> + ThreadSafe,
     L: SparseInstance + Into<SparseAccessCast<FE>>,
     R: SparseInstance<DType = L::DType> + Into<SparseAccessCast<FE>>,
     Number: From<L::DType> + From<R::DType>,
@@ -151,7 +152,7 @@ where
 
 impl<FE, A> TensorTransform for SparseTensor<FE, A>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: AsType<Node> + ThreadSafe,
     A: SparseInstance + Into<SparseAccess<FE, A::DType>>,
     A::DType: CastFrom<Number> + fmt::Debug,
     Number: From<A::DType>,

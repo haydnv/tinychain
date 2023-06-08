@@ -313,7 +313,7 @@ where
 impl<Txn, FE, T> Transact for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + FileLoad,
+    FE: AsType<Node> + FileLoad + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {

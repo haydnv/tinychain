@@ -20,6 +20,7 @@ use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberClass, NumberCollator, NumberType};
+use tcgeneric::ThreadSafe;
 
 use crate::tensor::transform::{Expand, Reshape, Slice, Transpose};
 use crate::tensor::{
@@ -45,7 +46,7 @@ pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
         zeros: SparseFile<FE, T>,
     ) -> Result<(), TCError>
     where
-        FE: AsType<Node> + Send + Sync + 'static,
+        FE: AsType<Node> + ThreadSafe,
         Number: CastInto<T>,
     {
         let mut zeros = zeros
@@ -118,10 +119,7 @@ macro_rules! access_cast_dispatch {
     };
 }
 
-impl<FE> SparseAccessCast<FE>
-where
-    FE: AsType<Node> + Send + Sync + 'static,
-{
+impl<FE: Send + Sync + 'static> SparseAccessCast<FE> {
     pub fn dtype(&self) -> NumberType {
         access_cast_dispatch!(self, this, this.dtype())
     }
@@ -129,7 +127,12 @@ where
     pub fn shape(&self) -> &Shape {
         access_cast_dispatch!(self, this, this.shape())
     }
+}
 
+impl<FE> SparseAccessCast<FE>
+where
+    FE: AsType<Node> + ThreadSafe,
+{
     pub async fn read_value(&self, coord: Coord) -> TCResult<Number> {
         access_cast_dispatch!(
             self,
@@ -294,7 +297,7 @@ macro_rules! access_dispatch {
 
 impl<FE, T> TensorInstance for SparseAccess<FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: Send + Sync + 'static,
     T: CDatatype + DType,
 {
     fn dtype(&self) -> NumberType {
@@ -309,7 +312,7 @@ where
 #[async_trait]
 impl<FE, T> SparseInstance for SparseAccess<FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
@@ -517,7 +520,7 @@ impl<FE: AsType<Node> + Send + Sync, T> SparseFile<FE, T> {
 impl<FE, T> TensorInstance for SparseFile<FE, T>
 where
     FE: Send + Sync + 'static,
-    T: DType + Send + Sync + 'static,
+    T: DType + ThreadSafe,
 {
     fn dtype(&self) -> NumberType {
         T::dtype()
@@ -531,7 +534,7 @@ where
 #[async_trait]
 impl<FE, T> SparseInstance for SparseFile<FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType,
     Number: CastInto<T>,
 {
@@ -573,7 +576,7 @@ where
 #[async_trait]
 impl<'a, FE, T> SparseWriteLock<'a> for SparseFile<FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
@@ -613,7 +616,7 @@ pub struct SparseTableWriteGuard<'a, FE, T> {
 #[async_trait]
 impl<'a, FE, T> SparseWriteGuard<T> for SparseTableWriteGuard<'a, FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T>,
 {
@@ -778,7 +781,7 @@ impl<FE, T> Clone for SparseBroadcast<FE, T> {
 
 impl<FE, T> SparseBroadcast<FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: Send + Sync + 'static,
     T: CDatatype + DType,
 {
     pub fn new<S>(source: S, shape: Shape) -> Result<Self, TCError>
@@ -827,7 +830,7 @@ impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for SparseB
 #[async_trait]
 impl<FE, T> SparseInstance for SparseBroadcast<FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
@@ -1254,7 +1257,7 @@ impl<FE, T> Clone for SparseCast<FE, T> {
 
 impl<FE, T> TensorInstance for SparseCast<FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: Send + Sync + 'static,
     T: CDatatype + DType,
 {
     fn dtype(&self) -> NumberType {
@@ -1270,7 +1273,7 @@ where
 #[async_trait]
 impl<FE, T> SparseInstance for SparseCast<FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
@@ -1445,7 +1448,7 @@ impl<FE, T> Clone for SparseCombine<FE, T> {
 
 impl<FE, T> SparseCombine<FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: Send + Sync + 'static,
 {
     pub fn new<L, R>(left: L, right: R, op: fn(Number, Number) -> T) -> TCResult<Self>
     where
@@ -1469,7 +1472,7 @@ where
 
 impl<FE, T> TensorInstance for SparseCombine<FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: Send + Sync + 'static,
     T: CDatatype + DType,
 {
     fn dtype(&self) -> NumberType {
@@ -1485,7 +1488,7 @@ where
 #[async_trait]
 impl<FE, T> SparseInstance for SparseCombine<FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType,
 {
     type CoordBlock = ArrayBase<Vec<u64>>;
@@ -1552,7 +1555,7 @@ impl<FE, T> Clone for SparseLeftCombine<FE, T> {
 
 impl<FE, T> SparseLeftCombine<FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: Send + Sync + 'static,
 {
     pub fn new<L, R>(left: L, right: R, op: fn(Number, Number) -> T) -> TCResult<Self>
     where
@@ -1576,7 +1579,7 @@ where
 
 impl<FE, T> TensorInstance for SparseLeftCombine<FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: Send + Sync + 'static,
     T: CDatatype + DType,
 {
     fn dtype(&self) -> NumberType {
@@ -1592,7 +1595,7 @@ where
 #[async_trait]
 impl<FE, T> SparseInstance for SparseLeftCombine<FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType,
 {
     type CoordBlock = ArrayBase<Vec<u64>>;
@@ -1689,7 +1692,7 @@ where
 #[async_trait]
 impl<FE, T, S> SparseInstance for SparseCow<FE, T, S>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     S: SparseInstance<DType = T>,
     Number: CastInto<T>,
@@ -1815,7 +1818,7 @@ where
 #[async_trait]
 impl<'a, FE, T, S> SparseWriteLock<'a> for SparseCow<FE, T, S>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     S: SparseInstance<DType = T>,
     Number: From<T> + CastInto<T>,
@@ -1857,7 +1860,7 @@ pub struct SparseCowWriteGuard<'a, FE, T> {
 #[async_trait]
 impl<'a, FE, T> SparseWriteGuard<T> for SparseCowWriteGuard<'a, FE, T>
 where
-    FE: AsType<Node> + Send + Sync + 'static,
+    FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T>,
 {
