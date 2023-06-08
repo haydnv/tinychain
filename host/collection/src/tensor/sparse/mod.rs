@@ -20,13 +20,12 @@ use tcgeneric::ThreadSafe;
 use super::{Axes, Coord, Range, Shape, TensorBoolean, TensorInstance, TensorTransform};
 
 use access::{
-    SparseAccess, SparseBroadcast, SparseCombine, SparseExpand, SparseLeftCombine, SparseReshape,
-    SparseSlice, SparseTranspose,
+    SparseAccess, SparseAccessCast, SparseBroadcast, SparseCombine, SparseExpand,
+    SparseLeftCombine, SparseReshape, SparseSlice, SparseTranspose,
 };
 
 const BLOCK_SIZE: usize = 4_096;
 
-use crate::tensor::sparse::access::SparseAccessCast;
 pub use base::SparseBase;
 pub use schema::{IndexSchema, Schema};
 
