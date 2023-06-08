@@ -44,15 +44,15 @@ pub enum Block {
 macro_rules! block_dispatch {
     ($this:ident, $var:ident, $call:expr) => {
         match $this {
-            Self::F32($var) => $call,
-            Self::F64($var) => $call,
-            Self::I16($var) => $call,
-            Self::I32($var) => $call,
-            Self::I64($var) => $call,
-            Self::U8($var) => $call,
-            Self::U16($var) => $call,
-            Self::U32($var) => $call,
-            Self::U64($var) => $call,
+            Block::F32($var) => $call,
+            Block::F64($var) => $call,
+            Block::I16($var) => $call,
+            Block::I32($var) => $call,
+            Block::I64($var) => $call,
+            Block::U8($var) => $call,
+            Block::U16($var) => $call,
+            Block::U32($var) => $call,
+            Block::U64($var) => $call,
         }
     };
 }
@@ -3159,10 +3159,276 @@ impl<FE, T: CDatatype> Clone for DenseUnaryCast<FE, T> {
 }
 
 impl<FE, T: CDatatype> DenseUnaryCast<FE, T> {
-    fn new<S: Into<DenseAccessCast<FE>>>(source: S, op: fn(Block) -> TCResult<Array<T>>) -> Self {
+    fn new<S>(source: S, op: fn(Block) -> TCResult<Array<T>>) -> Self
+    where
+        S: Into<DenseAccessCast<FE>>,
+    {
         Self {
             source: source.into(),
             op,
+        }
+    }
+}
+
+macro_rules! block_f32_cast {
+    ($this:ident, $var:ident, $call:expr) => {
+        match $this {
+            Block::F32($var) => $call,
+            Block::I16($var) => $call,
+            Block::I32($var) => $call,
+            Block::U8($var) => $call,
+            Block::U16($var) => $call,
+            Block::U32($var) => $call,
+            block => unreachable!("32-bit float op on {:?}", block),
+        }
+    };
+}
+
+impl<FE> DenseUnaryCast<FE, f32> {
+    pub fn asin_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f32_cast!(
+                    block,
+                    array,
+                    array.asin().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn sin_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f32_cast!(
+                    block,
+                    array,
+                    array.sin().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn sinh_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f32_cast!(
+                    block,
+                    array,
+                    array.sinh().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn acos_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f32_cast!(
+                    block,
+                    array,
+                    array.acos().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn cos_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f32_cast!(
+                    block,
+                    array,
+                    array.cos().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn cosh_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f32_cast!(
+                    block,
+                    array,
+                    array.cosh().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn atan_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f32_cast!(
+                    block,
+                    array,
+                    array.atan().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn tan_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f32_cast!(
+                    block,
+                    array,
+                    array.tan().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn tanh_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f32_cast!(
+                    block,
+                    array,
+                    array.tanh().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+}
+
+macro_rules! block_f64_cast {
+    ($this:ident, $var:ident, $call:expr) => {
+        match $this {
+            Block::F64($var) => $call,
+            Block::I64($var) => $call,
+            Block::U64($var) => $call,
+            block => unreachable!("64-bit float op on {:?}", block),
+        }
+    };
+}
+
+impl<FE> DenseUnaryCast<FE, f64> {
+    pub fn asin_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f64_cast!(
+                    block,
+                    array,
+                    array.asin().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn sin_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f64_cast!(
+                    block,
+                    array,
+                    array.sin().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn sinh_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f64_cast!(
+                    block,
+                    array,
+                    array.sinh().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn acos_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f64_cast!(
+                    block,
+                    array,
+                    array.acos().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn cos_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f64_cast!(
+                    block,
+                    array,
+                    array.cos().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn cosh_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f64_cast!(
+                    block,
+                    array,
+                    array.cosh().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn atan_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f64_cast!(
+                    block,
+                    array,
+                    array.atan().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn tan_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f64_cast!(
+                    block,
+                    array,
+                    array.tan().map(Array::from).map_err(TCError::from)
+                )
+            },
+        }
+    }
+
+    pub fn tanh_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
+        Self {
+            source: source.into(),
+            op: |block| {
+                block_f64_cast!(
+                    block,
+                    array,
+                    array.tanh().map(Array::from).map_err(TCError::from)
+                )
+            },
         }
     }
 }

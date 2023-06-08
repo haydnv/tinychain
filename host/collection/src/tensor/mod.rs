@@ -415,6 +415,49 @@ pub trait TensorTransform {
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
 }
 
+/// Trigonometric [`Tensor`] operations
+#[async_trait]
+pub trait TensorTrig {
+    /// The return type of a unary operation
+    type Unary: TensorInstance;
+
+    /// Element-wise arcsine
+    fn asin(self) -> TCResult<Self::Unary>;
+
+    /// Element-wise sine
+    fn sin(self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic arcsine
+    fn asinh(self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic sine
+    fn sinh(self) -> TCResult<Self::Unary>;
+
+    /// Element-wise arccosine
+    fn acos(self) -> TCResult<Self::Unary>;
+
+    /// Element-wise cosine
+    fn cos(self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic arccosine
+    fn acosh(self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic cosine
+    fn cosh(self) -> TCResult<Self::Unary>;
+
+    /// Element-wise arctangent
+    fn atan(self) -> TCResult<Self::Unary>;
+
+    /// Element-wise tangent
+    fn tan(self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic tangent
+    fn tanh(self) -> TCResult<Self::Unary>;
+
+    /// Element-wise hyperbolic arctangent
+    fn atanh(self) -> TCResult<Self::Unary>;
+}
+
 /// Unary [`Tensor`] operations
 pub trait TensorUnary {
     /// The return type of a unary operation
@@ -440,49 +483,6 @@ pub trait TensorUnaryBoolean {
 
     /// Element-wise logical not
     fn not(self) -> TCResult<Self::Unary>;
-}
-
-/// Trigonometric [`Tensor`] operations
-#[async_trait]
-pub trait TensorTrig {
-    /// The return type of a unary operation
-    type Unary: TensorInstance;
-
-    /// Element-wise arcsine
-    fn asin(&self) -> TCResult<Self::Unary>;
-
-    /// Element-wise sine
-    fn sin(&self) -> TCResult<Self::Unary>;
-
-    /// Element-wise hyperbolic arcsine
-    fn asinh(&self) -> TCResult<Self::Unary>;
-
-    /// Element-wise hyperbolic sine
-    fn sinh(&self) -> TCResult<Self::Unary>;
-
-    /// Element-wise arccosine
-    fn acos(&self) -> TCResult<Self::Unary>;
-
-    /// Element-wise cosine
-    fn cos(&self) -> TCResult<Self::Unary>;
-
-    /// Element-wise hyperbolic arccosine
-    fn acosh(&self) -> TCResult<Self::Unary>;
-
-    /// Element-wise hyperbolic cosine
-    fn cosh(&self) -> TCResult<Self::Unary>;
-
-    /// Element-wise arctangent
-    fn atan(&self) -> TCResult<Self::Unary>;
-
-    /// Element-wise tangent
-    fn tan(&self) -> TCResult<Self::Unary>;
-
-    /// Element-wise hyperbolic tangent
-    fn tanh(&self) -> TCResult<Self::Unary>;
-
-    /// Element-wise hyperbolic arctangent
-    fn atanh(&self) -> TCResult<Self::Unary>;
 }
 
 #[inline]
