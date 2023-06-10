@@ -1,11 +1,5 @@
 use std::fmt;
 use std::marker::PhantomData;
-
-mod access;
-mod base;
-mod schema;
-mod stream;
-
 use std::pin::Pin;
 
 use async_trait::async_trait;
@@ -13,18 +7,23 @@ use futures::{Stream, TryFutureExt};
 use ha_ndarray::{CDatatype, NDArrayMath, NDArrayRead, NDArrayTransform};
 use safecast::{AsType, CastFrom};
 
+mod access;
+mod base;
+mod schema;
+mod stream;
+
 use tc_error::*;
 use tc_value::{DType, Number, NumberType};
 use tcgeneric::ThreadSafe;
 
-use super::{Axes, Coord, Range, Shape, TensorBoolean, TensorInstance, TensorTransform};
+use crate::tensor::dense::{DenseSparse, DenseTensor};
 
-pub use access::SparseAccess;
-
-use access::{
-    SparseAccessCast, SparseBroadcast, SparseCombine, SparseExpand, SparseLeftCombine,
-    SparseReshape, SparseSlice, SparseTranspose,
+use super::{
+    Axes, Coord, Range, Shape, TensorBoolean, TensorCompare, TensorConvert, TensorInstance,
+    TensorTransform,
 };
+
+pub use access::*;
 
 const BLOCK_SIZE: usize = 4_096;
 
@@ -151,6 +150,81 @@ where
     }
 }
 
+impl<FE: AsType<Node> + ThreadSafe, A: SparseInstance> TensorConvert for SparseTensor<FE, A> {
+    type Dense = DenseTensor<FE, DenseSparse<A>>;
+
+    fn into_dense(self) -> Self::Dense {
+        DenseSparse::from(self.accessor).into()
+    }
+}
+
+impl<FE, L, R> TensorCompare<SparseTensor<FE, R>> for SparseTensor<FE, L>
+where
+    FE: AsType<Node> + ThreadSafe,
+    L: SparseInstance + Into<SparseAccess<FE, L::DType>> + fmt::Debug,
+    R: SparseInstance<DType = L::DType> + Into<SparseAccess<FE, R::DType>> + fmt::Debug,
+    SparseAccessCast<FE>: From<SparseAccess<FE, L::DType>>,
+{
+    type Compare = SparseTensor<FE, SparseCombine<FE, u8>>;
+
+    fn eq(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
+        Err(bad_request!(
+            "cannot compare {:?} with {:?} because the result would be dense",
+            self,
+            other
+        ))
+    }
+
+    fn gt(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
+        SparseCombine::new(self.accessor.into(), other.accessor.into(), |l, r| {
+            if l.gt(&r) {
+                1
+            } else {
+                0
+            }
+        })
+        .map(SparseTensor::from)
+    }
+
+    fn ge(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
+        Err(bad_request!(
+            "cannot compare {:?} with {:?} because the result would be dense",
+            self,
+            other
+        ))
+    }
+
+    fn lt(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
+        SparseCombine::new(self.accessor.into(), other.accessor.into(), |l, r| {
+            if l.lt(&r) {
+                1
+            } else {
+                0
+            }
+        })
+        .map(SparseTensor::from)
+    }
+
+    fn le(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
+        Err(bad_request!(
+            "cannot compare {:?} with {:?} because the result would be dense",
+            self,
+            other
+        ))
+    }
+
+    fn ne(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
+        SparseCombine::new(self.accessor.into(), other.accessor.into(), |l, r| {
+            if l.ne(&r) {
+                1
+            } else {
+                0
+            }
+        })
+        .map(SparseTensor::from)
+    }
+}
+
 impl<FE, A> TensorTransform for SparseTensor<FE, A>
 where
     FE: AsType<Node> + ThreadSafe,
@@ -219,5 +293,11 @@ where
             accessor,
             phantom: PhantomData,
         }
+    }
+}
+
+impl<FE, A: fmt::Debug> fmt::Debug for SparseTensor<FE, A> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.accessor.fmt(f)
     }
 }

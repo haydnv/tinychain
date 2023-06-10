@@ -882,8 +882,8 @@ where
             .map(|dim| dim as usize)
             .collect();
 
-        let block_map =
-            ArrayBase::<Vec<_>>::new(map_shape, (0u64..num_blocks as u64).into_iter().collect())?;
+        let block_map = (0u64..num_blocks as u64).into_iter().collect();
+        let block_map = ArrayBase::<Vec<_>>::new(map_shape, block_map)?;
 
         Ok(Self {
             dir,
@@ -2939,10 +2939,9 @@ pub struct DenseSparse<S> {
     block_size: usize,
 }
 
-impl<S: TensorInstance> DenseSparse<S> {
-    fn new(source: S) -> Self {
+impl<S: SparseInstance> From<S> for DenseSparse<S> {
+    fn from(source: S) -> Self {
         let (block_size, _) = ideal_block_size_for(source.shape());
-
         Self { source, block_size }
     }
 }

@@ -26,7 +26,7 @@ use crate::tensor::{
 
 use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
 
-use access::*;
+pub use access::*;
 
 mod access;
 mod base;
@@ -211,9 +211,8 @@ where
     T: CDatatype + DType,
 {
     type Compare = DenseTensor<FE, DenseCompare<FE, u8>>;
-    type Dense = DenseTensor<FE, DenseCompare<FE, u8>>;
 
-    fn eq(self, other: DenseTensor<FE, R>) -> TCResult<Self::Dense> {
+    fn eq(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
         DenseCompare::new(self.accessor, other.accessor, Block::eq).map(DenseTensor::from)
     }
 
@@ -221,7 +220,7 @@ where
         DenseCompare::new(self.accessor, other.accessor, Block::gt).map(DenseTensor::from)
     }
 
-    fn ge(self, other: DenseTensor<FE, R>) -> TCResult<Self::Dense> {
+    fn ge(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
         DenseCompare::new(self.accessor, other.accessor, Block::ge).map(DenseTensor::from)
     }
 
@@ -229,7 +228,7 @@ where
         DenseCompare::new(self.accessor, other.accessor, Block::lt).map(DenseTensor::from)
     }
 
-    fn le(self, other: DenseTensor<FE, R>) -> TCResult<Self::Dense> {
+    fn le(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
         DenseCompare::new(self.accessor, other.accessor, Block::le).map(DenseTensor::from)
     }
 

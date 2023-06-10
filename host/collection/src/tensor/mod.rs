@@ -135,18 +135,6 @@ impl fmt::Debug for TensorType {
 
 /// A [`Tensor`] instance
 pub trait TensorInstance: Send + Sync + 'static {
-    // /// A dense representation of this [`Tensor`]
-    // type Dense: TensorInstance;
-
-    // /// A sparse representation of this [`Tensor`]
-    // type Sparse: TensorInstance;
-
-    // /// Return a dense representation of this [`Tensor`].
-    // fn into_dense(self) -> Self::Dense;
-
-    // /// Return a sparse representation of this [`Tensor`].
-    // fn into_sparse(self) -> Self::Sparse;
-
     fn dtype(&self) -> NumberType;
 
     fn ndim(&self) -> usize {
@@ -217,23 +205,20 @@ pub trait TensorCompare<O> {
     /// The result of a comparison operation
     type Compare: TensorInstance;
 
-    /// The result of a comparison operation which can only return a dense [`Tensor`]
-    type Dense: TensorInstance;
-
     /// Element-wise equality
-    fn eq(self, other: O) -> TCResult<Self::Dense>;
+    fn eq(self, other: O) -> TCResult<Self::Compare>;
 
     /// Element-wise greater-than
     fn gt(self, other: O) -> TCResult<Self::Compare>;
 
     /// Element-wise greater-or-equal
-    fn ge(self, other: O) -> TCResult<Self::Dense>;
+    fn ge(self, other: O) -> TCResult<Self::Compare>;
 
     /// Element-wise less-than
     fn lt(self, other: O) -> TCResult<Self::Compare>;
 
     /// Element-wise less-or-equal
-    fn le(self, other: O) -> TCResult<Self::Dense>;
+    fn le(self, other: O) -> TCResult<Self::Compare>;
 
     /// Element-wise not-equal
     fn ne(self, other: O) -> TCResult<Self::Compare>;
@@ -261,6 +246,21 @@ pub trait TensorCompareConst {
 
     /// Element-wise not-equal
     fn ne_const(self, other: Number) -> TCResult<Self::Compare>;
+}
+
+/// Methods to convert between a sparse an dense [`Tensor`]
+pub trait TensorConvert: Send + Sync + 'static {
+    /// A dense representation of this [`Tensor`]
+    type Dense: TensorInstance;
+
+    // /// A sparse representation of this [`Tensor`]
+    // type Sparse: TensorInstance;
+
+    /// Return a dense representation of this [`Tensor`].
+    fn into_dense(self) -> Self::Dense;
+
+    // /// Return a sparse representation of this [`Tensor`].
+    // fn into_sparse(self) -> Self::Sparse;
 }
 
 /// [`Tensor`] linear algebra operations
