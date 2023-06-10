@@ -1644,6 +1644,95 @@ impl<FE, T> fmt::Debug for SparseLeftCombine<FE, T> {
     }
 }
 
+pub struct SparseCombineConst<FE, T> {
+    left: SparseAccessCast<FE>,
+    right: Number,
+    op: fn(Number, Number) -> T,
+}
+
+impl<FE, T> Clone for SparseCombineConst<FE, T> {
+    fn clone(&self) -> Self {
+        Self {
+            left: self.left.clone(),
+            right: self.right,
+            op: self.op,
+        }
+    }
+}
+
+impl<FE, T> SparseCombineConst<FE, T> {
+    pub fn new<L>(left: L, right: Number, op: fn(Number, Number) -> T) -> Self
+    where
+        L: Into<SparseAccessCast<FE>>,
+    {
+        Self {
+            left: left.into(),
+            right,
+            op,
+        }
+    }
+}
+
+impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for SparseCombineConst<FE, T> {
+    fn dtype(&self) -> NumberType {
+        T::dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.left.shape()
+    }
+}
+
+#[async_trait]
+impl<FE, T> SparseInstance for SparseCombineConst<FE, T>
+where
+    FE: AsType<Node> + ThreadSafe,
+    T: CDatatype + DType + fmt::Debug,
+    Number: From<T> + CastInto<T>,
+{
+    type CoordBlock = ArrayBase<Vec<u64>>;
+    type ValueBlock = ArrayBase<Vec<T>>;
+    type Blocks = stream::BlockCoords<Elements<T>, T>;
+    type DType = T;
+
+    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        let ndim = self.ndim();
+        let elements = self.elements(range, order).await?;
+        Ok(stream::BlockCoords::new(elements, ndim))
+    }
+
+    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+        let left_elements = self.left.elements(range, order).await?;
+
+        let elements = left_elements.map_ok(move |(coord, l)| {
+            let value = (self.op)(l, self.right);
+            (coord, value)
+        });
+
+        Ok(Box::pin(elements))
+    }
+
+    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+        self.left
+            .read_value(coord)
+            .map_ok(move |l| (self.op)(l, self.right))
+            .await
+    }
+}
+
+#[async_trait]
+impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for SparseCombineConst<FE, T> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        self.left.read_permit(txn_id, range).await
+    }
+}
+
+impl<FE, T> fmt::Debug for SparseCombineConst<FE, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "combine {:?} with {:?}", self.left, self.right)
+    }
+}
+
 pub struct SparseCow<FE, T, S> {
     source: S,
     filled: SparseFile<FE, T>,
