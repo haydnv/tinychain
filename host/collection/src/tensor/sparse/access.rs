@@ -40,11 +40,13 @@ pub trait SparseWriteLock<'a>: SparseInstance {
 
 #[async_trait]
 pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
+    async fn clear(&mut self, range: Range) -> TCResult<()>;
+
     async fn merge<FE>(
         &mut self,
         filled: SparseFile<FE, T>,
         zeros: SparseFile<FE, T>,
-    ) -> Result<(), TCError>
+    ) -> TCResult<()>
     where
         FE: AsType<Node> + ThreadSafe,
         Number: CastInto<T>,
@@ -72,7 +74,9 @@ pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
         Ok(())
     }
 
-    async fn write_value(&mut self, coord: Coord, value: T) -> Result<(), TCError>;
+    async fn overwrite<O: SparseInstance<DType = T>>(&mut self, other: O) -> TCResult<()>;
+
+    async fn write_value(&mut self, coord: Coord, value: T) -> TCResult<()>;
 }
 
 pub enum SparseAccessCast<FE> {
@@ -620,6 +624,36 @@ where
     T: CDatatype + DType + fmt::Debug,
     Number: From<T>,
 {
+    async fn clear(&mut self, range: Range) -> TCResult<()> {
+        if range == Range::default() || range == Range::all(&self.shape) {
+            self.table.truncate().map_err(TCError::from).await
+        } else {
+            Err(not_implemented!("delete {range:?}"))
+        }
+    }
+
+    async fn overwrite<O: SparseInstance<DType = T>>(&mut self, other: O) -> TCResult<()> {
+        if self.shape != other.shape() {
+            return Err(bad_request!(
+                "cannot overwrite a tensor of shape {:?} with {:?}",
+                self.shape,
+                other.shape()
+            ));
+        }
+
+        self.clear(Range::default()).await?;
+
+        let order = (0..other.ndim()).into_iter().collect();
+        let mut elements = other.elements(Range::default(), order).await?;
+
+        while let Some((coord, value)) = elements.try_next().await? {
+            let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
+            self.table.upsert(coord, vec![value.into()]).await?;
+        }
+
+        Ok(())
+    }
+
     async fn write_value(&mut self, coord: Coord, value: T) -> Result<(), TCError> {
         self.shape.validate_coord(&coord)?;
 
@@ -1909,13 +1943,14 @@ impl<'a, FE, T, S> SparseWriteLock<'a> for SparseCow<FE, T, S>
 where
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
-    S: SparseInstance<DType = T>,
+    S: SparseInstance<DType = T> + Clone,
     Number: From<T> + CastInto<T>,
 {
-    type Guard = SparseCowWriteGuard<'a, FE, T>;
+    type Guard = SparseCowWriteGuard<'a, FE, Self, T>;
 
     async fn write(&'a self) -> Self::Guard {
         SparseCowWriteGuard {
+            source: self,
             filled: self.filled.write().await,
             zeros: self.zeros.write().await,
         }
@@ -1941,18 +1976,55 @@ impl<FE, T, S: fmt::Debug> fmt::Debug for SparseCow<FE, T, S> {
     }
 }
 
-pub struct SparseCowWriteGuard<'a, FE, T> {
+pub struct SparseCowWriteGuard<'a, FE, S, T> {
+    source: &'a S,
     filled: SparseTableWriteGuard<'a, FE, T>,
     zeros: SparseTableWriteGuard<'a, FE, T>,
 }
 
 #[async_trait]
-impl<'a, FE, T> SparseWriteGuard<T> for SparseCowWriteGuard<'a, FE, T>
+impl<'a, FE, S, T> SparseWriteGuard<T> for SparseCowWriteGuard<'a, FE, S, T>
 where
     FE: AsType<Node> + ThreadSafe,
+    S: SparseInstance<DType = T> + Clone,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T>,
 {
+    async fn clear(&mut self, range: Range) -> TCResult<()> {
+        self.filled.clear(range.clone()).await?;
+        self.zeros.clear(range.clone()).await?;
+
+        let order = (0..self.source.ndim()).into_iter().collect();
+        let mut elements = self.source.clone().elements(range, order).await?;
+
+        while let Some((coord, value)) = elements.try_next().await? {
+            self.zeros.write_value(coord, value).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn overwrite<O: SparseInstance<DType = T>>(&mut self, other: O) -> TCResult<()> {
+        if self.source.shape() != other.shape() {
+            return Err(bad_request!(
+                "cannot overwrite a sparse tensor of shape {:?} with one of shape {:?}",
+                self.source.shape(),
+                other.shape()
+            ));
+        }
+
+        self.clear(Range::default()).await?;
+
+        let order = (0..other.ndim()).into_iter().collect();
+        let mut elements = other.elements(Range::default(), order).await?;
+
+        while let Some((coord, value)) = elements.try_next().await? {
+            self.write_value(coord, value).await?;
+        }
+
+        Ok(())
+    }
+
     async fn write_value(&mut self, coord: Coord, value: T) -> Result<(), TCError> {
         let inverse = if value == T::zero() {
             T::one()
@@ -2381,6 +2453,32 @@ where
     G: SparseWriteGuard<T>,
     T: CDatatype + DType,
 {
+    async fn clear(&mut self, range: Range) -> TCResult<()> {
+        self.transform.shape().validate_range(&range)?;
+        self.guard.clear(self.transform.invert_range(range)).await
+    }
+
+    async fn overwrite<O: SparseInstance<DType = T>>(&mut self, other: O) -> TCResult<()> {
+        if self.transform.shape() != other.shape() {
+            return Err(bad_request!(
+                "cannot overwrite a sparse tensor of shape {:?} with one of shape {:?}",
+                self.transform.shape(),
+                other.shape()
+            ));
+        }
+
+        self.clear(Range::default()).await?;
+
+        let order = (0..other.shape().len()).into_iter().collect();
+        let mut elements = other.elements(Range::default(), order).await?;
+
+        while let Some((coord, value)) = elements.try_next().await? {
+            self.write_value(coord, value).await?;
+        }
+
+        Ok(())
+    }
+
     async fn write_value(&mut self, coord: Coord, value: T) -> Result<(), TCError> {
         self.transform.shape().validate_coord(&coord)?;
         let coord = self.transform.invert_coord(coord)?;

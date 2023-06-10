@@ -246,12 +246,14 @@ where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + 'static,
     T: CDatatype + DType + fmt::Debug,
-    A: DenseInstance<DType = T>,
+    A: DenseInstance<DType = T> + TensorPermitRead,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
     async fn write(self, txn_id: TxnId, range: Range, value: DenseTensor<FE, A>) -> TCResult<()> {
-        let _permit = self.canon.write_permit(txn_id, range.clone()).await?;
+        // always acquire these permits in-order to avoid the risk of a deadlock
+        let _write_permit = self.canon.write_permit(txn_id, range.clone()).await?;
+        let _read_permit = value.accessor.read_permit(txn_id, range.clone()).await?;
 
         let version = {
             let mut state = self.state.write().expect("dense state");

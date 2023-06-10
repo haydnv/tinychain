@@ -18,14 +18,14 @@ use tc_value::{DType, Number, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
 use crate::tensor::{
-    Coord, Range, Semaphore, Shape, TensorIO, TensorInstance, TensorPermitRead, TensorPermitWrite,
-    TensorType,
+    Coord, Range, Semaphore, Shape, TensorDualIO, TensorIO, TensorInstance, TensorPermitRead,
+    TensorPermitWrite, TensorType,
 };
 
 use super::access::{
     SparseAccess, SparseCow, SparseFile, SparseVersion, SparseWriteGuard, SparseWriteLock,
 };
-use super::{Node, Schema, SparseInstance};
+use super::{Node, Schema, SparseInstance, SparseSlice, SparseTensor};
 
 const CANON: Label = label("canon");
 const FILLED: Label = label("filled");
@@ -264,6 +264,35 @@ where
             .write_value(coord, value.cast_into())
             .map_err(TCError::from)
             .await
+    }
+}
+#[async_trait]
+impl<Txn, FE, A> TensorDualIO<SparseTensor<FE, A>> for SparseBase<Txn, FE, A::DType>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+    A: SparseInstance + TensorPermitRead,
+    A::DType: fmt::Debug,
+    Number: From<A::DType> + CastInto<A::DType>,
+{
+    async fn write(self, txn_id: TxnId, range: Range, value: SparseTensor<FE, A>) -> TCResult<()> {
+        // always acquire these permits in-order to avoid the risk of a deadlock
+        let _write_permit = self.canon.write_permit(txn_id, range.clone()).await?;
+        let _read_permit = value.accessor.read_permit(txn_id, range.clone()).await?;
+
+        let version = {
+            let mut state = self.state.write().expect("dense state");
+            state.pending_version(txn_id, self.canon.clone().into())?
+        };
+
+        if range.is_empty() || range == Range::all(self.canon.shape()) {
+            let mut guard = version.write().await;
+            guard.overwrite(value.accessor).await
+        } else {
+            let slice = SparseSlice::new(version, range)?;
+            let mut guard = slice.write().await;
+            guard.overwrite(value.accessor).await
+        }
     }
 }
 
