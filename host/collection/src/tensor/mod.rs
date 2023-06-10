@@ -1,4 +1,5 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
+
 use std::fmt;
 use std::ops::{Div, Rem};
 
@@ -11,7 +12,9 @@ use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::TxnId;
 use tc_value::{Number, NumberType, ValueType};
-use tcgeneric::{label, path_label, Class, NativeClass, PathLabel, PathSegment, TCPathBuf};
+use tcgeneric::{
+    label, path_label, Class, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
+};
 
 pub use shape::{AxisRange, Range, Shape};
 
@@ -134,7 +137,7 @@ impl fmt::Debug for TensorType {
 }
 
 /// A [`Tensor`] instance
-pub trait TensorInstance: Send + Sync + 'static {
+pub trait TensorInstance: ThreadSafe {
     fn dtype(&self) -> NumberType;
 
     fn ndim(&self) -> usize {
@@ -249,7 +252,7 @@ pub trait TensorCompareConst {
 }
 
 /// Methods to convert between a sparse an dense [`Tensor`]
-pub trait TensorConvert: Send + Sync + 'static {
+pub trait TensorConvert: ThreadSafe {
     /// A dense representation of this [`Tensor`]
     type Dense: TensorInstance;
 

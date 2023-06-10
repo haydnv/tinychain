@@ -563,7 +563,7 @@ impl<L, R, T> Stream for OuterJoin<L, R, T>
 where
     L: Stream<Item = Result<(u64, T), TCError>>,
     R: Stream<Item = Result<(u64, T), TCError>>,
-    T: Copy + Eq,
+    T: Copy + PartialEq,
 {
     type Item = Result<(u64, T, T), TCError>;
 

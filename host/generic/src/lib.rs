@@ -36,7 +36,7 @@ pub type TCBoxTryStream<'a, T> = Pin<Box<dyn Stream<Item = TCResult<T>> + Send +
 /// A thread-safe type
 pub trait ThreadSafe: Send + Sync + 'static {}
 
-impl<T: Clone + Send + Sync + 'static> ThreadSafe for T {}
+impl<T: Send + Sync + 'static> ThreadSafe for T {}
 
 /// A generic class trait
 pub trait Class: fmt::Debug + Sized {}

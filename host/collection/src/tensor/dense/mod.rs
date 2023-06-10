@@ -66,7 +66,7 @@ impl<FE> DenseCacheFile for FE where
 }
 
 #[async_trait]
-pub trait DenseInstance: TensorInstance + fmt::Debug + Send + Sync + 'static {
+pub trait DenseInstance: TensorInstance + ThreadSafe + fmt::Debug {
     type Block: NDArrayRead<DType = Self::DType> + NDArrayTransform + Into<Array<Self::DType>>;
     type DType: CDatatype + DType;
 
@@ -147,7 +147,7 @@ impl<FE, A> DenseTensor<FE, A> {
     }
 }
 
-impl<FE: Send + Sync + 'static, A: TensorInstance> TensorInstance for DenseTensor<FE, A> {
+impl<FE: ThreadSafe, A: TensorInstance> TensorInstance for DenseTensor<FE, A> {
     fn dtype(&self) -> NumberType {
         self.accessor.dtype()
     }
@@ -159,7 +159,7 @@ impl<FE: Send + Sync + 'static, A: TensorInstance> TensorInstance for DenseTenso
 
 impl<FE, L, R, T> TensorBoolean<DenseTensor<FE, R>> for DenseTensor<FE, L>
 where
-    FE: Send + Sync + 'static,
+    FE: ThreadSafe,
     L: DenseInstance<DType = T> + Into<DenseAccessCast<FE>> + fmt::Debug,
     R: DenseInstance<DType = T> + Into<DenseAccessCast<FE>> + fmt::Debug,
     T: CDatatype + DType,
@@ -184,7 +184,7 @@ where
 
 impl<FE, A> TensorBooleanConst for DenseTensor<FE, A>
 where
-    FE: Send + Sync + 'static,
+    FE: ThreadSafe,
     A: DenseInstance + Into<DenseAccessCast<FE>>,
 {
     type Combine = DenseTensor<FE, DenseCompareConst<FE, u8>>;
@@ -205,7 +205,7 @@ where
 
 impl<FE, L, R, T> TensorCompare<DenseTensor<FE, R>> for DenseTensor<FE, L>
 where
-    FE: Send + Sync + 'static,
+    FE: ThreadSafe,
     L: DenseInstance<DType = T> + Into<DenseAccessCast<FE>>,
     R: DenseInstance<DType = T> + Into<DenseAccessCast<FE>>,
     T: CDatatype + DType,
@@ -239,7 +239,7 @@ where
 
 impl<FE, A> TensorCompareConst for DenseTensor<FE, A>
 where
-    FE: Send + Sync + 'static,
+    FE: ThreadSafe,
     A: DenseInstance + Into<DenseAccessCast<FE>>,
 {
     type Compare = DenseTensor<FE, DenseCompareConst<FE, u8>>;
@@ -269,7 +269,7 @@ where
     }
 }
 
-impl<FE: Send + Sync + 'static, A: DenseInstance> TensorDiagonal for DenseTensor<FE, A> {
+impl<FE: ThreadSafe, A: DenseInstance> TensorDiagonal for DenseTensor<FE, A> {
     type Diagonal = DenseTensor<FE, DenseDiagonal<A>>;
 
     fn diagonal(self) -> TCResult<Self::Diagonal> {
@@ -279,7 +279,7 @@ impl<FE: Send + Sync + 'static, A: DenseInstance> TensorDiagonal for DenseTensor
 
 impl<FE, L, R, T> TensorMath<DenseTensor<FE, R>> for DenseTensor<FE, L>
 where
-    FE: Send + Sync + 'static,
+    FE: ThreadSafe,
     L: DenseInstance<DType = T>,
     R: DenseInstance<DType = T>,
     T: CDatatype + DType,
@@ -338,7 +338,7 @@ where
     }
 }
 
-impl<FE: Send + Sync + 'static, A: DenseInstance> TensorMathConst for DenseTensor<FE, A>
+impl<FE: ThreadSafe, A: DenseInstance> TensorMathConst for DenseTensor<FE, A>
 where
     Number: CastInto<A::DType>,
 {
@@ -537,7 +537,7 @@ where
     }
 }
 
-impl<FE: Send + Sync + 'static, A: DenseInstance> TensorTransform for DenseTensor<FE, A> {
+impl<FE: ThreadSafe, A: DenseInstance> TensorTransform for DenseTensor<FE, A> {
     type Broadcast = DenseTensor<FE, DenseBroadcast<A>>;
     type Expand = DenseTensor<FE, DenseExpand<A>>;
     type Reshape = DenseTensor<FE, DenseReshape<A>>;
@@ -565,7 +565,7 @@ impl<FE: Send + Sync + 'static, A: DenseInstance> TensorTransform for DenseTenso
     }
 }
 
-impl<FE: Send + Sync + 'static, A: DenseInstance> TensorUnary for DenseTensor<FE, A> {
+impl<FE: ThreadSafe, A: DenseInstance> TensorUnary for DenseTensor<FE, A> {
     type Unary = DenseTensor<FE, DenseUnary<A, A::DType>>;
 
     fn abs(self) -> TCResult<Self::Unary> {

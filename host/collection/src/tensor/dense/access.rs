@@ -17,6 +17,7 @@ use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::TxnId;
 use tc_value::{DType, Float, Int, Number, NumberClass, NumberInstance, NumberType, UInt};
+use tcgeneric::ThreadSafe;
 
 use super::{
     div_ceil, ideal_block_size_for, DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock,
@@ -519,7 +520,7 @@ macro_rules! access_cast_dispatch {
 }
 
 #[async_trait]
-impl<FE: Send + Sync + 'static> TensorPermitRead for DenseAccessCast<FE> {
+impl<FE: ThreadSafe> TensorPermitRead for DenseAccessCast<FE> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         access_cast_dispatch!(self, this, this.read_permit(txn_id, range).await)
     }
@@ -601,7 +602,7 @@ macro_rules! access_dispatch {
 
 impl<FE, T> TensorInstance for DenseAccess<FE, T>
 where
-    FE: Send + Sync + 'static,
+    FE: ThreadSafe,
     T: CDatatype + DType,
 {
     fn dtype(&self) -> NumberType {
@@ -670,7 +671,7 @@ where
 #[async_trait]
 impl<FE, T> TensorPermitRead for DenseAccess<FE, T>
 where
-    FE: Send + Sync + 'static,
+    FE: ThreadSafe,
     T: CDatatype + DType,
 {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
@@ -897,8 +898,8 @@ where
 
 impl<FE, T> TensorInstance for DenseFile<FE, T>
 where
-    FE: Send + Sync + 'static,
-    T: DType + Send + Sync + 'static,
+    FE: ThreadSafe,
+    T: DType + ThreadSafe,
 {
     fn dtype(&self) -> NumberType {
         T::dtype()
@@ -1024,7 +1025,7 @@ where
 impl<'a, FE, T> DenseWriteLock<'a> for DenseFile<FE, T>
 where
     FE: FileLoad + AsType<Buffer<T>>,
-    T: CDatatype + DType + 'static,
+    T: CDatatype + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     type WriteGuard = DenseFileWriteGuard<'a, FE>;
@@ -1467,7 +1468,7 @@ where
 
 impl<FE, S> TensorInstance for DenseCow<FE, S>
 where
-    FE: Send + Sync + 'static,
+    FE: ThreadSafe,
     S: TensorInstance,
 {
     fn dtype(&self) -> NumberType {
@@ -1957,7 +1958,7 @@ impl<FE, T: CDatatype> DenseCompare<FE, T> {
     }
 }
 
-impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseCompare<FE, T> {
+impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for DenseCompare<FE, T> {
     fn dtype(&self) -> NumberType {
         T::dtype()
     }
@@ -2005,7 +2006,7 @@ where
 }
 
 #[async_trait]
-impl<FE: Send + Sync + 'static, T: CDatatype> TensorPermitRead for DenseCompare<FE, T> {
+impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for DenseCompare<FE, T> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         // always acquire these permits in-order to avoid the risk of a deadlock
         let mut left = self.left.read_permit(txn_id, range.clone()).await?;
@@ -2053,7 +2054,7 @@ impl<FE, T: CDatatype> DenseCompareConst<FE, T> {
     }
 }
 
-impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseCompareConst<FE, T> {
+impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for DenseCompareConst<FE, T> {
     fn dtype(&self) -> NumberType {
         T::dtype()
     }
@@ -2093,7 +2094,7 @@ where
 }
 
 #[async_trait]
-impl<FE: Send + Sync + 'static, T: CDatatype> TensorPermitRead for DenseCompareConst<FE, T> {
+impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for DenseCompareConst<FE, T> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.left.read_permit(txn_id, range).await
     }
@@ -3574,7 +3575,7 @@ impl<FE> DenseUnaryCast<FE, u8> {
     }
 }
 
-impl<FE: Send + Sync + 'static, T: CDatatype + DType> TensorInstance for DenseUnaryCast<FE, T> {
+impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for DenseUnaryCast<FE, T> {
     fn dtype(&self) -> NumberType {
         T::dtype()
     }
@@ -3615,7 +3616,7 @@ where
 }
 
 #[async_trait]
-impl<FE: Send + Sync + 'static, T: CDatatype> TensorPermitRead for DenseUnaryCast<FE, T> {
+impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for DenseUnaryCast<FE, T> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         let source = &self.source;
         access_cast_dispatch!(source, this, this.read_permit(txn_id, range).await)

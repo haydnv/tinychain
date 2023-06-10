@@ -4,7 +4,7 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures::{Stream, TryFutureExt};
-use ha_ndarray::{CDatatype, NDArrayMath, NDArrayRead, NDArrayTransform};
+use ha_ndarray::{Array, CDatatype, Log, NDArrayCast, NDArrayMath, NDArrayRead, NDArrayTransform};
 use safecast::{AsType, CastFrom};
 
 mod access;
@@ -20,7 +20,7 @@ use crate::tensor::dense::{DenseSparse, DenseTensor};
 
 use super::{
     Axes, Coord, Range, Shape, TensorBoolean, TensorCompare, TensorCompareConst, TensorConvert,
-    TensorInstance, TensorTransform,
+    TensorInstance, TensorMath, TensorTransform,
 };
 
 pub use access::*;
@@ -91,7 +91,7 @@ impl<FE, A: Clone> Clone for SparseTensor<FE, A> {
 
 impl<FE, A> TensorInstance for SparseTensor<FE, A>
 where
-    FE: Send + Sync + 'static,
+    FE: ThreadSafe,
     A: SparseInstance,
 {
     fn dtype(&self) -> NumberType {
@@ -110,11 +110,11 @@ where
     R: SparseInstance<DType = L::DType> + Into<SparseAccessCast<FE>>,
     Number: From<L::DType> + From<R::DType>,
 {
-    type Combine = SparseTensor<FE, SparseCombine<FE, u8>>;
-    type LeftCombine = SparseTensor<FE, SparseLeftCombine<FE, u8>>;
+    type Combine = SparseTensor<FE, SparseCompare<FE, u8>>;
+    type LeftCombine = SparseTensor<FE, SparseCompareLeft<FE, u8>>;
 
     fn and(self, other: SparseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
-        let access = SparseLeftCombine::new(self.accessor, other.accessor, |l, r| {
+        let access = SparseCompareLeft::new(self.accessor, other.accessor, |l, r| {
             if bool::cast_from(l) && bool::cast_from(r) {
                 1
             } else {
@@ -126,7 +126,7 @@ where
     }
 
     fn or(self, other: SparseTensor<FE, R>) -> TCResult<Self::Combine> {
-        let access = SparseCombine::new(self.accessor, other.accessor, |l, r| {
+        let access = SparseCompare::new(self.accessor, other.accessor, |l, r| {
             if bool::cast_from(l) && bool::cast_from(r) {
                 1
             } else {
@@ -138,7 +138,7 @@ where
     }
 
     fn xor(self, other: SparseTensor<FE, R>) -> TCResult<Self::Combine> {
-        let access = SparseCombine::new(self.accessor, other.accessor, |l, r| {
+        let access = SparseCompare::new(self.accessor, other.accessor, |l, r| {
             if bool::cast_from(l) && bool::cast_from(r) {
                 1
             } else {
@@ -165,7 +165,7 @@ where
     R: SparseInstance<DType = L::DType> + Into<SparseAccess<FE, R::DType>> + fmt::Debug,
     SparseAccessCast<FE>: From<SparseAccess<FE, L::DType>>,
 {
-    type Compare = SparseTensor<FE, SparseCombine<FE, u8>>;
+    type Compare = SparseTensor<FE, SparseCompare<FE, u8>>;
 
     fn eq(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
         Err(bad_request!(
@@ -176,7 +176,7 @@ where
     }
 
     fn gt(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
-        SparseCombine::new(self.accessor.into(), other.accessor.into(), |l, r| {
+        SparseCompare::new(self.accessor.into(), other.accessor.into(), |l, r| {
             if l.gt(&r) {
                 1
             } else {
@@ -195,7 +195,7 @@ where
     }
 
     fn lt(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
-        SparseCombine::new(self.accessor.into(), other.accessor.into(), |l, r| {
+        SparseCompare::new(self.accessor.into(), other.accessor.into(), |l, r| {
             if l.lt(&r) {
                 1
             } else {
@@ -214,7 +214,7 @@ where
     }
 
     fn ne(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
-        SparseCombine::new(self.accessor.into(), other.accessor.into(), |l, r| {
+        SparseCompare::new(self.accessor.into(), other.accessor.into(), |l, r| {
             if l.ne(&r) {
                 1
             } else {
@@ -231,42 +231,117 @@ where
     A: SparseInstance + Into<SparseAccess<FE, A::DType>>,
     SparseAccessCast<FE>: From<SparseAccess<FE, A::DType>>,
 {
-    type Compare = SparseTensor<FE, SparseCombineConst<FE, u8>>;
+    type Compare = SparseTensor<FE, SparseCompareConst<FE, u8>>;
 
     fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
         let cmp = |l: Number, r: Number| if l.eq(&r) { 1 } else { 0 };
-        let sparse = SparseCombineConst::new(self.accessor.into(), other, cmp);
+        let sparse = SparseCompareConst::new(self.accessor.into(), other, cmp);
         Ok(sparse.into())
     }
 
     fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
         let cmp = |l: Number, r: Number| if l.gt(&r) { 1 } else { 0 };
-        let sparse = SparseCombineConst::new(self.accessor.into(), other, cmp);
+        let sparse = SparseCompareConst::new(self.accessor.into(), other, cmp);
         Ok(sparse.into())
     }
 
     fn ge_const(self, other: Number) -> TCResult<Self::Compare> {
         let cmp = |l: Number, r: Number| if l.ge(&r) { 1 } else { 0 };
-        let sparse = SparseCombineConst::new(self.accessor.into(), other, cmp);
+        let sparse = SparseCompareConst::new(self.accessor.into(), other, cmp);
         Ok(sparse.into())
     }
 
     fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
         let cmp = |l: Number, r: Number| if l.lt(&r) { 1 } else { 0 };
-        let sparse = SparseCombineConst::new(self.accessor.into(), other, cmp);
+        let sparse = SparseCompareConst::new(self.accessor.into(), other, cmp);
         Ok(sparse.into())
     }
 
     fn le_const(self, other: Number) -> TCResult<Self::Compare> {
         let cmp = |l: Number, r: Number| if l.le(&r) { 1 } else { 0 };
-        let sparse = SparseCombineConst::new(self.accessor.into(), other, cmp);
+        let sparse = SparseCompareConst::new(self.accessor.into(), other, cmp);
         Ok(sparse.into())
     }
 
     fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
         let cmp = |l: Number, r: Number| if l.ne(&r) { 1 } else { 0 };
-        let sparse = SparseCombineConst::new(self.accessor.into(), other, cmp);
+        let sparse = SparseCompareConst::new(self.accessor.into(), other, cmp);
         Ok(sparse.into())
+    }
+}
+
+impl<FE, L, R, T> TensorMath<SparseTensor<FE, R>> for SparseTensor<FE, L>
+where
+    FE: ThreadSafe,
+    L: SparseInstance<DType = T>,
+    R: SparseInstance<DType = T>,
+    T: CDatatype + DType,
+{
+    type Combine = SparseTensor<FE, SparseCombine<L, R, T>>;
+    type LeftCombine = SparseTensor<FE, SparseCombineLeft<L, R, T>>;
+
+    fn add(self, other: SparseTensor<FE, R>) -> TCResult<Self::Combine> {
+        SparseCombine::new(
+            self.accessor,
+            other.accessor,
+            |l, r| l.add(r).map(Array::from).map_err(TCError::from),
+            |l, r| l + r,
+        )
+        .map(SparseTensor::from)
+    }
+
+    fn div(self, other: SparseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+        SparseCombineLeft::new(
+            self.accessor,
+            other.accessor,
+            |l, r| l.div(r).map(Array::from).map_err(TCError::from),
+            |l, r| l / r,
+        )
+        .map(SparseTensor::from)
+    }
+
+    fn log(self, base: SparseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+        fn log<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+            let right = right.cast()?;
+            left.log(right).map(Array::from).map_err(TCError::from)
+        }
+
+        SparseCombineLeft::new(self.accessor, base.accessor, log, |l, r| {
+            T::from_f64(T::to_f64(l).log(T::to_f64(r)))
+        })
+        .map(SparseTensor::from)
+    }
+
+    fn mul(self, other: SparseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+        SparseCombineLeft::new(
+            self.accessor,
+            other.accessor,
+            |l, r| l.mul(r).map(Array::from).map_err(TCError::from),
+            |l, r| l * r,
+        )
+        .map(SparseTensor::from)
+    }
+
+    fn pow(self, other: SparseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+        fn pow<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+            let right = right.cast()?;
+            left.pow(right).map(Array::from).map_err(TCError::from)
+        }
+
+        SparseCombineLeft::new(self.accessor, other.accessor, pow, |l, r| {
+            T::from_f64(T::to_f64(l).pow(T::to_f64(r)))
+        })
+        .map(SparseTensor::from)
+    }
+
+    fn sub(self, other: SparseTensor<FE, R>) -> TCResult<Self::Combine> {
+        SparseCombine::new(
+            self.accessor,
+            other.accessor,
+            |l, r| l.add(r).map(Array::from).map_err(TCError::from),
+            |l, r| l + r,
+        )
+        .map(SparseTensor::from)
     }
 }
 
