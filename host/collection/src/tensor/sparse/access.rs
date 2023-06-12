@@ -22,7 +22,7 @@ use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberClass, NumberCollator, NumberType};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::transform::{Expand, Reshape, Slice, Transpose};
+use crate::tensor::transform::{Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
     coord_of, offset_of, strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore,
     Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
@@ -657,8 +657,7 @@ where
 
         self.clear(Range::default()).await?;
 
-        let order = (0..other.ndim()).into_iter().collect();
-        let mut elements = other.elements(Range::default(), order).await?;
+        let mut elements = other.elements(Range::default(), vec![]).await?;
 
         while let Some((coord, value)) = elements.try_next().await? {
             let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
@@ -2270,8 +2269,7 @@ where
         self.filled.clear(range.clone()).await?;
         self.zeros.clear(range.clone()).await?;
 
-        let order = (0..self.source.ndim()).into_iter().collect();
-        let mut elements = self.source.clone().elements(range, order).await?;
+        let mut elements = self.source.clone().elements(range, vec![]).await?;
 
         while let Some((coord, value)) = elements.try_next().await? {
             self.zeros.write_value(coord, value).await?;
@@ -2291,8 +2289,7 @@ where
 
         self.clear(Range::default()).await?;
 
-        let order = (0..other.ndim()).into_iter().collect();
-        let mut elements = other.elements(Range::default(), order).await?;
+        let mut elements = other.elements(Range::default(), vec![]).await?;
 
         while let Some((coord, value)) = elements.try_next().await? {
             self.write_value(coord, value).await?;
@@ -2422,6 +2419,140 @@ impl<S: fmt::Debug> fmt::Debug for SparseExpand<S> {
             f,
             "expand axes {:?} of {:?}",
             self.transform.expand_axes(),
+            self.source,
+        )
+    }
+}
+
+#[derive(Clone)]
+pub struct SparseReduce<S, T: CDatatype> {
+    source: S,
+    transform: Arc<Reduce>,
+    id: T,
+    op: fn(Array<T>) -> TCResult<T>,
+    value_op: fn(T, T) -> T,
+}
+
+impl<S, T> SparseReduce<S, T>
+where
+    S: SparseInstance<DType = T> + Clone,
+    T: CDatatype + DType,
+{
+    pub fn new(
+        source: S,
+        id: T,
+        axes: Axes,
+        keepdims: bool,
+        op: fn(Array<T>) -> TCResult<T>,
+        value_op: fn(T, T) -> T,
+    ) -> TCResult<Self> {
+        Reduce::new(source.shape().clone(), axes, keepdims)
+            .map(Arc::new)
+            .map(|transform| Self {
+                source,
+                transform,
+                id,
+                op,
+                value_op,
+            })
+    }
+
+    async fn reduce_element(&self, coord: Coord) -> TCResult<(Coord, T)> {
+        let source_range = self.transform.invert_coord(&coord);
+        let slice = SparseSlice::new(self.source.clone(), source_range.into())?;
+        let blocks = slice.blocks(Range::default(), vec![]).await?;
+
+        let reduced = blocks
+            .try_fold(self.id, |reduced, (_coords, values)| async move {
+                let value = (self.op)(values.into())?;
+                Ok((self.value_op)(reduced, value))
+            })
+            .await?;
+
+        Ok((coord, reduced))
+    }
+}
+
+impl<S, T> TensorInstance for SparseReduce<S, T>
+where
+    S: ThreadSafe,
+    T: CDatatype + DType,
+{
+    fn dtype(&self) -> NumberType {
+        T::dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.transform.shape()
+    }
+}
+
+#[async_trait]
+impl<S, T> SparseInstance for SparseReduce<S, T>
+where
+    S: SparseInstance<DType = T> + Clone,
+    T: CDatatype + DType,
+{
+    type CoordBlock = ArrayBase<Vec<u64>>;
+    type ValueBlock = ArrayBase<Vec<T>>;
+    type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
+    type DType = S::DType;
+
+    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        let ndim = self.ndim();
+        let elements = self.elements(range, order).await?;
+        Ok(stream::BlockCoords::new(elements, ndim))
+    }
+
+    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+        self.transform.shape().validate_range(&range)?;
+        self.transform.shape().validate_axes(&order)?;
+
+        let source_range = self.transform.invert_range(range);
+        let source_axes = self.transform.invert_axes(order);
+        let filled_at = self
+            .source
+            .clone()
+            .filled_at(source_range, source_axes)
+            .await?;
+
+        let elements = filled_at
+            .map(move |result| {
+                let coord = result?;
+                let this = self.clone();
+                Ok(async move { this.reduce_element(coord).await })
+            })
+            .try_buffered(num_cpus::get());
+
+        Ok(Box::pin(elements))
+    }
+
+    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+        self.reduce_element(coord)
+            .map_ok(|(_coord, value)| value)
+            .await
+    }
+}
+
+#[async_trait]
+impl<S, T> TensorPermitRead for SparseReduce<S, T>
+where
+    S: TensorPermitRead,
+    T: CDatatype,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        self.transform.shape().validate_range(&range)?;
+        let range = self.transform.invert_range(range);
+        self.source.read_permit(txn_id, range).await
+    }
+}
+
+impl<S: fmt::Debug, T: CDatatype> fmt::Debug for SparseReduce<S, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "reduce axes {:?} of {:?}",
+            self.transform.reduce_axes(),
             self.source
         )
     }
@@ -2757,8 +2888,7 @@ where
 
         self.clear(Range::default()).await?;
 
-        let order = (0..other.shape().len()).into_iter().collect();
-        let mut elements = other.elements(Range::default(), order).await?;
+        let mut elements = other.elements(Range::default(), vec![]).await?;
 
         while let Some((coord, value)) = elements.try_next().await? {
             self.write_value(coord, value).await?;

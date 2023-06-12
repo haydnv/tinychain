@@ -1,5 +1,4 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
-
 use std::fmt;
 use std::ops::{Div, Rem};
 
@@ -535,5 +534,9 @@ fn strides_for(shape: &[u64], ndim: usize) -> Strides {
 
 #[inline]
 fn validate_order(order: &[usize], ndim: usize) -> bool {
-    order.len() == ndim && order.iter().all(|x| x < &ndim)
+    if order.is_empty() {
+        true
+    } else {
+        order.len() == ndim && order.iter().all(|x| x < &ndim)
+    }
 }

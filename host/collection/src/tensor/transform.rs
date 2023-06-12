@@ -202,8 +202,10 @@ pub struct Reduce {
 }
 
 impl Reduce {
-    pub fn new(source_shape: Shape, axes: Vec<usize>, keepdims: bool) -> TCResult<Reduce> {
+    pub fn new(source_shape: Shape, mut axes: Vec<usize>, keepdims: bool) -> TCResult<Reduce> {
         source_shape.validate_axes(&axes)?;
+
+        axes.sort();
 
         let mut shape = source_shape.clone();
 
@@ -232,6 +234,15 @@ impl Reduce {
         &self.shape
     }
 
+    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
+        let mut source_axes: Axes = (0..self.source_shape.len()).into_iter().collect();
+        for x in self.axes.iter().rev().copied() {
+            source_axes.remove(x);
+        }
+
+        axes.into_iter().map(|x| source_axes[x]).collect()
+    }
+
     pub fn invert_range(&self, mut range: Range) -> Range {
         if self.shape.len() == self.source_shape.len() {
             for x in self.axes.iter().copied() {
@@ -251,7 +262,8 @@ impl Reduce {
     }
 
     pub fn invert_coord(&self, coord: &[u64]) -> Range {
-        let mut range: Vec<AxisRange> = coord.iter().map(|i| AxisRange::At(*i)).collect();
+        let mut range = Vec::with_capacity(self.source_shape.len());
+        range.extend(coord.iter().copied().map(|i| AxisRange::At(i)));
 
         if self.shape.len() == self.source_shape.len() {
             for x in self.axes.iter().copied() {
