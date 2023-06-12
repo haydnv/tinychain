@@ -256,11 +256,14 @@ pub enum SparseAccess<FE, T: CDatatype> {
     CompareConst(Box<SparseCompareConst<FE, T>>),
     CompareLeft(Box<SparseCompareLeft<FE, T>>),
     Combine(Box<SparseCombine<Self, Self, T>>),
+    CombineLeft(Box<SparseCombineLeft<Self, Self, T>>),
     Cow(Box<SparseCow<FE, T, Self>>),
     Expand(Box<SparseExpand<Self>>),
     Reshape(Box<SparseReshape<Self>>),
     Slice(Box<SparseSlice<Self>>),
     Transpose(Box<SparseTranspose<Self>>),
+    Unary(Box<SparseUnary<Self, T>>),
+    UnaryCast(Box<SparseUnaryCast<FE, T>>),
     Version(SparseVersion<FE, T>),
 }
 
@@ -272,6 +275,7 @@ impl<FE, T: CDatatype> Clone for SparseAccess<FE, T> {
             Self::BroadcastAxis(broadcast) => Self::BroadcastAxis(broadcast.clone()),
             Self::Cast(cast) => Self::Cast(cast.clone()),
             Self::Combine(combine) => Self::Combine(combine.clone()),
+            Self::CombineLeft(combine) => Self::CombineLeft(combine.clone()),
             Self::Compare(compare) => Self::Compare(compare.clone()),
             Self::CompareConst(compare) => Self::CompareConst(compare.clone()),
             Self::CompareLeft(compare) => Self::CompareLeft(compare.clone()),
@@ -280,6 +284,8 @@ impl<FE, T: CDatatype> Clone for SparseAccess<FE, T> {
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
             Self::Slice(slice) => Self::Slice(slice.clone()),
             Self::Transpose(transpose) => Self::Transpose(transpose.clone()),
+            Self::Unary(unary) => Self::Unary(unary.clone()),
+            Self::UnaryCast(unary) => Self::UnaryCast(unary.clone()),
             Self::Version(version) => Self::Version(version.clone()),
         }
     }
@@ -293,6 +299,7 @@ macro_rules! access_dispatch {
             Self::BroadcastAxis($var) => $call,
             Self::Cast($var) => $call,
             Self::Combine($var) => $call,
+            Self::CombineLeft($var) => $call,
             Self::Compare($var) => $call,
             Self::CompareConst($var) => $call,
             Self::CompareLeft($var) => $call,
@@ -300,8 +307,10 @@ macro_rules! access_dispatch {
             Self::Expand($var) => $call,
             Self::Reshape($var) => $call,
             Self::Slice($var) => $call,
-            Self::Transpose($var) => $call,
+            Self::Unary($var) => $call,
+            Self::UnaryCast($var) => $call,
             Self::Version($var) => $call,
+            Self::Transpose($var) => $call,
         }
     };
 }
@@ -333,100 +342,13 @@ where
     type DType = T;
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
-        match self {
-            Self::Table(table) => {
-                let blocks = table.blocks(range, order).await?;
-                let blocks =
-                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
+        access_dispatch!(self, this, {
+            let blocks = this.blocks(range, order).await?;
+            let blocks =
+                blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
 
-                Ok(Box::pin(blocks))
-            }
-            Self::Broadcast(broadcast) => {
-                let blocks = broadcast.blocks(range, order).await?;
-                let blocks =
-                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
-
-                Ok(Box::pin(blocks))
-            }
-            Self::BroadcastAxis(broadcast) => {
-                let blocks = broadcast.blocks(range, order).await?;
-                let blocks =
-                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
-
-                Ok(Box::pin(blocks))
-            }
-            Self::Cast(cast) => cast.blocks(range, order).await,
-            Self::Combine(combine) => {
-                let blocks = combine.blocks(range, order).await?;
-                let blocks =
-                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
-
-                Ok(Box::pin(blocks))
-            }
-            Self::Compare(compare) => {
-                let blocks = compare.blocks(range, order).await?;
-                let blocks =
-                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
-
-                Ok(Box::pin(blocks))
-            }
-            Self::CompareConst(compare) => {
-                let blocks = compare.blocks(range, order).await?;
-                let blocks =
-                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
-
-                Ok(Box::pin(blocks))
-            }
-            Self::CompareLeft(compare) => {
-                let blocks = compare.blocks(range, order).await?;
-                let blocks =
-                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
-
-                Ok(Box::pin(blocks))
-            }
-            Self::Cow(cow) => {
-                let blocks = cow.blocks(range, order).await?;
-                let blocks =
-                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
-
-                Ok(Box::pin(blocks))
-            }
-            Self::Expand(expand) => {
-                let blocks = expand.blocks(range, order).await?;
-                let blocks =
-                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
-
-                Ok(Box::pin(blocks))
-            }
-            Self::Reshape(reshape) => {
-                let blocks = reshape.blocks(range, order).await?;
-                let blocks =
-                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
-
-                Ok(Box::pin(blocks))
-            }
-            Self::Slice(slice) => {
-                let blocks = slice.blocks(range, order).await?;
-                let blocks =
-                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
-
-                Ok(Box::pin(blocks))
-            }
-            Self::Transpose(transpose) => {
-                let blocks = transpose.blocks(range, order).await?;
-                let blocks =
-                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
-
-                Ok(Box::pin(blocks))
-            }
-            Self::Version(version) => {
-                let blocks = version.blocks(range, order).await?;
-                let blocks =
-                    blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
-
-                Ok(Box::pin(blocks))
-            }
-        }
+            Ok(Box::pin(blocks))
+        })
     }
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
@@ -449,12 +371,16 @@ where
             Self::Broadcast(broadcast) => broadcast.read_permit(txn_id, range).await,
             Self::BroadcastAxis(broadcast) => broadcast.read_permit(txn_id, range).await,
             Self::Cow(cow) => cow.read_permit(txn_id, range).await,
-            Self::Compare(combine) => combine.read_permit(txn_id, range).await,
-            Self::CompareLeft(combine) => combine.read_permit(txn_id, range).await,
+            Self::Combine(combine) => combine.read_permit(txn_id, range).await,
+            Self::CombineLeft(combine) => combine.read_permit(txn_id, range).await,
+            Self::Compare(compare) => compare.read_permit(txn_id, range).await,
+            Self::CompareLeft(compare) => compare.read_permit(txn_id, range).await,
             Self::Expand(expand) => expand.read_permit(txn_id, range).await,
             Self::Reshape(reshape) => reshape.read_permit(txn_id, range).await,
             Self::Slice(slice) => slice.read_permit(txn_id, range).await,
             Self::Transpose(transpose) => transpose.read_permit(txn_id, range).await,
+            Self::Unary(unary) => unary.read_permit(txn_id, range).await,
+            Self::UnaryCast(unary) => unary.read_permit(txn_id, range).await,
             Self::Version(version) => version.read_permit(txn_id, range).await,
             other => Err(bad_request!(
                 "{:?} does not support transactional reads",
@@ -3056,6 +2982,7 @@ impl<S: fmt::Debug> fmt::Debug for SparseTranspose<S> {
     }
 }
 
+#[derive(Clone)]
 pub struct SparseUnary<S, T: CDatatype> {
     source: S,
     block_op: fn(Array<T>) -> TCResult<Array<T>>,
@@ -3135,6 +3062,16 @@ pub struct SparseUnaryCast<FE, T: CDatatype> {
     source: SparseCastSource<FE>,
     block_op: fn(Block) -> TCResult<Array<T>>,
     value_op: fn(Number) -> T,
+}
+
+impl<FE, T: CDatatype> Clone for SparseUnaryCast<FE, T> {
+    fn clone(&self) -> Self {
+        Self {
+            source: self.source.clone(),
+            block_op: self.block_op,
+            value_op: self.value_op,
+        }
+    }
 }
 
 impl<FE, T: CDatatype> SparseUnaryCast<FE, T> {
