@@ -17,6 +17,7 @@ use tcgeneric::{
 
 pub use shape::{AxisRange, Range, Shape};
 
+mod block;
 pub mod dense;
 pub mod shape;
 pub mod sparse;

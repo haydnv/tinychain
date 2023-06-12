@@ -16,14 +16,15 @@ mod stream;
 
 use tc_error::*;
 use tc_transact::TxnId;
-use tc_value::{DType, Number, NumberCollator, NumberType};
+use tc_value::{DType, Number, NumberClass, NumberCollator, NumberType};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::dense::{DenseSparse, DenseTensor};
 
 use super::{
     Axes, Coord, Range, Shape, TensorBoolean, TensorCompare, TensorCompareConst, TensorConvert,
-    TensorInstance, TensorMath, TensorPermitRead, TensorReduce, TensorTransform,
+    TensorInstance, TensorMath, TensorPermitRead, TensorReduce, TensorTransform, TensorUnary,
+    TensorUnaryBoolean,
 };
 
 pub use access::*;
@@ -584,6 +585,73 @@ where
             accessor,
             phantom: PhantomData,
         })
+    }
+}
+
+impl<FE, A> TensorUnary for SparseTensor<FE, A>
+where
+    FE: ThreadSafe,
+    A: SparseInstance,
+{
+    type Unary = SparseTensor<FE, SparseUnary<A, A::DType>>;
+
+    fn abs(self) -> TCResult<Self::Unary> {
+        let accessor = SparseUnary::new(
+            self.accessor,
+            |arr| arr.abs().map(Array::from).map_err(TCError::from),
+            |n| A::DType::abs(n),
+        );
+
+        Ok(accessor.into())
+    }
+
+    fn exp(self) -> TCResult<Self::Unary> {
+        let accessor = SparseUnary::new(
+            self.accessor,
+            |arr| arr.exp().map(Array::from).map_err(TCError::from),
+            |n| A::DType::from_f64(A::DType::to_f64(n).exp()),
+        );
+
+        Ok(accessor.into())
+    }
+
+    fn ln(self) -> TCResult<Self::Unary> {
+        let accessor = SparseUnary::new(
+            self.accessor,
+            |arr| arr.ln().map(Array::from).map_err(TCError::from),
+            |n| A::DType::from_f64(A::DType::to_f64(n).ln()),
+        );
+
+        Ok(accessor.into())
+    }
+
+    fn round(self) -> TCResult<Self::Unary> {
+        let accessor = SparseUnary::new(
+            self.accessor,
+            |arr| arr.round().map(Array::from).map_err(TCError::from),
+            |n| A::DType::round(n),
+        );
+
+        Ok(accessor.into())
+    }
+}
+
+impl<FE, A> TensorUnaryBoolean for SparseTensor<FE, A>
+where
+    FE: AsType<Node> + ThreadSafe,
+    A: SparseInstance + Into<SparseAccess<FE, A::DType>>,
+    SparseCastSource<FE>: From<SparseAccess<FE, A::DType>>,
+{
+    type Unary = SparseTensor<FE, SparseUnaryCast<FE, u8>>;
+
+    fn not(self) -> TCResult<Self::Unary> {
+        let accessor = SparseUnaryCast::new(
+            self.accessor.into(),
+            |block| block.not(),
+            |n| if n == NumberType::Number.zero() { 1 } else { 0 },
+        );
+
+        Ok(accessor.into())
     }
 }
 

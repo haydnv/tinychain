@@ -16,13 +16,14 @@ use safecast::{AsType, CastInto};
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::TxnId;
-use tc_value::{DType, Float, Int, Number, NumberClass, NumberInstance, NumberType, UInt};
+use tc_value::{DType, Number, NumberClass, NumberInstance, NumberType};
 use tcgeneric::ThreadSafe;
 
 use super::{
     div_ceil, ideal_block_size_for, DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock,
 };
 
+use crate::tensor::block::Block;
 use crate::tensor::sparse::{Node, SparseAccess, SparseInstance};
 use crate::tensor::transform::{Broadcast, Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
@@ -32,332 +33,6 @@ use crate::tensor::{
 
 use super::stream::{BlockResize, ValueStream};
 use super::{BlockShape, BlockStream, DenseCacheFile};
-
-pub enum Block {
-    F32(Array<f32>),
-    F64(Array<f64>),
-    I16(Array<i16>),
-    I32(Array<i32>),
-    I64(Array<i64>),
-    U8(Array<u8>),
-    U16(Array<u16>),
-    U32(Array<u32>),
-    U64(Array<u64>),
-}
-
-macro_rules! block_dispatch {
-    ($this:ident, $var:ident, $call:expr) => {
-        match $this {
-            Block::F32($var) => $call,
-            Block::F64($var) => $call,
-            Block::I16($var) => $call,
-            Block::I32($var) => $call,
-            Block::I64($var) => $call,
-            Block::U8($var) => $call,
-            Block::U16($var) => $call,
-            Block::U32($var) => $call,
-            Block::U64($var) => $call,
-        }
-    };
-}
-
-macro_rules! block_cmp {
-    ($self:ident, $other:ident, $this:ident, $that:ident, $call:expr) => {
-        match ($self, $other) {
-            (Self::F32($this), Self::F32($that)) => {
-                $this.eq($that).map(Array::from).map_err(TCError::from)
-            }
-            (Self::F64($this), Self::F64($that)) => {
-                $this.eq($that).map(Array::from).map_err(TCError::from)
-            }
-            (Self::I16($this), Self::I16($that)) => {
-                $this.eq($that).map(Array::from).map_err(TCError::from)
-            }
-            (Self::I32($this), Self::I32($that)) => {
-                $this.eq($that).map(Array::from).map_err(TCError::from)
-            }
-            (Self::I64($this), Self::I64($that)) => {
-                $this.eq($that).map(Array::from).map_err(TCError::from)
-            }
-            (Self::U8($this), Self::U8($that)) => {
-                $this.eq($that).map(Array::from).map_err(TCError::from)
-            }
-            (Self::U16($this), Self::U16($that)) => {
-                $this.eq($that).map(Array::from).map_err(TCError::from)
-            }
-            (Self::U32($this), Self::U32($that)) => {
-                $this.eq($that).map(Array::from).map_err(TCError::from)
-            }
-            (Self::U64($this), Self::U64($that)) => {
-                $this.eq($that).map(Array::from).map_err(TCError::from)
-            }
-            ($this, $that) => Err(bad_request!("cannot compare {:?} with {:?}", $this, $that)),
-        }
-    };
-}
-
-macro_rules! block_cmp_scalar {
-    ($self:ident, $other:ident, $this:ident, $that:ident, $call:expr) => {
-        match ($self, $other) {
-            (Self::F32($this), Number::Float(Float::F32($that))) => $this
-                .eq_scalar($that)
-                .map(Array::from)
-                .map_err(TCError::from),
-
-            (Self::F64($this), Number::Float(Float::F64($that))) => $this
-                .eq_scalar($that)
-                .map(Array::from)
-                .map_err(TCError::from),
-
-            (Self::I16($this), Number::Int(Int::I16($that))) => $this
-                .eq_scalar($that)
-                .map(Array::from)
-                .map_err(TCError::from),
-
-            (Self::I32($this), Number::Int(Int::I32($that))) => $this
-                .eq_scalar($that)
-                .map(Array::from)
-                .map_err(TCError::from),
-
-            (Self::I64($this), Number::Int(Int::I64($that))) => $this
-                .eq_scalar($that)
-                .map(Array::from)
-                .map_err(TCError::from),
-
-            (Self::U8($this), Number::UInt(UInt::U8($that))) => $this
-                .eq_scalar($that)
-                .map(Array::from)
-                .map_err(TCError::from),
-
-            (Self::U16($this), Number::UInt(UInt::U16($that))) => $this
-                .eq_scalar($that)
-                .map(Array::from)
-                .map_err(TCError::from),
-
-            (Self::U32($this), Number::UInt(UInt::U32($that))) => $this
-                .eq_scalar($that)
-                .map(Array::from)
-                .map_err(TCError::from),
-
-            (Self::U64($this), Number::UInt(UInt::U64($that))) => $this
-                .eq_scalar($that)
-                .map(Array::from)
-                .map_err(TCError::from),
-
-            ($this, $that) => Err(bad_request!("cannot compare {:?} with {:?}", $this, $that)),
-        }
-    };
-}
-
-impl Block {
-    pub fn and(self, other: Self) -> TCResult<Array<u8>> {
-        block_cmp!(
-            self,
-            other,
-            this,
-            that,
-            this.and(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn and_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        block_cmp_scalar!(
-            self,
-            other,
-            this,
-            that,
-            this.and_scalar(that)
-                .map(Array::from)
-                .map_err(TCError::from)
-        )
-    }
-
-    pub fn not(self) -> TCResult<Array<u8>> {
-        block_dispatch!(
-            self,
-            this,
-            this.not().map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn or(self, other: Self) -> TCResult<Array<u8>> {
-        block_cmp!(
-            self,
-            other,
-            this,
-            that,
-            this.or(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn or_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        block_cmp_scalar!(
-            self,
-            other,
-            this,
-            that,
-            this.or_scalar(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn xor(self, other: Self) -> TCResult<Array<u8>> {
-        block_cmp!(
-            self,
-            other,
-            this,
-            that,
-            this.xor(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn xor_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        block_cmp_scalar!(
-            self,
-            other,
-            this,
-            that,
-            this.xor_scalar(that)
-                .map(Array::from)
-                .map_err(TCError::from)
-        )
-    }
-
-    pub fn eq(self, other: Self) -> TCResult<Array<u8>> {
-        block_cmp!(
-            self,
-            other,
-            this,
-            that,
-            this.eq(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn eq_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        block_cmp_scalar!(
-            self,
-            other,
-            this,
-            that,
-            this.eq_scalar(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn gt(self, other: Self) -> TCResult<Array<u8>> {
-        block_cmp!(
-            self,
-            other,
-            this,
-            that,
-            this.gt(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn gt_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        block_cmp_scalar!(
-            self,
-            other,
-            this,
-            that,
-            this.gt_scalar(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn ge(self, other: Self) -> TCResult<Array<u8>> {
-        block_cmp!(
-            self,
-            other,
-            this,
-            that,
-            this.ge(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn ge_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        block_cmp_scalar!(
-            self,
-            other,
-            this,
-            that,
-            this.ge_scalar(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn lt(self, other: Self) -> TCResult<Array<u8>> {
-        block_cmp!(
-            self,
-            other,
-            this,
-            that,
-            this.lt(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn lt_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        block_cmp_scalar!(
-            self,
-            other,
-            this,
-            that,
-            this.lt_scalar(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn le(self, other: Self) -> TCResult<Array<u8>> {
-        block_cmp!(
-            self,
-            other,
-            this,
-            that,
-            this.le(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn le_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        block_cmp_scalar!(
-            self,
-            other,
-            this,
-            that,
-            this.le_scalar(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn ne(self, other: Self) -> TCResult<Array<u8>> {
-        block_cmp!(
-            self,
-            other,
-            this,
-            that,
-            this.ne(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-
-    pub fn ne_scalar(self, other: Number) -> TCResult<Array<u8>> {
-        block_cmp_scalar!(
-            self,
-            other,
-            this,
-            that,
-            this.ne_scalar(that).map(Array::from).map_err(TCError::from)
-        )
-    }
-}
-
-impl fmt::Debug for Block {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::F32(this) => this.fmt(f),
-            Self::F64(this) => this.fmt(f),
-            Self::I16(this) => this.fmt(f),
-            Self::I32(this) => this.fmt(f),
-            Self::I64(this) => this.fmt(f),
-            Self::U8(this) => this.fmt(f),
-            Self::U16(this) => this.fmt(f),
-            Self::U32(this) => this.fmt(f),
-            Self::U64(this) => this.fmt(f),
-        }
-    }
-}
 
 pub enum DenseAccessCast<FE> {
     F32(DenseAccess<FE, f32>),
@@ -369,6 +44,22 @@ pub enum DenseAccessCast<FE> {
     U16(DenseAccess<FE, u16>),
     U32(DenseAccess<FE, u32>),
     U64(DenseAccess<FE, u64>),
+}
+
+macro_rules! cast_dispatch {
+    ($this:ident, $var:ident, $call:expr) => {
+        match $this {
+            DenseAccessCast::F32($var) => $call,
+            DenseAccessCast::F64($var) => $call,
+            DenseAccessCast::I16($var) => $call,
+            DenseAccessCast::I32($var) => $call,
+            DenseAccessCast::I64($var) => $call,
+            DenseAccessCast::U8($var) => $call,
+            DenseAccessCast::U16($var) => $call,
+            DenseAccessCast::U32($var) => $call,
+            DenseAccessCast::U64($var) => $call,
+        }
+    };
 }
 
 impl<FE> Clone for DenseAccessCast<FE> {
@@ -392,94 +83,19 @@ where
     FE: DenseCacheFile + AsType<Node>,
 {
     async fn read_block(&self, block_id: u64) -> TCResult<Block> {
-        match self {
-            Self::F32(this) => this.read_block(block_id).map_ok(Block::F32).await,
-            Self::F64(this) => this.read_block(block_id).map_ok(Block::F64).await,
-            Self::I16(this) => this.read_block(block_id).map_ok(Block::I16).await,
-            Self::I32(this) => this.read_block(block_id).map_ok(Block::I32).await,
-            Self::I64(this) => this.read_block(block_id).map_ok(Block::I64).await,
-            Self::U8(this) => this.read_block(block_id).map_ok(Block::U8).await,
-            Self::U16(this) => this.read_block(block_id).map_ok(Block::U16).await,
-            Self::U32(this) => this.read_block(block_id).map_ok(Block::U32).await,
-            Self::U64(this) => this.read_block(block_id).map_ok(Block::U64).await,
-        }
+        cast_dispatch!(
+            self,
+            this,
+            this.read_block(block_id).map_ok(Block::from).await
+        )
     }
 
     async fn read_blocks(self) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<Block>> + Send>>> {
-        match self {
-            Self::F32(this) => {
-                let blocks = this
-                    .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(Block::F32))
-                    .await?;
-
-                Ok(Box::pin(blocks))
-            }
-            Self::F64(this) => {
-                let blocks = this
-                    .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(Block::F64))
-                    .await?;
-
-                Ok(Box::pin(blocks))
-            }
-            Self::I16(this) => {
-                let blocks = this
-                    .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(Block::I16))
-                    .await?;
-
-                Ok(Box::pin(blocks))
-            }
-            Self::I32(this) => {
-                let blocks = this
-                    .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(Block::I32))
-                    .await?;
-
-                Ok(Box::pin(blocks))
-            }
-            Self::I64(this) => {
-                let blocks = this
-                    .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(Block::I64))
-                    .await?;
-
-                Ok(Box::pin(blocks))
-            }
-            Self::U8(this) => {
-                let blocks = this
-                    .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(Block::U8))
-                    .await?;
-
-                Ok(Box::pin(blocks))
-            }
-            Self::U16(this) => {
-                let blocks = this
-                    .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(Block::U16))
-                    .await?;
-
-                Ok(Box::pin(blocks))
-            }
-            Self::U32(this) => {
-                let blocks = this
-                    .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(Block::U32))
-                    .await?;
-
-                Ok(Box::pin(blocks))
-            }
-            Self::U64(this) => {
-                let blocks = this
-                    .read_blocks()
-                    .map_ok(|blocks| blocks.map_ok(Block::U64))
-                    .await?;
-
-                Ok(Box::pin(blocks))
-            }
-        }
+        cast_dispatch!(self, this, {
+            let blocks = this.read_blocks().await?;
+            let blocks = blocks.map_ok(Block::from);
+            Ok(Box::pin(blocks))
+        })
     }
 }
 
@@ -503,32 +119,16 @@ access_cast_from!(u16, U16);
 access_cast_from!(u32, U32);
 access_cast_from!(u64, U64);
 
-macro_rules! access_cast_dispatch {
-    ($this:ident, $var:ident, $call:expr) => {
-        match $this {
-            DenseAccessCast::F32($var) => $call,
-            DenseAccessCast::F64($var) => $call,
-            DenseAccessCast::I16($var) => $call,
-            DenseAccessCast::I32($var) => $call,
-            DenseAccessCast::I64($var) => $call,
-            DenseAccessCast::U8($var) => $call,
-            DenseAccessCast::U16($var) => $call,
-            DenseAccessCast::U32($var) => $call,
-            DenseAccessCast::U64($var) => $call,
-        }
-    };
-}
-
 #[async_trait]
 impl<FE: ThreadSafe> TensorPermitRead for DenseAccessCast<FE> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
-        access_cast_dispatch!(self, this, this.read_permit(txn_id, range).await)
+        cast_dispatch!(self, this, this.read_permit(txn_id, range).await)
     }
 }
 
 impl<FE> fmt::Debug for DenseAccessCast<FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        access_cast_dispatch!(self, this, this.fmt(f))
+        cast_dispatch!(self, this, this.fmt(f))
     }
 }
 
@@ -1965,7 +1565,7 @@ impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for DenseCompare<FE, T
 
     fn shape(&self) -> &Shape {
         let left = &self.left;
-        access_cast_dispatch!(left, this, this.shape())
+        cast_dispatch!(left, this, this.shape())
     }
 }
 
@@ -1981,7 +1581,7 @@ where
 
     fn block_size(&self) -> usize {
         let left = &self.left;
-        access_cast_dispatch!(left, this, this.block_size())
+        cast_dispatch!(left, this, this.block_size())
     }
 
     async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
@@ -2061,7 +1661,7 @@ impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for DenseCompareConst<
 
     fn shape(&self) -> &Shape {
         let left = &self.left;
-        access_cast_dispatch!(left, this, this.shape())
+        cast_dispatch!(left, this, this.shape())
     }
 }
 
@@ -2076,7 +1676,7 @@ where
 
     fn block_size(&self) -> usize {
         let left = &self.left;
-        access_cast_dispatch!(left, this, this.block_size())
+        cast_dispatch!(left, this, this.block_size())
     }
 
     async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
@@ -3582,7 +3182,7 @@ impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for DenseUnaryCast<FE,
 
     fn shape(&self) -> &Shape {
         let source = &self.source;
-        access_cast_dispatch!(source, this, this.shape())
+        cast_dispatch!(source, this, this.shape())
     }
 }
 
@@ -3598,7 +3198,7 @@ where
 
     fn block_size(&self) -> usize {
         let source = &self.source;
-        access_cast_dispatch!(source, this, this.block_size())
+        cast_dispatch!(source, this, this.block_size())
     }
 
     async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
@@ -3619,7 +3219,7 @@ where
 impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for DenseUnaryCast<FE, T> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         let source = &self.source;
-        access_cast_dispatch!(source, this, this.read_permit(txn_id, range).await)
+        cast_dispatch!(source, this, this.read_permit(txn_id, range).await)
     }
 }
 

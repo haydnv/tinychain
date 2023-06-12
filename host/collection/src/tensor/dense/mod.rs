@@ -17,6 +17,7 @@ use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberCollator, NumberType};
 use tcgeneric::ThreadSafe;
 
+use crate::tensor::block::Block;
 use crate::tensor::sparse::Node;
 use crate::tensor::{
     TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal,

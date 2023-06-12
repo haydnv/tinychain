@@ -22,6 +22,7 @@ use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberClass, NumberCollator, NumberType};
 use tcgeneric::ThreadSafe;
 
+use crate::tensor::block::Block;
 use crate::tensor::transform::{Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
     coord_of, offset_of, strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore,
@@ -1287,6 +1288,24 @@ macro_rules! cast_dispatch {
     };
 }
 
+impl<FE: AsType<Node> + ThreadSafe> SparseCastSource<FE> {
+    async fn blocks(self, range: Range, order: Axes) -> TCResult<Blocks<Array<u64>, Block>> {
+        cast_dispatch!(self, this, {
+            let blocks = this.blocks(range, order).await?;
+            let blocks = blocks.map_ok(|(coords, values)| (coords.into(), values.into()));
+            Ok(Box::pin(blocks))
+        })
+    }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Number> {
+        cast_dispatch!(
+            self,
+            this,
+            this.read_value(coord).map_ok(Number::from).await
+        )
+    }
+}
+
 impl<FE> fmt::Debug for SparseCastSource<FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         cast_dispatch!(self, this, this.fmt(f))
@@ -1440,31 +1459,9 @@ where
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
-
+        let size = self.size();
         let blocks = self.blocks(range, order).await?;
-
-        let elements = blocks
-            .map(move |result| {
-                let (coords, values) = result?;
-                let coords = coords.read(&queue)?.to_slice()?;
-                let values = values.read(&queue)?.to_slice()?;
-                let tuples = coords
-                    .as_ref()
-                    .into_par_iter()
-                    .copied()
-                    .chunks(ndim)
-                    .zip(values.as_ref().into_par_iter().copied())
-                    .map(Ok)
-                    .collect::<Vec<_>>();
-
-                Result::<_, TCError>::Ok(futures::stream::iter(tuples))
-            })
-            .try_flatten();
-
-        Ok(Box::pin(elements))
+        block_elements(blocks, ndim, size)
     }
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
@@ -2969,31 +2966,9 @@ where
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
-
+        let size = self.size();
         let blocks = self.blocks(range, order).await?;
-
-        let elements = blocks
-            .map(move |result| {
-                let (coords, values) = result?;
-                let coords = coords.read(&queue)?.to_slice()?;
-                let values = values.read(&queue)?.to_slice()?;
-                let tuples = coords
-                    .as_ref()
-                    .into_par_iter()
-                    .copied()
-                    .chunks(ndim)
-                    .zip(values.as_ref().into_par_iter().copied())
-                    .map(Ok)
-                    .collect::<Vec<_>>();
-
-                Result::<_, TCError>::Ok(futures::stream::iter(tuples))
-            })
-            .try_flatten();
-
-        Ok(Box::pin(elements))
+        block_elements(blocks, ndim, size)
     }
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
@@ -3034,6 +3009,195 @@ impl<S: fmt::Debug> fmt::Debug for SparseTranspose<S> {
             self.transform.axes()
         )
     }
+}
+
+pub struct SparseUnary<S, T: CDatatype> {
+    source: S,
+    block_op: fn(Array<T>) -> TCResult<Array<T>>,
+    value_op: fn(T) -> T,
+}
+
+impl<S, T: CDatatype> SparseUnary<S, T> {
+    pub fn new(
+        source: S,
+        block_op: fn(Array<T>) -> TCResult<Array<T>>,
+        value_op: fn(T) -> T,
+    ) -> Self {
+        Self {
+            source,
+            block_op,
+            value_op,
+        }
+    }
+}
+
+impl<S: TensorInstance, T: CDatatype + DType> TensorInstance for SparseUnary<S, T> {
+    fn dtype(&self) -> NumberType {
+        T::dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.source.shape()
+    }
+}
+
+#[async_trait]
+impl<S: SparseInstance<DType = T>, T: CDatatype + DType> SparseInstance for SparseUnary<S, T> {
+    type CoordBlock = S::CoordBlock;
+    type ValueBlock = Array<T>;
+    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type DType = T;
+
+    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        let source_blocks = self.source.blocks(range, order).await?;
+        let blocks = source_blocks.map(move |result| {
+            let (coords, values) = result?;
+            (self.block_op)(values.into()).map(|values| (coords, values))
+        });
+
+        Ok(Box::pin(blocks))
+    }
+
+    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+        let ndim = self.ndim();
+        let size = self.size();
+        let blocks = self.blocks(range, order).await?;
+        block_elements(blocks, ndim, size)
+    }
+
+    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+        self.source
+            .read_value(coord)
+            .map_ok(|value| (self.value_op)(value))
+            .await
+    }
+}
+
+#[async_trait]
+impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for SparseUnary<S, T> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        self.source.read_permit(txn_id, range).await
+    }
+}
+
+impl<S: fmt::Debug, T: CDatatype> fmt::Debug for SparseUnary<S, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "unary operation on {:?}", self.source)
+    }
+}
+
+pub struct SparseUnaryCast<FE, T: CDatatype> {
+    source: SparseCastSource<FE>,
+    block_op: fn(Block) -> TCResult<Array<T>>,
+    value_op: fn(Number) -> T,
+}
+
+impl<FE, T: CDatatype> SparseUnaryCast<FE, T> {
+    pub fn new<S: Into<SparseCastSource<FE>>>(
+        source: S,
+        block_op: fn(Block) -> TCResult<Array<T>>,
+        value_op: fn(Number) -> T,
+    ) -> Self {
+        Self {
+            source: source.into(),
+            block_op,
+            value_op,
+        }
+    }
+}
+
+impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for SparseUnaryCast<FE, T> {
+    fn dtype(&self) -> NumberType {
+        T::dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        let source = &self.source;
+        cast_dispatch!(source, this, this.shape())
+    }
+}
+
+#[async_trait]
+impl<FE, T> SparseInstance for SparseUnaryCast<FE, T>
+where
+    FE: AsType<Node> + ThreadSafe,
+    T: CDatatype + DType,
+{
+    type CoordBlock = Array<u64>;
+    type ValueBlock = Array<T>;
+    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type DType = T;
+
+    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        let source_blocks = self.source.blocks(range, order).await?;
+        let blocks = source_blocks.map(move |result| {
+            let (coords, values) = result?;
+
+            (self.block_op)(values)
+                .map(|values| (coords, values.into()))
+                .map_err(TCError::from)
+        });
+
+        Ok(Box::pin(blocks))
+    }
+
+    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+        let ndim = self.ndim();
+        let size = self.size();
+        let blocks = self.blocks(range, order).await?;
+        block_elements(blocks, ndim, size)
+    }
+
+    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+        self.source
+            .read_value(coord)
+            .map_ok(|value| (self.value_op)(value))
+            .await
+    }
+}
+
+#[async_trait]
+impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for SparseUnaryCast<FE, T> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        let source = &self.source;
+        cast_dispatch!(source, this, this.read_permit(txn_id, range).await)
+    }
+}
+
+impl<FE, T: CDatatype> fmt::Debug for SparseUnaryCast<FE, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "unary operation on {:?}", self.source)
+    }
+}
+
+#[inline]
+fn block_elements<T: CDatatype, C: NDArrayRead<DType = u64>, V: NDArrayRead<DType = T>>(
+    blocks: impl Stream<Item = TCResult<(C, V)>> + Send + 'static,
+    ndim: usize,
+    size: u64,
+) -> TCResult<Elements<T>> {
+    let context = ha_ndarray::Context::default()?;
+    let queue = ha_ndarray::Queue::new(context, size_hint(size))?;
+
+    let elements = blocks
+        .map(move |result| {
+            let (coords, values) = result?;
+            let coords = coords.read(&queue)?.to_slice()?;
+            let values = values.read(&queue)?.to_slice()?;
+            let tuples = coords
+                .as_ref()
+                .into_par_iter()
+                .copied()
+                .chunks(ndim)
+                .zip(values.as_ref().into_par_iter().copied())
+                .map(Ok)
+                .collect::<Vec<_>>();
+
+            Result::<_, TCError>::Ok(futures::stream::iter(tuples))
+        })
+        .try_flatten();
+
+    Ok(Box::pin(elements))
 }
 
 #[inline]
