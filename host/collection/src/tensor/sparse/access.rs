@@ -175,7 +175,7 @@ where
         let this = this.map_ok(move |(coord, value)| (offset_of(coord, &this_shape), value));
         let that = that.map_ok(move |(coord, value)| (offset_of(coord, &that_shape), value));
 
-        let elements = stream::InnerJoin::new(this, that).map_ok(move |(offset, left, right)| {
+        let elements = stream::InnerJoin::new(this, that).map_ok(move |(offset, (left, right))| {
             let coord = coord_of(offset, &strides, &shape);
             (coord, (left, right))
         });
@@ -205,7 +205,7 @@ where
         let that = that.map_ok(move |(coord, value)| (offset_of(coord, &that_shape), value));
 
         let elements =
-            stream::OuterJoin::new(this, that, zero).map_ok(move |(offset, left, right)| {
+            stream::OuterJoin::new(this, that, zero).map_ok(move |(offset, (left, right))| {
                 let coord = coord_of(offset, &strides, &shape);
                 (coord, (left, right))
             });
@@ -1489,9 +1489,9 @@ pub struct SparseCombine<L, R, T: CDatatype> {
 
 impl<L, R, T> SparseCombine<L, R, T>
 where
-    L: TensorInstance + fmt::Debug,
-    R: TensorInstance + fmt::Debug,
-    T: CDatatype,
+    L: SparseInstance<DType = T> + fmt::Debug,
+    R: SparseInstance<DType = T> + fmt::Debug,
+    T: CDatatype + DType,
 {
     pub fn new(
         left: L,
@@ -1513,6 +1513,40 @@ where
                 right
             ))
         }
+    }
+
+    async fn source_blocks(
+        self,
+        range: Range,
+        order: Axes,
+    ) -> TCResult<
+        impl Stream<Item = TCResult<(Array<u64>, (ArrayBase<Vec<T>>, ArrayBase<Vec<T>>))>> + Send,
+    > {
+        let size = self.size();
+        let strides = strides_for(self.shape(), self.ndim());
+        let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
+        let shape =
+            ArrayBase::<Arc<Vec<u64>>>::new(vec![self.ndim()], Arc::new(self.shape().to_vec()))?;
+
+        let (left_blocks, right_blocks) = try_join!(
+            self.left.blocks(range.clone(), order.to_vec()),
+            self.right.blocks(range, order)
+        )?;
+
+        let context = ha_ndarray::Context::default()?;
+        let queue = ha_ndarray::Queue::new(context.clone(), size_hint(size))?;
+
+        let left = offsets(queue.clone(), strides.clone(), left_blocks);
+        let right = offsets(queue.clone(), strides.clone(), right_blocks);
+
+        let elements = stream::OuterJoin::new(left, right, T::zero());
+        let blocks = stream::BlockOffsetsDual::new(elements);
+        let coord_blocks = blocks.map_ok(move |(offsets, values)| {
+            let coords = (offsets * strides.clone()) % shape.clone();
+            (coords.into(), values)
+        });
+
+        Ok(coord_blocks)
     }
 }
 
@@ -1539,41 +1573,28 @@ where
     R: SparseInstance<DType = T>,
     T: CDatatype + DType + PartialEq,
 {
-    type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<T>>;
-    type Blocks = stream::BlockCoords<Elements<Self::DType>, T>;
+    type CoordBlock = Array<u64>;
+    type ValueBlock = Array<T>;
+    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
-    // TODO: perform the combine operation per-block, not per-element
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
-        let ndim = self.ndim();
-        let elements = self.elements(range, order).await?;
-        Ok(stream::BlockCoords::new(elements, ndim))
+        let block_op = self.block_op;
+        let source_blocks = self.source_blocks(range, order).await?;
+        let blocks = source_blocks.map(move |result| {
+            result.and_then(|(coords, (left, right))| {
+                (block_op)(left.into(), right.into()).map(|values| (coords, values))
+            })
+        });
+
+        Ok(Box::pin(blocks))
     }
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        let zero = T::zero();
-        let shape = self.shape().to_vec();
-        let strides = strides_for(&shape, shape.len());
-
-        let left_shape = self.left.shape().to_vec();
-        let right_shape = self.right.shape().to_vec();
-
-        let (left, right) = try_join!(
-            self.left.elements(range.clone(), order.to_vec()),
-            self.right.elements(range, order)
-        )?;
-
-        let left = left.map_ok(move |(coord, value)| (offset_of(coord, &left_shape), value));
-        let right = right.map_ok(move |(coord, value)| (offset_of(coord, &right_shape), value));
-
-        let elements =
-            stream::OuterJoin::new(left, right, zero).map_ok(move |(offset, left, right)| {
-                let coord = coord_of(offset, &strides, &shape);
-                (coord, (self.value_op)(left, right))
-            });
-
-        Ok(Box::pin(elements))
+        let ndim = self.ndim();
+        let size = self.size();
+        let blocks = self.blocks(range, order).await?;
+        block_elements(blocks, ndim, size)
     }
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1618,9 +1639,9 @@ pub struct SparseCombineLeft<L, R, T: CDatatype> {
 
 impl<L, R, T> SparseCombineLeft<L, R, T>
 where
-    L: TensorInstance + fmt::Debug,
-    R: TensorInstance + fmt::Debug,
-    T: CDatatype,
+    L: SparseInstance<DType = T> + fmt::Debug,
+    R: SparseInstance<DType = T> + fmt::Debug,
+    T: CDatatype + DType,
 {
     pub fn new(
         left: L,
@@ -1642,6 +1663,40 @@ where
                 right
             ))
         }
+    }
+
+    async fn source_blocks(
+        self,
+        range: Range,
+        order: Axes,
+    ) -> TCResult<
+        impl Stream<Item = TCResult<(Array<u64>, (ArrayBase<Vec<T>>, ArrayBase<Vec<T>>))>> + Send,
+    > {
+        let size = self.size();
+        let strides = strides_for(self.shape(), self.ndim());
+        let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
+        let shape =
+            ArrayBase::<Arc<Vec<u64>>>::new(vec![self.ndim()], Arc::new(self.shape().to_vec()))?;
+
+        let (left_blocks, right_blocks) = try_join!(
+            self.left.blocks(range.clone(), order.to_vec()),
+            self.right.blocks(range, order)
+        )?;
+
+        let context = ha_ndarray::Context::default()?;
+        let queue = ha_ndarray::Queue::new(context.clone(), size_hint(size))?;
+
+        let left = offsets(queue.clone(), strides.clone(), left_blocks);
+        let right = offsets(queue.clone(), strides.clone(), right_blocks);
+
+        let elements = stream::InnerJoin::new(left, right);
+        let blocks = stream::BlockOffsetsDual::new(elements);
+        let coord_blocks = blocks.map_ok(move |(offsets, values)| {
+            let coords = (offsets * strides.clone()) % shape.clone();
+            (coords.into(), values)
+        });
+
+        Ok(coord_blocks)
     }
 }
 
@@ -1668,39 +1723,28 @@ where
     R: SparseInstance<DType = T>,
     T: CDatatype + DType + PartialEq,
 {
-    type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<T>>;
-    type Blocks = stream::BlockCoords<Elements<Self::DType>, T>;
+    type CoordBlock = Array<u64>;
+    type ValueBlock = Array<T>;
+    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
-    // TODO: perform the combine operation per-block, not per-element
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
-        let ndim = self.ndim();
-        let elements = self.elements(range, order).await?;
-        Ok(stream::BlockCoords::new(elements, ndim))
+        let block_op = self.block_op;
+        let source_blocks = self.source_blocks(range, order).await?;
+        let blocks = source_blocks.map(move |result| {
+            result.and_then(|(coords, (left, right))| {
+                (block_op)(left.into(), right.into()).map(|values| (coords, values))
+            })
+        });
+
+        Ok(Box::pin(blocks))
     }
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        let shape = self.shape().to_vec();
-        let strides = strides_for(&shape, shape.len());
-
-        let left_shape = self.left.shape().to_vec();
-        let right_shape = self.right.shape().to_vec();
-
-        let (left, right) = try_join!(
-            self.left.elements(range.clone(), order.to_vec()),
-            self.right.elements(range, order)
-        )?;
-
-        let left = left.map_ok(move |(coord, value)| (offset_of(coord, &left_shape), value));
-        let right = right.map_ok(move |(coord, value)| (offset_of(coord, &right_shape), value));
-
-        let elements = stream::InnerJoin::new(left, right).map_ok(move |(offset, left, right)| {
-            let coord = coord_of(offset, &strides, &shape);
-            (coord, (self.value_op)(left, right))
-        });
-
-        Ok(Box::pin(elements))
+        let ndim = self.ndim();
+        let size = self.size();
+        let blocks = self.blocks(range, order).await?;
+        block_elements(blocks, ndim, size)
     }
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
@@ -2099,6 +2143,7 @@ where
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
         let shape = self.source.shape().to_vec();
         let ndim = shape.len();
+
         let context = ha_ndarray::Context::default()?;
         let queue = ha_ndarray::Queue::new(context.clone(), size_hint(self.size()))?;
 

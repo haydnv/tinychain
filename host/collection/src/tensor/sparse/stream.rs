@@ -27,7 +27,7 @@ where
     pub fn new(source: S, ndim: usize) -> Self {
         Self {
             source: source.fuse(),
-            pending_coords: Vec::with_capacity(IDEAL_BLOCK_SIZE),
+            pending_coords: Vec::with_capacity(IDEAL_BLOCK_SIZE * ndim),
             pending_values: Vec::with_capacity(IDEAL_BLOCK_SIZE),
             ndim,
         }
@@ -42,7 +42,7 @@ where
         pending_coords: &mut Vec<u64>,
         pending_values: &mut Vec<T>,
         ndim: usize,
-    ) -> Result<(ArrayBase<Vec<u64>>, ArrayBase<Vec<T>>), TCError> {
+    ) -> TCResult<(ArrayBase<Vec<u64>>, ArrayBase<Vec<T>>)> {
         let num_coords = pending_values.len();
 
         debug_assert_eq!(pending_coords.len() % ndim, 0);
@@ -61,10 +61,10 @@ where
 
 impl<S, T> Stream for BlockCoords<S, T>
 where
-    S: Stream<Item = Result<(Coord, T), TCError>> + Unpin,
+    S: Stream<Item = TCResult<(Coord, T)>> + Unpin,
     T: CDatatype,
 {
-    type Item = Result<(ArrayBase<Vec<u64>>, ArrayBase<Vec<T>>), TCError>;
+    type Item = TCResult<(ArrayBase<Vec<u64>>, ArrayBase<Vec<T>>)>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
         let ndim = self.ndim;
@@ -103,6 +103,93 @@ where
 }
 
 #[pin_project]
+pub struct BlockOffsetsDual<S, T> {
+    #[pin]
+    source: Fuse<S>,
+    pending_offsets: Vec<u64>,
+    pending_left: Vec<T>,
+    pending_right: Vec<T>,
+}
+
+impl<S, T> BlockOffsetsDual<S, T>
+where
+    S: Stream<Item = TCResult<(u64, (T, T))>>,
+{
+    pub fn new(source: S) -> Self {
+        Self {
+            source: source.fuse(),
+            pending_offsets: Vec::with_capacity(IDEAL_BLOCK_SIZE),
+            pending_left: Vec::with_capacity(IDEAL_BLOCK_SIZE),
+            pending_right: Vec::with_capacity(IDEAL_BLOCK_SIZE),
+        }
+    }
+}
+
+impl<S, T> BlockOffsetsDual<S, T>
+where
+    T: CDatatype,
+{
+    fn block_cutoff(
+        pending_offsets: &mut Vec<u64>,
+        pending_left: &mut Vec<T>,
+        pending_right: &mut Vec<T>,
+    ) -> TCResult<(ArrayBase<Vec<u64>>, (ArrayBase<Vec<T>>, ArrayBase<Vec<T>>))> {
+        debug_assert_eq!(pending_offsets.len(), pending_left.len());
+        debug_assert_eq!(pending_left.len(), pending_right.len());
+
+        let num_offsets = pending_left.len();
+        let left = ArrayBase::<Vec<_>>::new(vec![num_offsets], pending_left.drain(..).collect())?;
+        let right = ArrayBase::<Vec<_>>::new(vec![num_offsets], pending_right.drain(..).collect())?;
+        let coords =
+            ArrayBase::<Vec<_>>::new(vec![num_offsets], pending_offsets.drain(..).collect())?;
+
+        Ok((coords, (left, right)))
+    }
+}
+
+impl<S, T> Stream for BlockOffsetsDual<S, T>
+where
+    S: Stream<Item = TCResult<(u64, (T, T))>> + Unpin,
+    T: CDatatype,
+{
+    type Item = TCResult<(ArrayBase<Vec<u64>>, (ArrayBase<Vec<T>>, ArrayBase<Vec<T>>))>;
+
+    fn poll_next(self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
+        let mut this = self.project();
+
+        Poll::Ready(loop {
+            debug_assert_eq!(this.pending_left.len(), this.pending_right.len());
+            debug_assert_eq!(this.pending_left.len(), this.pending_offsets.len());
+
+            match ready!(this.source.as_mut().poll_next(cxt)) {
+                Some(Ok((offset, (left, right)))) => {
+                    this.pending_offsets.push(offset);
+                    this.pending_left.push(left);
+                    this.pending_right.push(right);
+
+                    if this.pending_offsets.len() == IDEAL_BLOCK_SIZE {
+                        break Some(Self::block_cutoff(
+                            this.pending_offsets,
+                            this.pending_left,
+                            this.pending_right,
+                        ));
+                    }
+                }
+                None if !this.pending_offsets.is_empty() => {
+                    break Some(Self::block_cutoff(
+                        this.pending_offsets,
+                        this.pending_left,
+                        this.pending_right,
+                    ));
+                }
+                None => break None,
+                Some(Err(cause)) => break Some(Err(cause)),
+            }
+        })
+    }
+}
+
+#[pin_project]
 pub struct BlockOffsets<S, T> {
     #[pin]
     source: Fuse<S>,
@@ -112,7 +199,7 @@ pub struct BlockOffsets<S, T> {
 
 impl<S, T> BlockOffsets<S, T>
 where
-    S: Stream<Item = Result<(u64, T), TCError>>,
+    S: Stream<Item = TCResult<(u64, T)>>,
 {
     pub fn new(source: S) -> Self {
         Self {
@@ -130,7 +217,7 @@ where
     fn block_cutoff(
         pending_offsets: &mut Vec<u64>,
         pending_values: &mut Vec<T>,
-    ) -> Result<(ArrayBase<Vec<u64>>, ArrayBase<Vec<T>>), TCError> {
+    ) -> TCResult<(ArrayBase<Vec<u64>>, ArrayBase<Vec<T>>)> {
         debug_assert_eq!(pending_offsets.len(), pending_values.len());
 
         let values = ArrayBase::<Vec<_>>::new(
@@ -149,10 +236,10 @@ where
 
 impl<S, T> Stream for BlockOffsets<S, T>
 where
-    S: Stream<Item = Result<(u64, T), TCError>> + Unpin,
+    S: Stream<Item = TCResult<(u64, T)>> + Unpin,
     T: CDatatype,
 {
-    type Item = Result<(ArrayBase<Vec<u64>>, ArrayBase<Vec<T>>), TCError>;
+    type Item = TCResult<(ArrayBase<Vec<u64>>, ArrayBase<Vec<T>>)>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
@@ -212,11 +299,11 @@ where
 // Based on: https://github.com/rust-lang/futures-rs/blob/master/futures-util/src/stream/select.rs
 impl<L, R, T> Stream for TryDiff<L, R, T>
 where
-    L: Stream<Item = Result<(u64, T), TCError>>,
-    R: Stream<Item = Result<(u64, T), TCError>>,
+    L: Stream<Item = TCResult<(u64, T)>>,
+    R: Stream<Item = TCResult<(u64, T)>>,
     T: CDatatype + fmt::Debug,
 {
-    type Item = Result<(u64, T), TCError>;
+    type Item = TCResult<(u64, T)>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
@@ -304,8 +391,8 @@ impl<S> FilledAt<S> {
     }
 }
 
-impl<T, S: Stream<Item = Result<(Coord, T), TCError>>> Stream for FilledAt<S> {
-    type Item = Result<Vec<u64>, TCError>;
+impl<T, S: Stream<Item = TCResult<(Coord, T)>>> Stream for FilledAt<S> {
+    type Item = TCResult<Vec<u64>>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
@@ -355,8 +442,8 @@ pub struct InnerJoin<L, R, T> {
 
 impl<L, R, T> InnerJoin<L, R, T>
 where
-    L: Stream<Item = Result<(u64, T), TCError>>,
-    R: Stream<Item = Result<(u64, T), TCError>>,
+    L: Stream<Item = TCResult<(u64, T)>>,
+    R: Stream<Item = TCResult<(u64, T)>>,
 {
     pub fn new(left: L, right: R) -> Self {
         Self {
@@ -370,10 +457,10 @@ where
 
 impl<L, R, T> Stream for InnerJoin<L, R, T>
 where
-    L: Stream<Item = Result<(u64, T), TCError>>,
-    R: Stream<Item = Result<(u64, T), TCError>>,
+    L: Stream<Item = TCResult<(u64, T)>>,
+    R: Stream<Item = TCResult<(u64, T)>>,
 {
-    type Item = Result<(u64, T, T), TCError>;
+    type Item = TCResult<(u64, (T, T))>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
@@ -417,7 +504,7 @@ where
                     Ordering::Equal => {
                         let (l_offset, l_value) = this.pending_left.take().unwrap();
                         let (_r_offset, r_value) = this.pending_left.take().unwrap();
-                        break Some(Ok((l_offset, l_value, r_value)));
+                        break Some(Ok((l_offset, (l_value, r_value))));
                     }
                     Ordering::Less => {
                         this.pending_left.take();
@@ -447,8 +534,8 @@ pub struct TryMerge<L, R, T> {
 
 impl<L, R, T> TryMerge<L, R, T>
 where
-    L: Stream<Item = Result<(u64, T), TCError>>,
-    R: Stream<Item = Result<(u64, T), TCError>>,
+    L: Stream<Item = TCResult<(u64, T)>>,
+    R: Stream<Item = TCResult<(u64, T)>>,
 {
     pub fn new(left: L, right: R) -> Self {
         Self {
@@ -466,7 +553,7 @@ where
     Fuse<R>: TryStream<Ok = (u64, T), Error = TCError> + Unpin,
     T: CDatatype + fmt::Debug,
 {
-    type Item = Result<(u64, T), TCError>;
+    type Item = TCResult<(u64, T)>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -545,8 +632,8 @@ pub struct OuterJoin<L, R, T> {
 
 impl<L, R, T> OuterJoin<L, R, T>
 where
-    L: Stream<Item = Result<(u64, T), TCError>>,
-    R: Stream<Item = Result<(u64, T), TCError>>,
+    L: Stream<Item = TCResult<(u64, T)>>,
+    R: Stream<Item = TCResult<(u64, T)>>,
 {
     pub fn new(left: L, right: R, zero: T) -> Self {
         Self {
@@ -561,11 +648,11 @@ where
 
 impl<L, R, T> Stream for OuterJoin<L, R, T>
 where
-    L: Stream<Item = Result<(u64, T), TCError>>,
-    R: Stream<Item = Result<(u64, T), TCError>>,
+    L: Stream<Item = TCResult<(u64, T)>>,
+    R: Stream<Item = TCResult<(u64, T)>>,
     T: Copy + PartialEq,
 {
-    type Item = Result<(u64, T, T), TCError>;
+    type Item = TCResult<(u64, (T, T))>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
@@ -609,23 +696,23 @@ where
                     Ordering::Equal => {
                         let (offset, l_value) = this.pending_left.take().unwrap();
                         let (_offset, r_value) = this.pending_right.take().unwrap();
-                        Some(Ok((offset, l_value, r_value)))
+                        Some(Ok((offset, (l_value, r_value))))
                     }
                     Ordering::Less => {
                         let (offset, l_value) = this.pending_left.take().unwrap();
-                        Some(Ok((offset, l_value, *this.zero)))
+                        Some(Ok((offset, (l_value, *this.zero))))
                     }
                     Ordering::Greater => {
                         let (offset, r_value) = this.pending_right.take().unwrap();
-                        Some(Ok((offset, *this.zero, r_value)))
+                        Some(Ok((offset, (*this.zero, r_value))))
                     }
                 };
             } else if right_done && this.pending_left.is_some() {
                 let (offset, l_value) = this.pending_left.take().unwrap();
-                break Some(Ok((offset, l_value, *this.zero)));
+                break Some(Ok((offset, (l_value, *this.zero))));
             } else if left_done && this.pending_right.is_some() {
                 let (offset, r_value) = this.pending_right.take().unwrap();
-                break Some(Ok((offset, *this.zero, r_value)));
+                break Some(Ok((offset, (*this.zero, r_value))));
             } else if left_done && right_done {
                 break None;
             }
