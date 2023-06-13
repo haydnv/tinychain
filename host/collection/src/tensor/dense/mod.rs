@@ -17,15 +17,14 @@ use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberCollator, NumberType};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::block::Block;
-use crate::tensor::sparse::Node;
-use crate::tensor::{
-    TensorBoolean, TensorBooleanConst, TensorCompare, TensorCompareConst, TensorDiagonal,
-    TensorMath, TensorMathConst, TensorPermitRead, TensorReduce, TensorUnary, TensorUnaryBoolean,
+use super::block::Block;
+use super::sparse::{Node, SparseDense, SparseTensor};
+use super::{
+    offset_of, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCompare,
+    TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance, TensorMath, TensorMathConst,
+    TensorPermitRead, TensorReduce, TensorTransform, TensorUnary, TensorUnaryBoolean,
     IDEAL_BLOCK_SIZE,
 };
-
-use super::{offset_of, Axes, Coord, Range, Shape, TensorInstance, TensorTransform};
 
 pub use access::*;
 
@@ -267,6 +266,26 @@ where
 
     fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
         Ok(DenseCompareConst::new(self.accessor, other, Block::ne_scalar).into())
+    }
+}
+
+impl<FE, A> TensorConvert for DenseTensor<FE, A>
+where
+    FE: ThreadSafe,
+    A: DenseInstance + Clone,
+    A::Block: NDArrayTransform,
+    <A::Block as NDArrayTransform>::Slice:
+        NDArrayRead<DType = A::DType> + NDArrayTransform + Into<Array<A::DType>>,
+{
+    type Dense = Self;
+    type Sparse = SparseTensor<FE, SparseDense<A>>;
+
+    fn into_dense(self) -> Self::Dense {
+        self
+    }
+
+    fn into_sparse(self) -> Self::Sparse {
+        SparseDense::new(self.accessor).into()
     }
 }
 

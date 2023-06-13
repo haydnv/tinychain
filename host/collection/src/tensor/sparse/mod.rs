@@ -19,8 +19,7 @@ use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberClass, NumberCollator, NumberType};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::dense::{DenseSparse, DenseTensor};
-
+use super::dense::{DenseSparse, DenseTensor};
 use super::{
     Axes, Coord, Range, Shape, TensorBoolean, TensorCompare, TensorCompareConst, TensorConvert,
     TensorInstance, TensorMath, TensorPermitRead, TensorReduce, TensorTransform, TensorUnary,
@@ -156,9 +155,14 @@ where
 
 impl<FE: AsType<Node> + ThreadSafe, A: SparseInstance> TensorConvert for SparseTensor<FE, A> {
     type Dense = DenseTensor<FE, DenseSparse<A>>;
+    type Sparse = Self;
 
     fn into_dense(self) -> Self::Dense {
         DenseSparse::from(self.accessor).into()
+    }
+
+    fn into_sparse(self) -> Self::Sparse {
+        self
     }
 }
 

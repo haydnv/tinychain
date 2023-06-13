@@ -23,6 +23,7 @@ use tc_value::{DType, Number, NumberClass, NumberCollator, NumberType};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::block::Block;
+use crate::tensor::dense::{DenseInstance, DenseSlice};
 use crate::tensor::transform::{Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
     coord_of, offset_of, strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore,
@@ -2109,6 +2110,105 @@ where
             self.zeros.write_value(coord, inverse)
         )
         .map(|_| ())
+    }
+}
+
+#[derive(Clone)]
+pub struct SparseDense<S> {
+    source: S,
+}
+
+impl<S> SparseDense<S> {
+    pub fn new(source: S) -> Self {
+        Self { source }
+    }
+}
+
+impl<S: TensorInstance> TensorInstance for SparseDense<S> {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.source.shape()
+    }
+}
+
+#[async_trait]
+impl<S> SparseInstance for SparseDense<S>
+where
+    S: DenseInstance + Clone,
+    S::Block: NDArrayTransform,
+    <S::Block as NDArrayTransform>::Slice:
+        NDArrayRead<DType = S::DType> + NDArrayTransform + Into<Array<S::DType>>,
+{
+    type CoordBlock = ArrayBase<Vec<u64>>;
+    type ValueBlock = Array<S::DType>;
+    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type DType = S::DType;
+
+    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        let ndim = self.ndim();
+
+        if !order.is_empty() {
+            if order.len() != ndim || order.iter().copied().zip(0..ndim).any(|(a, x)| a != x) {
+                return Err(bad_request!(
+                    "{:?} does not support permutation {:?}",
+                    self,
+                    order
+                ));
+            }
+        }
+
+        self.shape().validate_range(&range)?;
+
+        let coord_block_size = self.source.block_size() * ndim;
+
+        let range = range.normalize(self.shape());
+        let coords = range.affected().map(|coord| coord.into_iter()).flatten();
+        let coords = futures::stream::iter(coords)
+            .chunks(coord_block_size)
+            .map(move |coords| ArrayBase::<Vec<u64>>::new(vec![coords.len() / ndim, ndim], coords));
+
+        if range.is_empty() || range == Range::all(self.shape()) {
+            let source_blocks = self.source.read_blocks().await?;
+            let blocks = coords
+                .zip(source_blocks)
+                .map(|(coords, values)| Ok((coords?, values?.into())));
+
+            Ok(Box::pin(blocks))
+        } else {
+            let source_blocks = DenseSlice::new(self.source, range)?.read_blocks().await?;
+            let blocks = coords
+                .zip(source_blocks)
+                .map(|(coords, values)| Ok((coords?, values?.into())));
+
+            Ok(Box::pin(blocks))
+        }
+    }
+
+    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+        let ndim = self.ndim();
+        let size = self.size();
+        let blocks = self.blocks(range, order).await?;
+        block_elements(blocks, ndim, size)
+    }
+
+    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+        self.source.read_value(coord).await
+    }
+}
+
+#[async_trait]
+impl<S: TensorPermitRead> TensorPermitRead for SparseDense<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        self.source.read_permit(txn_id, range).await
+    }
+}
+
+impl<S: fmt::Debug> fmt::Debug for SparseDense<S> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "sparse view of {:?}", self.source)
     }
 }
 
