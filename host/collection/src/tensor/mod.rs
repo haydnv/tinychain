@@ -430,9 +430,6 @@ pub trait TensorTrig {
     /// Element-wise sine
     fn sin(self) -> TCResult<Self::Unary>;
 
-    /// Element-wise hyperbolic arcsine
-    fn asinh(self) -> TCResult<Self::Unary>;
-
     /// Element-wise hyperbolic sine
     fn sinh(self) -> TCResult<Self::Unary>;
 
@@ -441,9 +438,6 @@ pub trait TensorTrig {
 
     /// Element-wise cosine
     fn cos(self) -> TCResult<Self::Unary>;
-
-    /// Element-wise hyperbolic arccosine
-    fn acosh(self) -> TCResult<Self::Unary>;
 
     /// Element-wise hyperbolic cosine
     fn cosh(self) -> TCResult<Self::Unary>;
@@ -456,9 +450,6 @@ pub trait TensorTrig {
 
     /// Element-wise hyperbolic tangent
     fn tanh(self) -> TCResult<Self::Unary>;
-
-    /// Element-wise hyperbolic arctangent
-    fn atanh(self) -> TCResult<Self::Unary>;
 }
 
 /// Unary [`Tensor`] operations

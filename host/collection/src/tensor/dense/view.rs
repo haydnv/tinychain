@@ -62,6 +62,18 @@ impl<FE> Clone for DenseView<FE> {
     }
 }
 
+impl<FE: ThreadSafe> DenseView<FE> {
+    fn complex_from(real: Self, imag: Self) -> TCResult<Self> {
+        match (real, imag) {
+            (Self::F32(real), Self::F32(imag)) => Ok(Self::C32((real, imag))),
+            (Self::F64(real), Self::F64(imag)) => Ok(Self::C64((real, imag))),
+            (real, imag) => Err(bad_request!(
+                "cannot construct a complex tensor from {real:?} and {imag:?}"
+            )),
+        }
+    }
+}
+
 macro_rules! dense_view_from {
     ($t:ty, $var:ident) => {
         impl<FE> From<DenseTensor<FE, DenseAccess<FE, $t>>> for DenseView<FE> {
@@ -774,58 +786,160 @@ where
     }
 }
 
+macro_rules! view_trig {
+    ($this:ident, $general32:ident, $general64:ident, $r:ident, $i:ident, $complex:expr) => {
+        match $this {
+            Self::Bool(this) => {
+                let accessor = DenseUnaryCast::$general32(this.into_inner());
+                Ok(Self::F32(DenseAccess::from(accessor).into()))
+            }
+            Self::C32(($r, $i)) => {
+                let $r = Self::F32($r);
+                let $i = Self::F32($i);
+                $complex
+            }
+            Self::C64(($r, $i)) => {
+                let $r = Self::F64($r);
+                let $i = Self::F64($i);
+                $complex
+            }
+            Self::F32(this) => {
+                let accessor = DenseUnaryCast::$general32(this.into_inner());
+                Ok(Self::F32(DenseAccess::from(accessor).into()))
+            }
+            Self::F64(this) => {
+                let accessor = DenseUnaryCast::$general64(this.into_inner());
+                Ok(Self::F64(DenseAccess::from(accessor).into()))
+            }
+            Self::I16(this) => {
+                let accessor = DenseUnaryCast::$general32(this.into_inner());
+                Ok(Self::F32(DenseAccess::from(accessor).into()))
+            }
+            Self::I32(this) => {
+                let accessor = DenseUnaryCast::$general32(this.into_inner());
+                Ok(Self::F32(DenseAccess::from(accessor).into()))
+            }
+            Self::I64(this) => {
+                let accessor = DenseUnaryCast::$general64(this.into_inner());
+                Ok(Self::F64(DenseAccess::from(accessor).into()))
+            }
+            Self::U8(this) => {
+                let accessor = DenseUnaryCast::$general32(this.into_inner());
+                Ok(Self::F32(DenseAccess::from(accessor).into()))
+            }
+            Self::U16(this) => {
+                let accessor = DenseUnaryCast::$general32(this.into_inner());
+                Ok(Self::F32(DenseAccess::from(accessor).into()))
+            }
+            Self::U32(this) => {
+                let accessor = DenseUnaryCast::$general32(this.into_inner());
+                Ok(Self::F32(DenseAccess::from(accessor).into()))
+            }
+            Self::U64(this) => {
+                let accessor = DenseUnaryCast::$general64(this.into_inner());
+                Ok(Self::F64(DenseAccess::from(accessor).into()))
+            }
+        }
+    };
+}
+
 impl<FE> TensorTrig for DenseView<FE>
 where
-    FE: ThreadSafe,
+    FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Unary = Self;
 
     fn asin(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(
+            self,
+            asin_f32,
+            asin_f64,
+            x,
+            y,
+            Err(not_implemented!("arcsine of a complex number"))
+        )
     }
 
     fn sin(self) -> TCResult<Self::Unary> {
-        todo!()
-    }
-
-    fn asinh(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(self, sin_f32, sin_f64, x, y, {
+            let real = x.clone().sin()?.add(y.clone().cosh()?)?;
+            let imag = x.cos()?.add(y.sinh()?)?;
+            Self::complex_from(real, imag)
+        })
     }
 
     fn sinh(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(self, sinh_f32, sinh_f64, x, y, {
+            let real = x.clone().sinh()?.mul(y.clone().cos()?)?;
+            let imag = x.cosh()?.mul(y.sin()?)?;
+            Self::complex_from(real, imag)
+        })
     }
 
     fn acos(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(
+            self,
+            acos_f32,
+            acos_f64,
+            x,
+            y,
+            Err(not_implemented!("arccosine of a complex number"))
+        )
     }
 
     fn cos(self) -> TCResult<Self::Unary> {
-        todo!()
-    }
-
-    fn acosh(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(self, cos_f32, cos_f64, x, y, {
+            let real = x.clone().cos()?.mul(y.clone().cosh()?)?;
+            let imag = x.sin()?.mul(y.sinh()?)?;
+            Self::complex_from(real, imag)
+        })
     }
 
     fn cosh(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(self, cosh_f32, cosh_f64, x, y, {
+            let real = x.clone().cosh()?.mul(y.clone().cos()?)?;
+            let imag = x.sinh()?.mul(y.sin()?)?;
+            Self::complex_from(real, imag)
+        })
     }
 
     fn atan(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(
+            self,
+            atan_f32,
+            atan_f64,
+            x,
+            y,
+            Err(not_implemented!("arctangent of a complex number"))
+        )
     }
 
     fn tan(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(self, tan_f32, tan_f64, x, y, {
+            let num_real = x.clone().sin()?.mul(y.clone().cosh()?)?;
+            let num_imag = x.clone().cos()?.mul(y.clone().sinh()?)?;
+            let num = Self::complex_from(num_real, num_imag)?;
+
+            let denom_real = x.clone().cos()?.mul(y.clone().cosh()?)?;
+            let denom_imag = x.clone().sin()?.mul(y.clone().sinh()?)?;
+            let denom = Self::complex_from(denom_real, denom_imag)?;
+
+            num.div(denom)
+        })
     }
 
     fn tanh(self) -> TCResult<Self::Unary> {
-        todo!()
-    }
+        view_trig!(self, tanh_f32, tanh_f64, x, y, {
+            let num_real = x.clone().sinh()?.mul(y.clone().cos()?)?;
+            let num_imag = x.clone().cosh()?.mul(y.clone().sin()?)?;
+            let num = Self::complex_from(num_real, num_imag)?;
 
-    fn atanh(self) -> TCResult<Self::Unary> {
-        todo!()
+            let denom_real = x.clone().cosh()?.mul(y.clone().cos()?)?;
+            let denom_imag = x.sinh()?.mul(y.sin()?)?;
+            let denom = Self::complex_from(denom_real, denom_imag)?;
+
+            num.div(denom)
+        })
     }
 }
 
@@ -877,17 +991,12 @@ where
         match self {
             Self::Bool(this) => Ok(Self::Bool(this)),
 
-            Self::C32((a, b)) => {
-                let r = Self::C32((a.clone(), b.clone()));
+            Self::C32((x, y)) => {
+                let r = Self::C32((x.clone(), y.clone()));
                 let r = r.abs()?.exp()?;
 
-                let b = Self::F32(b);
-                let e_i_theta = match (b.clone().cos()?, b.sin()?) {
-                    (Self::F32(b_cos), Self::F32(b_sin)) => {
-                        Self::C32((dense_from(b_cos), dense_from(b_sin)))
-                    }
-                    _ => unreachable!("trigonometric function returned non-float value"),
-                };
+                let y = Self::F32(y);
+                let e_i_theta = Self::complex_from(y.clone().cos()?, y.sin()?)?;
 
                 r.mul(e_i_theta)
             }
@@ -897,12 +1006,7 @@ where
                 let r = r.abs()?.exp()?;
 
                 let y = Self::F64(y);
-                let e_i_theta = match (y.clone().cos()?, y.sin()?) {
-                    (Self::F64(y_cos), Self::F64(y_sin)) => {
-                        Self::C64((dense_from(y_cos), dense_from(y_sin)))
-                    }
-                    _ => unreachable!("trigonometric function returned non-float value"),
-                };
+                let e_i_theta = Self::complex_from(y.clone().cos()?, y.sin()?)?;
 
                 r.mul(e_i_theta)
             }
@@ -921,28 +1025,18 @@ where
 
     fn ln(self) -> TCResult<Self::Unary> {
         match self {
-            Self::Bool(this) => Err(bad_request!("a boolean value has no logarithm")),
+            Self::Bool(_) => Err(bad_request!("a boolean value has no logarithm")),
             Self::C32((x, y)) => {
                 let r = Self::C32((x.clone(), y.clone())).abs()?;
-                let real = match r.ln()? {
-                    Self::F32(real) => real,
-                    _ => unreachable!("magnitude of a 32-bit complex tensor is not a 32-bit float"),
-                };
-
+                let real = r.ln()?;
                 let imag = atan2(y, x)?;
-
-                Ok(Self::C32((real, imag)))
+                Self::complex_from(real, imag.into())
             }
             Self::C64((x, y)) => {
                 let r = Self::C64((x.clone(), y.clone())).abs()?;
-                let real = match r.ln()? {
-                    Self::F64(real) => real,
-                    _ => unreachable!("magnitude of a 32-bit complex tensor is not a 32-bit float"),
-                };
-
+                let real = r.ln()?;
                 let imag = atan2(y, x)?;
-
-                Ok(Self::C64((real, imag)))
+                Self::complex_from(real, imag.into())
             }
             Self::F32(this) => this.ln().map(dense_from).map(Self::F32),
             Self::F64(this) => this.ln().map(dense_from).map(Self::F64),
