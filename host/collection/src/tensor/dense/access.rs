@@ -1511,6 +1511,21 @@ where
     }
 }
 
+impl<FE, L, R, T> From<DenseCombine<L, R, T>> for DenseAccess<FE, T>
+where
+    L: Into<DenseAccess<FE, T>>,
+    R: Into<DenseAccess<FE, T>>,
+    T: CDatatype,
+{
+    fn from(combine: DenseCombine<L, R, T>) -> Self {
+        Self::Combine(Box::new(DenseCombine {
+            left: combine.left.into(),
+            right: combine.right.into(),
+            op: combine.op,
+        }))
+    }
+}
+
 impl<L, R, T> fmt::Debug for DenseCombine<L, R, T>
 where
     L: fmt::Debug,
@@ -1613,6 +1628,12 @@ impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for DenseCompare<FE, T> {
         let right = self.right.read_permit(txn_id, range).await?;
         left.extend(right);
         Ok(left)
+    }
+}
+
+impl<FE, T: CDatatype> From<DenseCompare<FE, T>> for DenseAccess<FE, T> {
+    fn from(compare: DenseCompare<FE, T>) -> Self {
+        Self::Compare(Box::new(compare))
     }
 }
 

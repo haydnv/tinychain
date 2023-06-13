@@ -148,6 +148,18 @@ impl<FE, A> DenseTensor<FE, A> {
     }
 }
 
+impl<FE: ThreadSafe, T: CDatatype + DType> DenseTensor<FE, DenseAccess<FE, T>> {
+    pub fn from_access<A>(accessor: A) -> Self
+    where
+        A: DenseInstance<DType = T> + Into<DenseAccess<FE, T>>,
+    {
+        Self {
+            accessor: accessor.into(),
+            phantom: PhantomData,
+        }
+    }
+}
+
 impl<FE: ThreadSafe, A: TensorInstance> TensorInstance for DenseTensor<FE, A> {
     fn dtype(&self) -> NumberType {
         self.accessor.dtype()
@@ -160,26 +172,32 @@ impl<FE: ThreadSafe, A: TensorInstance> TensorInstance for DenseTensor<FE, A> {
 
 impl<FE, L, R, T> TensorBoolean<DenseTensor<FE, R>> for DenseTensor<FE, L>
 where
-    FE: ThreadSafe,
-    L: DenseInstance<DType = T> + Into<DenseAccessCast<FE>> + fmt::Debug,
-    R: DenseInstance<DType = T> + Into<DenseAccessCast<FE>> + fmt::Debug,
-    T: CDatatype + DType,
+    FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
+    L: DenseInstance<DType = T> + Into<DenseAccess<FE, T>> + fmt::Debug,
+    R: DenseInstance<DType = T> + Into<DenseAccess<FE, T>> + fmt::Debug,
+    T: CDatatype + DType + fmt::Debug,
+    DenseAccessCast<FE>: From<DenseAccess<FE, T>>,
     DenseTensor<FE, R>: fmt::Debug,
+    Buffer<T>: de::FromStream<Context = ()>,
+    Number: From<T> + CastInto<T>,
     Self: fmt::Debug,
 {
     type Combine = DenseTensor<FE, DenseCompare<FE, u8>>;
     type LeftCombine = DenseTensor<FE, DenseCompare<FE, u8>>;
 
     fn and(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
-        DenseCompare::new(self.accessor, other.accessor, Block::and).map(DenseTensor::from)
+        DenseCompare::new(self.accessor.into(), other.accessor.into(), Block::and)
+            .map(DenseTensor::from)
     }
 
     fn or(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
-        DenseCompare::new(self.accessor, other.accessor, Block::or).map(DenseTensor::from)
+        DenseCompare::new(self.accessor.into(), other.accessor.into(), Block::or)
+            .map(DenseTensor::from)
     }
 
     fn xor(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
-        DenseCompare::new(self.accessor, other.accessor, Block::xor).map(DenseTensor::from)
+        DenseCompare::new(self.accessor.into(), other.accessor.into(), Block::xor)
+            .map(DenseTensor::from)
     }
 }
 

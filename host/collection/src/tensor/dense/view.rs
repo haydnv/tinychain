@@ -1,10 +1,13 @@
 use std::fmt;
 
+use safecast::AsType;
+
 use tc_error::*;
 use tc_value::{ComplexType, FloatType, IntType, Number, NumberType, UIntType};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::dense::{DenseAccess, DenseUnaryCast};
+use crate::tensor::dense::{DenseAccess, DenseCacheFile, DenseUnaryCast};
+use crate::tensor::sparse::Node;
 use crate::tensor::{Shape, TensorBoolean, TensorCast, TensorCompareConst, TensorInstance};
 
 use super::DenseTensor;
@@ -66,6 +69,26 @@ macro_rules! view_dispatch {
     };
 }
 
+macro_rules! view_dispatch_dual {
+    ($this:ident, $that:ident, $left:ident, $right:ident, $bool:expr, $complex:expr, $general:expr, $mismatch:expr) => {
+        match ($this, $that) {
+            (DenseView::Bool($left), DenseView::Bool($right)) => $bool,
+            (DenseView::C32($left), DenseView::C32($right)) => $complex,
+            (DenseView::C64($left), DenseView::C64($right)) => $complex,
+            (DenseView::F32($left), DenseView::F32($right)) => $general,
+            (DenseView::F64($left), DenseView::F64($right)) => $general,
+            (DenseView::I16($left), DenseView::I16($right)) => $general,
+            (DenseView::I32($left), DenseView::I32($right)) => $general,
+            (DenseView::I64($left), DenseView::I64($right)) => $general,
+            (DenseView::U8($left), DenseView::U8($right)) => $general,
+            (DenseView::U16($left), DenseView::U16($right)) => $general,
+            (DenseView::U32($left), DenseView::U32($right)) => $general,
+            (DenseView::U64($left), DenseView::U64($right)) => $general,
+            ($left, $right) => $mismatch,
+        }
+    };
+}
+
 impl<FE: ThreadSafe> TensorInstance for DenseView<FE> {
     fn dtype(&self) -> NumberType {
         match self {
@@ -98,20 +121,104 @@ impl<FE: ThreadSafe> TensorInstance for DenseView<FE> {
     }
 }
 
-impl<FE: ThreadSafe> TensorBoolean<Self> for DenseView<FE> {
+impl<FE> TensorBoolean<Self> for DenseView<FE>
+where
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
     type Combine = Self;
     type LeftCombine = Self;
 
     fn and(self, other: Self) -> TCResult<Self::LeftCombine> {
-        todo!()
+        view_dispatch_dual!(
+            self,
+            other,
+            left,
+            right,
+            {
+                left.and(right)
+                    .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner())))
+            },
+            {
+                let (lr, li) = left;
+                let (rr, ri) = right;
+                let left = lr.or(li)?;
+                let right = rr.or(ri)?;
+
+                left.and(right)
+                    .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner())))
+            },
+            {
+                left.and(right)
+                    .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner())))
+            },
+            {
+                let left = left.cast_into(NumberType::Bool)?;
+                let right = right.cast_into(NumberType::Bool)?;
+                left.and(right)
+            }
+        )
     }
 
     fn or(self, other: Self) -> TCResult<Self::Combine> {
-        todo!()
+        view_dispatch_dual!(
+            self,
+            other,
+            left,
+            right,
+            {
+                left.or(right)
+                    .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner())))
+            },
+            {
+                let (lr, li) = left;
+                let (rr, ri) = right;
+                let left = lr.or(li)?;
+                let right = rr.or(ri)?;
+
+                left.or(right)
+                    .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner())))
+            },
+            {
+                left.or(right)
+                    .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner())))
+            },
+            {
+                let left = left.cast_into(NumberType::Bool)?;
+                let right = right.cast_into(NumberType::Bool)?;
+                left.or(right)
+            }
+        )
     }
 
     fn xor(self, other: Self) -> TCResult<Self::Combine> {
-        todo!()
+        view_dispatch_dual!(
+            self,
+            other,
+            left,
+            right,
+            {
+                left.xor(right)
+                    .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner())))
+            },
+            {
+                let (lr, li) = left;
+                let (rr, ri) = right;
+                let left = lr.or(li)?;
+                let right = rr.or(ri)?;
+
+                left.xor(right)
+                    .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner())))
+            },
+            {
+                left.xor(right)
+                    .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner())))
+            },
+            {
+                let left = left.cast_into(NumberType::Bool)?;
+                let right = right.cast_into(NumberType::Bool)?;
+                left.xor(right)
+            }
+        )
     }
 }
 
@@ -143,7 +250,10 @@ impl<FE: ThreadSafe> TensorCompareConst for DenseView<FE> {
     }
 }
 
-impl<FE: ThreadSafe> TensorCast for DenseView<FE> {
+impl<FE> TensorCast for DenseView<FE>
+where
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
     type Cast = Self;
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
