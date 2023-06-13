@@ -2892,7 +2892,7 @@ impl<FE, T: CDatatype> Clone for DenseUnaryCast<FE, T> {
 }
 
 impl<FE, T: CDatatype> DenseUnaryCast<FE, T> {
-    fn new<S>(source: S, op: fn(Block) -> TCResult<Array<T>>) -> Self
+    pub fn new<S>(source: S, op: fn(Block) -> TCResult<Array<T>>) -> Self
     where
         S: Into<DenseAccessCast<FE>>,
     {
@@ -3220,6 +3220,12 @@ impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for DenseUnaryCast<FE, T> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         let source = &self.source;
         cast_dispatch!(source, this, this.read_permit(txn_id, range).await)
+    }
+}
+
+impl<FE, T: CDatatype> From<DenseUnaryCast<FE, T>> for DenseAccess<FE, T> {
+    fn from(unary: DenseUnaryCast<FE, T>) -> Self {
+        Self::UnaryCast(Box::new(unary))
     }
 }
 

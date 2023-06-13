@@ -56,7 +56,7 @@ impl<FE: ThreadSafe> TensorInstance for SparseView<FE> {
         match self {
             Self::Bool(_) => NumberType::Bool,
             Self::C32(_) => NumberType::Complex(ComplexType::C32),
-            Self::C64(_) => NumberType::Complex(ComplexType::C32),
+            Self::C64(_) => NumberType::Complex(ComplexType::C64),
             Self::F32(this) => this.dtype(),
             Self::F64(this) => this.dtype(),
             Self::I16(this) => this.dtype(),

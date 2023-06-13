@@ -122,6 +122,14 @@ macro_rules! block_cmp_scalar {
 }
 
 impl Block {
+    pub fn cast<T: CDatatype>(self) -> TCResult<Array<T>> {
+        block_dispatch!(
+            self,
+            this,
+            this.cast().map(Array::from).map_err(TCError::from)
+        )
+    }
+
     pub fn and(self, other: Self) -> TCResult<Array<u8>> {
         block_cmp!(
             self,
