@@ -31,6 +31,7 @@ pub use access::*;
 mod access;
 mod base;
 mod stream;
+mod view;
 
 type BlockShape = ha_ndarray::Shape;
 type BlockStream<Block> = Pin<Box<dyn Stream<Item = TCResult<Block>> + Send>>;
@@ -623,6 +624,12 @@ impl<FE, A> From<A> for DenseTensor<FE, A> {
             accessor,
             phantom: PhantomData,
         }
+    }
+}
+
+impl<FE, A: fmt::Debug> fmt::Debug for DenseTensor<FE, A> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.accessor.fmt(f)
     }
 }
 

@@ -13,6 +13,7 @@ mod access;
 mod base;
 mod schema;
 mod stream;
+mod view;
 
 use tc_error::*;
 use tc_transact::TxnId;
@@ -92,11 +93,7 @@ impl<FE, A: Clone> Clone for SparseTensor<FE, A> {
     }
 }
 
-impl<FE, A> TensorInstance for SparseTensor<FE, A>
-where
-    FE: ThreadSafe,
-    A: SparseInstance,
-{
+impl<FE: ThreadSafe, A: TensorInstance> TensorInstance for SparseTensor<FE, A> {
     fn dtype(&self) -> NumberType {
         self.accessor.dtype()
     }
