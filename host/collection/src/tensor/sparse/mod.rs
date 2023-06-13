@@ -640,7 +640,7 @@ impl<FE, A> TensorUnaryBoolean for SparseTensor<FE, A>
 where
     FE: AsType<Node> + ThreadSafe,
     A: SparseInstance + Into<SparseAccess<FE, A::DType>>,
-    SparseCastSource<FE>: From<SparseAccess<FE, A::DType>>,
+    SparseAccessCast<FE>: From<SparseAccess<FE, A::DType>>,
 {
     type Unary = SparseTensor<FE, SparseUnaryCast<FE, u8>>;
 
