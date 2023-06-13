@@ -136,10 +136,18 @@ pub trait DenseWriteGuard<T>: Send + Sync {
     async fn write_value(&self, coord: Coord, value: T) -> TCResult<()>;
 }
 
-#[derive(Clone)]
 pub struct DenseTensor<FE, A> {
     accessor: A,
     phantom: PhantomData<FE>,
+}
+
+impl<FE, A: Clone> Clone for DenseTensor<FE, A> {
+    fn clone(&self) -> Self {
+        Self {
+            accessor: self.accessor.clone(),
+            phantom: self.phantom,
+        }
+    }
 }
 
 impl<FE, A> DenseTensor<FE, A> {
@@ -148,11 +156,8 @@ impl<FE, A> DenseTensor<FE, A> {
     }
 }
 
-impl<FE: ThreadSafe, T: CDatatype + DType> DenseTensor<FE, DenseAccess<FE, T>> {
-    pub fn from_access<A>(accessor: A) -> Self
-    where
-        A: DenseInstance<DType = T> + Into<DenseAccess<FE, T>>,
-    {
+impl<FE, T: CDatatype> DenseTensor<FE, DenseAccess<FE, T>> {
+    pub fn from_access<A: Into<DenseAccess<FE, T>>>(accessor: A) -> Self {
         Self {
             accessor: accessor.into(),
             phantom: PhantomData,

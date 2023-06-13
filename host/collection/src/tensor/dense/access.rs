@@ -1796,6 +1796,16 @@ impl<L: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseConst<L, T> {
     }
 }
 
+impl<FE, L: Into<DenseAccess<FE, T>>, T: CDatatype> From<DenseConst<L, T>> for DenseAccess<FE, T> {
+    fn from(combine: DenseConst<L, T>) -> Self {
+        Self::Const(Box::new(DenseConst {
+            left: combine.left.into(),
+            right: combine.right,
+            op: combine.op,
+        }))
+    }
+}
+
 impl<L: fmt::Debug, T: CDatatype> fmt::Debug for DenseConst<L, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "dual constant operation on {:?}", self.left)
@@ -2895,6 +2905,15 @@ where
 impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseUnary<S, T> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.source.read_permit(txn_id, range).await
+    }
+}
+
+impl<FE, S: Into<DenseAccess<FE, T>>, T: CDatatype> From<DenseUnary<S, T>> for DenseAccess<FE, T> {
+    fn from(unary: DenseUnary<S, T>) -> Self {
+        Self::Unary(Box::new(DenseUnary {
+            source: unary.source.into(),
+            op: unary.op,
+        }))
     }
 }
 
