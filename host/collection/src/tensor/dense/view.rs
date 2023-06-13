@@ -1,16 +1,19 @@
 use std::fmt;
 
-use safecast::AsType;
+use safecast::{AsType, CastFrom};
 
 use tc_error::*;
-use tc_value::{ComplexType, FloatType, IntType, Number, NumberType, UIntType};
+use tc_value::{
+    Complex, ComplexType, FloatType, IntType, Number, NumberInstance, NumberType, UIntType,
+};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::dense::{DenseAccess, DenseCacheFile, DenseUnaryCast};
 use crate::tensor::sparse::Node;
-use crate::tensor::{Shape, TensorBoolean, TensorCast, TensorCompareConst, TensorInstance};
+use crate::tensor::{
+    Shape, TensorBoolean, TensorCast, TensorCompareConst, TensorInstance, TensorUnary,
+};
 
-use super::DenseTensor;
+use super::{DenseAccess, DenseCacheFile, DenseTensor, DenseUnaryCast};
 
 pub enum DenseView<FE> {
     Bool(DenseTensor<FE, DenseAccess<FE, u8>>),
@@ -222,31 +225,282 @@ where
     }
 }
 
-impl<FE: ThreadSafe> TensorCompareConst for DenseView<FE> {
+impl<FE> TensorCompareConst for DenseView<FE>
+where
+    FE: DenseCacheFile + AsType<Node>,
+{
     type Compare = Self;
 
     fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
-        todo!()
+        view_dispatch!(
+            self,
+            this,
+            {
+                this.eq_const(other)
+                    .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner())))
+            },
+            {
+                let (real, imag) = this;
+
+                let number = Complex::cast_from(other);
+                let n_real = number.re();
+                let n_imag = number.im();
+
+                let real = real.eq_const(n_real.into())?;
+                let imag = imag.eq_const(n_imag.into())?;
+                let eq = real.and(imag)?;
+
+                Ok(Self::Bool(DenseTensor::from_access(eq.into_inner())))
+            },
+            {
+                this.eq_const(other)
+                    .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner())))
+            }
+        )
     }
 
     fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
-        todo!()
+        match self {
+            Self::Bool(this) => this
+                .gt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::C32(this) => {
+                let other = Complex::cast_from(other).abs().into();
+                Self::C32(this).abs().and_then(|abs| abs.gt_const(other))
+            }
+
+            Self::C64(this) => {
+                let other = Complex::cast_from(other).abs().into();
+                Self::C64(this).abs().and_then(|abs| abs.gt_const(other))
+            }
+
+            Self::F32(this) => this
+                .gt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::F64(this) => this
+                .gt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::I16(this) => this
+                .gt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::I32(this) => this
+                .gt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::I64(this) => this
+                .gt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U8(this) => this
+                .gt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U16(this) => this
+                .gt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U32(this) => this
+                .gt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U64(this) => this
+                .gt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+        }
     }
 
     fn ge_const(self, other: Number) -> TCResult<Self::Compare> {
-        todo!()
+        match self {
+            Self::Bool(this) => this
+                .ge_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::C32(this) => {
+                let other = Complex::cast_from(other).abs().into();
+                Self::C32(this).abs().and_then(|abs| abs.ge_const(other))
+            }
+
+            Self::C64(this) => {
+                let other = Complex::cast_from(other).abs().into();
+                Self::C64(this).abs().and_then(|abs| abs.ge_const(other))
+            }
+
+            Self::F32(this) => this
+                .ge_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::F64(this) => this
+                .ge_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::I16(this) => this
+                .ge_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::I32(this) => this
+                .ge_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::I64(this) => this
+                .ge_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U8(this) => this
+                .ge_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U16(this) => this
+                .ge_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U32(this) => this
+                .ge_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U64(this) => this
+                .ge_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+        }
     }
 
     fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
-        todo!()
+        match self {
+            Self::Bool(this) => this
+                .lt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::C32(this) => {
+                let other = Complex::cast_from(other).abs().into();
+                Self::C32(this).abs().and_then(|abs| abs.lt_const(other))
+            }
+
+            Self::C64(this) => {
+                let other = Complex::cast_from(other).abs().into();
+                Self::C64(this).abs().and_then(|abs| abs.lt_const(other))
+            }
+
+            Self::F32(this) => this
+                .lt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::F64(this) => this
+                .lt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::I16(this) => this
+                .lt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::I32(this) => this
+                .lt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::I64(this) => this
+                .lt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U8(this) => this
+                .lt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U16(this) => this
+                .lt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U32(this) => this
+                .lt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U64(this) => this
+                .lt_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+        }
     }
 
     fn le_const(self, other: Number) -> TCResult<Self::Compare> {
-        todo!()
+        match self {
+            Self::Bool(this) => this
+                .le_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::C32(this) => {
+                let other = Complex::cast_from(other).abs().into();
+                Self::C32(this).abs().and_then(|abs| abs.le_const(other))
+            }
+
+            Self::C64(this) => {
+                let other = Complex::cast_from(other).abs().into();
+                Self::C64(this).abs().and_then(|abs| abs.le_const(other))
+            }
+
+            Self::F32(this) => this
+                .le_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::F64(this) => this
+                .le_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::I16(this) => this
+                .le_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::I32(this) => this
+                .le_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::I64(this) => this
+                .le_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U8(this) => this
+                .le_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U16(this) => this
+                .le_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U32(this) => this
+                .le_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+
+            Self::U64(this) => this
+                .le_const(other)
+                .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner()))),
+        }
     }
 
     fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
-        todo!()
+        view_dispatch!(
+            self,
+            this,
+            {
+                this.ne_const(other)
+                    .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner())))
+            },
+            {
+                let (real, imag) = this;
+
+                let number = Complex::cast_from(other);
+                let n_real = number.re();
+                let n_imag = number.im();
+
+                let real = real.ne_const(n_real.into())?;
+                let imag = imag.ne_const(n_imag.into())?;
+                let ne = real.and(imag)?;
+
+                Ok(Self::Bool(DenseTensor::from_access(ne.into_inner())))
+            },
+            {
+                this.ne_const(other)
+                    .map(|tensor| Self::Bool(DenseTensor::from_access(tensor.into_inner())))
+            }
+        )
     }
 }
 
@@ -356,6 +610,29 @@ where
             NumberType::UInt(UIntType::U32) => view_dispatch_cast!(U32),
             NumberType::UInt(UIntType::U64) => view_dispatch_cast!(U64),
         }
+    }
+}
+
+impl<FE> TensorUnary for DenseView<FE>
+where
+    FE: ThreadSafe,
+{
+    type Unary = Self;
+
+    fn abs(self) -> TCResult<Self::Unary> {
+        todo!()
+    }
+
+    fn exp(self) -> TCResult<Self::Unary> {
+        todo!()
+    }
+
+    fn ln(self) -> TCResult<Self::Unary> {
+        todo!()
+    }
+
+    fn round(self) -> TCResult<Self::Unary> {
+        todo!()
     }
 }
 

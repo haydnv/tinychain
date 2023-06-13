@@ -1721,6 +1721,12 @@ impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for DenseCompareConst<FE, T>
     }
 }
 
+impl<FE, T: CDatatype> From<DenseCompareConst<FE, T>> for DenseAccess<FE, T> {
+    fn from(compare: DenseCompareConst<FE, T>) -> Self {
+        Self::CompareConst(Box::new(compare))
+    }
+}
+
 impl<FE, T: CDatatype> fmt::Debug for DenseCompareConst<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "compare {:?} with {:?}", self.left, self.right)
