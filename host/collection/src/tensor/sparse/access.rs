@@ -1381,6 +1381,22 @@ where
     }
 }
 
+impl<FE, L, R, T> From<SparseCombine<L, R, T>> for SparseAccess<FE, T>
+where
+    L: Into<SparseAccess<FE, T>>,
+    R: Into<SparseAccess<FE, T>>,
+    T: CDatatype,
+{
+    fn from(combine: SparseCombine<L, R, T>) -> Self {
+        Self::Combine(Box::new(SparseCombine {
+            left: combine.left.into(),
+            right: combine.right.into(),
+            block_op: combine.block_op,
+            value_op: combine.value_op,
+        }))
+    }
+}
+
 impl<L: fmt::Debug, R: fmt::Debug, T: CDatatype> fmt::Debug for SparseCombine<L, R, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "outer join of {:?} and {:?}", self.left, self.right)

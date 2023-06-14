@@ -1,15 +1,15 @@
 use std::fmt;
 
-use ha_ndarray::CDatatype;
+use ha_ndarray::{Array, CDatatype, NDArrayBoolean};
 use safecast::AsType;
 
 use tc_error::*;
-use tc_value::{ComplexType, Float, FloatType, Int, IntType, Number, NumberType, UInt, UIntType};
+use tc_value::{ComplexType, FloatType, IntType, Number, NumberType, UIntType};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::{Shape, TensorBoolean, TensorCast, TensorInstance};
 
-use super::{Node, SparseAccess, SparseTensor, SparseUnaryCast};
+use super::{Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
 
 pub enum SparseView<FE> {
     Bool(SparseTensor<FE, SparseAccess<FE, u8>>),
@@ -87,20 +87,63 @@ impl<FE: ThreadSafe> TensorInstance for SparseView<FE> {
     }
 }
 
-impl<FE: ThreadSafe> TensorBoolean<Self> for SparseView<FE> {
+impl<FE: ThreadSafe + AsType<Node>> TensorBoolean<Self> for SparseView<FE> {
     type Combine = Self;
     type LeftCombine = Self;
 
     fn and(self, other: Self) -> TCResult<Self::LeftCombine> {
-        todo!()
+        let this = expect_bool(self)?;
+        let that = expect_bool(other)?;
+
+        SparseCombine::new(
+            this.accessor,
+            that.accessor,
+            |l, r| l.and(r).map(Array::from).map_err(TCError::from),
+            |l, r| if l != 0 && r != 0 { 1 } else { 0 },
+        )
+        .map(SparseTensor::from)
+        .map(sparse_from)
+        .map(Self::Bool)
     }
 
     fn or(self, other: Self) -> TCResult<Self::Combine> {
-        todo!()
+        let this = expect_bool(self)?;
+        let that = expect_bool(other)?;
+
+        SparseCombine::new(
+            this.accessor,
+            that.accessor,
+            |l, r| l.or(r).map(Array::from).map_err(TCError::from),
+            |l, r| if l != 0 || r != 0 { 1 } else { 0 },
+        )
+        .map(SparseTensor::from)
+        .map(sparse_from)
+        .map(Self::Bool)
     }
 
     fn xor(self, other: Self) -> TCResult<Self::Combine> {
-        todo!()
+        let this = expect_bool(self)?;
+        let that = expect_bool(other)?;
+
+        SparseCombine::new(
+            this.accessor,
+            that.accessor,
+            |l, r| l.xor(r).map(Array::from).map_err(TCError::from),
+            |l, r| if (l != 0) ^ (r != 0) { 1 } else { 0 },
+        )
+        .map(SparseTensor::from)
+        .map(sparse_from)
+        .map(Self::Bool)
+    }
+}
+
+fn expect_bool<FE>(view: SparseView<FE>) -> TCResult<SparseTensor<FE, SparseAccess<FE, u8>>>
+where
+    FE: ThreadSafe + AsType<Node>,
+{
+    match view.cast_into(NumberType::Bool)? {
+        SparseView::Bool(that) => Ok(that),
+        _ => unreachable!("failed to cast sparse tensor into boolean"),
     }
 }
 
