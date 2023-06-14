@@ -1,11 +1,15 @@
 use std::fmt;
 
-use tc_value::{ComplexType, NumberType};
+use ha_ndarray::CDatatype;
+use safecast::AsType;
+
+use tc_error::*;
+use tc_value::{ComplexType, Float, FloatType, Int, IntType, Number, NumberType, UInt, UIntType};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::{Shape, TensorInstance};
+use crate::tensor::{Shape, TensorBoolean, TensorCast, TensorInstance};
 
-use super::{SparseAccess, SparseTensor};
+use super::{Node, SparseAccess, SparseTensor, SparseUnaryCast};
 
 pub enum SparseView<FE> {
     Bool(SparseTensor<FE, SparseAccess<FE, u8>>),
@@ -83,6 +87,147 @@ impl<FE: ThreadSafe> TensorInstance for SparseView<FE> {
     }
 }
 
+impl<FE: ThreadSafe> TensorBoolean<Self> for SparseView<FE> {
+    type Combine = Self;
+    type LeftCombine = Self;
+
+    fn and(self, other: Self) -> TCResult<Self::LeftCombine> {
+        todo!()
+    }
+
+    fn or(self, other: Self) -> TCResult<Self::Combine> {
+        todo!()
+    }
+
+    fn xor(self, other: Self) -> TCResult<Self::Combine> {
+        todo!()
+    }
+}
+
+impl<FE: ThreadSafe + AsType<Node>> TensorCast for SparseView<FE> {
+    type Cast = Self;
+
+    fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
+        const ERR_COMPLEX: &str = "cannot cast a real tensor into a complex tensor";
+
+        macro_rules! view_dispatch_cast {
+            ($var:ident) => {
+                view_dispatch!(
+                    self,
+                    this,
+                    TensorCast::cast_into(Self::U8(this), dtype),
+                    {
+                        let real = TensorCast::cast_into(Self::from(this.0), dtype)?;
+
+                        match real {
+                            Self::$var(real) => Ok(Self::$var(real)),
+                            real => unreachable!("cast resulted in {real:?}"),
+                        }
+                    },
+                    {
+                        let cast = SparseUnaryCast::new(
+                            this.accessor,
+                            |block| block.cast(),
+                            |n| safecast::CastInto::cast_into(Number::from(n)),
+                        );
+
+                        Ok(Self::$var(sparse_from(cast.into())))
+                    }
+                )
+            };
+        }
+
+        match dtype {
+            NumberType::Number => Ok(self),
+            NumberType::Bool => view_dispatch!(
+                self,
+                this,
+                Ok(Self::Bool(this)),
+                {
+                    let real = Self::from(this.0);
+                    let imag = Self::from(this.1);
+                    real.or(imag)
+                },
+                {
+                    let cast = SparseUnaryCast::new(
+                        this.accessor,
+                        |block| block.cast(),
+                        |n| safecast::CastInto::cast_into(Number::from(n)),
+                    );
+
+                    Ok(Self::Bool(sparse_from(cast.into())))
+                }
+            ),
+            NumberType::Complex(ComplexType::Complex) => self.cast_into(ComplexType::C32.into()),
+            NumberType::Complex(ComplexType::C32) => {
+                view_dispatch!(
+                    self,
+                    this,
+                    Err(TCError::unsupported(ERR_COMPLEX)),
+                    {
+                        let ftype = NumberType::Float(FloatType::F32);
+                        let real = Self::from(this.0).cast_into(ftype)?;
+                        let imag = Self::from(this.1).cast_into(ftype)?;
+
+                        match (real, imag) {
+                            (Self::F32(real), Self::F32(imag)) => Ok(Self::C32((real, imag))),
+                            (real, imag) => {
+                                unreachable!("cast to f32 resulted in {real:?} and {imag:?}")
+                            }
+                        }
+                    },
+                    Err(TCError::unsupported(ERR_COMPLEX))
+                )
+            }
+            NumberType::Complex(ComplexType::C64) => {
+                view_dispatch!(
+                    self,
+                    this,
+                    Err(TCError::unsupported(ERR_COMPLEX)),
+                    {
+                        let ftype = NumberType::Float(FloatType::F64);
+                        let real = Self::from(this.0).cast_into(ftype)?;
+                        let imag = Self::from(this.1).cast_into(ftype)?;
+
+                        match (real, imag) {
+                            (Self::F64(real), Self::F64(imag)) => Ok(Self::C64((real, imag))),
+                            (real, imag) => {
+                                unreachable!("cast to f64 resulted in {real:?} and {imag:?}")
+                            }
+                        }
+                    },
+                    Err(TCError::unsupported(ERR_COMPLEX))
+                )
+            }
+            NumberType::Float(FloatType::Float) => self.cast_into(FloatType::F32.into()),
+            NumberType::Float(FloatType::F32) => view_dispatch_cast!(F32),
+            NumberType::Float(FloatType::F64) => view_dispatch_cast!(F64),
+            NumberType::Int(IntType::Int) => self.cast_into(IntType::I32.into()),
+            NumberType::Int(IntType::I16) => view_dispatch_cast!(I16),
+            NumberType::Int(IntType::I8) => Err(TCError::unsupported(IntType::I8)),
+            NumberType::Int(IntType::I32) => view_dispatch_cast!(I32),
+            NumberType::Int(IntType::I64) => view_dispatch_cast!(I64),
+            NumberType::UInt(UIntType::UInt) => self.cast_into(UIntType::U32.into()),
+            NumberType::UInt(UIntType::U8) => view_dispatch_cast!(U8),
+            NumberType::UInt(UIntType::U16) => view_dispatch_cast!(U16),
+            NumberType::UInt(UIntType::U32) => view_dispatch_cast!(U32),
+            NumberType::UInt(UIntType::U64) => view_dispatch_cast!(U64),
+        }
+    }
+}
+
+impl<FE> From<SparseTensor<FE, SparseAccess<FE, f32>>> for SparseView<FE> {
+    fn from(tensor: SparseTensor<FE, SparseAccess<FE, f32>>) -> Self {
+        Self::F32(tensor)
+    }
+}
+
+impl<FE> From<SparseTensor<FE, SparseAccess<FE, f64>>> for SparseView<FE> {
+    fn from(tensor: SparseTensor<FE, SparseAccess<FE, f64>>) -> Self {
+        Self::F64(tensor)
+    }
+}
+
 impl<FE: ThreadSafe> fmt::Debug for SparseView<FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
@@ -92,4 +237,13 @@ impl<FE: ThreadSafe> fmt::Debug for SparseView<FE> {
             self.shape()
         )
     }
+}
+
+#[inline]
+fn sparse_from<FE, A, T>(tensor: SparseTensor<FE, A>) -> SparseTensor<FE, SparseAccess<FE, T>>
+where
+    A: Into<SparseAccess<FE, T>>,
+    T: CDatatype,
+{
+    SparseTensor::from_access(tensor.into_inner())
 }

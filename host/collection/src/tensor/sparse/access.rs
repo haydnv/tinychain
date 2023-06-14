@@ -3077,6 +3077,12 @@ impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for SparseUnaryCast<FE, T> {
     }
 }
 
+impl<FE, T: CDatatype> From<SparseUnaryCast<FE, T>> for SparseAccess<FE, T> {
+    fn from(unary: SparseUnaryCast<FE, T>) -> Self {
+        Self::UnaryCast(Box::new(unary))
+    }
+}
+
 impl<FE, T: CDatatype> fmt::Debug for SparseUnaryCast<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "unary operation on {:?}", self.source)

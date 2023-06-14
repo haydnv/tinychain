@@ -84,6 +84,15 @@ impl<FE, A> SparseTensor<FE, A> {
     }
 }
 
+impl<FE, T: CDatatype> SparseTensor<FE, SparseAccess<FE, T>> {
+    pub fn from_access<A: Into<SparseAccess<FE, T>>>(accessor: A) -> Self {
+        Self {
+            accessor: accessor.into(),
+            phantom: PhantomData,
+        }
+    }
+}
+
 impl<FE, A: Clone> Clone for SparseTensor<FE, A> {
     fn clone(&self) -> Self {
         Self {

@@ -425,11 +425,9 @@ where
                 view_dispatch!(
                     self,
                     this,
-                    Self::U8(this)
-                        .ne_const(0u8.into())
-                        .and_then(|tensor| tensor.cast_into(dtype)),
+                    TensorCast::cast_into(Self::U8(this), dtype),
                     {
-                        let real = Self::from(this.0).cast_into(dtype)?;
+                        let real = TensorCast::cast_into(Self::from(this.0), dtype)?;
 
                         match real {
                             Self::$var(real) => Ok(Self::$var(real)),
