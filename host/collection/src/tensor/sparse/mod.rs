@@ -9,12 +9,6 @@ use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ha_ndarray::*;
 use safecast::{AsType, CastFrom};
 
-mod access;
-mod base;
-mod schema;
-mod stream;
-mod view;
-
 use tc_error::*;
 use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberClass, NumberCollator, NumberType};
@@ -28,11 +22,17 @@ use super::{
 };
 
 pub use access::*;
-
-const BLOCK_SIZE: usize = 4_096;
-
 pub use base::SparseBase;
 pub use schema::{IndexSchema, Schema};
+pub use view::*;
+
+mod access;
+mod base;
+mod schema;
+mod stream;
+mod view;
+
+const BLOCK_SIZE: usize = 4_096;
 
 pub type Blocks<C, V> = Pin<Box<dyn Stream<Item = Result<(C, V), TCError>> + Send>>;
 pub type Elements<T> = Pin<Box<dyn Stream<Item = Result<(Coord, T), TCError>> + Send>>;
@@ -115,27 +115,29 @@ impl<FE: ThreadSafe, A: TensorInstance> TensorInstance for SparseTensor<FE, A> {
 impl<FE, L, R> TensorBoolean<SparseTensor<FE, R>> for SparseTensor<FE, L>
 where
     FE: AsType<Node> + ThreadSafe,
-    L: SparseInstance + Into<SparseAccessCast<FE>>,
-    R: SparseInstance<DType = L::DType> + Into<SparseAccessCast<FE>>,
+    L: SparseInstance + Into<SparseAccess<FE, L::DType>>,
+    R: SparseInstance<DType = L::DType> + Into<SparseAccess<FE, R::DType>>,
     Number: From<L::DType> + From<R::DType>,
+    SparseAccessCast<FE>: From<SparseAccess<FE, L::DType>>,
 {
     type Combine = SparseTensor<FE, SparseCompare<FE, u8>>;
     type LeftCombine = SparseTensor<FE, SparseCompareLeft<FE, u8>>;
 
     fn and(self, other: SparseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
-        let access = SparseCompareLeft::new(self.accessor, other.accessor, |l, r| {
-            if bool::cast_from(l) && bool::cast_from(r) {
-                1
-            } else {
-                0
-            }
-        })?;
+        let access =
+            SparseCompareLeft::new(self.accessor.into(), other.accessor.into(), |l, r| {
+                if bool::cast_from(l) && bool::cast_from(r) {
+                    1
+                } else {
+                    0
+                }
+            })?;
 
         Ok(SparseTensor::from(access))
     }
 
     fn or(self, other: SparseTensor<FE, R>) -> TCResult<Self::Combine> {
-        let access = SparseCompare::new(self.accessor, other.accessor, |l, r| {
+        let access = SparseCompare::new(self.accessor.into(), other.accessor.into(), |l, r| {
             if bool::cast_from(l) && bool::cast_from(r) {
                 1
             } else {
@@ -147,7 +149,7 @@ where
     }
 
     fn xor(self, other: SparseTensor<FE, R>) -> TCResult<Self::Combine> {
-        let access = SparseCompare::new(self.accessor, other.accessor, |l, r| {
+        let access = SparseCompare::new(self.accessor.into(), other.accessor.into(), |l, r| {
             if bool::cast_from(l) && bool::cast_from(r) {
                 1
             } else {
@@ -681,4 +683,13 @@ impl<FE, A: fmt::Debug> fmt::Debug for SparseTensor<FE, A> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.accessor.fmt(f)
     }
+}
+
+#[inline]
+pub fn sparse_from<FE, A, T>(tensor: SparseTensor<FE, A>) -> SparseTensor<FE, SparseAccess<FE, T>>
+where
+    A: Into<SparseAccess<FE, T>>,
+    T: CDatatype,
+{
+    SparseTensor::from_access(tensor.into_inner())
 }

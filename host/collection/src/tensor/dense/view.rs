@@ -12,11 +12,11 @@ use tcgeneric::ThreadSafe;
 
 use crate::tensor::sparse::Node;
 use crate::tensor::{
-    Shape, TensorBoolean, TensorCast, TensorCompareConst, TensorInstance, TensorMath,
-    TensorMathConst, TensorTrig, TensorUnary,
+    Shape, TensorBoolean, TensorCast, TensorCompare, TensorCompareConst, TensorInstance,
+    TensorMath, TensorMathConst, TensorTrig, TensorUnary,
 };
 
-use super::{DenseAccess, DenseCacheFile, DenseTensor, DenseUnaryCast};
+use super::{dense_from, DenseAccess, DenseCacheFile, DenseTensor, DenseUnaryCast};
 
 pub enum DenseView<FE> {
     Bool(DenseTensor<FE, DenseAccess<FE, u8>>),
@@ -255,6 +255,34 @@ where
                 left.xor(right)
             }
         )
+    }
+}
+
+impl<FE: ThreadSafe> TensorCompare<Self> for DenseView<FE> {
+    type Compare = Self;
+
+    fn eq(self, other: Self) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn gt(self, other: Self) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn ge(self, other: Self) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn lt(self, other: Self) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn le(self, other: Self) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn ne(self, other: Self) -> TCResult<Self::Compare> {
+        todo!()
     }
 }
 
@@ -784,6 +812,35 @@ where
     }
 }
 
+impl<FE: ThreadSafe> TensorMathConst for DenseView<FE> {
+    type Combine = Self;
+    type DenseCombine = Self;
+
+    fn add_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        todo!()
+    }
+
+    fn div_const(self, other: Number) -> TCResult<Self::Combine> {
+        todo!()
+    }
+
+    fn log_const(self, base: Number) -> TCResult<Self::Combine> {
+        todo!()
+    }
+
+    fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
+        todo!()
+    }
+
+    fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
+        todo!()
+    }
+
+    fn sub_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        todo!()
+    }
+}
+
 macro_rules! view_trig {
     ($this:ident, $general32:ident, $general64:ident, $r:ident, $i:ident, $complex:expr) => {
         match $this {
@@ -1083,15 +1140,6 @@ impl<FE: ThreadSafe> fmt::Debug for DenseView<FE> {
             self.shape()
         )
     }
-}
-
-#[inline]
-fn dense_from<FE, A, T>(tensor: DenseTensor<FE, A>) -> DenseTensor<FE, DenseAccess<FE, T>>
-where
-    A: Into<DenseAccess<FE, T>>,
-    T: CDatatype,
-{
-    DenseTensor::from_access(tensor.into_inner())
 }
 
 #[inline]

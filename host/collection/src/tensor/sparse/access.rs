@@ -1654,6 +1654,12 @@ impl<FE: ThreadSafe, T> TensorPermitRead for SparseCompare<FE, T> {
     }
 }
 
+impl<FE, T: CDatatype> From<SparseCompare<FE, T>> for SparseAccess<FE, T> {
+    fn from(compare: SparseCompare<FE, T>) -> Self {
+        Self::Compare(Box::new(compare))
+    }
+}
+
 impl<FE, T> fmt::Debug for SparseCompare<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} and {:?}", self.left, self.right)
@@ -1758,6 +1764,12 @@ impl<FE: ThreadSafe, T> TensorPermitRead for SparseCompareLeft<FE, T> {
         let right = self.right.read_permit(txn_id, range.clone()).await?;
         left.extend(right);
         Ok(left)
+    }
+}
+
+impl<FE, T: CDatatype> From<SparseCompareLeft<FE, T>> for SparseAccess<FE, T> {
+    fn from(compare: SparseCompareLeft<FE, T>) -> Self {
+        Self::CompareLeft(Box::new(compare))
     }
 }
 

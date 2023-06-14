@@ -27,6 +27,7 @@ use super::{
 };
 
 pub use access::*;
+pub use view::*;
 
 mod access;
 mod base;
@@ -654,6 +655,15 @@ impl<FE, A: fmt::Debug> fmt::Debug for DenseTensor<FE, A> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.accessor.fmt(f)
     }
+}
+
+#[inline]
+pub fn dense_from<FE, A, T>(tensor: DenseTensor<FE, A>) -> DenseTensor<FE, DenseAccess<FE, T>>
+where
+    A: Into<DenseAccess<FE, T>>,
+    T: CDatatype,
+{
+    DenseTensor::from_access(tensor.into_inner())
 }
 
 #[inline]

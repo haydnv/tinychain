@@ -1,15 +1,17 @@
 use std::fmt;
 
-use ha_ndarray::{Array, CDatatype, NDArrayBoolean};
+use ha_ndarray::{Array, NDArrayBoolean};
 use safecast::AsType;
 
 use tc_error::*;
 use tc_value::{ComplexType, FloatType, IntType, Number, NumberType, UIntType};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::{Shape, TensorBoolean, TensorCast, TensorInstance};
+use crate::tensor::{
+    Shape, TensorBoolean, TensorCast, TensorCompare, TensorInstance, TensorMath, TensorMathConst,
+};
 
-use super::{Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
+use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
 
 pub enum SparseView<FE> {
     Bool(SparseTensor<FE, SparseAccess<FE, u8>>),
@@ -137,16 +139,6 @@ impl<FE: ThreadSafe + AsType<Node>> TensorBoolean<Self> for SparseView<FE> {
     }
 }
 
-fn expect_bool<FE>(view: SparseView<FE>) -> TCResult<SparseTensor<FE, SparseAccess<FE, u8>>>
-where
-    FE: ThreadSafe + AsType<Node>,
-{
-    match view.cast_into(NumberType::Bool)? {
-        SparseView::Bool(that) => Ok(that),
-        _ => unreachable!("failed to cast sparse tensor into boolean"),
-    }
-}
-
 impl<FE: ThreadSafe + AsType<Node>> TensorCast for SparseView<FE> {
     type Cast = Self;
 
@@ -201,7 +193,9 @@ impl<FE: ThreadSafe + AsType<Node>> TensorCast for SparseView<FE> {
                     Ok(Self::Bool(sparse_from(cast.into())))
                 }
             ),
-            NumberType::Complex(ComplexType::Complex) => self.cast_into(ComplexType::C32.into()),
+            NumberType::Complex(ComplexType::Complex) => {
+                TensorCast::cast_into(self, ComplexType::C32.into())
+            }
             NumberType::Complex(ComplexType::C32) => {
                 view_dispatch!(
                     self,
@@ -209,8 +203,8 @@ impl<FE: ThreadSafe + AsType<Node>> TensorCast for SparseView<FE> {
                     Err(TCError::unsupported(ERR_COMPLEX)),
                     {
                         let ftype = NumberType::Float(FloatType::F32);
-                        let real = Self::from(this.0).cast_into(ftype)?;
-                        let imag = Self::from(this.1).cast_into(ftype)?;
+                        let real = TensorCast::cast_into(Self::from(this.0), ftype)?;
+                        let imag = TensorCast::cast_into(Self::from(this.1), ftype)?;
 
                         match (real, imag) {
                             (Self::F32(real), Self::F32(imag)) => Ok(Self::C32((real, imag))),
@@ -229,8 +223,8 @@ impl<FE: ThreadSafe + AsType<Node>> TensorCast for SparseView<FE> {
                     Err(TCError::unsupported(ERR_COMPLEX)),
                     {
                         let ftype = NumberType::Float(FloatType::F64);
-                        let real = Self::from(this.0).cast_into(ftype)?;
-                        let imag = Self::from(this.1).cast_into(ftype)?;
+                        let real = TensorCast::cast_into(Self::from(this.0), ftype)?;
+                        let imag = TensorCast::cast_into(Self::from(this.1), ftype)?;
 
                         match (real, imag) {
                             (Self::F64(real), Self::F64(imag)) => Ok(Self::C64((real, imag))),
@@ -242,20 +236,108 @@ impl<FE: ThreadSafe + AsType<Node>> TensorCast for SparseView<FE> {
                     Err(TCError::unsupported(ERR_COMPLEX))
                 )
             }
-            NumberType::Float(FloatType::Float) => self.cast_into(FloatType::F32.into()),
+            NumberType::Float(FloatType::Float) => {
+                TensorCast::cast_into(self, FloatType::F32.into())
+            }
             NumberType::Float(FloatType::F32) => view_dispatch_cast!(F32),
             NumberType::Float(FloatType::F64) => view_dispatch_cast!(F64),
-            NumberType::Int(IntType::Int) => self.cast_into(IntType::I32.into()),
+            NumberType::Int(IntType::Int) => TensorCast::cast_into(self, IntType::I32.into()),
             NumberType::Int(IntType::I16) => view_dispatch_cast!(I16),
             NumberType::Int(IntType::I8) => Err(TCError::unsupported(IntType::I8)),
             NumberType::Int(IntType::I32) => view_dispatch_cast!(I32),
             NumberType::Int(IntType::I64) => view_dispatch_cast!(I64),
-            NumberType::UInt(UIntType::UInt) => self.cast_into(UIntType::U32.into()),
+            NumberType::UInt(UIntType::UInt) => TensorCast::cast_into(self, UIntType::U32.into()),
             NumberType::UInt(UIntType::U8) => view_dispatch_cast!(U8),
             NumberType::UInt(UIntType::U16) => view_dispatch_cast!(U16),
             NumberType::UInt(UIntType::U32) => view_dispatch_cast!(U32),
             NumberType::UInt(UIntType::U64) => view_dispatch_cast!(U64),
         }
+    }
+}
+
+impl<FE: ThreadSafe> TensorCompare<Self> for SparseView<FE> {
+    type Compare = Self;
+
+    fn eq(self, other: Self) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn gt(self, other: Self) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn ge(self, other: Self) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn lt(self, other: Self) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn le(self, other: Self) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn ne(self, other: Self) -> TCResult<Self::Compare> {
+        todo!()
+    }
+}
+
+impl<FE: ThreadSafe> TensorMath<Self> for SparseView<FE> {
+    type Combine = Self;
+    type LeftCombine = Self;
+
+    fn add(self, other: Self) -> TCResult<Self::Combine> {
+        todo!()
+    }
+
+    fn div(self, other: Self) -> TCResult<Self::LeftCombine> {
+        todo!()
+    }
+
+    fn log(self, base: Self) -> TCResult<Self::LeftCombine> {
+        todo!()
+    }
+
+    fn mul(self, other: Self) -> TCResult<Self::LeftCombine> {
+        todo!()
+    }
+
+    fn pow(self, other: Self) -> TCResult<Self::LeftCombine> {
+        todo!()
+    }
+
+    fn sub(self, other: Self) -> TCResult<Self::Combine> {
+        todo!()
+    }
+}
+
+impl<FE: ThreadSafe> TensorMathConst for SparseView<FE> {
+    type Combine = Self;
+    type DenseCombine = Self;
+
+    fn add_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        todo!()
+    }
+
+    fn div_const(self, other: Number) -> TCResult<Self::Combine> {
+        todo!()
+    }
+
+    fn log_const(self, base: Number) -> TCResult<Self::Combine> {
+        todo!()
+    }
+
+    fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
+        todo!()
+    }
+
+    fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
+        todo!()
+    }
+
+    fn sub_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        todo!()
     }
 }
 
@@ -283,10 +365,12 @@ impl<FE: ThreadSafe> fmt::Debug for SparseView<FE> {
 }
 
 #[inline]
-fn sparse_from<FE, A, T>(tensor: SparseTensor<FE, A>) -> SparseTensor<FE, SparseAccess<FE, T>>
+fn expect_bool<FE>(view: SparseView<FE>) -> TCResult<SparseTensor<FE, SparseAccess<FE, u8>>>
 where
-    A: Into<SparseAccess<FE, T>>,
-    T: CDatatype,
+    FE: ThreadSafe + AsType<Node>,
 {
-    SparseTensor::from_access(tensor.into_inner())
+    match TensorCast::cast_into(view, NumberType::Bool)? {
+        SparseView::Bool(that) => Ok(that),
+        _ => unreachable!("failed to cast sparse tensor into boolean"),
+    }
 }

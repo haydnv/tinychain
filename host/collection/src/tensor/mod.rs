@@ -18,6 +18,7 @@ use tcgeneric::{
 pub use shape::{AxisRange, Range, Shape};
 
 mod block;
+mod complex;
 pub mod dense;
 pub mod shape;
 pub mod sparse;
@@ -137,7 +138,7 @@ impl fmt::Debug for TensorType {
 }
 
 /// A [`Tensor`] instance
-pub trait TensorInstance: ThreadSafe {
+pub trait TensorInstance: ThreadSafe + Sized {
     fn dtype(&self) -> NumberType;
 
     fn ndim(&self) -> usize {
