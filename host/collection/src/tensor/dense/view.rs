@@ -10,7 +10,7 @@ use tc_value::{
 };
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::complex::ComplexCompare;
+use crate::tensor::complex::{ComplexCompare, ComplexMath};
 use crate::tensor::sparse::Node;
 use crate::tensor::{
     Shape, TensorBoolean, TensorCast, TensorCompare, TensorCompareConst, TensorInstance,
@@ -64,8 +64,8 @@ impl<FE> Clone for DenseView<FE> {
 }
 
 impl<FE: ThreadSafe> DenseView<FE> {
-    fn complex_from(real: Self, imag: Self) -> TCResult<Self> {
-        match (real, imag) {
+    fn complex_from(complex: (Self, Self)) -> TCResult<Self> {
+        match complex {
             (Self::F32(real), Self::F32(imag)) => Ok(Self::C32((real, imag))),
             (Self::F64(real), Self::F64(imag)) => Ok(Self::C64((real, imag))),
             (real, imag) => Err(bad_request!(
@@ -122,26 +122,6 @@ macro_rules! view_dispatch_compare {
             (DenseView::U16($left), DenseView::U16($right)) => $general,
             (DenseView::U32($left), DenseView::U32($right)) => $general,
             (DenseView::U64($left), DenseView::U64($right)) => $general,
-            ($left, $right) => $mismatch,
-        }
-    };
-}
-
-macro_rules! view_dispatch_dual {
-    ($this:ident, $that:ident, $left:ident, $right:ident, $bool:expr, $complex:expr, $general:expr, $mismatch:expr) => {
-        match ($this, $that) {
-            (DenseView::Bool($left), DenseView::Bool($right)) => $bool.map(DenseView::Bool),
-            (DenseView::C32($left), DenseView::C32($right)) => $complex.map(DenseView::C32),
-            (DenseView::C64($left), DenseView::C64($right)) => $complex.map(DenseView::C64),
-            (DenseView::F32($left), DenseView::F32($right)) => $general.map(DenseView::F32),
-            (DenseView::F64($left), DenseView::F64($right)) => $general.map(DenseView::F64),
-            (DenseView::I16($left), DenseView::I16($right)) => $general.map(DenseView::I16),
-            (DenseView::I32($left), DenseView::I32($right)) => $general.map(DenseView::I32),
-            (DenseView::I64($left), DenseView::I64($right)) => $general.map(DenseView::I64),
-            (DenseView::U8($left), DenseView::U8($right)) => $general.map(DenseView::U8),
-            (DenseView::U16($left), DenseView::U16($right)) => $general.map(DenseView::U16),
-            (DenseView::U32($left), DenseView::U32($right)) => $general.map(DenseView::U32),
-            (DenseView::U64($left), DenseView::U64($right)) => $general.map(DenseView::U64),
             ($left, $right) => $mismatch,
         }
     };
@@ -259,7 +239,7 @@ where
     }
 }
 
-macro_rules! dense_compare {
+macro_rules! view_compare {
     ($this:ident, $that:ident, $complex:expr, $general:expr) => {
         match ($this, $that) {
             (Self::Bool(this), Self::Bool(that)) => {
@@ -315,27 +295,27 @@ where
     type Compare = Self;
 
     fn eq(self, other: Self) -> TCResult<Self::Compare> {
-        dense_compare!(self, other, ComplexCompare::eq, TensorCompare::eq)
+        view_compare!(self, other, ComplexCompare::eq, TensorCompare::eq)
     }
 
     fn gt(self, other: Self) -> TCResult<Self::Compare> {
-        dense_compare!(self, other, ComplexCompare::gt, TensorCompare::gt)
+        view_compare!(self, other, ComplexCompare::gt, TensorCompare::gt)
     }
 
     fn ge(self, other: Self) -> TCResult<Self::Compare> {
-        dense_compare!(self, other, ComplexCompare::ge, TensorCompare::ge)
+        view_compare!(self, other, ComplexCompare::ge, TensorCompare::ge)
     }
 
     fn lt(self, other: Self) -> TCResult<Self::Compare> {
-        dense_compare!(self, other, ComplexCompare::lt, TensorCompare::lt)
+        view_compare!(self, other, ComplexCompare::lt, TensorCompare::lt)
     }
 
     fn le(self, other: Self) -> TCResult<Self::Compare> {
-        dense_compare!(self, other, ComplexCompare::le, TensorCompare::le)
+        view_compare!(self, other, ComplexCompare::le, TensorCompare::le)
     }
 
     fn ne(self, other: Self) -> TCResult<Self::Compare> {
-        dense_compare!(self, other, ComplexCompare::ne, TensorCompare::ne)
+        view_compare!(self, other, ComplexCompare::ne, TensorCompare::ne)
     }
 }
 
@@ -605,43 +585,59 @@ where
     type LeftCombine = Self;
 
     fn add(self, other: Self) -> TCResult<Self::Combine> {
-        view_dispatch_dual!(
-            self,
-            other,
-            this,
-            that,
-            this.or(that).map(dense_from),
-            {
-                let real = this.0.add(that.0).map(dense_from)?;
-                let imag = this.1.add(that.1).map(dense_from)?;
-                Ok((real, imag))
-            },
-            this.add(that).map(dense_from),
-            {
+        match (self, other) {
+            (Self::Bool(this), Self::Bool(that)) => this.or(that).map(dense_from).map(Self::Bool),
+            (Self::C32((a, b)), Self::C32((c, d))) => {
+                ComplexMath::add((a.into(), b.into()), (c.into(), d.into()))
+                    .and_then(Self::complex_from)
+            }
+            (Self::C32((a, b)), Self::F32(that)) => {
+                let real = a.add(that.clone()).map(dense_from)?;
+                let imag = b.add(that).map(dense_from)?;
+                Ok(Self::C32((real, imag)))
+            }
+            (Self::C32(this), that) if that.dtype().is_real() => {
+                let that = that.cast_into(this.0.dtype())?;
+                Self::C32(this).add(that)
+            }
+            (Self::C64((a, b)), Self::C64((c, d))) => {
+                ComplexMath::add((a.into(), b.into()), (c.into(), d.into()))
+                    .and_then(Self::complex_from)
+            }
+            (Self::C64((a, b)), Self::F64(that)) => {
+                let real = a.add(that.clone()).map(dense_from)?;
+                let imag = b.add(that).map(dense_from)?;
+                Ok(Self::C64((real, imag)))
+            }
+            (Self::C64(this), that) if that.dtype().is_real() => {
+                let that = that.cast_into(this.0.dtype())?;
+                Self::C64(this).add(that)
+            }
+            (Self::F32(this), Self::F32(that)) => this.add(that).map(dense_from).map(Self::F32),
+            (Self::F64(this), Self::F64(that)) => this.add(that).map(dense_from).map(Self::F64),
+            (Self::I16(this), Self::I16(that)) => this.add(that).map(dense_from).map(Self::I16),
+            (Self::I32(this), Self::I32(that)) => this.add(that).map(dense_from).map(Self::I32),
+            (Self::I64(this), Self::I64(that)) => this.add(that).map(dense_from).map(Self::I64),
+            (Self::U8(this), Self::U8(that)) => this.add(that).map(dense_from).map(Self::U8),
+            (Self::U16(this), Self::U16(that)) => this.add(that).map(dense_from).map(Self::U16),
+            (Self::U32(this), Self::U32(that)) => this.add(that).map(dense_from).map(Self::U32),
+            (Self::U64(this), Self::U64(that)) => this.add(that).map(dense_from).map(Self::U64),
+            (this, that) if this.dtype().is_real() && that.dtype().is_complex() => that.add(this),
+            (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
                 let this = this.cast_into(dtype)?;
                 let that = that.cast_into(dtype)?;
                 this.add(that)
             }
-        )
+        }
     }
 
     fn div(self, other: Self) -> TCResult<Self::LeftCombine> {
         match (self, other) {
             (Self::Bool(this), Self::Bool(that)) => this.div(that).map(dense_from).map(Self::Bool),
             (Self::C32((a, b)), Self::C32((c, d))) => {
-                let denom = c
-                    .clone()
-                    .pow_const(2.into())?
-                    .add(d.clone().pow_const(2.into())?)?;
-
-                let real_num = a.clone().mul(c.clone())?.add(b.clone().mul(d.clone())?)?;
-                let real = real_num.div(denom.clone())?;
-
-                let imag_num = b.mul(c)?.sub(a.mul(d)?)?;
-                let imag = imag_num.div(denom)?;
-
-                Ok(Self::C32((dense_from(real), dense_from(imag))))
+                ComplexMath::div((a.into(), b.into()), (c.into(), d.into()))
+                    .and_then(Self::complex_from)
             }
             (Self::C32((a, b)), Self::F32(that)) => {
                 let real = a.div(that.clone())?;
@@ -653,18 +649,8 @@ where
                 Self::C32(this).div(that)
             }
             (Self::C64((a, b)), Self::C64((c, d))) => {
-                let denom = c
-                    .clone()
-                    .pow_const(2.into())?
-                    .add(d.clone().pow_const(2.into())?)?;
-
-                let real_num = a.clone().mul(c.clone())?.add(b.clone().mul(d.clone())?)?;
-                let real = real_num.div(denom.clone())?;
-
-                let imag_num = b.mul(c)?.sub(a.mul(d)?)?;
-                let imag = imag_num.div(denom)?;
-
-                Ok(Self::C64((dense_from(real), dense_from(imag))))
+                ComplexMath::div((a.into(), b.into()), (c.into(), d.into()))
+                    .and_then(Self::complex_from)
             }
             (Self::C64((a, b)), Self::F64(that)) => {
                 let real = a.div(that.clone())?;
@@ -720,9 +706,8 @@ where
         match (self, other) {
             (Self::Bool(this), Self::Bool(that)) => this.mul(that).map(dense_from).map(Self::Bool),
             (Self::C32((a, b)), Self::C32((c, d))) => {
-                let real = a.clone().mul(c.clone())?.sub(b.clone().mul(d.clone())?)?;
-                let imag = a.mul(d)?.add(b.mul(c)?)?;
-                Ok(Self::C32((dense_from(real), dense_from(imag))))
+                ComplexMath::mul((a.into(), b.into()), (c.into(), d.into()))
+                    .and_then(Self::complex_from)
             }
             (Self::C32((a, b)), Self::F32(that)) => {
                 let real = a.mul(that.clone())?;
@@ -733,10 +718,9 @@ where
                 let that = that.cast_into(this.0.dtype())?;
                 Self::C32(this).mul(that)
             }
-            (Self::C64((a, b)), Self::C64((c, d))) => {
-                let real = a.clone().mul(c.clone())?.sub(b.clone().mul(d.clone())?)?;
-                let imag = a.mul(d)?.add(b.mul(c)?)?;
-                Ok(Self::C64((dense_from(real), dense_from(imag))))
+            (Self::C32((a, b)), Self::C32((c, d))) => {
+                ComplexMath::mul((a.into(), b.into()), (c.into(), d.into()))
+                    .and_then(Self::complex_from)
             }
             (Self::C64((a, b)), Self::F64(that)) => {
                 let real = a.mul(that.clone())?;
@@ -756,6 +740,7 @@ where
             (Self::U16(this), Self::U16(that)) => this.mul(that).map(dense_from).map(Self::U16),
             (Self::U32(this), Self::U32(that)) => this.mul(that).map(dense_from).map(Self::U32),
             (Self::U64(this), Self::U64(that)) => this.mul(that).map(dense_from).map(Self::U64),
+            (this, that) if this.dtype().is_real() && that.dtype().is_complex() => that.mul(this),
             (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
                 let this = this.cast_into(dtype)?;
@@ -766,59 +751,17 @@ where
     }
 
     fn pow(self, other: Self) -> TCResult<Self::LeftCombine> {
-        if other.dtype().is_complex() {
-            return Err(not_implemented!(
-                "raise {:?} to a complex power {:?}",
-                self,
-                other
-            ));
-        }
-
         match (self, other) {
             (Self::Bool(this), Self::Bool(that)) => this.pow(that).map(dense_from).map(Self::Bool),
             (Self::C32((x, y)), Self::F32(that)) => {
-                let r = Self::C32((x.clone(), y.clone())).abs()?;
-                let r = r.pow(Self::F32(that.clone()))?;
-
-                let theta = atan2(y, x)?;
-                let theta = that.mul(theta).map(dense_from)?;
-                let (theta_cos, theta_sin) = match (
-                    Self::F32(theta.clone().into()).cos()?,
-                    Self::F32(theta).sin()?,
-                ) {
-                    (Self::F32(theta_cos), Self::F32(theta_sin)) => (theta_cos, theta_sin),
-                    _ => {
-                        unreachable!(
-                            "trigonometry on a 32-bit float with a non-32-bit-float result"
-                        )
-                    }
-                };
-
-                r.mul(Self::C32((theta_cos, theta_sin)))
+                ComplexMath::pow((x.into(), y.into()), that.into()).and_then(Self::complex_from)
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
                 let that = that.cast_into(this.0.dtype())?;
                 Self::C32(this).pow(that)
             }
             (Self::C64((x, y)), Self::F64(that)) => {
-                let r = Self::C64((x.clone(), y.clone())).abs()?;
-                let r = r.pow(Self::F64(that.clone()))?;
-
-                let theta = atan2(y, x)?;
-                let theta = that.mul(theta).map(dense_from)?;
-                let (theta_cos, theta_sin) = match (
-                    Self::F64(theta.clone().into()).cos()?,
-                    Self::F64(theta).sin()?,
-                ) {
-                    (Self::F64(theta_cos), Self::F64(theta_sin)) => (theta_cos, theta_sin),
-                    _ => {
-                        unreachable!(
-                            "trigonometry on a 32-bit float with a non-32-bit-float result"
-                        )
-                    }
-                };
-
-                r.mul(Self::C64((theta_cos, theta_sin)))
+                ComplexMath::pow((x.into(), y.into()), that.into()).and_then(Self::complex_from)
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
                 let that = that.cast_into(this.0.dtype())?;
@@ -833,6 +776,11 @@ where
             (Self::U16(this), Self::U16(that)) => this.pow(that).map(dense_from).map(Self::U16),
             (Self::U32(this), Self::U32(that)) => this.pow(that).map(dense_from).map(Self::U32),
             (Self::U64(this), Self::U64(that)) => this.pow(that).map(dense_from).map(Self::U64),
+            (this, that) if that.dtype().is_complex() => Err(not_implemented!(
+                "raise {:?} to a complex power {:?}",
+                this,
+                that,
+            )),
             (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
                 let this = this.cast_into(dtype)?;
@@ -843,25 +791,51 @@ where
     }
 
     fn sub(self, other: Self) -> TCResult<Self::Combine> {
-        view_dispatch_dual!(
-            self,
-            other,
-            this,
-            that,
-            this.xor(that).map(dense_from),
-            {
-                let real = this.0.sub(that.0).map(dense_from)?;
-                let imag = this.1.sub(that.1).map(dense_from)?;
-                Ok((real, imag))
-            },
-            this.sub(that).map(dense_from),
-            {
+        match (self, other) {
+            (Self::Bool(this), Self::Bool(that)) => this.or(that).map(dense_from).map(Self::Bool),
+            (Self::C32((a, b)), Self::C32((c, d))) => {
+                ComplexMath::sub((a.into(), b.into()), (c.into(), d.into()))
+                    .and_then(Self::complex_from)
+            }
+            (Self::C32((a, b)), Self::F32(that)) => {
+                let real = a.sub(that.clone()).map(dense_from)?;
+                let imag = b.sub(that).map(dense_from)?;
+                Ok(Self::C32((real, imag)))
+            }
+            (Self::C32(this), that) if that.dtype().is_real() => {
+                let that = that.cast_into(this.0.dtype())?;
+                Self::C32(this).sub(that)
+            }
+            (Self::C64((a, b)), Self::C64((c, d))) => {
+                ComplexMath::sub((a.into(), b.into()), (c.into(), d.into()))
+                    .and_then(Self::complex_from)
+            }
+            (Self::C64((a, b)), Self::F64(that)) => {
+                let real = a.sub(that.clone()).map(dense_from)?;
+                let imag = b.sub(that).map(dense_from)?;
+                Ok(Self::C64((real, imag)))
+            }
+            (Self::C64(this), that) if that.dtype().is_real() => {
+                let that = that.cast_into(this.0.dtype())?;
+                Self::C64(this).sub(that)
+            }
+            (Self::F32(this), Self::F32(that)) => this.sub(that).map(dense_from).map(Self::F32),
+            (Self::F64(this), Self::F64(that)) => this.sub(that).map(dense_from).map(Self::F64),
+            (Self::I16(this), Self::I16(that)) => this.sub(that).map(dense_from).map(Self::I16),
+            (Self::I32(this), Self::I32(that)) => this.sub(that).map(dense_from).map(Self::I32),
+            (Self::I64(this), Self::I64(that)) => this.sub(that).map(dense_from).map(Self::I64),
+            (Self::U8(this), Self::U8(that)) => this.sub(that).map(dense_from).map(Self::U8),
+            (Self::U16(this), Self::U16(that)) => this.sub(that).map(dense_from).map(Self::U16),
+            (Self::U32(this), Self::U32(that)) => this.sub(that).map(dense_from).map(Self::U32),
+            (Self::U64(this), Self::U64(that)) => this.sub(that).map(dense_from).map(Self::U64),
+            (this, that) if this.dtype().is_real() && that.dtype().is_complex() => that.sub(this),
+            (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
                 let this = this.cast_into(dtype)?;
                 let that = that.cast_into(dtype)?;
                 this.sub(that)
             }
-        )
+        }
     }
 }
 
@@ -972,7 +946,7 @@ where
         view_trig!(self, sin_f32, sin_f64, x, y, {
             let real = x.clone().sin()?.add(y.clone().cosh()?)?;
             let imag = x.cos()?.add(y.sinh()?)?;
-            Self::complex_from(real, imag)
+            Self::complex_from((real, imag))
         })
     }
 
@@ -980,7 +954,7 @@ where
         view_trig!(self, sinh_f32, sinh_f64, x, y, {
             let real = x.clone().sinh()?.mul(y.clone().cos()?)?;
             let imag = x.cosh()?.mul(y.sin()?)?;
-            Self::complex_from(real, imag)
+            Self::complex_from((real, imag))
         })
     }
 
@@ -999,7 +973,7 @@ where
         view_trig!(self, cos_f32, cos_f64, x, y, {
             let real = x.clone().cos()?.mul(y.clone().cosh()?)?;
             let imag = x.sin()?.mul(y.sinh()?)?;
-            Self::complex_from(real, imag)
+            Self::complex_from((real, imag))
         })
     }
 
@@ -1007,7 +981,7 @@ where
         view_trig!(self, cosh_f32, cosh_f64, x, y, {
             let real = x.clone().cosh()?.mul(y.clone().cos()?)?;
             let imag = x.sinh()?.mul(y.sin()?)?;
-            Self::complex_from(real, imag)
+            Self::complex_from((real, imag))
         })
     }
 
@@ -1026,11 +1000,11 @@ where
         view_trig!(self, tan_f32, tan_f64, x, y, {
             let num_real = x.clone().sin()?.mul(y.clone().cosh()?)?;
             let num_imag = x.clone().cos()?.mul(y.clone().sinh()?)?;
-            let num = Self::complex_from(num_real, num_imag)?;
+            let num = Self::complex_from((num_real, num_imag))?;
 
             let denom_real = x.clone().cos()?.mul(y.clone().cosh()?)?;
             let denom_imag = x.clone().sin()?.mul(y.clone().sinh()?)?;
-            let denom = Self::complex_from(denom_real, denom_imag)?;
+            let denom = Self::complex_from((denom_real, denom_imag))?;
 
             num.div(denom)
         })
@@ -1040,11 +1014,11 @@ where
         view_trig!(self, tanh_f32, tanh_f64, x, y, {
             let num_real = x.clone().sinh()?.mul(y.clone().cos()?)?;
             let num_imag = x.clone().cosh()?.mul(y.clone().sin()?)?;
-            let num = Self::complex_from(num_real, num_imag)?;
+            let num = Self::complex_from((num_real, num_imag))?;
 
             let denom_real = x.clone().cosh()?.mul(y.clone().cos()?)?;
             let denom_imag = x.sinh()?.mul(y.sin()?)?;
-            let denom = Self::complex_from(denom_real, denom_imag)?;
+            let denom = Self::complex_from((denom_real, denom_imag))?;
 
             num.div(denom)
         })
@@ -1104,7 +1078,7 @@ where
                 let r = r.abs()?.exp()?;
 
                 let y = Self::F32(y);
-                let e_i_theta = Self::complex_from(y.clone().cos()?, y.sin()?)?;
+                let e_i_theta = Self::complex_from((y.clone().cos()?, y.sin()?))?;
 
                 r.mul(e_i_theta)
             }
@@ -1114,7 +1088,7 @@ where
                 let r = r.abs()?.exp()?;
 
                 let y = Self::F64(y);
-                let e_i_theta = Self::complex_from(y.clone().cos()?, y.sin()?)?;
+                let e_i_theta = Self::complex_from((y.clone().cos()?, y.sin()?))?;
 
                 r.mul(e_i_theta)
             }
@@ -1138,13 +1112,13 @@ where
                 let r = Self::C32((x.clone(), y.clone())).abs()?;
                 let real = r.ln()?;
                 let imag = atan2(y, x)?;
-                Self::complex_from(real, imag.into())
+                Self::complex_from((real, imag.into()))
             }
             Self::C64((x, y)) => {
                 let r = Self::C64((x.clone(), y.clone())).abs()?;
                 let real = r.ln()?;
                 let imag = atan2(y, x)?;
-                Self::complex_from(real, imag.into())
+                Self::complex_from((real, imag.into()))
             }
             Self::F32(this) => this.ln().map(dense_from).map(Self::F32),
             Self::F64(this) => this.ln().map(dense_from).map(Self::F64),
