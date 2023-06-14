@@ -7,7 +7,7 @@ use crate::tensor::{TensorBoolean, TensorCompare, TensorInstance, TensorMath, Te
 use super::dense::{DenseCacheFile, DenseView};
 use super::sparse::{Node, SparseView};
 
-trait TensorComplex:
+pub(crate) trait TensorComplex:
     TensorInstance
     + TensorMath<Self, Combine = Self, LeftCombine = Self>
     + TensorMathConst<Combine = Self, DenseCombine = Self>
@@ -23,7 +23,7 @@ trait TensorComplex:
 impl<FE: DenseCacheFile + AsType<Node> + Clone> TensorComplex for DenseView<FE> {}
 impl<FE: ThreadSafe + AsType<Node>> TensorComplex for SparseView<FE> {}
 
-trait TensorComplexCompare:
+pub(crate) trait ComplexCompare:
     TensorComplex
     + TensorBoolean<Self, Combine = Self, LeftCombine = Self>
     + TensorCompare<Self, Compare = Self>
@@ -73,5 +73,5 @@ trait TensorComplexCompare:
     }
 }
 
-impl<FE: DenseCacheFile + AsType<Node> + Clone> TensorComplexCompare for DenseView<FE> {}
-impl<FE: ThreadSafe + AsType<Node>> TensorComplexCompare for SparseView<FE> {}
+impl<FE: DenseCacheFile + AsType<Node> + Clone> ComplexCompare for DenseView<FE> {}
+impl<FE: ThreadSafe + AsType<Node>> ComplexCompare for SparseView<FE> {}
