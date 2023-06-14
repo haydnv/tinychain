@@ -10,6 +10,7 @@ use tc_value::{
 };
 use tcgeneric::ThreadSafe;
 
+use crate::tensor::complex::ComplexCompare;
 use crate::tensor::sparse::Node;
 use crate::tensor::{
     Shape, TensorBoolean, TensorCast, TensorCompare, TensorCompareConst, TensorInstance,
@@ -258,31 +259,83 @@ where
     }
 }
 
-impl<FE: ThreadSafe> TensorCompare<Self> for DenseView<FE> {
+macro_rules! dense_compare {
+    ($this:ident, $that:ident, $complex:expr, $general:expr) => {
+        match ($this, $that) {
+            (Self::Bool(this), Self::Bool(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::C32((lr, li)), Self::C32((rr, ri))) => {
+                $complex((lr.into(), li.into()), (rr.into(), ri.into()))
+            }
+            (Self::C64((lr, li)), Self::C64((rr, ri))) => {
+                $complex((lr.into(), li.into()), (rr.into(), ri.into()))
+            }
+            (Self::F32(this), Self::F32(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::F64(this), Self::F64(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::I16(this), Self::I16(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::I32(this), Self::I32(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::I64(this), Self::I64(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::U8(this), Self::U8(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::U16(this), Self::U16(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::U32(this), Self::U32(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::U64(this), Self::U64(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (this, that) => {
+                let dtype = Ord::max(this.dtype(), that.dtype());
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
+                $general(this, that)
+            }
+        }
+    };
+}
+
+impl<FE> TensorCompare<Self> for DenseView<FE>
+where
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
     type Compare = Self;
 
     fn eq(self, other: Self) -> TCResult<Self::Compare> {
-        todo!()
+        dense_compare!(self, other, ComplexCompare::eq, TensorCompare::eq)
     }
 
     fn gt(self, other: Self) -> TCResult<Self::Compare> {
-        todo!()
+        dense_compare!(self, other, ComplexCompare::gt, TensorCompare::gt)
     }
 
     fn ge(self, other: Self) -> TCResult<Self::Compare> {
-        todo!()
+        dense_compare!(self, other, ComplexCompare::ge, TensorCompare::ge)
     }
 
     fn lt(self, other: Self) -> TCResult<Self::Compare> {
-        todo!()
+        dense_compare!(self, other, ComplexCompare::lt, TensorCompare::lt)
     }
 
     fn le(self, other: Self) -> TCResult<Self::Compare> {
-        todo!()
+        dense_compare!(self, other, ComplexCompare::le, TensorCompare::le)
     }
 
     fn ne(self, other: Self) -> TCResult<Self::Compare> {
-        todo!()
+        dense_compare!(self, other, ComplexCompare::ne, TensorCompare::ne)
     }
 }
 
