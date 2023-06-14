@@ -7,18 +7,19 @@ use async_trait::async_trait;
 use collate::Collate;
 use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ha_ndarray::*;
-use safecast::{AsType, CastFrom};
+use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
 use tc_transact::TxnId;
-use tc_value::{DType, Number, NumberClass, NumberCollator, NumberType};
+use tc_value::{DType, Number, NumberClass, NumberCollator, NumberInstance, NumberType};
 use tcgeneric::ThreadSafe;
 
-use super::dense::{DenseSparse, DenseTensor};
+use super::dense::{DenseAccess, DenseAccessCast, DenseCompareConst, DenseSparse, DenseTensor};
+
 use super::{
-    Axes, Coord, Range, Shape, TensorBoolean, TensorCompare, TensorCompareConst, TensorConvert,
-    TensorInstance, TensorMath, TensorPermitRead, TensorReduce, TensorTransform, TensorUnary,
-    TensorUnaryBoolean,
+    Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCompare,
+    TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorPermitRead, TensorReduce,
+    TensorTransform, TensorUnary, TensorUnaryBoolean,
 };
 
 pub use access::*;
@@ -158,6 +159,48 @@ where
         })?;
 
         Ok(SparseTensor::from(access))
+    }
+}
+
+impl<FE, A> TensorBooleanConst for SparseTensor<FE, A>
+where
+    FE: AsType<Node> + ThreadSafe,
+    A: SparseInstance + Into<SparseAccess<FE, A::DType>>,
+    DenseAccess<FE, A::DType>: From<DenseSparse<A>>,
+    DenseAccessCast<FE>: From<DenseAccess<FE, A::DType>>,
+    SparseAccessCast<FE>: From<SparseAccess<FE, A::DType>>,
+{
+    type Combine = SparseTensor<FE, SparseCompareConst<FE, u8>>;
+    type DenseCombine = DenseTensor<FE, DenseCompareConst<FE, u8>>;
+
+    fn and_const(self, other: Number) -> TCResult<Self::Combine> {
+        let access = SparseCompareConst::new(self.accessor.into(), other, |l, r| {
+            if l.and(r).cast_into() {
+                1
+            } else {
+                0
+            }
+        });
+
+        Ok(SparseTensor::from(access))
+    }
+
+    fn or_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        let access = DenseSparse::from(self.accessor);
+        let access = DenseCompareConst::new(DenseAccess::from(access), other, |l, r| {
+            l.or_scalar(r).map(Array::from).map_err(TCError::from)
+        });
+
+        Ok(DenseTensor::from(access))
+    }
+
+    fn xor_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        let access = DenseSparse::from(self.accessor);
+        let access = DenseCompareConst::new(DenseAccess::from(access), other, |l, r| {
+            l.xor_scalar(r).map(Array::from).map_err(TCError::from)
+        });
+
+        Ok(DenseTensor::from(access))
     }
 }
 

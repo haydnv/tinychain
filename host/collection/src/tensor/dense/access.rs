@@ -136,6 +136,7 @@ pub enum DenseAccess<FE, T: CDatatype> {
     File(DenseFile<FE, T>),
     Broadcast(Box<DenseBroadcast<Self>>),
     Combine(Box<DenseCombine<Self, Self, T>>),
+    CombineConst(Box<DenseCombineConst<Self, T>>),
     Compare(Box<DenseCompare<FE, T>>),
     CompareConst(Box<DenseCompareConst<FE, T>>),
     Const(Box<DenseConst<Self, T>>),
@@ -158,6 +159,7 @@ impl<FE, T: CDatatype> Clone for DenseAccess<FE, T> {
             Self::File(file) => Self::File(file.clone()),
             Self::Broadcast(broadcast) => Self::Broadcast(broadcast.clone()),
             Self::Combine(combine) => Self::Combine(combine.clone()),
+            Self::CombineConst(combine) => Self::CombineConst(combine.clone()),
             Self::Compare(compare) => Self::Compare(compare.clone()),
             Self::CompareConst(compare) => Self::CompareConst(compare.clone()),
             Self::Const(combine) => Self::Const(combine.clone()),
@@ -182,6 +184,7 @@ macro_rules! access_dispatch {
             DenseAccess::File($var) => $call,
             DenseAccess::Broadcast($var) => $call,
             DenseAccess::Combine($var) => $call,
+            DenseAccess::CombineConst($var) => $call,
             DenseAccess::Compare($var) => $call,
             DenseAccess::CompareConst($var) => $call,
             DenseAccess::Const($var) => $call,
@@ -244,6 +247,7 @@ where
                 Ok(Box::pin(broadcast.read_blocks().await?.map_ok(Array::from)))
             }
             Self::Combine(combine) => combine.read_blocks().await,
+            Self::CombineConst(combine) => combine.read_blocks().await,
             Self::Compare(compare) => compare.read_blocks().await,
             Self::CompareConst(compare) => compare.read_blocks().await,
             Self::Const(combine) => combine.read_blocks().await,
@@ -278,6 +282,7 @@ where
         match self {
             Self::Broadcast(broadcast) => broadcast.read_permit(txn_id, range).await,
             Self::Combine(combine) => combine.read_permit(txn_id, range).await,
+            Self::CombineConst(combine) => combine.read_permit(txn_id, range).await,
             Self::Compare(compare) => compare.read_permit(txn_id, range).await,
             Self::CompareConst(compare) => compare.read_permit(txn_id, range).await,
             Self::Const(combine) => combine.read_permit(txn_id, range).await,
@@ -1537,6 +1542,74 @@ where
     }
 }
 
+#[derive(Clone)]
+pub struct DenseCombineConst<S, T: CDatatype> {
+    left: S,
+    right: T,
+    block_op: fn(Array<T>, T) -> TCResult<Array<T>>,
+    value_op: fn(T, T) -> T,
+}
+
+impl<S: TensorInstance, T: CDatatype + DType> TensorInstance for DenseCombineConst<S, T> {
+    fn dtype(&self) -> NumberType {
+        T::dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.left.shape()
+    }
+}
+
+#[async_trait]
+impl<S, T> DenseInstance for DenseCombineConst<S, T>
+where
+    S: DenseInstance,
+    T: CDatatype + DType,
+{
+    type Block = Array<T>;
+    type DType = T;
+
+    fn block_size(&self) -> usize {
+        todo!()
+    }
+
+    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+        todo!()
+    }
+
+    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+        todo!()
+    }
+}
+
+#[async_trait]
+impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseCombineConst<S, T> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        self.left.read_permit(txn_id, range).await
+    }
+}
+
+impl<FE, S, T> From<DenseCombineConst<S, T>> for DenseAccess<FE, T>
+where
+    S: Into<DenseAccess<FE, T>>,
+    T: CDatatype,
+{
+    fn from(combine: DenseCombineConst<S, T>) -> Self {
+        Self::CombineConst(Box::new(DenseCombineConst {
+            left: combine.left.into(),
+            right: combine.right,
+            block_op: combine.block_op,
+            value_op: combine.value_op,
+        }))
+    }
+}
+
+impl<S: fmt::Debug, T: CDatatype> fmt::Debug for DenseCombineConst<S, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "combine {:?} with a constant value", self.left)
+    }
+}
+
 type ArrayCmp<T> = fn(Block, Block) -> TCResult<Array<T>>;
 
 pub struct DenseCompare<FE, T: CDatatype> {
@@ -2682,6 +2755,19 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
 impl<S: TensorPermitRead> TensorPermitRead for DenseSparse<S> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.source.read_permit(txn_id, range).await
+    }
+}
+
+impl<FE, S, T> From<DenseSparse<S>> for DenseAccess<FE, T>
+where
+    S: Into<SparseAccess<FE, T>>,
+    T: CDatatype,
+{
+    fn from(sparse: DenseSparse<S>) -> Self {
+        Self::Sparse(DenseSparse {
+            source: sparse.source.into(),
+            block_size: sparse.block_size,
+        })
     }
 }
 

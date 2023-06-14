@@ -185,7 +185,7 @@ pub trait TensorBooleanConst {
     /// The return type of a boolean operation.
     type Combine: TensorInstance;
 
-    /// The return type of a boolean operation with a result expected to be dense.
+    /// The dense return type of a boolean operation.
     type DenseCombine: TensorInstance;
 
     /// Logical and

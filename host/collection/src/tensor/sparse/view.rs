@@ -619,7 +619,7 @@ impl<FE: ThreadSafe + AsType<Node>> TensorMath<Self> for SparseView<FE> {
     }
 }
 
-impl<FE: ThreadSafe> TensorMathConst for SparseView<FE> {
+impl<FE: AsType<Node> + ThreadSafe> TensorMathConst for SparseView<FE> {
     type Combine = Self;
     type DenseCombine = Self;
 

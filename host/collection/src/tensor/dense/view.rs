@@ -718,7 +718,7 @@ where
                 let that = that.cast_into(this.0.dtype())?;
                 Self::C32(this).mul(that)
             }
-            (Self::C32((a, b)), Self::C32((c, d))) => {
+            (Self::C64((a, b)), Self::C64((c, d))) => {
                 ComplexMath::mul((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }

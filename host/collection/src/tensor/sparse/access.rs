@@ -266,6 +266,7 @@ pub enum SparseAccess<FE, T: CDatatype> {
     CompareLeft(Box<SparseCompareLeft<FE, T>>),
     Combine(Box<SparseCombine<Self, Self, T>>),
     CombineLeft(Box<SparseCombineLeft<Self, Self, T>>),
+    CombineConst(Box<SparseCombineConst<Self, T>>),
     Cow(Box<SparseCow<FE, T, Self>>),
     Expand(Box<SparseExpand<Self>>),
     Reshape(Box<SparseReshape<Self>>),
@@ -285,6 +286,7 @@ impl<FE, T: CDatatype> Clone for SparseAccess<FE, T> {
             Self::Cast(cast) => Self::Cast(cast.clone()),
             Self::Combine(combine) => Self::Combine(combine.clone()),
             Self::CombineLeft(combine) => Self::CombineLeft(combine.clone()),
+            Self::CombineConst(combine) => Self::CombineConst(combine.clone()),
             Self::Compare(compare) => Self::Compare(compare.clone()),
             Self::CompareConst(compare) => Self::CompareConst(compare.clone()),
             Self::CompareLeft(compare) => Self::CompareLeft(compare.clone()),
@@ -309,6 +311,7 @@ macro_rules! access_dispatch {
             Self::Cast($var) => $call,
             Self::Combine($var) => $call,
             Self::CombineLeft($var) => $call,
+            Self::CombineConst($var) => $call,
             Self::Compare($var) => $call,
             Self::CompareConst($var) => $call,
             Self::CompareLeft($var) => $call,
@@ -382,6 +385,7 @@ where
             Self::Cow(cow) => cow.read_permit(txn_id, range).await,
             Self::Combine(combine) => combine.read_permit(txn_id, range).await,
             Self::CombineLeft(combine) => combine.read_permit(txn_id, range).await,
+            Self::CombineConst(combine) => combine.read_permit(txn_id, range).await,
             Self::Compare(compare) => compare.read_permit(txn_id, range).await,
             Self::CompareLeft(compare) => compare.read_permit(txn_id, range).await,
             Self::Expand(expand) => expand.read_permit(txn_id, range).await,
@@ -1570,6 +1574,88 @@ impl<L: fmt::Debug, R: fmt::Debug, T: CDatatype> fmt::Debug for SparseCombineLef
     }
 }
 
+#[derive(Clone)]
+pub struct SparseCombineConst<S, T: CDatatype> {
+    left: S,
+    right: T,
+    block_op: fn(Array<T>, T) -> TCResult<Array<T>>,
+    value_op: fn(T, T) -> T,
+}
+
+impl<S, T> TensorInstance for SparseCombineConst<S, T>
+where
+    S: TensorInstance,
+    T: CDatatype + DType,
+{
+    fn dtype(&self) -> NumberType {
+        T::dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.left.shape()
+    }
+}
+
+#[async_trait]
+impl<S, T> SparseInstance for SparseCombineConst<S, T>
+where
+    S: SparseInstance,
+    T: CDatatype + DType,
+{
+    type CoordBlock = S::CoordBlock;
+    type ValueBlock = Array<T>;
+    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type DType = T;
+
+    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        todo!()
+    }
+
+    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+        todo!()
+    }
+
+    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+        todo!()
+    }
+}
+
+#[async_trait]
+impl<S, T> TensorPermitRead for SparseCombineConst<S, T>
+where
+    S: TensorPermitRead,
+    T: CDatatype,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        self.left.read_permit(txn_id, range).await
+    }
+}
+
+impl<FE, S, T> From<SparseCombineConst<S, T>> for SparseAccess<FE, T>
+where
+    S: Into<SparseAccess<FE, T>>,
+    T: CDatatype,
+{
+    fn from(combine: SparseCombineConst<S, T>) -> Self {
+        Self::CombineConst(Box::new(SparseCombineConst {
+            left: combine.left.into(),
+            right: combine.right,
+            block_op: combine.block_op,
+            value_op: combine.value_op,
+        }))
+    }
+}
+
+impl<S, T> fmt::Debug for SparseCombineConst<S, T>
+where
+    S: fmt::Debug,
+    T: CDatatype,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "combine {:?} with a constant value", self.left)
+    }
+}
+
 pub struct SparseCompare<FE, T> {
     left: SparseAccessCast<FE>,
     right: SparseAccessCast<FE>,
@@ -1876,6 +1962,12 @@ where
 impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for SparseCompareConst<FE, T> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.left.read_permit(txn_id, range).await
+    }
+}
+
+impl<FE, T: CDatatype> From<SparseCompareConst<FE, T>> for SparseAccess<FE, T> {
+    fn from(compare: SparseCompareConst<FE, T>) -> Self {
+        Self::CompareConst(Box::new(compare))
     }
 }
 
