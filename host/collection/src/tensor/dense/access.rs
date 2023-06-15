@@ -1411,6 +1411,15 @@ impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for DenseExpand<S> {
     }
 }
 
+impl<FE, S: Into<DenseAccess<FE, T>>, T: CDatatype> From<DenseExpand<S>> for DenseAccess<FE, T> {
+    fn from(expand: DenseExpand<S>) -> Self {
+        Self::Expand(Box::new(DenseExpand {
+            source: expand.source.into(),
+            transform: expand.transform,
+        }))
+    }
+}
+
 impl<S: fmt::Debug> fmt::Debug for DenseExpand<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(

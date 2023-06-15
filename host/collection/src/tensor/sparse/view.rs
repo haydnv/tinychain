@@ -12,9 +12,9 @@ use tcgeneric::ThreadSafe;
 use crate::tensor::complex::{ComplexCompare, ComplexMath};
 use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
-    Axes, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst,
-    TensorConvert, TensorInstance, TensorMath, TensorMathConst, TensorReduce, TensorTrig,
-    TensorUnary, TensorUnaryBoolean,
+    Axes, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare,
+    TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorMathConst, TensorReduce,
+    TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
@@ -1007,6 +1007,139 @@ impl<FE: AsType<Node> + ThreadSafe> TensorReduce for SparseView<FE> {
             Err(not_implemented!("sum of a complex tensor")),
             this.sum_all(txn_id).await
         )
+    }
+}
+
+impl<FE: AsType<Node> + ThreadSafe> TensorTransform for SparseView<FE> {
+    type Broadcast = Self;
+    type Expand = Self;
+    type Reshape = Self;
+    type Slice = Self;
+    type Transpose = Self;
+
+    fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
+        match self {
+            Self::Bool(this) => this.broadcast(shape).map(sparse_from).map(Self::Bool),
+            Self::C32((re, im)) => {
+                let re = re.broadcast(shape.clone()).map(sparse_from)?;
+                let im = im.broadcast(shape).map(sparse_from)?;
+                Ok(Self::C32((re, im)))
+            }
+            Self::C64((re, im)) => {
+                let re = re.broadcast(shape.clone()).map(sparse_from)?;
+                let im = im.broadcast(shape).map(sparse_from)?;
+                Ok(Self::C64((re, im)))
+            }
+            Self::F32(this) => this.broadcast(shape).map(sparse_from).map(Self::F32),
+            Self::F64(this) => this.broadcast(shape).map(sparse_from).map(Self::F64),
+            Self::I16(this) => this.broadcast(shape).map(sparse_from).map(Self::I16),
+            Self::I32(this) => this.broadcast(shape).map(sparse_from).map(Self::I32),
+            Self::I64(this) => this.broadcast(shape).map(sparse_from).map(Self::I64),
+            Self::U8(this) => this.broadcast(shape).map(sparse_from).map(Self::U8),
+            Self::U16(this) => this.broadcast(shape).map(sparse_from).map(Self::U16),
+            Self::U32(this) => this.broadcast(shape).map(sparse_from).map(Self::U32),
+            Self::U64(this) => this.broadcast(shape).map(sparse_from).map(Self::U64),
+        }
+    }
+
+    fn expand(self, axes: Axes) -> TCResult<Self::Expand> {
+        match self {
+            Self::Bool(this) => this.expand(axes).map(sparse_from).map(Self::Bool),
+            Self::C32((re, im)) => {
+                let re = re.expand(axes.to_vec()).map(sparse_from)?;
+                let im = im.expand(axes).map(sparse_from)?;
+                Ok(Self::C32((re, im)))
+            }
+            Self::C64((re, im)) => {
+                let re = re.expand(axes.to_vec()).map(sparse_from)?;
+                let im = im.expand(axes).map(sparse_from)?;
+                Ok(Self::C64((re, im)))
+            }
+            Self::F32(this) => this.expand(axes).map(sparse_from).map(Self::F32),
+            Self::F64(this) => this.expand(axes).map(sparse_from).map(Self::F64),
+            Self::I16(this) => this.expand(axes).map(sparse_from).map(Self::I16),
+            Self::I32(this) => this.expand(axes).map(sparse_from).map(Self::I32),
+            Self::I64(this) => this.expand(axes).map(sparse_from).map(Self::I64),
+            Self::U8(this) => this.expand(axes).map(sparse_from).map(Self::U8),
+            Self::U16(this) => this.expand(axes).map(sparse_from).map(Self::U16),
+            Self::U32(this) => this.expand(axes).map(sparse_from).map(Self::U32),
+            Self::U64(this) => this.expand(axes).map(sparse_from).map(Self::U64),
+        }
+    }
+
+    fn reshape(self, shape: Shape) -> TCResult<Self::Reshape> {
+        match self {
+            Self::Bool(this) => this.reshape(shape).map(sparse_from).map(Self::Bool),
+            Self::C32((re, im)) => {
+                let re = re.reshape(shape.clone()).map(sparse_from)?;
+                let im = im.reshape(shape).map(sparse_from)?;
+                Ok(Self::C32((re, im)))
+            }
+            Self::C64((re, im)) => {
+                let re = re.reshape(shape.clone()).map(sparse_from)?;
+                let im = im.reshape(shape).map(sparse_from)?;
+                Ok(Self::C64((re, im)))
+            }
+            Self::F32(this) => this.reshape(shape).map(sparse_from).map(Self::F32),
+            Self::F64(this) => this.reshape(shape).map(sparse_from).map(Self::F64),
+            Self::I16(this) => this.reshape(shape).map(sparse_from).map(Self::I16),
+            Self::I32(this) => this.reshape(shape).map(sparse_from).map(Self::I32),
+            Self::I64(this) => this.reshape(shape).map(sparse_from).map(Self::I64),
+            Self::U8(this) => this.reshape(shape).map(sparse_from).map(Self::U8),
+            Self::U16(this) => this.reshape(shape).map(sparse_from).map(Self::U16),
+            Self::U32(this) => this.reshape(shape).map(sparse_from).map(Self::U32),
+            Self::U64(this) => this.reshape(shape).map(sparse_from).map(Self::U64),
+        }
+    }
+
+    fn slice(self, range: Range) -> TCResult<Self::Slice> {
+        match self {
+            Self::Bool(this) => this.slice(range).map(sparse_from).map(Self::Bool),
+            Self::C32((re, im)) => {
+                let re = re.slice(range.clone()).map(sparse_from)?;
+                let im = im.slice(range).map(sparse_from)?;
+                Ok(Self::C32((re, im)))
+            }
+            Self::C64((re, im)) => {
+                let re = re.slice(range.clone()).map(sparse_from)?;
+                let im = im.slice(range).map(sparse_from)?;
+                Ok(Self::C64((re, im)))
+            }
+            Self::F32(this) => this.slice(range).map(sparse_from).map(Self::F32),
+            Self::F64(this) => this.slice(range).map(sparse_from).map(Self::F64),
+            Self::I16(this) => this.slice(range).map(sparse_from).map(Self::I16),
+            Self::I32(this) => this.slice(range).map(sparse_from).map(Self::I32),
+            Self::I64(this) => this.slice(range).map(sparse_from).map(Self::I64),
+            Self::U8(this) => this.slice(range).map(sparse_from).map(Self::U8),
+            Self::U16(this) => this.slice(range).map(sparse_from).map(Self::U16),
+            Self::U32(this) => this.slice(range).map(sparse_from).map(Self::U32),
+            Self::U64(this) => this.slice(range).map(sparse_from).map(Self::U64),
+        }
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        match self {
+            Self::Bool(this) => this.transpose(permutation).map(sparse_from).map(Self::Bool),
+            Self::C32((re, im)) => {
+                let re = re.transpose(permutation.clone()).map(sparse_from)?;
+                let im = im.transpose(permutation).map(sparse_from)?;
+                Ok(Self::C32((re, im)))
+            }
+            Self::C64((re, im)) => {
+                let re = re.transpose(permutation.clone()).map(sparse_from)?;
+                let im = im.transpose(permutation).map(sparse_from)?;
+                Ok(Self::C64((re, im)))
+            }
+            Self::F32(this) => this.transpose(permutation).map(sparse_from).map(Self::F32),
+            Self::F64(this) => this.transpose(permutation).map(sparse_from).map(Self::F64),
+            Self::I16(this) => this.transpose(permutation).map(sparse_from).map(Self::I16),
+            Self::I32(this) => this.transpose(permutation).map(sparse_from).map(Self::I32),
+            Self::I64(this) => this.transpose(permutation).map(sparse_from).map(Self::I64),
+            Self::U8(this) => this.transpose(permutation).map(sparse_from).map(Self::U8),
+            Self::U16(this) => this.transpose(permutation).map(sparse_from).map(Self::U16),
+            Self::U32(this) => this.transpose(permutation).map(sparse_from).map(Self::U32),
+            Self::U64(this) => this.transpose(permutation).map(sparse_from).map(Self::U64),
+        }
     }
 }
 
