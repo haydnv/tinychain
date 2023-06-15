@@ -260,7 +260,6 @@ pub enum SparseAccess<FE, T: CDatatype> {
     Table(SparseFile<FE, T>),
     Broadcast(Box<SparseBroadcast<FE, T>>),
     BroadcastAxis(Box<SparseBroadcastAxis<Self>>),
-    Cast(Box<SparseCast<FE, T>>),
     Compare(Box<SparseCompare<FE, T>>),
     CompareConst(Box<SparseCompareConst<FE, T>>),
     CompareLeft(Box<SparseCompareLeft<FE, T>>),
@@ -284,7 +283,6 @@ impl<FE, T: CDatatype> Clone for SparseAccess<FE, T> {
             Self::Table(table) => Self::Table(table.clone()),
             Self::Broadcast(broadcast) => Self::Broadcast(broadcast.clone()),
             Self::BroadcastAxis(broadcast) => Self::BroadcastAxis(broadcast.clone()),
-            Self::Cast(cast) => Self::Cast(cast.clone()),
             Self::Combine(combine) => Self::Combine(combine.clone()),
             Self::CombineLeft(combine) => Self::CombineLeft(combine.clone()),
             Self::CombineConst(combine) => Self::CombineConst(combine.clone()),
@@ -310,7 +308,6 @@ macro_rules! access_dispatch {
             Self::Table($var) => $call,
             Self::Broadcast($var) => $call,
             Self::BroadcastAxis($var) => $call,
-            Self::Cast($var) => $call,
             Self::Combine($var) => $call,
             Self::CombineLeft($var) => $call,
             Self::CombineConst($var) => $call,
@@ -1164,84 +1161,6 @@ where
 impl<S: fmt::Debug> fmt::Debug for SparseBroadcastAxis<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "broadcast of {:?} axis {}", self.source, self.axis)
-    }
-}
-
-pub struct SparseCast<FE, T> {
-    source: SparseAccessCast<FE>,
-    dtype: PhantomData<T>,
-}
-
-impl<FE, T> Clone for SparseCast<FE, T> {
-    fn clone(&self) -> Self {
-        Self {
-            source: self.source.clone(),
-            dtype: self.dtype,
-        }
-    }
-}
-
-impl<FE, T> TensorInstance for SparseCast<FE, T>
-where
-    FE: ThreadSafe,
-    T: CDatatype + DType,
-{
-    fn dtype(&self) -> NumberType {
-        T::dtype()
-    }
-
-    fn shape(&self) -> &Shape {
-        let source = &self.source;
-        access_cast_dispatch!(source, this, this.shape())
-    }
-}
-
-#[async_trait]
-impl<FE, T> SparseInstance for SparseCast<FE, T>
-where
-    FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType + fmt::Debug,
-    Number: From<T> + CastInto<T>,
-{
-    type CoordBlock = Array<u64>;
-    type ValueBlock = Array<T>;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
-    type DType = T;
-
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
-        let source = self.source;
-        access_cast_dispatch!(source, access, {
-            let source_blocks = access.blocks(range, order).await?;
-            let blocks = source_blocks.map(|result| {
-                result.and_then(|(coords, values)| {
-                    let values = values.cast().map(Array::<T>::from)?;
-                    Ok((coords, values))
-                })
-            });
-
-            Ok(Box::pin(blocks))
-        })
-    }
-
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        let ndim = self.ndim();
-        let size = self.size();
-        let blocks = self.blocks(range, order).await?;
-        block_elements(blocks, ndim, size)
-    }
-
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
-        let source = &self.source;
-        access_cast_dispatch!(source, this, {
-            let value: Number = this.read_value(coord).map_ok(|n| n.into()).await?;
-            Ok(value.cast_into())
-        })
-    }
-}
-
-impl<FE, T: DType> fmt::Debug for SparseCast<FE, T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "cast {:?} into {:?}", self.source, T::dtype())
     }
 }
 
