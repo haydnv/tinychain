@@ -1563,22 +1563,27 @@ impl<S: TensorInstance, T: CDatatype + DType> TensorInstance for DenseCombineCon
 #[async_trait]
 impl<S, T> DenseInstance for DenseCombineConst<S, T>
 where
-    S: DenseInstance,
+    S: DenseInstance<DType = T>,
     T: CDatatype + DType,
 {
     type Block = Array<T>;
     type DType = T;
 
     fn block_size(&self) -> usize {
-        todo!()
+        self.left.block_size()
     }
 
     async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
-        todo!()
+        let source_block = self.left.read_block(block_id).await?;
+        (self.block_op)(source_block.into(), self.right)
     }
 
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        todo!()
+        let source_blocks = self.left.read_blocks().await?;
+        let blocks = source_blocks
+            .map(move |result| result.and_then(|block| (self.block_op)(block.into(), self.right)));
+
+        Ok(Box::pin(blocks))
     }
 }
 

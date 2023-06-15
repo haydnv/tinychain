@@ -1599,7 +1599,7 @@ where
 #[async_trait]
 impl<S, T> SparseInstance for SparseCombineConst<S, T>
 where
-    S: SparseInstance,
+    S: SparseInstance<DType = T>,
     T: CDatatype + DType,
 {
     type CoordBlock = S::CoordBlock;
@@ -1608,15 +1608,29 @@ where
     type DType = T;
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
-        todo!()
+        let left_blocks = self.left.blocks(range, order).await?;
+
+        let blocks = left_blocks.map(move |result| {
+            let (coords, values) = result?;
+            let values = (self.block_op)(values.into(), self.right)?;
+            Ok((coords, values))
+        });
+
+        Ok(Box::pin(blocks))
     }
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        todo!()
+        let ndim = self.ndim();
+        let size = self.size();
+        let blocks = self.blocks(range, order).await?;
+        block_elements(blocks, ndim, size)
     }
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
-        todo!()
+        self.left
+            .read_value(coord)
+            .map_ok(|value| (self.value_op)(value, self.right))
+            .await
     }
 }
 
