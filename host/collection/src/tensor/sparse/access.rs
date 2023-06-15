@@ -269,6 +269,7 @@ pub enum SparseAccess<FE, T: CDatatype> {
     CombineConst(Box<SparseCombineConst<Self, T>>),
     Cow(Box<SparseCow<FE, T, Self>>),
     Expand(Box<SparseExpand<Self>>),
+    Reduce(Box<SparseReduce<Self, T>>),
     Reshape(Box<SparseReshape<Self>>),
     Slice(Box<SparseSlice<Self>>),
     Transpose(Box<SparseTranspose<Self>>),
@@ -292,6 +293,7 @@ impl<FE, T: CDatatype> Clone for SparseAccess<FE, T> {
             Self::CompareLeft(compare) => Self::CompareLeft(compare.clone()),
             Self::Cow(cow) => Self::Cow(cow.clone()),
             Self::Expand(expand) => Self::Expand(expand.clone()),
+            Self::Reduce(reduce) => Self::Reduce(reduce.clone()),
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
             Self::Slice(slice) => Self::Slice(slice.clone()),
             Self::Transpose(transpose) => Self::Transpose(transpose.clone()),
@@ -317,6 +319,7 @@ macro_rules! access_dispatch {
             Self::CompareLeft($var) => $call,
             Self::Cow($var) => $call,
             Self::Expand($var) => $call,
+            Self::Reduce($var) => $call,
             Self::Reshape($var) => $call,
             Self::Slice($var) => $call,
             Self::Unary($var) => $call,
@@ -389,6 +392,7 @@ where
             Self::Compare(compare) => compare.read_permit(txn_id, range).await,
             Self::CompareLeft(compare) => compare.read_permit(txn_id, range).await,
             Self::Expand(expand) => expand.read_permit(txn_id, range).await,
+            Self::Reduce(reduce) => reduce.read_permit(txn_id, range).await,
             Self::Reshape(reshape) => reshape.read_permit(txn_id, range).await,
             Self::Slice(slice) => slice.read_permit(txn_id, range).await,
             Self::Transpose(transpose) => transpose.read_permit(txn_id, range).await,
@@ -2610,6 +2614,20 @@ where
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, range).await
+    }
+}
+
+impl<FE, S: Into<SparseAccess<FE, T>>, T: CDatatype> From<SparseReduce<S, T>>
+    for SparseAccess<FE, T>
+{
+    fn from(reduce: SparseReduce<S, T>) -> Self {
+        Self::Reduce(Box::new(SparseReduce {
+            source: reduce.source.into(),
+            transform: reduce.transform,
+            id: reduce.id,
+            op: reduce.op,
+            value_op: reduce.value_op,
+        }))
     }
 }
 

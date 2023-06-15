@@ -462,7 +462,6 @@ where
     FE: DenseCacheFile + AsType<Buffer<A::DType>> + AsType<Node>,
     A: DenseInstance + TensorPermitRead + Into<DenseAccess<FE, A::DType>>,
     A::DType: fmt::Debug,
-    Array<A::DType>: Clone,
     Buffer<A::DType>: de::FromStream<Context = ()>,
     Number: From<A::DType> + CastInto<A::DType>,
 {

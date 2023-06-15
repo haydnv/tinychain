@@ -1,18 +1,20 @@
 use std::fmt;
 
+use async_trait::async_trait;
 use ha_ndarray::{Array, NDArrayBoolean};
 use safecast::{AsType, CastFrom};
 
 use tc_error::*;
+use tc_transact::TxnId;
 use tc_value::{ComplexType, FloatType, IntType, Number, NumberClass, NumberType, UIntType};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::complex::{ComplexCompare, ComplexMath};
 use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
-    Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst,
-    TensorConvert, TensorInstance, TensorMath, TensorMathConst, TensorTrig, TensorUnary,
-    TensorUnaryBoolean,
+    Axes, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst,
+    TensorConvert, TensorInstance, TensorMath, TensorMathConst, TensorReduce, TensorTrig,
+    TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
@@ -842,6 +844,169 @@ impl<FE: AsType<Node> + ThreadSafe> TensorMathConst for SparseView<FE> {
 
     fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
         Err(bad_request!("cannot subtract {} from {:?} because the result would not be sparse (consider converting to a dense tensor first)", other, self))
+    }
+}
+
+#[async_trait]
+impl<FE: AsType<Node> + ThreadSafe> TensorReduce for SparseView<FE> {
+    type Reduce = Self;
+
+    async fn all(self, txn_id: TxnId) -> TCResult<bool> {
+        match self {
+            Self::Bool(this) => this.all(txn_id).await,
+            Self::C32(this) => {
+                let this = Self::C32(this).cast_into(NumberType::Bool)?;
+                this.all(txn_id).await
+            }
+            Self::C64(this) => {
+                let this = Self::C64(this).cast_into(NumberType::Bool)?;
+                this.all(txn_id).await
+            }
+            Self::F32(this) => this.all(txn_id).await,
+            Self::F64(this) => this.all(txn_id).await,
+            Self::I16(this) => this.all(txn_id).await,
+            Self::I32(this) => this.all(txn_id).await,
+            Self::I64(this) => this.all(txn_id).await,
+            Self::U8(this) => this.all(txn_id).await,
+            Self::U16(this) => this.all(txn_id).await,
+            Self::U32(this) => this.all(txn_id).await,
+            Self::U64(this) => this.all(txn_id).await,
+        }
+    }
+
+    async fn any(self, txn_id: TxnId) -> TCResult<bool> {
+        match self {
+            Self::Bool(this) => this.any(txn_id).await,
+            Self::C32(this) => {
+                let this = Self::C32(this).cast_into(NumberType::Bool)?;
+                this.any(txn_id).await
+            }
+            Self::C64(this) => {
+                let this = Self::C64(this).cast_into(NumberType::Bool)?;
+                this.any(txn_id).await
+            }
+            Self::F32(this) => this.any(txn_id).await,
+            Self::F64(this) => this.any(txn_id).await,
+            Self::I16(this) => this.any(txn_id).await,
+            Self::I32(this) => this.any(txn_id).await,
+            Self::I64(this) => this.any(txn_id).await,
+            Self::U8(this) => this.any(txn_id).await,
+            Self::U16(this) => this.any(txn_id).await,
+            Self::U32(this) => this.any(txn_id).await,
+            Self::U64(this) => this.any(txn_id).await,
+        }
+    }
+
+    fn max(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
+        match self {
+            Self::Bool(this) => this.max(axes, keepdims).map(sparse_from).map(Self::Bool),
+            Self::C32(_) | Self::C64(_) => {
+                Err(not_implemented!("maximum value of a complex tensor"))
+            }
+            Self::F32(this) => this.max(axes, keepdims).map(sparse_from).map(Self::F32),
+            Self::F64(this) => this.max(axes, keepdims).map(sparse_from).map(Self::F64),
+            Self::I16(this) => this.max(axes, keepdims).map(sparse_from).map(Self::I16),
+            Self::I32(this) => this.max(axes, keepdims).map(sparse_from).map(Self::I32),
+            Self::I64(this) => this.max(axes, keepdims).map(sparse_from).map(Self::I64),
+            Self::U8(this) => this.max(axes, keepdims).map(sparse_from).map(Self::U8),
+            Self::U16(this) => this.max(axes, keepdims).map(sparse_from).map(Self::U16),
+            Self::U32(this) => this.max(axes, keepdims).map(sparse_from).map(Self::U32),
+            Self::U64(this) => this.max(axes, keepdims).map(sparse_from).map(Self::U64),
+        }
+    }
+
+    async fn max_all(self, txn_id: TxnId) -> TCResult<Number> {
+        view_dispatch!(
+            self,
+            this,
+            this.max_all(txn_id).await,
+            Err(not_implemented!("maximum value of a complex tensor")),
+            this.max_all(txn_id).await
+        )
+    }
+
+    fn min(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
+        match self {
+            Self::Bool(this) => this.min(axes, keepdims).map(sparse_from).map(Self::Bool),
+            Self::C32(_) | Self::C64(_) => {
+                Err(not_implemented!("minimum value of a complex tensor"))
+            }
+            Self::F32(this) => this.min(axes, keepdims).map(sparse_from).map(Self::F32),
+            Self::F64(this) => this.min(axes, keepdims).map(sparse_from).map(Self::F64),
+            Self::I16(this) => this.min(axes, keepdims).map(sparse_from).map(Self::I16),
+            Self::I32(this) => this.min(axes, keepdims).map(sparse_from).map(Self::I32),
+            Self::I64(this) => this.min(axes, keepdims).map(sparse_from).map(Self::I64),
+            Self::U8(this) => this.min(axes, keepdims).map(sparse_from).map(Self::U8),
+            Self::U16(this) => this.min(axes, keepdims).map(sparse_from).map(Self::U16),
+            Self::U32(this) => this.min(axes, keepdims).map(sparse_from).map(Self::U32),
+            Self::U64(this) => this.min(axes, keepdims).map(sparse_from).map(Self::U64),
+        }
+    }
+
+    async fn min_all(self, txn_id: TxnId) -> TCResult<Number> {
+        view_dispatch!(
+            self,
+            this,
+            this.min_all(txn_id).await,
+            Err(not_implemented!("minimum value of a complex tensor")),
+            this.min_all(txn_id).await
+        )
+    }
+
+    fn product(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
+        match self {
+            Self::Bool(this) => this
+                .product(axes, keepdims)
+                .map(sparse_from)
+                .map(Self::Bool),
+
+            Self::C32(_) | Self::C64(_) => Err(not_implemented!("product of a complex tensor")),
+            Self::F32(this) => this.product(axes, keepdims).map(sparse_from).map(Self::F32),
+            Self::F64(this) => this.product(axes, keepdims).map(sparse_from).map(Self::F64),
+            Self::I16(this) => this.product(axes, keepdims).map(sparse_from).map(Self::I16),
+            Self::I32(this) => this.product(axes, keepdims).map(sparse_from).map(Self::I32),
+            Self::I64(this) => this.product(axes, keepdims).map(sparse_from).map(Self::I64),
+            Self::U8(this) => this.product(axes, keepdims).map(sparse_from).map(Self::U8),
+            Self::U16(this) => this.product(axes, keepdims).map(sparse_from).map(Self::U16),
+            Self::U32(this) => this.product(axes, keepdims).map(sparse_from).map(Self::U32),
+            Self::U64(this) => this.product(axes, keepdims).map(sparse_from).map(Self::U64),
+        }
+    }
+
+    async fn product_all(self, txn_id: TxnId) -> TCResult<Number> {
+        view_dispatch!(
+            self,
+            this,
+            this.product_all(txn_id).await,
+            Err(not_implemented!("product of a complex tensor")),
+            this.product_all(txn_id).await
+        )
+    }
+
+    fn sum(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
+        match self {
+            Self::Bool(this) => this.sum(axes, keepdims).map(sparse_from).map(Self::Bool),
+            Self::C32(_) | Self::C64(_) => Err(not_implemented!("sum of a complex tensor")),
+            Self::F32(this) => this.sum(axes, keepdims).map(sparse_from).map(Self::F32),
+            Self::F64(this) => this.sum(axes, keepdims).map(sparse_from).map(Self::F64),
+            Self::I16(this) => this.sum(axes, keepdims).map(sparse_from).map(Self::I16),
+            Self::I32(this) => this.sum(axes, keepdims).map(sparse_from).map(Self::I32),
+            Self::I64(this) => this.sum(axes, keepdims).map(sparse_from).map(Self::I64),
+            Self::U8(this) => this.sum(axes, keepdims).map(sparse_from).map(Self::U8),
+            Self::U16(this) => this.sum(axes, keepdims).map(sparse_from).map(Self::U16),
+            Self::U32(this) => this.sum(axes, keepdims).map(sparse_from).map(Self::U32),
+            Self::U64(this) => this.sum(axes, keepdims).map(sparse_from).map(Self::U64),
+        }
+    }
+
+    async fn sum_all(self, txn_id: TxnId) -> TCResult<Number> {
+        view_dispatch!(
+            self,
+            this,
+            this.sum_all(txn_id).await,
+            Err(not_implemented!("sum of a complex tensor")),
+            this.sum_all(txn_id).await
+        )
     }
 }
 

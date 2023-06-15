@@ -1901,10 +1901,7 @@ pub struct DenseReduce<S, T: CDatatype> {
     reduce_op: fn(Array<T>, &[usize], bool) -> TCResult<Array<T>>,
 }
 
-impl<S: DenseInstance> DenseReduce<S, S::DType>
-where
-    Array<S::DType>: Clone,
-{
+impl<S: DenseInstance> DenseReduce<S, S::DType> {
     fn new(
         source: S,
         axes: Axes,
@@ -1951,6 +1948,9 @@ where
             axes,
             keepdims,
             |l, r| {
+                let l = ArrayBase::<Arc<Buffer<S::DType>>>::copy(&l)?;
+                let r = ArrayBase::<Arc<Buffer<S::DType>>>::copy(&r)?;
+
                 l.clone()
                     .ge(r.clone())?
                     .cond(l, r)
@@ -1973,6 +1973,9 @@ where
             axes,
             keepdims,
             |l, r| {
+                let l = ArrayBase::<Arc<Buffer<S::DType>>>::copy(&l)?;
+                let r = ArrayBase::<Arc<Buffer<S::DType>>>::copy(&r)?;
+
                 l.clone()
                     .le(r.clone())?
                     .cond(l, r)
@@ -2136,6 +2139,20 @@ impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseReduce<S, T> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, range).await
+    }
+}
+
+impl<FE, S: Into<DenseAccess<FE, T>>, T: CDatatype> From<DenseReduce<S, T>> for DenseAccess<FE, T> {
+    fn from(reduce: DenseReduce<S, T>) -> Self {
+        Self::Reduce(Box::new(DenseReduce {
+            source: reduce.source.into(),
+            block_map: reduce.block_map,
+            block_axes: reduce.block_axes,
+            map_axes: reduce.map_axes,
+            transform: reduce.transform,
+            reduce_blocks: reduce.reduce_blocks,
+            reduce_op: reduce.reduce_op,
+        }))
     }
 }
 
