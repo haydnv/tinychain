@@ -20,8 +20,8 @@ use tcgeneric::{label, Instance, Label, ThreadSafe};
 
 use crate::tensor::sparse::Node;
 use crate::tensor::{
-    Coord, Range, Semaphore, Shape, TensorDualIO, TensorIO, TensorInstance, TensorPermitRead,
-    TensorPermitWrite, TensorType,
+    Coord, Range, Semaphore, Shape, TensorDualIO, TensorInstance, TensorPermitRead,
+    TensorPermitWrite, TensorRead, TensorType, TensorWrite,
 };
 
 use super::access::{DenseAccess, DenseCow, DenseFile, DenseSlice, DenseVersion};
@@ -171,9 +171,8 @@ where
         self.canon.shape()
     }
 }
-
 #[async_trait]
-impl<Txn, FE, T> TensorIO for DenseBase<Txn, FE, T>
+impl<Txn, FE, T> TensorRead for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + 'static,
@@ -198,7 +197,17 @@ where
             .map_err(TCError::from)
             .await
     }
+}
 
+#[async_trait]
+impl<Txn, FE, T> TensorWrite for DenseBase<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + 'static,
+    T: CDatatype + DType + fmt::Debug,
+    Buffer<T>: de::FromStream<Context = ()>,
+    Number: From<T> + CastInto<T>,
+{
     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
         let _permit = self
             .canon

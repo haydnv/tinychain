@@ -18,8 +18,8 @@ use tc_value::{DType, Number, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
 use crate::tensor::{
-    Coord, Range, Semaphore, Shape, TensorDualIO, TensorIO, TensorInstance, TensorPermitRead,
-    TensorPermitWrite, TensorType,
+    Coord, Range, Semaphore, Shape, TensorDualIO, TensorInstance, TensorPermitRead,
+    TensorPermitWrite, TensorRead, TensorType, TensorWrite,
 };
 
 use super::access::{
@@ -200,7 +200,7 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE, T> TensorIO for SparseBase<Txn, FE, T>
+impl<Txn, FE, T> TensorRead for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
@@ -224,7 +224,16 @@ where
             .map_err(TCError::from)
             .await
     }
+}
 
+#[async_trait]
+impl<Txn, FE, T> TensorWrite for SparseBase<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+    T: CDatatype + DType + fmt::Debug,
+    Number: From<T> + CastInto<T>,
+{
     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
         let _permit = self
             .canon

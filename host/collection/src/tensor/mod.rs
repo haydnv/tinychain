@@ -272,12 +272,16 @@ pub trait TensorDiagonal {
     fn diagonal(self) -> TCResult<Self::Diagonal>;
 }
 
-/// [`Tensor`] I/O operations
+/// [`Tensor`] read operations
 #[async_trait]
-pub trait TensorIO {
+pub trait TensorRead {
     /// Read a single value from this [`Tensor`].
     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number>;
+}
 
+/// [`Tensor`] write operations
+#[async_trait]
+pub trait TensorWrite {
     /// Write a single value to the slice of this [`Tensor`] with the given [`Range`].
     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()>;
 
