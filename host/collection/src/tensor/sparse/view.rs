@@ -12,6 +12,7 @@ use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
     Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst,
     TensorConvert, TensorInstance, TensorMath, TensorMathConst, TensorTrig, TensorUnary,
+    TensorUnaryBoolean,
 };
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
@@ -773,6 +774,29 @@ impl<FE: AsType<Node> + ThreadSafe> TensorMath<Self> for SparseView<FE> {
     }
 }
 
+macro_rules! math_const {
+    ($this:ident, $that:ident, $complex:expr, $general:expr) => {
+        match $this {
+            Self::Bool(this) => $general(this, $that).map(sparse_from).map(Self::Bool),
+            Self::C32(this) => {
+                ($complex)((this.0.into(), this.1.into()), $that).and_then(Self::complex_from)
+            }
+            Self::C64(this) => {
+                ($complex)((this.0.into(), this.1.into()), $that).and_then(Self::complex_from)
+            }
+            Self::F32(this) => $general(this, $that).map(sparse_from).map(Self::F32),
+            Self::F64(this) => $general(this, $that).map(sparse_from).map(Self::F64),
+            Self::I16(this) => $general(this, $that).map(sparse_from).map(Self::I16),
+            Self::I32(this) => $general(this, $that).map(sparse_from).map(Self::I32),
+            Self::I64(this) => $general(this, $that).map(sparse_from).map(Self::I64),
+            Self::U8(this) => $general(this, $that).map(sparse_from).map(Self::U8),
+            Self::U16(this) => $general(this, $that).map(sparse_from).map(Self::U16),
+            Self::U32(this) => $general(this, $that).map(sparse_from).map(Self::U32),
+            Self::U64(this) => $general(this, $that).map(sparse_from).map(Self::U64),
+        }
+    };
+}
+
 impl<FE: AsType<Node> + ThreadSafe> TensorMathConst for SparseView<FE> {
     type Combine = Self;
 
@@ -781,19 +805,39 @@ impl<FE: AsType<Node> + ThreadSafe> TensorMathConst for SparseView<FE> {
     }
 
     fn div_const(self, other: Number) -> TCResult<Self::Combine> {
-        todo!()
+        math_const!(
+            self,
+            other,
+            ComplexMath::div_const,
+            TensorMathConst::div_const
+        )
     }
 
     fn log_const(self, base: Number) -> TCResult<Self::Combine> {
-        todo!()
+        math_const!(
+            self,
+            base,
+            ComplexMath::log_const,
+            TensorMathConst::log_const
+        )
     }
 
     fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
-        todo!()
+        math_const!(
+            self,
+            other,
+            ComplexMath::mul_const,
+            TensorMathConst::mul_const
+        )
     }
 
     fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
-        todo!()
+        math_const!(
+            self,
+            other,
+            ComplexMath::pow_const,
+            TensorMathConst::pow_const
+        )
     }
 
     fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
@@ -858,6 +902,14 @@ impl<FE: ThreadSafe> TensorUnary for SparseView<FE> {
 
     fn round(self) -> TCResult<Self::Unary> {
         todo!()
+    }
+}
+
+impl<FE: ThreadSafe> TensorUnaryBoolean for SparseView<FE> {
+    type Unary = Self;
+
+    fn not(self) -> TCResult<Self::Unary> {
+        Err(bad_request!("a sparse tensor does not support the logical not operation because the result would be dense (consider converting to a dense tensor first)"))
     }
 }
 

@@ -1,22 +1,24 @@
-use safecast::{AsType, CastFrom};
+use safecast::AsType;
 
 use tc_error::*;
-use tc_value::{Complex, Number, NumberClass, NumberInstance};
+use tc_value::{Number, NumberClass, NumberInstance};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::{
     TensorBoolean, TensorCompare, TensorCompareConst, TensorInstance, TensorMath, TensorMathConst,
-    TensorTrig, TensorUnary,
+    TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::dense::{DenseCacheFile, DenseView};
 use super::sparse::{Node, SparseView};
 
-pub(crate) trait TensorComplex:
+pub(crate) trait ComplexUnary:
     TensorInstance
+    + TensorBoolean<Self, Combine = Self, LeftCombine = Self>
     + TensorMath<Self, Combine = Self, LeftCombine = Self>
     + TensorMathConst<Combine = Self>
     + TensorUnary<Unary = Self>
+    + TensorUnaryBoolean<Unary = Self>
     + Clone
 {
     fn abs(this: (Self, Self)) -> TCResult<Self> {
@@ -28,21 +30,23 @@ pub(crate) trait TensorComplex:
 
     fn ln(this: (Self, Self)) -> TCResult<(Self, Self)> {
         let (x, y) = this.clone();
-        let r = TensorComplex::abs(this)?;
+        let r = ComplexUnary::abs(this)?;
         let real = r.ln()?;
         let imag = atan2(y, x)?;
         Ok((real, imag))
     }
+
+    fn not(this: (Self, Self)) -> TCResult<Self> {
+        let (x, y) = this;
+        (x.or(y)?).not()
+    }
 }
 
-impl<FE: DenseCacheFile + AsType<Node> + Clone> TensorComplex for DenseView<FE> {}
-impl<FE: ThreadSafe + AsType<Node>> TensorComplex for SparseView<FE> {}
+impl<FE: DenseCacheFile + AsType<Node> + Clone> ComplexUnary for DenseView<FE> {}
+impl<FE: ThreadSafe + AsType<Node>> ComplexUnary for SparseView<FE> {}
 
 pub(crate) trait ComplexCompare:
-    TensorComplex
-    + TensorBoolean<Self, Combine = Self, LeftCombine = Self>
-    + TensorCompare<Self, Compare = Self>
-    + TensorCompareConst<Compare = Self>
+    ComplexUnary + TensorCompare<Self, Compare = Self> + TensorCompareConst<Compare = Self>
 {
     fn eq(this: (Self, Self), that: (Self, Self)) -> TCResult<Self> {
         let (this_r, this_i) = this;
@@ -56,20 +60,27 @@ pub(crate) trait ComplexCompare:
 
     fn eq_const(this: (Self, Self), that: Number) -> TCResult<Self> {
         let (lr, li) = this;
-        let (rr, ri) = Complex::cast_from(that).into();
-        let real = lr.eq_const(rr.into())?;
-        let imag = li.eq_const(ri.into())?;
-        real.and(imag)
+
+        if let Number::Complex(that) = that {
+            let (rr, ri) = that.into();
+            let real = lr.eq_const(rr.into())?;
+            let imag = li.eq_const(ri.into())?;
+            real.and(imag)
+        } else {
+            let real = lr.eq_const(that)?;
+            let imag = li.not()?;
+            real.and(imag)
+        }
     }
 
     fn gt(this: (Self, Self), that: (Self, Self)) -> TCResult<Self> {
-        let this = TensorComplex::abs(this)?;
-        let that = TensorComplex::abs(that)?;
+        let this = ComplexUnary::abs(this)?;
+        let that = ComplexUnary::abs(that)?;
         this.gt(that)
     }
 
     fn gt_const(this: (Self, Self), that: Number) -> TCResult<Self> {
-        let this = TensorComplex::abs(this)?;
+        let this = ComplexUnary::abs(this)?;
         let that = if that.class().is_complex() {
             that.abs()
         } else {
@@ -80,13 +91,13 @@ pub(crate) trait ComplexCompare:
     }
 
     fn ge(this: (Self, Self), that: (Self, Self)) -> TCResult<Self> {
-        let this = TensorComplex::abs(this)?;
-        let that = TensorComplex::abs(that)?;
+        let this = ComplexUnary::abs(this)?;
+        let that = ComplexUnary::abs(that)?;
         this.ge(that)
     }
 
     fn ge_const(this: (Self, Self), that: Number) -> TCResult<Self> {
-        let this = TensorComplex::abs(this)?;
+        let this = ComplexUnary::abs(this)?;
         let that = if that.class().is_complex() {
             that.abs()
         } else {
@@ -97,13 +108,13 @@ pub(crate) trait ComplexCompare:
     }
 
     fn lt(this: (Self, Self), that: (Self, Self)) -> TCResult<Self> {
-        let this = TensorComplex::abs(this)?;
-        let that = TensorComplex::abs(that)?;
+        let this = ComplexUnary::abs(this)?;
+        let that = ComplexUnary::abs(that)?;
         this.lt(that)
     }
 
     fn lt_const(this: (Self, Self), that: Number) -> TCResult<Self> {
-        let this = TensorComplex::abs(this)?;
+        let this = ComplexUnary::abs(this)?;
         let that = if that.class().is_complex() {
             that.abs()
         } else {
@@ -114,13 +125,13 @@ pub(crate) trait ComplexCompare:
     }
 
     fn le(this: (Self, Self), that: (Self, Self)) -> TCResult<Self> {
-        let this = TensorComplex::abs(this)?;
-        let that = TensorComplex::abs(that)?;
+        let this = ComplexUnary::abs(this)?;
+        let that = ComplexUnary::abs(that)?;
         this.le(that)
     }
 
     fn le_const(this: (Self, Self), that: Number) -> TCResult<Self> {
-        let this = TensorComplex::abs(this)?;
+        let this = ComplexUnary::abs(this)?;
         let that = if that.class().is_complex() {
             that.abs()
         } else {
@@ -142,21 +153,41 @@ pub(crate) trait ComplexCompare:
 
     fn ne_const(this: (Self, Self), that: Number) -> TCResult<Self> {
         let (lr, li) = this;
-        let (rr, ri) = Complex::cast_from(that).into();
-        let real = lr.ne_const(rr.into())?;
-        let imag = li.ne_const(ri.into())?;
-        real.or(imag)
+
+        if let Number::Complex(that) = that {
+            let (rr, ri) = that.into();
+            let real = lr.ne_const(rr.into())?;
+            let imag = li.ne_const(ri.into())?;
+            real.or(imag)
+        } else {
+            let real = lr.ne_const(that)?;
+            real.or(li)
+        }
     }
 }
 
 impl<FE: DenseCacheFile + AsType<Node> + Clone> ComplexCompare for DenseView<FE> {}
 impl<FE: ThreadSafe + AsType<Node>> ComplexCompare for SparseView<FE> {}
 
-pub(crate) trait ComplexMath: TensorComplex + TensorTrig<Unary = Self> + Clone {
+pub(crate) trait ComplexMath: ComplexUnary + TensorTrig<Unary = Self> + Clone {
     fn add(this: (Self, Self), that: (Self, Self)) -> TCResult<(Self, Self)> {
         let real = this.0.add(that.0)?;
         let imag = this.1.add(that.1)?;
         Ok((real, imag))
+    }
+
+    fn add_const(this: (Self, Self), that: Number) -> TCResult<(Self, Self)> {
+        let (a, b) = this;
+
+        if let Number::Complex(that) = that {
+            let (c, d) = that.into();
+            let real = a.add_const(c.into())?;
+            let imag = b.add_const(d.into())?;
+            Ok((real, imag))
+        } else {
+            let real = a.add_const(that)?;
+            Ok((real, b))
+        }
     }
 
     fn div(this: (Self, Self), that: (Self, Self)) -> TCResult<(Self, Self)> {
@@ -169,16 +200,43 @@ pub(crate) trait ComplexMath: TensorComplex + TensorTrig<Unary = Self> + Clone {
             .add(d.clone().pow_const(2.into())?)?;
 
         let real_num = a.clone().mul(c.clone())?.add(b.clone().mul(d.clone())?)?;
-        let real = real_num.div(denom.clone())?;
-
         let imag_num = b.mul(c)?.sub(a.mul(d)?)?;
+
+        let real = real_num.div(denom.clone())?;
         let imag = imag_num.div(denom)?;
 
         Ok((real, imag))
     }
 
+    fn div_const(this: (Self, Self), that: Number) -> TCResult<(Self, Self)> {
+        let (a, b) = this;
+
+        if let Number::Complex(that) = that {
+            let (c, d) = that.into();
+            let (c, d) = (Number::from(c), Number::from(d));
+
+            let denom = c.pow(2.into()) + d.pow(2.into());
+
+            let real_num = a.clone().mul_const(c)?.add(b.clone().mul_const(d)?)?;
+            let imag_num = b.mul_const(c)?.sub(a.mul_const(d)?)?;
+
+            let real = real_num.div_const(denom)?;
+            let imag = imag_num.div_const(denom)?;
+
+            Ok((real, imag))
+        } else {
+            let real = a.div_const(that)?;
+            let imag = b.div_const(that)?;
+            Ok((real, imag))
+        }
+    }
+
     fn log(this: (Self, Self), that: (Self, Self)) -> TCResult<(Self, Self)> {
-        ComplexMath::div(TensorComplex::ln(this)?, TensorComplex::ln(that)?)
+        ComplexMath::div(ComplexUnary::ln(this)?, ComplexUnary::ln(that)?)
+    }
+
+    fn log_const(this: (Self, Self), that: Number) -> TCResult<(Self, Self)> {
+        ComplexMath::div_const(ComplexUnary::ln(this)?, that.ln())
     }
 
     fn mul(this: (Self, Self), that: (Self, Self)) -> TCResult<(Self, Self)> {
@@ -191,13 +249,31 @@ pub(crate) trait ComplexMath: TensorComplex + TensorTrig<Unary = Self> + Clone {
         Ok((real, imag))
     }
 
+    fn mul_const(this: (Self, Self), that: Number) -> TCResult<(Self, Self)> {
+        let (a, b) = this;
+
+        if let Number::Complex(that) = that {
+            let (c, d) = that.into();
+            let (c, d) = (Number::from(c), Number::from(d));
+
+            let real = a.clone().mul_const(c)?.sub(b.clone().mul_const(d)?)?;
+            let imag = a.mul_const(d)?.add(b.mul_const(c)?)?;
+
+            Ok((real, imag))
+        } else {
+            let real = a.mul_const(that)?;
+            let imag = b.mul_const(that)?;
+            Ok((real, imag))
+        }
+    }
+
     fn pow(this: (Self, Self), that: Self) -> TCResult<(Self, Self)>
     where
         Self: ComplexTrig,
     {
         let (x, y) = this.clone();
 
-        let r = TensorComplex::abs(this)?;
+        let r = ComplexUnary::abs(this)?;
         let r = r.pow(that.clone())?;
 
         let theta = atan2(y, x)?;
@@ -208,17 +284,54 @@ pub(crate) trait ComplexMath: TensorComplex + TensorTrig<Unary = Self> + Clone {
         Ok((r.clone().mul(theta_cos)?, r.mul(theta_sin)?))
     }
 
+    fn pow_const(this: (Self, Self), that: Number) -> TCResult<(Self, Self)>
+    where
+        Self: ComplexTrig,
+    {
+        if let Number::Complex(that) = that {
+            Err(bad_request!(
+                "complex exponents are not supported: {}",
+                that
+            ))
+        } else {
+            let r = ComplexUnary::abs(this.clone())?;
+            let r = r.pow_const(that)?;
+
+            let (x, y) = this;
+            let theta = atan2(y, x)?;
+            let theta = theta.mul_const(that)?;
+            let theta_cos = theta.clone().cos()?;
+            let theta_sin = theta.sin()?;
+
+            Ok((r.clone().mul(theta_cos)?, r.mul(theta_sin)?))
+        }
+    }
+
     fn sub(this: (Self, Self), that: (Self, Self)) -> TCResult<(Self, Self)> {
         let real = this.0.sub(that.0)?;
         let imag = this.1.sub(that.1)?;
         Ok((real, imag))
+    }
+
+    fn sub_const(this: (Self, Self), that: Number) -> TCResult<(Self, Self)> {
+        let (a, b) = this;
+
+        if let Number::Complex(that) = that {
+            let (c, d) = that.into();
+            let real = a.sub_const(c.into())?;
+            let imag = b.sub_const(d.into())?;
+            Ok((real, imag))
+        } else {
+            let real = a.sub_const(that)?;
+            Ok((real, b))
+        }
     }
 }
 
 impl<FE: DenseCacheFile + AsType<Node> + Clone> ComplexMath for DenseView<FE> {}
 impl<FE: ThreadSafe + AsType<Node>> ComplexMath for SparseView<FE> {}
 
-pub(crate) trait ComplexTrig: TensorComplex + Clone {
+pub(crate) trait ComplexTrig: ComplexUnary + Clone {
     fn sin(this: (Self, Self)) -> TCResult<(Self, Self)> {
         todo!()
     }

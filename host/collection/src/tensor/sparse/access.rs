@@ -1577,9 +1577,25 @@ impl<L: fmt::Debug, R: fmt::Debug, T: CDatatype> fmt::Debug for SparseCombineLef
 #[derive(Clone)]
 pub struct SparseCombineConst<S, T: CDatatype> {
     left: S,
-    right: T,
-    block_op: fn(Array<T>, T) -> TCResult<Array<T>>,
-    value_op: fn(T, T) -> T,
+    right: Number,
+    block_op: fn(Array<T>, Number) -> TCResult<Array<T>>,
+    value_op: fn(T, Number) -> T,
+}
+
+impl<S, T: CDatatype> SparseCombineConst<S, T> {
+    pub fn new(
+        left: S,
+        right: Number,
+        block_op: fn(Array<T>, Number) -> TCResult<Array<T>>,
+        value_op: fn(T, Number) -> T,
+    ) -> Self {
+        Self {
+            left,
+            right,
+            block_op,
+            value_op,
+        }
+    }
 }
 
 impl<S, T> TensorInstance for SparseCombineConst<S, T>

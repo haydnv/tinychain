@@ -18,8 +18,8 @@ use super::dense::{DenseAccess, DenseAccessCast, DenseSparse, DenseTensor};
 
 use super::{
     Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCompare,
-    TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorPermitRead, TensorReduce,
-    TensorTransform, TensorUnary, TensorUnaryBoolean,
+    TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorMathConst,
+    TensorPermitRead, TensorReduce, TensorTransform, TensorUnary, TensorUnaryBoolean,
 };
 
 pub use access::*;
@@ -390,6 +390,93 @@ where
             |l, r| l + r,
         )
         .map(SparseTensor::from)
+    }
+}
+
+impl<FE, A> TensorMathConst for SparseTensor<FE, A>
+where
+    FE: ThreadSafe,
+    A: SparseInstance,
+    A::DType: CastFrom<Number>,
+    <A::DType as CDatatype>::Float: CastFrom<Number>,
+    Number: From<A::DType>,
+{
+    type Combine = SparseTensor<FE, SparseCombineConst<A, A::DType>>;
+
+    fn add_const(self, other: Number) -> TCResult<Self::Combine> {
+        Err(bad_request!("cannot add {other} to {self:?} because the result would not be sparse (consider converting to a dense tensor first)"))
+    }
+
+    fn div_const(self, other: Number) -> TCResult<Self::Combine> {
+        if bool::cast_from(other) {
+            let access = SparseCombineConst::new(
+                self.accessor,
+                other,
+                |l, r| {
+                    l.div_scalar(r.cast_into())
+                        .map(Array::from)
+                        .map_err(TCError::from)
+                },
+                |l, r| l / r.cast_into(),
+            );
+
+            Ok(SparseTensor::from(access))
+        } else {
+            Err(bad_request!("cannot divide {self:?} by {other}"))
+        }
+    }
+
+    fn log_const(self, base: Number) -> TCResult<Self::Combine> {
+        let access = SparseCombineConst::new(
+            self.accessor,
+            base,
+            |l, r| {
+                l.log_scalar(r.cast_into())
+                    .map(Array::from)
+                    .map_err(TCError::from)
+            },
+            |l, r| {
+                Number::from(l)
+                    .log(tc_value::Float::cast_from(r))
+                    .cast_into()
+            },
+        );
+
+        Ok(SparseTensor::from(access))
+    }
+
+    fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
+        let access = SparseCombineConst::new(
+            self.accessor,
+            other,
+            |l, r| {
+                l.mul_scalar(r.cast_into())
+                    .map(Array::from)
+                    .map_err(TCError::from)
+            },
+            |l, r| l * r.cast_into(),
+        );
+
+        Ok(SparseTensor::from(access))
+    }
+
+    fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
+        let access = SparseCombineConst::new(
+            self.accessor,
+            other,
+            |l, r| {
+                l.pow_scalar(r.cast_into())
+                    .map(Array::from)
+                    .map_err(TCError::from)
+            },
+            |l, r| Number::from(l).pow(r).cast_into(),
+        );
+
+        Ok(SparseTensor::from(access))
+    }
+
+    fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
+        Err(bad_request!("cannot subtract {other} from {self:?} because the result would not be sparse (consider converting to a dense tensor first)"))
     }
 }
 

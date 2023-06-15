@@ -210,20 +210,21 @@ where
 impl<FE, A> TensorBooleanConst for DenseTensor<FE, A>
 where
     FE: ThreadSafe,
-    A: DenseInstance + Into<DenseAccessCast<FE>>,
+    A: DenseInstance + Into<DenseAccess<FE, A::DType>>,
+    DenseAccessCast<FE>: From<DenseAccess<FE, A::DType>>,
 {
     type Combine = DenseTensor<FE, DenseCompareConst<FE, u8>>;
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
-        Ok(DenseCompareConst::new(self.accessor, other, Block::and_scalar).into())
+        Ok(DenseCompareConst::new(self.accessor.into(), other, Block::and_scalar).into())
     }
 
     fn or_const(self, other: Number) -> TCResult<Self::Combine> {
-        Ok(DenseCompareConst::new(self.accessor, other, Block::or_scalar).into())
+        Ok(DenseCompareConst::new(self.accessor.into(), other, Block::or_scalar).into())
     }
 
     fn xor_const(self, other: Number) -> TCResult<Self::Combine> {
-        Ok(DenseCompareConst::new(self.accessor, other, Block::xor_scalar).into())
+        Ok(DenseCompareConst::new(self.accessor.into(), other, Block::xor_scalar).into())
     }
 }
 

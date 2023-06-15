@@ -7,11 +7,11 @@ use tc_error::*;
 use tc_value::{ComplexType, FloatType, IntType, Number, NumberClass, NumberType, UIntType};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::complex::{ComplexCompare, ComplexMath};
+use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexUnary};
 use crate::tensor::sparse::Node;
 use crate::tensor::{
     Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst,
-    TensorInstance, TensorMath, TensorMathConst, TensorTrig, TensorUnary,
+    TensorInstance, TensorMath, TensorMathConst, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{dense_from, DenseAccess, DenseCacheFile, DenseTensor, DenseUnaryCast};
@@ -799,31 +799,87 @@ where
     }
 }
 
-impl<FE: ThreadSafe> TensorMathConst for DenseView<FE> {
+macro_rules! math_const {
+    ($this:ident, $that:ident, $complex:expr, $general:expr) => {
+        match $this {
+            Self::Bool(this) => $general(this, $that).map(dense_from).map(Self::Bool),
+            Self::C32(this) => {
+                ($complex)((this.0.into(), this.1.into()), $that).and_then(Self::complex_from)
+            }
+            Self::C64(this) => {
+                ($complex)((this.0.into(), this.1.into()), $that).and_then(Self::complex_from)
+            }
+            Self::F32(this) => $general(this, $that).map(dense_from).map(Self::F32),
+            Self::F64(this) => $general(this, $that).map(dense_from).map(Self::F64),
+            Self::I16(this) => $general(this, $that).map(dense_from).map(Self::I16),
+            Self::I32(this) => $general(this, $that).map(dense_from).map(Self::I32),
+            Self::I64(this) => $general(this, $that).map(dense_from).map(Self::I64),
+            Self::U8(this) => $general(this, $that).map(dense_from).map(Self::U8),
+            Self::U16(this) => $general(this, $that).map(dense_from).map(Self::U16),
+            Self::U32(this) => $general(this, $that).map(dense_from).map(Self::U32),
+            Self::U64(this) => $general(this, $that).map(dense_from).map(Self::U64),
+        }
+    };
+}
+
+impl<FE> TensorMathConst for DenseView<FE>
+where
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
     type Combine = Self;
 
     fn add_const(self, other: Number) -> TCResult<Self::Combine> {
-        todo!()
+        math_const!(
+            self,
+            other,
+            ComplexMath::add_const,
+            TensorMathConst::add_const
+        )
     }
 
     fn div_const(self, other: Number) -> TCResult<Self::Combine> {
-        todo!()
+        math_const!(
+            self,
+            other,
+            ComplexMath::div_const,
+            TensorMathConst::div_const
+        )
     }
 
     fn log_const(self, base: Number) -> TCResult<Self::Combine> {
-        todo!()
+        math_const!(
+            self,
+            base,
+            ComplexMath::log_const,
+            TensorMathConst::log_const
+        )
     }
 
     fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
-        todo!()
+        math_const!(
+            self,
+            other,
+            ComplexMath::mul_const,
+            TensorMathConst::mul_const
+        )
     }
 
     fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
-        todo!()
+        math_const!(
+            self,
+            other,
+            ComplexMath::pow_const,
+            TensorMathConst::pow_const
+        )
     }
 
     fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
-        todo!()
+        math_const!(
+            self,
+            other,
+            ComplexMath::sub_const,
+            TensorMathConst::sub_const
+        )
     }
 }
 
@@ -1114,6 +1170,23 @@ where
             Self::U32(this) => this.round().map(dense_from).map(Self::U32),
             Self::U64(this) => this.round().map(dense_from).map(Self::U64),
         }
+    }
+}
+
+impl<FE> TensorUnaryBoolean for DenseView<FE>
+where
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Unary = Self;
+
+    fn not(self) -> TCResult<Self::Unary> {
+        view_dispatch!(
+            self,
+            this,
+            this.not().map(dense_from).map(Self::Bool),
+            ComplexUnary::not((this.0.into(), this.1.into())),
+            this.not().map(dense_from).map(Self::Bool)
+        )
     }
 }
 
