@@ -1,10 +1,12 @@
-use safecast::AsType;
+use safecast::{AsType, CastFrom};
+
 use tc_error::*;
+use tc_value::{Complex, Number, NumberClass, NumberInstance};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::{
-    TensorBoolean, TensorCompare, TensorInstance, TensorMath, TensorMathConst, TensorTrig,
-    TensorUnary,
+    TensorBoolean, TensorCompare, TensorCompareConst, TensorInstance, TensorMath, TensorMathConst,
+    TensorTrig, TensorUnary,
 };
 
 use super::dense::{DenseCacheFile, DenseView};
@@ -40,6 +42,7 @@ pub(crate) trait ComplexCompare:
     TensorComplex
     + TensorBoolean<Self, Combine = Self, LeftCombine = Self>
     + TensorCompare<Self, Compare = Self>
+    + TensorCompareConst<Compare = Self>
 {
     fn eq(this: (Self, Self), that: (Self, Self)) -> TCResult<Self> {
         let (this_r, this_i) = this;
@@ -51,10 +54,29 @@ pub(crate) trait ComplexCompare:
         real.and(imag).map_err(TCError::from)
     }
 
+    fn eq_const(this: (Self, Self), that: Number) -> TCResult<Self> {
+        let (lr, li) = this;
+        let (rr, ri) = Complex::cast_from(that).into();
+        let real = lr.eq_const(rr.into())?;
+        let imag = li.eq_const(ri.into())?;
+        real.and(imag)
+    }
+
     fn gt(this: (Self, Self), that: (Self, Self)) -> TCResult<Self> {
         let this = TensorComplex::abs(this)?;
         let that = TensorComplex::abs(that)?;
         this.gt(that)
+    }
+
+    fn gt_const(this: (Self, Self), that: Number) -> TCResult<Self> {
+        let this = TensorComplex::abs(this)?;
+        let that = if that.class().is_complex() {
+            that.abs()
+        } else {
+            that
+        };
+
+        this.gt_const(that)
     }
 
     fn ge(this: (Self, Self), that: (Self, Self)) -> TCResult<Self> {
@@ -63,16 +85,49 @@ pub(crate) trait ComplexCompare:
         this.ge(that)
     }
 
+    fn ge_const(this: (Self, Self), that: Number) -> TCResult<Self> {
+        let this = TensorComplex::abs(this)?;
+        let that = if that.class().is_complex() {
+            that.abs()
+        } else {
+            that
+        };
+
+        this.ge_const(that)
+    }
+
     fn lt(this: (Self, Self), that: (Self, Self)) -> TCResult<Self> {
         let this = TensorComplex::abs(this)?;
         let that = TensorComplex::abs(that)?;
         this.lt(that)
     }
 
+    fn lt_const(this: (Self, Self), that: Number) -> TCResult<Self> {
+        let this = TensorComplex::abs(this)?;
+        let that = if that.class().is_complex() {
+            that.abs()
+        } else {
+            that
+        };
+
+        this.lt_const(that)
+    }
+
     fn le(this: (Self, Self), that: (Self, Self)) -> TCResult<Self> {
         let this = TensorComplex::abs(this)?;
         let that = TensorComplex::abs(that)?;
         this.le(that)
+    }
+
+    fn le_const(this: (Self, Self), that: Number) -> TCResult<Self> {
+        let this = TensorComplex::abs(this)?;
+        let that = if that.class().is_complex() {
+            that.abs()
+        } else {
+            that
+        };
+
+        this.le_const(that)
     }
 
     fn ne(this: (Self, Self), that: (Self, Self)) -> TCResult<Self> {
@@ -83,6 +138,14 @@ pub(crate) trait ComplexCompare:
         let imag = this_i.ne(that_i)?;
 
         real.or(imag).map_err(TCError::from)
+    }
+
+    fn ne_const(this: (Self, Self), that: Number) -> TCResult<Self> {
+        let (lr, li) = this;
+        let (rr, ri) = Complex::cast_from(that).into();
+        let real = lr.ne_const(rr.into())?;
+        let imag = li.ne_const(ri.into())?;
+        real.or(imag)
     }
 }
 

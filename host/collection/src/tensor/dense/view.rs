@@ -1,13 +1,10 @@
 use std::fmt;
 
 use ha_ndarray::CDatatype;
-use safecast::{AsType, CastFrom};
+use safecast::AsType;
 
 use tc_error::*;
-use tc_value::{
-    Complex, ComplexType, FloatType, IntType, Number, NumberClass, NumberInstance, NumberType,
-    UIntType,
-};
+use tc_value::{ComplexType, FloatType, IntType, Number, NumberClass, NumberType, UIntType};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::complex::{ComplexCompare, ComplexMath};
@@ -379,123 +376,49 @@ where
             self,
             this,
             { this.eq_const(other).map(dense_from).map(Self::Bool) },
-            {
-                let (real, imag) = this;
-
-                let number = Complex::cast_from(other);
-                let n_real = number.re();
-                let n_imag = number.im();
-
-                let real = real.eq_const(n_real.into())?;
-                let imag = imag.eq_const(n_imag.into())?;
-                real.and(imag).map(dense_from).map(Self::Bool)
-            },
+            ComplexCompare::eq_const((this.0.into(), this.1.into()), other),
             { this.eq_const(other).map(dense_from).map(Self::Bool) }
         )
     }
 
     fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
-        match self {
-            Self::Bool(this) => this.gt_const(other).map(dense_from).map(Self::Bool),
-
-            Self::C32(this) => {
-                let other = Complex::cast_from(other).abs().into();
-                Self::C32(this).abs().and_then(|abs| abs.gt_const(other))
-            }
-
-            Self::C64(this) => {
-                let other = Complex::cast_from(other).abs().into();
-                Self::C64(this).abs().and_then(|abs| abs.gt_const(other))
-            }
-
-            Self::F32(this) => this.gt_const(other).map(dense_from).map(Self::Bool),
-            Self::F64(this) => this.gt_const(other).map(dense_from).map(Self::Bool),
-            Self::I16(this) => this.gt_const(other).map(dense_from).map(Self::Bool),
-            Self::I32(this) => this.gt_const(other).map(dense_from).map(Self::Bool),
-            Self::I64(this) => this.gt_const(other).map(dense_from).map(Self::Bool),
-            Self::U8(this) => this.gt_const(other).map(dense_from).map(Self::Bool),
-            Self::U16(this) => this.gt_const(other).map(dense_from).map(Self::Bool),
-            Self::U32(this) => this.gt_const(other).map(dense_from).map(Self::Bool),
-            Self::U64(this) => this.gt_const(other).map(dense_from).map(Self::Bool),
-        }
+        view_dispatch!(
+            self,
+            this,
+            { this.gt_const(other).map(dense_from).map(Self::Bool) },
+            ComplexCompare::gt_const((this.0.into(), this.1.into()), other),
+            { this.gt_const(other).map(dense_from).map(Self::Bool) }
+        )
     }
 
     fn ge_const(self, other: Number) -> TCResult<Self::Compare> {
-        match self {
-            Self::Bool(this) => this.ge_const(other).map(dense_from).map(Self::Bool),
-
-            Self::C32(this) => {
-                let other = Complex::cast_from(other).abs().into();
-                Self::C32(this).abs().and_then(|abs| abs.ge_const(other))
-            }
-
-            Self::C64(this) => {
-                let other = Complex::cast_from(other).abs().into();
-                Self::C64(this).abs().and_then(|abs| abs.ge_const(other))
-            }
-
-            Self::F32(this) => this.ge_const(other).map(dense_from).map(Self::Bool),
-            Self::F64(this) => this.ge_const(other).map(dense_from).map(Self::Bool),
-            Self::I16(this) => this.ge_const(other).map(dense_from).map(Self::Bool),
-            Self::I32(this) => this.ge_const(other).map(dense_from).map(Self::Bool),
-            Self::I64(this) => this.ge_const(other).map(dense_from).map(Self::Bool),
-            Self::U8(this) => this.ge_const(other).map(dense_from).map(Self::Bool),
-            Self::U16(this) => this.ge_const(other).map(dense_from).map(Self::Bool),
-            Self::U32(this) => this.ge_const(other).map(dense_from).map(Self::Bool),
-            Self::U64(this) => this.ge_const(other).map(dense_from).map(Self::Bool),
-        }
+        view_dispatch!(
+            self,
+            this,
+            { this.ge_const(other).map(dense_from).map(Self::Bool) },
+            ComplexCompare::ge_const((this.0.into(), this.1.into()), other),
+            { this.ge_const(other).map(dense_from).map(Self::Bool) }
+        )
     }
 
     fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
-        match self {
-            Self::Bool(this) => this.lt_const(other).map(dense_from).map(Self::Bool),
-
-            Self::C32(this) => {
-                let other = Complex::cast_from(other).abs().into();
-                Self::C32(this).abs().and_then(|abs| abs.lt_const(other))
-            }
-
-            Self::C64(this) => {
-                let other = Complex::cast_from(other).abs().into();
-                Self::C64(this).abs().and_then(|abs| abs.lt_const(other))
-            }
-
-            Self::F32(this) => this.lt_const(other).map(dense_from).map(Self::Bool),
-            Self::F64(this) => this.lt_const(other).map(dense_from).map(Self::Bool),
-            Self::I16(this) => this.lt_const(other).map(dense_from).map(Self::Bool),
-            Self::I32(this) => this.lt_const(other).map(dense_from).map(Self::Bool),
-            Self::I64(this) => this.lt_const(other).map(dense_from).map(Self::Bool),
-            Self::U8(this) => this.lt_const(other).map(dense_from).map(Self::Bool),
-            Self::U16(this) => this.lt_const(other).map(dense_from).map(Self::Bool),
-            Self::U32(this) => this.lt_const(other).map(dense_from).map(Self::Bool),
-            Self::U64(this) => this.lt_const(other).map(dense_from).map(Self::Bool),
-        }
+        view_dispatch!(
+            self,
+            this,
+            { this.lt_const(other).map(dense_from).map(Self::Bool) },
+            ComplexCompare::lt_const((this.0.into(), this.1.into()), other),
+            { this.lt_const(other).map(dense_from).map(Self::Bool) }
+        )
     }
 
     fn le_const(self, other: Number) -> TCResult<Self::Compare> {
-        match self {
-            Self::Bool(this) => this.le_const(other).map(dense_from).map(Self::Bool),
-
-            Self::C32(this) => {
-                let other = Complex::cast_from(other).abs().into();
-                Self::C32(this).abs().and_then(|abs| abs.le_const(other))
-            }
-
-            Self::C64(this) => {
-                let other = Complex::cast_from(other).abs().into();
-                Self::C64(this).abs().and_then(|abs| abs.le_const(other))
-            }
-
-            Self::F32(this) => this.le_const(other).map(dense_from).map(Self::Bool),
-            Self::F64(this) => this.le_const(other).map(dense_from).map(Self::Bool),
-            Self::I16(this) => this.le_const(other).map(dense_from).map(Self::Bool),
-            Self::I32(this) => this.le_const(other).map(dense_from).map(Self::Bool),
-            Self::I64(this) => this.le_const(other).map(dense_from).map(Self::Bool),
-            Self::U8(this) => this.le_const(other).map(dense_from).map(Self::Bool),
-            Self::U16(this) => this.le_const(other).map(dense_from).map(Self::Bool),
-            Self::U32(this) => this.le_const(other).map(dense_from).map(Self::Bool),
-            Self::U64(this) => this.le_const(other).map(dense_from).map(Self::Bool),
-        }
+        view_dispatch!(
+            self,
+            this,
+            { this.le_const(other).map(dense_from).map(Self::Bool) },
+            ComplexCompare::le_const((this.0.into(), this.1.into()), other),
+            { this.le_const(other).map(dense_from).map(Self::Bool) }
+        )
     }
 
     fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
@@ -503,19 +426,7 @@ where
             self,
             this,
             { this.ne_const(other).map(dense_from).map(Self::Bool) },
-            {
-                let (real, imag) = this;
-
-                let number = Complex::cast_from(other);
-                let n_real = number.re();
-                let n_imag = number.im();
-
-                let real = real.ne_const(n_real.into())?;
-                let imag = imag.ne_const(n_imag.into())?;
-                let ne = real.and(imag)?;
-
-                Ok(Self::Bool(DenseTensor::from_access(ne.into_inner())))
-            },
+            ComplexCompare::ne_const((this.0.into(), this.1.into()), other),
             { this.ne_const(other).map(dense_from).map(Self::Bool) }
         )
     }

@@ -1,7 +1,7 @@
 use std::fmt;
 
 use ha_ndarray::{Array, NDArrayBoolean};
-use safecast::AsType;
+use safecast::{AsType, CastFrom};
 
 use tc_error::*;
 use tc_value::{ComplexType, FloatType, IntType, Number, NumberClass, NumberType, UIntType};
@@ -425,27 +425,92 @@ impl<FE: AsType<Node> + ThreadSafe> TensorCompareConst for SparseView<FE> {
     type Compare = Self;
 
     fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
-        todo!()
+        if bool::cast_from(other) {
+            view_dispatch!(
+                self,
+                this,
+                this.eq_const(other).map(sparse_from).map(Self::Bool),
+                ComplexCompare::eq_const(
+                    (SparseView::from(this.0), SparseView::from(this.1)),
+                    other
+                ),
+                this.eq_const(other).map(sparse_from).map(Self::Bool)
+            )
+        } else {
+            Err(bad_request!("cannot calculate {:?} == {} because the result would not be sparse (consider converting to a dense tensor first)", self, other))
+        }
     }
 
     fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
-        todo!()
+        if other.ge(&self.dtype().zero().into()) {
+            view_dispatch!(
+                self,
+                this,
+                this.gt_const(other).map(sparse_from).map(Self::Bool),
+                ComplexCompare::gt_const(
+                    (SparseView::from(this.0), SparseView::from(this.1)),
+                    other
+                ),
+                this.gt_const(other).map(sparse_from).map(Self::Bool)
+            )
+        } else {
+            Err(bad_request!("cannot calculate {:?} > {} because the result would not be sparse (consider converting to a dense tensor first)", self, other))
+        }
     }
 
     fn ge_const(self, other: Number) -> TCResult<Self::Compare> {
-        todo!()
+        if other.gt(&self.dtype().zero().into()) {
+            view_dispatch!(
+                self,
+                this,
+                this.ge_const(other).map(sparse_from).map(Self::Bool),
+                ComplexCompare::ge_const(
+                    (SparseView::from(this.0), SparseView::from(this.1)),
+                    other
+                ),
+                this.ge_const(other).map(sparse_from).map(Self::Bool)
+            )
+        } else {
+            Err(bad_request!("cannot calculate {:?} >= {} because the result would not be sparse (consider converting to a dense tensor first)", self, other))
+        }
     }
 
     fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
-        todo!()
+        if other.le(&self.dtype().zero().into()) {
+            view_dispatch!(
+                self,
+                this,
+                this.lt_const(other).map(sparse_from).map(Self::Bool),
+                ComplexCompare::lt_const(
+                    (SparseView::from(this.0), SparseView::from(this.1)),
+                    other
+                ),
+                this.lt_const(other).map(sparse_from).map(Self::Bool)
+            )
+        } else {
+            Err(bad_request!("cannot calculate {:?} < {} because the result would not be sparse (consider converting to a dense tensor first)", self, other))
+        }
     }
 
     fn le_const(self, other: Number) -> TCResult<Self::Compare> {
-        todo!()
+        if other.lt(&self.dtype().zero().into()) {
+            view_dispatch!(
+                self,
+                this,
+                this.le_const(other).map(sparse_from).map(Self::Bool),
+                ComplexCompare::le_const(
+                    (SparseView::from(this.0), SparseView::from(this.1)),
+                    other
+                ),
+                this.le_const(other).map(sparse_from).map(Self::Bool)
+            )
+        } else {
+            Err(bad_request!("cannot calculate {:?} <= {} because the result would not be sparse (consider converting to a dense tensor first)", self, other))
+        }
     }
 
     fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
-        todo!()
+        Err(bad_request!("cannot calculate {:?} != {} because the result would not be sparse (consider converting to a dense tensor first)", self, other))
     }
 }
 
