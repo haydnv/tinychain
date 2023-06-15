@@ -13,26 +13,21 @@ use tcgeneric::ThreadSafe;
 use crate::tensor::complex::{ComplexCompare, ComplexMath};
 use crate::tensor::sparse::Node;
 use crate::tensor::{
-    Shape, TensorBoolean, TensorCast, TensorCompare, TensorCompareConst, TensorInstance,
-    TensorMath, TensorMathConst, TensorTrig, TensorUnary,
+    Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst,
+    TensorInstance, TensorMath, TensorMathConst, TensorTrig, TensorUnary,
 };
 
 use super::{dense_from, DenseAccess, DenseCacheFile, DenseTensor, DenseUnaryCast};
 
+type DenseComplex<FE, T> = (
+    DenseTensor<FE, DenseAccess<FE, T>>,
+    DenseTensor<FE, DenseAccess<FE, T>>,
+);
+
 pub enum DenseView<FE> {
     Bool(DenseTensor<FE, DenseAccess<FE, u8>>),
-    C32(
-        (
-            DenseTensor<FE, DenseAccess<FE, f32>>,
-            DenseTensor<FE, DenseAccess<FE, f32>>,
-        ),
-    ),
-    C64(
-        (
-            DenseTensor<FE, DenseAccess<FE, f64>>,
-            DenseTensor<FE, DenseAccess<FE, f64>>,
-        ),
-    ),
+    C32(DenseComplex<FE, f32>),
+    C64(DenseComplex<FE, f64>),
     F32(DenseTensor<FE, DenseAccess<FE, f32>>),
     F64(DenseTensor<FE, DenseAccess<FE, f64>>),
     I16(DenseTensor<FE, DenseAccess<FE, i16>>),
@@ -75,18 +70,29 @@ impl<FE: ThreadSafe> DenseView<FE> {
     }
 }
 
-macro_rules! dense_view_from {
-    ($t:ty, $var:ident) => {
-        impl<FE> From<DenseTensor<FE, DenseAccess<FE, $t>>> for DenseView<FE> {
-            fn from(tensor: DenseTensor<FE, DenseAccess<FE, $t>>) -> Self {
-                Self::$var(tensor)
-            }
-        }
-    };
+impl<FE> From<DenseTensor<FE, DenseAccess<FE, f32>>> for DenseView<FE> {
+    fn from(tensor: DenseTensor<FE, DenseAccess<FE, f32>>) -> Self {
+        Self::F32(tensor)
+    }
 }
 
-dense_view_from!(f32, F32);
-dense_view_from!(f64, F64);
+impl<FE> From<DenseTensor<FE, DenseAccess<FE, f64>>> for DenseView<FE> {
+    fn from(tensor: DenseTensor<FE, DenseAccess<FE, f64>>) -> Self {
+        Self::F64(tensor)
+    }
+}
+
+impl<FE> From<DenseComplex<FE, f32>> for DenseView<FE> {
+    fn from(tensors: DenseComplex<FE, f32>) -> Self {
+        Self::C32(tensors)
+    }
+}
+
+impl<FE> From<DenseComplex<FE, f64>> for DenseView<FE> {
+    fn from(tensors: DenseComplex<FE, f64>) -> Self {
+        Self::C64(tensors)
+    }
+}
 
 macro_rules! view_dispatch {
     ($this:ident, $var:ident, $bool:expr, $complex:expr, $general:expr) => {
@@ -235,6 +241,50 @@ where
                 let right = right.cast_into(NumberType::Bool)?;
                 left.xor(right)
             }
+        )
+    }
+}
+
+impl<FE> TensorBooleanConst for DenseView<FE>
+where
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Combine = Self;
+    type DenseCombine = Self;
+
+    fn and_const(self, other: Number) -> TCResult<Self::Combine> {
+        view_dispatch!(
+            self,
+            this,
+            this.and_const(other).map(dense_from).map(Self::Bool),
+            Self::from(this)
+                .cast_into(NumberType::Bool)
+                .and_then(|this| this.and_const(other)),
+            this.and_const(other).map(dense_from).map(Self::Bool)
+        )
+    }
+
+    fn or_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        view_dispatch!(
+            self,
+            this,
+            this.or_const(other).map(dense_from).map(Self::Bool),
+            Self::from(this)
+                .cast_into(NumberType::Bool)
+                .and_then(|this| this.or_const(other)),
+            this.or_const(other).map(dense_from).map(Self::Bool)
+        )
+    }
+
+    fn xor_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        view_dispatch!(
+            self,
+            this,
+            this.xor_const(other).map(dense_from).map(Self::Bool),
+            Self::from(this)
+                .cast_into(NumberType::Bool)
+                .and_then(|this| this.xor_const(other)),
+            this.xor_const(other).map(dense_from).map(Self::Bool)
         )
     }
 }

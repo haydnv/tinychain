@@ -8,9 +8,10 @@ use tc_value::{ComplexType, FloatType, IntType, Number, NumberClass, NumberType,
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::complex::{ComplexCompare, ComplexMath};
+use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
-    Shape, TensorBoolean, TensorCast, TensorCompare, TensorInstance, TensorMath, TensorMathConst,
-    TensorTrig, TensorUnary,
+    Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare, TensorConvert,
+    TensorInstance, TensorMath, TensorMathConst, TensorTrig, TensorUnary,
 };
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
@@ -117,7 +118,7 @@ impl<FE: ThreadSafe> TensorInstance for SparseView<FE> {
     }
 }
 
-impl<FE: ThreadSafe + AsType<Node>> TensorBoolean<Self> for SparseView<FE> {
+impl<FE: AsType<Node> + ThreadSafe> TensorBoolean<Self> for SparseView<FE> {
     type Combine = Self;
     type LeftCombine = Self;
 
@@ -167,7 +168,34 @@ impl<FE: ThreadSafe + AsType<Node>> TensorBoolean<Self> for SparseView<FE> {
     }
 }
 
-impl<FE: ThreadSafe + AsType<Node>> TensorCast for SparseView<FE> {
+impl<FE> TensorBooleanConst for SparseView<FE>
+where
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Combine = Self;
+    type DenseCombine = DenseView<FE>;
+
+    fn and_const(self, other: Number) -> TCResult<Self::Combine> {
+        view_dispatch!(
+            self,
+            this,
+            this.and_const(other).map(sparse_from).map(Self::Bool),
+            TensorCast::cast_into(Self::from(this), NumberType::Bool)
+                .and_then(|this| this.and_const(other)),
+            this.and_const(other).map(sparse_from).map(Self::Bool)
+        )
+    }
+
+    fn or_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        self.into_dense().or_const(other)
+    }
+
+    fn xor_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+        self.into_dense().xor_const(other)
+    }
+}
+
+impl<FE: AsType<Node> + ThreadSafe> TensorCast for SparseView<FE> {
     type Cast = Self;
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
@@ -283,6 +311,40 @@ impl<FE: ThreadSafe + AsType<Node>> TensorCast for SparseView<FE> {
     }
 }
 
+impl<FE: AsType<Node> + ThreadSafe> TensorConvert for SparseView<FE> {
+    type Dense = DenseView<FE>;
+    type Sparse = Self;
+
+    fn into_dense(self) -> Self::Dense {
+        match self {
+            Self::Bool(this) => DenseView::Bool(dense_from(this.into_dense())),
+            Self::C32((re, im)) => {
+                let re = dense_from(re.into_dense());
+                let im = dense_from(im.into_dense());
+                DenseView::C32((re, im))
+            }
+            Self::C64((re, im)) => {
+                let re = dense_from(re.into_dense());
+                let im = dense_from(im.into_dense());
+                DenseView::C64((re, im))
+            }
+            Self::F32(this) => DenseView::F32(dense_from(this.into_dense())),
+            Self::F64(this) => DenseView::F64(dense_from(this.into_dense())),
+            Self::I16(this) => DenseView::I16(dense_from(this.into_dense())),
+            Self::I32(this) => DenseView::I32(dense_from(this.into_dense())),
+            Self::I64(this) => DenseView::I64(dense_from(this.into_dense())),
+            Self::U8(this) => DenseView::U8(dense_from(this.into_dense())),
+            Self::U16(this) => DenseView::U16(dense_from(this.into_dense())),
+            Self::U32(this) => DenseView::U32(dense_from(this.into_dense())),
+            Self::U64(this) => DenseView::U64(dense_from(this.into_dense())),
+        }
+    }
+
+    fn into_sparse(self) -> Self::Sparse {
+        self
+    }
+}
+
 macro_rules! view_compare {
     ($this:ident, $that:ident, $complex:expr, $general:expr) => {
         match ($this, $that) {
@@ -332,7 +394,7 @@ macro_rules! view_compare {
     };
 }
 
-impl<FE: ThreadSafe + AsType<Node>> TensorCompare<Self> for SparseView<FE> {
+impl<FE: AsType<Node> + ThreadSafe> TensorCompare<Self> for SparseView<FE> {
     type Compare = Self;
 
     fn eq(self, other: Self) -> TCResult<Self::Compare> {
@@ -360,7 +422,7 @@ impl<FE: ThreadSafe + AsType<Node>> TensorCompare<Self> for SparseView<FE> {
     }
 }
 
-impl<FE: ThreadSafe + AsType<Node>> TensorMath<Self> for SparseView<FE> {
+impl<FE: AsType<Node> + ThreadSafe> TensorMath<Self> for SparseView<FE> {
     type Combine = Self;
     type LeftCombine = Self;
 
@@ -720,6 +782,18 @@ impl<FE> From<SparseTensor<FE, SparseAccess<FE, f64>>> for SparseView<FE> {
     }
 }
 
+impl<FE> From<SparseComplex<FE, f32>> for SparseView<FE> {
+    fn from(tensors: SparseComplex<FE, f32>) -> Self {
+        Self::C32(tensors)
+    }
+}
+
+impl<FE> From<SparseComplex<FE, f64>> for SparseView<FE> {
+    fn from(tensors: SparseComplex<FE, f64>) -> Self {
+        Self::C64(tensors)
+    }
+}
+
 impl<FE: ThreadSafe> fmt::Debug for SparseView<FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
@@ -734,7 +808,7 @@ impl<FE: ThreadSafe> fmt::Debug for SparseView<FE> {
 #[inline]
 fn expect_bool<FE>(view: SparseView<FE>) -> TCResult<SparseTensor<FE, SparseAccess<FE, u8>>>
 where
-    FE: ThreadSafe + AsType<Node>,
+    FE: AsType<Node> + ThreadSafe,
 {
     match TensorCast::cast_into(view, NumberType::Bool)? {
         SparseView::Bool(that) => Ok(that),
