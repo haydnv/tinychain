@@ -9,7 +9,7 @@ use tc_transact::TxnId;
 use tc_value::{ComplexType, FloatType, IntType, Number, NumberClass, NumberType, UIntType};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexTrig};
+use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexTrig, ComplexUnary};
 use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
     Axes, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare,
@@ -1238,23 +1238,87 @@ impl<FE: ThreadSafe + AsType<Node>> TensorTrig for SparseView<FE> {
     }
 }
 
-impl<FE: ThreadSafe> TensorUnary for SparseView<FE> {
+impl<FE: AsType<Node> + ThreadSafe> TensorUnary for SparseView<FE> {
     type Unary = Self;
 
     fn abs(self) -> TCResult<Self::Unary> {
-        todo!()
+        match self {
+            Self::Bool(this) => this.abs().map(sparse_from).map(Self::Bool),
+            Self::C32((re, im)) => ComplexUnary::abs((Self::from(re), Self::from(im))),
+            Self::C64((re, im)) => ComplexUnary::abs((Self::from(re), Self::from(im))),
+            Self::F32(this) => this.abs().map(sparse_from).map(Self::F32),
+            Self::F64(this) => this.abs().map(sparse_from).map(Self::F64),
+            Self::I16(this) => this.abs().map(sparse_from).map(Self::I16),
+            Self::I32(this) => this.abs().map(sparse_from).map(Self::I32),
+            Self::I64(this) => this.abs().map(sparse_from).map(Self::I64),
+            Self::U8(this) => this.abs().map(sparse_from).map(Self::U8),
+            Self::U16(this) => this.abs().map(sparse_from).map(Self::U16),
+            Self::U32(this) => this.abs().map(sparse_from).map(Self::U32),
+            Self::U64(this) => this.abs().map(sparse_from).map(Self::U64),
+        }
     }
 
     fn exp(self) -> TCResult<Self::Unary> {
-        todo!()
+        match self {
+            Self::Bool(this) => this.exp().map(sparse_from).map(Self::Bool),
+            Self::C32((re, im)) => {
+                ComplexUnary::exp((Self::from(re), Self::from(im))).and_then(Self::complex_from)
+            }
+            Self::C64((re, im)) => {
+                ComplexUnary::exp((Self::from(re), Self::from(im))).and_then(Self::complex_from)
+            }
+            Self::F32(this) => this.exp().map(sparse_from).map(Self::F32),
+            Self::F64(this) => this.exp().map(sparse_from).map(Self::F64),
+            Self::I16(this) => this.exp().map(sparse_from).map(Self::I16),
+            Self::I32(this) => this.exp().map(sparse_from).map(Self::I32),
+            Self::I64(this) => this.exp().map(sparse_from).map(Self::I64),
+            Self::U8(this) => this.exp().map(sparse_from).map(Self::U8),
+            Self::U16(this) => this.exp().map(sparse_from).map(Self::U16),
+            Self::U32(this) => this.exp().map(sparse_from).map(Self::U32),
+            Self::U64(this) => this.exp().map(sparse_from).map(Self::U64),
+        }
     }
 
     fn ln(self) -> TCResult<Self::Unary> {
-        todo!()
+        match self {
+            Self::Bool(this) => this.ln().map(sparse_from).map(Self::Bool),
+            Self::C32((re, im)) => {
+                ComplexUnary::ln((Self::from(re), Self::from(im))).and_then(Self::complex_from)
+            }
+            Self::C64((re, im)) => {
+                ComplexUnary::ln((Self::from(re), Self::from(im))).and_then(Self::complex_from)
+            }
+            Self::F32(this) => this.ln().map(sparse_from).map(Self::F32),
+            Self::F64(this) => this.ln().map(sparse_from).map(Self::F64),
+            Self::I16(this) => this.ln().map(sparse_from).map(Self::I16),
+            Self::I32(this) => this.ln().map(sparse_from).map(Self::I32),
+            Self::I64(this) => this.ln().map(sparse_from).map(Self::I64),
+            Self::U8(this) => this.ln().map(sparse_from).map(Self::U8),
+            Self::U16(this) => this.ln().map(sparse_from).map(Self::U16),
+            Self::U32(this) => this.ln().map(sparse_from).map(Self::U32),
+            Self::U64(this) => this.ln().map(sparse_from).map(Self::U64),
+        }
     }
 
     fn round(self) -> TCResult<Self::Unary> {
-        todo!()
+        match self {
+            Self::Bool(this) => this.round().map(sparse_from).map(Self::Bool),
+            Self::C32((re, im)) => {
+                ComplexUnary::round((Self::from(re), Self::from(im))).and_then(Self::complex_from)
+            }
+            Self::C64((re, im)) => {
+                ComplexUnary::round((Self::from(re), Self::from(im))).and_then(Self::complex_from)
+            }
+            Self::F32(this) => this.round().map(sparse_from).map(Self::F32),
+            Self::F64(this) => this.round().map(sparse_from).map(Self::F64),
+            Self::I16(this) => this.round().map(sparse_from).map(Self::I16),
+            Self::I32(this) => this.round().map(sparse_from).map(Self::I32),
+            Self::I64(this) => this.round().map(sparse_from).map(Self::I64),
+            Self::U8(this) => this.round().map(sparse_from).map(Self::U8),
+            Self::U16(this) => this.round().map(sparse_from).map(Self::U16),
+            Self::U32(this) => this.round().map(sparse_from).map(Self::U32),
+            Self::U64(this) => this.round().map(sparse_from).map(Self::U64),
+        }
     }
 }
 

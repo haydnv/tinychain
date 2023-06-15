@@ -3168,6 +3168,18 @@ impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for SparseUnary<S, T> {
     }
 }
 
+impl<FE, S: Into<SparseAccess<FE, T>>, T: CDatatype> From<SparseUnary<S, T>>
+    for SparseAccess<FE, T>
+{
+    fn from(unary: SparseUnary<S, T>) -> Self {
+        Self::Unary(Box::new(SparseUnary {
+            source: unary.source.into(),
+            block_op: unary.block_op,
+            value_op: unary.value_op,
+        }))
+    }
+}
+
 impl<S: fmt::Debug, T: CDatatype> fmt::Debug for SparseUnary<S, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "unary operation on {:?}", self.source)

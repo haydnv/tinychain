@@ -1289,29 +1289,8 @@ where
     fn abs(self) -> TCResult<Self::Unary> {
         match self {
             Self::Bool(this) => this.abs().map(dense_from).map(Self::Bool),
-
-            Self::C32(this) => {
-                let (real, imag) = this;
-
-                let abs = real
-                    .pow_const(2.into())?
-                    .add(imag.pow_const(2.into())?)?
-                    .pow_const((0.5).into())?;
-
-                Ok(Self::F32(dense_from(abs)))
-            }
-
-            Self::C64(this) => {
-                let (real, imag) = this;
-
-                let abs = real
-                    .pow_const(2.into())?
-                    .add(imag.pow_const(2.into())?)?
-                    .pow_const((0.5).into())?;
-
-                Ok(Self::F64(dense_from(abs)))
-            }
-
+            Self::C32((re, im)) => ComplexUnary::abs((Self::from(re), Self::from(im))),
+            Self::C64((re, im)) => ComplexUnary::abs((Self::from(re), Self::from(im))),
             Self::F32(this) => this.abs().map(dense_from).map(Self::F32),
             Self::F64(this) => this.abs().map(dense_from).map(Self::F64),
             Self::I16(this) => this.abs().map(dense_from).map(Self::I16),
@@ -1326,28 +1305,13 @@ where
 
     fn exp(self) -> TCResult<Self::Unary> {
         match self {
-            Self::Bool(this) => Ok(Self::Bool(this)),
-
-            Self::C32((x, y)) => {
-                let r = Self::C32((x.clone(), y.clone()));
-                let r = r.abs()?.exp()?;
-
-                let y = Self::F32(y);
-                let e_i_theta = Self::complex_from((y.clone().cos()?, y.sin()?))?;
-
-                r.mul(e_i_theta)
+            Self::Bool(this) => this.exp().map(dense_from).map(Self::Bool),
+            Self::C32((re, im)) => {
+                ComplexUnary::exp((Self::from(re), Self::from(im))).and_then(Self::complex_from)
             }
-
-            Self::C64((x, y)) => {
-                let r = Self::C64((x.clone(), y.clone()));
-                let r = r.abs()?.exp()?;
-
-                let y = Self::F64(y);
-                let e_i_theta = Self::complex_from((y.clone().cos()?, y.sin()?))?;
-
-                r.mul(e_i_theta)
+            Self::C64((re, im)) => {
+                ComplexUnary::exp((Self::from(re), Self::from(im))).and_then(Self::complex_from)
             }
-
             Self::F32(this) => this.exp().map(dense_from).map(Self::F32),
             Self::F64(this) => this.exp().map(dense_from).map(Self::F64),
             Self::I16(this) => this.exp().map(dense_from).map(Self::I16),
@@ -1362,18 +1326,12 @@ where
 
     fn ln(self) -> TCResult<Self::Unary> {
         match self {
-            Self::Bool(_) => Err(bad_request!("a boolean value has no logarithm")),
-            Self::C32((x, y)) => {
-                let r = Self::C32((x.clone(), y.clone())).abs()?;
-                let real = r.ln()?;
-                let imag = atan2(y, x)?;
-                Self::complex_from((real, imag.into()))
+            Self::Bool(this) => this.ln().map(dense_from).map(Self::Bool),
+            Self::C32((re, im)) => {
+                ComplexUnary::ln((Self::from(re), Self::from(im))).and_then(Self::complex_from)
             }
-            Self::C64((x, y)) => {
-                let r = Self::C64((x.clone(), y.clone())).abs()?;
-                let real = r.ln()?;
-                let imag = atan2(y, x)?;
-                Self::complex_from((real, imag.into()))
+            Self::C64((re, im)) => {
+                ComplexUnary::ln((Self::from(re), Self::from(im))).and_then(Self::complex_from)
             }
             Self::F32(this) => this.ln().map(dense_from).map(Self::F32),
             Self::F64(this) => this.ln().map(dense_from).map(Self::F64),
@@ -1390,15 +1348,11 @@ where
     fn round(self) -> TCResult<Self::Unary> {
         match self {
             Self::Bool(this) => this.round().map(dense_from).map(Self::Bool),
-            Self::C32((real, imag)) => {
-                let real = real.round().map(dense_from)?;
-                let imag = imag.round().map(dense_from)?;
-                Ok(Self::C32((real, imag)))
+            Self::C32((re, im)) => {
+                ComplexUnary::round((Self::from(re), Self::from(im))).and_then(Self::complex_from)
             }
-            Self::C64((real, imag)) => {
-                let real = real.round().map(dense_from)?;
-                let imag = imag.round().map(dense_from)?;
-                Ok(Self::C64((real, imag)))
+            Self::C64((re, im)) => {
+                ComplexUnary::round((Self::from(re), Self::from(im))).and_then(Self::complex_from)
             }
             Self::F32(this) => this.round().map(dense_from).map(Self::F32),
             Self::F64(this) => this.round().map(dense_from).map(Self::F64),

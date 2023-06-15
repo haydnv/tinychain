@@ -17,6 +17,7 @@ pub(crate) trait ComplexUnary:
     + TensorBoolean<Self, Combine = Self, LeftCombine = Self>
     + TensorMath<Self, Combine = Self, LeftCombine = Self>
     + TensorMathConst<Combine = Self>
+    + TensorTrig<Unary = Self>
     + TensorUnary<Unary = Self>
     + TensorUnaryBoolean<Unary = Self>
     + Clone
@@ -26,6 +27,16 @@ pub(crate) trait ComplexUnary:
         real.pow_const(2.into())?
             .add(imag.pow_const(2.into())?)?
             .pow_const((0.5).into())
+    }
+
+    fn exp(this: (Self, Self)) -> TCResult<(Self, Self)> {
+        let (_x, y) = this.clone();
+
+        let r = ComplexUnary::abs(this)?.exp()?;
+        let real = r.clone().mul(y.clone().cos()?)?;
+        let imag = r.mul(y.sin()?)?;
+
+        Ok((real, imag))
     }
 
     fn ln(this: (Self, Self)) -> TCResult<(Self, Self)> {
@@ -39,6 +50,12 @@ pub(crate) trait ComplexUnary:
     fn not(this: (Self, Self)) -> TCResult<Self> {
         let (x, y) = this;
         (x.or(y)?).not()
+    }
+
+    fn round(this: (Self, Self)) -> TCResult<(Self, Self)> {
+        let real = this.0.round()?;
+        let imag = this.1.round()?;
+        Ok((real, imag))
     }
 }
 
@@ -169,7 +186,7 @@ pub(crate) trait ComplexCompare:
 impl<FE: DenseCacheFile + AsType<Node> + Clone> ComplexCompare for DenseView<FE> {}
 impl<FE: ThreadSafe + AsType<Node>> ComplexCompare for SparseView<FE> {}
 
-pub(crate) trait ComplexMath: ComplexUnary + TensorTrig<Unary = Self> + Clone {
+pub(crate) trait ComplexMath: ComplexUnary + Clone {
     fn add(this: (Self, Self), that: (Self, Self)) -> TCResult<(Self, Self)> {
         let real = this.0.add(that.0)?;
         let imag = this.1.add(that.1)?;
@@ -331,7 +348,7 @@ pub(crate) trait ComplexMath: ComplexUnary + TensorTrig<Unary = Self> + Clone {
 impl<FE: DenseCacheFile + AsType<Node> + Clone> ComplexMath for DenseView<FE> {}
 impl<FE: ThreadSafe + AsType<Node>> ComplexMath for SparseView<FE> {}
 
-pub(crate) trait ComplexTrig: ComplexMath + TensorTrig<Unary = Self> + Clone {
+pub(crate) trait ComplexTrig: ComplexMath + Clone {
     fn sin(this: (Self, Self)) -> TCResult<(Self, Self)> {
         let (x, y) = this;
         let real = x.clone().sin()?.add(y.clone().cosh()?)?;
