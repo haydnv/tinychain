@@ -331,13 +331,61 @@ pub(crate) trait ComplexMath: ComplexUnary + TensorTrig<Unary = Self> + Clone {
 impl<FE: DenseCacheFile + AsType<Node> + Clone> ComplexMath for DenseView<FE> {}
 impl<FE: ThreadSafe + AsType<Node>> ComplexMath for SparseView<FE> {}
 
-pub(crate) trait ComplexTrig: ComplexUnary + Clone {
+pub(crate) trait ComplexTrig: ComplexMath + TensorTrig<Unary = Self> + Clone {
     fn sin(this: (Self, Self)) -> TCResult<(Self, Self)> {
-        todo!()
+        let (x, y) = this;
+        let real = x.clone().sin()?.add(y.clone().cosh()?)?;
+        let imag = x.cos()?.add(y.sinh()?)?;
+        Ok((real, imag))
+    }
+
+    fn sinh(this: (Self, Self)) -> TCResult<(Self, Self)> {
+        let (x, y) = this;
+        let real = x.clone().sinh()?.mul(y.clone().cos()?)?;
+        let imag = x.cosh()?.mul(y.sin()?)?;
+        Ok((real, imag))
     }
 
     fn cos(this: (Self, Self)) -> TCResult<(Self, Self)> {
-        todo!()
+        let (x, y) = this;
+        let real = x.clone().cos()?.mul(y.clone().cosh()?)?;
+        let imag = x.sin()?.mul(y.sinh()?)?;
+        Ok((real, imag))
+    }
+
+    fn cosh(this: (Self, Self)) -> TCResult<(Self, Self)> {
+        let (x, y) = this;
+        let real = x.clone().cosh()?.mul(y.clone().cos()?)?;
+        let imag = x.sinh()?.mul(y.sin()?)?;
+        Ok((real, imag))
+    }
+
+    fn tan(this: (Self, Self)) -> TCResult<(Self, Self)> {
+        let (x, y) = this;
+
+        let num_real = x.clone().sin()?.mul(y.clone().cosh()?)?;
+        let num_imag = x.clone().cos()?.mul(y.clone().sinh()?)?;
+        let num = (num_real, num_imag);
+
+        let denom_real = x.clone().cos()?.mul(y.clone().cosh()?)?;
+        let denom_imag = x.clone().sin()?.mul(y.clone().sinh()?)?;
+        let denom = (denom_real, denom_imag);
+
+        ComplexMath::div(num, denom)
+    }
+
+    fn tanh(this: (Self, Self)) -> TCResult<(Self, Self)> {
+        let (x, y) = this;
+
+        let num_real = x.clone().sinh()?.mul(y.clone().cos()?)?;
+        let num_imag = x.clone().cosh()?.mul(y.clone().sin()?)?;
+        let num = (num_real, num_imag);
+
+        let denom_real = x.clone().cosh()?.mul(y.clone().cos()?)?;
+        let denom_imag = x.sinh()?.mul(y.sin()?)?;
+        let denom = (denom_real, denom_imag);
+
+        ComplexMath::div(num, denom)
     }
 }
 

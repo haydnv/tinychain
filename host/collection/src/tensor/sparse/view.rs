@@ -9,7 +9,7 @@ use tc_transact::TxnId;
 use tc_value::{ComplexType, FloatType, IntType, Number, NumberClass, NumberType, UIntType};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::complex::{ComplexCompare, ComplexMath};
+use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexTrig};
 use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
     Axes, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare,
@@ -1143,43 +1143,98 @@ impl<FE: AsType<Node> + ThreadSafe> TensorTransform for SparseView<FE> {
     }
 }
 
-impl<FE: ThreadSafe> TensorTrig for SparseView<FE> {
+macro_rules! view_trig {
+    ($this:ident, $general32:ident, $general64:ident, $complex:expr) => {
+        match $this {
+            Self::Bool(this) => {
+                let accessor = SparseUnaryCast::$general32(this.into_inner());
+                Ok(Self::F32(SparseAccess::from(accessor).into()))
+            }
+            Self::C32((re, im)) => $complex((re.into(), im.into())).and_then(Self::complex_from),
+            Self::C64((re, im)) => $complex((re.into(), im.into())).and_then(Self::complex_from),
+            Self::F32(this) => {
+                let accessor = SparseUnaryCast::$general32(this.into_inner());
+                Ok(Self::F32(SparseAccess::from(accessor).into()))
+            }
+            Self::F64(this) => {
+                let accessor = SparseUnaryCast::$general64(this.into_inner());
+                Ok(Self::F64(SparseAccess::from(accessor).into()))
+            }
+            Self::I16(this) => {
+                let accessor = SparseUnaryCast::$general32(this.into_inner());
+                Ok(Self::F32(SparseAccess::from(accessor).into()))
+            }
+            Self::I32(this) => {
+                let accessor = SparseUnaryCast::$general32(this.into_inner());
+                Ok(Self::F32(SparseAccess::from(accessor).into()))
+            }
+            Self::I64(this) => {
+                let accessor = SparseUnaryCast::$general64(this.into_inner());
+                Ok(Self::F64(SparseAccess::from(accessor).into()))
+            }
+            Self::U8(this) => {
+                let accessor = SparseUnaryCast::$general32(this.into_inner());
+                Ok(Self::F32(SparseAccess::from(accessor).into()))
+            }
+            Self::U16(this) => {
+                let accessor = SparseUnaryCast::$general32(this.into_inner());
+                Ok(Self::F32(SparseAccess::from(accessor).into()))
+            }
+            Self::U32(this) => {
+                let accessor = SparseUnaryCast::$general32(this.into_inner());
+                Ok(Self::F32(SparseAccess::from(accessor).into()))
+            }
+            Self::U64(this) => {
+                let accessor = SparseUnaryCast::$general64(this.into_inner());
+                Ok(Self::F64(SparseAccess::from(accessor).into()))
+            }
+        }
+    };
+}
+
+impl<FE: ThreadSafe + AsType<Node>> TensorTrig for SparseView<FE> {
     type Unary = Self;
 
     fn asin(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(self, asin_f32, asin_f64, |_: (Self, Self)| Err(
+            not_implemented!("arcsine of a complex number")
+        ))
     }
 
     fn sin(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(self, sin_f32, sin_f64, ComplexTrig::sin)
     }
 
     fn sinh(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(self, sinh_f32, sinh_f64, ComplexTrig::sinh)
     }
 
     fn acos(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(self, acos_f32, acos_f64, |_: (Self, Self)| Err(
+            not_implemented!("arccosine of a complex number")
+        ))
     }
 
     fn cos(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(self, cos_f32, cos_f64, ComplexTrig::cos)
     }
 
     fn cosh(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(self, cosh_f32, cosh_f64, ComplexTrig::cosh)
     }
 
     fn atan(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(self, atan_f32, atan_f64, |_: (Self, Self)| Err(
+            not_implemented!("arctangent of a complex number")
+        ))
     }
 
     fn tan(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(self, tan_f32, tan_f64, ComplexTrig::tan)
     }
 
     fn tanh(self) -> TCResult<Self::Unary> {
-        todo!()
+        view_trig!(self, tanh_f32, tanh_f64, ComplexTrig::tanh)
     }
 }
 
