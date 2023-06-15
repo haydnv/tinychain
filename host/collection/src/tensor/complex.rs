@@ -13,7 +13,7 @@ use super::sparse::{Node, SparseView};
 pub(crate) trait TensorComplex:
     TensorInstance
     + TensorMath<Self, Combine = Self, LeftCombine = Self>
-    + TensorMathConst<Combine = Self, DenseCombine = Self>
+    + TensorMathConst<Combine = Self>
     + TensorUnary<Unary = Self>
     + Clone
 {

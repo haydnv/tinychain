@@ -10,8 +10,8 @@ use tcgeneric::ThreadSafe;
 use crate::tensor::complex::{ComplexCompare, ComplexMath};
 use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
-    Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare, TensorConvert,
-    TensorInstance, TensorMath, TensorMathConst, TensorTrig, TensorUnary,
+    Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst,
+    TensorConvert, TensorInstance, TensorMath, TensorMathConst, TensorTrig, TensorUnary,
 };
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
@@ -173,7 +173,6 @@ where
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Combine = Self;
-    type DenseCombine = DenseView<FE>;
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
         view_dispatch!(
@@ -186,12 +185,12 @@ where
         )
     }
 
-    fn or_const(self, other: Number) -> TCResult<Self::DenseCombine> {
-        self.into_dense().or_const(other)
+    fn or_const(self, other: Number) -> TCResult<Self::Combine> {
+        Err(bad_request!("cannot call OR {} on {:?} because the result would not be sparse (consider converting to a dense tensor first)", other, self))
     }
 
-    fn xor_const(self, other: Number) -> TCResult<Self::DenseCombine> {
-        self.into_dense().xor_const(other)
+    fn xor_const(self, other: Number) -> TCResult<Self::Combine> {
+        Err(bad_request!("cannot call XOR {} on {:?} because the result would not be sparse (consider converting to a dense tensor first)", other, self))
     }
 }
 
@@ -422,6 +421,34 @@ impl<FE: AsType<Node> + ThreadSafe> TensorCompare<Self> for SparseView<FE> {
     }
 }
 
+impl<FE: AsType<Node> + ThreadSafe> TensorCompareConst for SparseView<FE> {
+    type Compare = Self;
+
+    fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn ge_const(self, other: Number) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn le_const(self, other: Number) -> TCResult<Self::Compare> {
+        todo!()
+    }
+
+    fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
+        todo!()
+    }
+}
+
 impl<FE: AsType<Node> + ThreadSafe> TensorMath<Self> for SparseView<FE> {
     type Combine = Self;
     type LeftCombine = Self;
@@ -560,7 +587,7 @@ impl<FE: AsType<Node> + ThreadSafe> TensorMath<Self> for SparseView<FE> {
                 let that = that.cast_into(this.0.dtype())?;
                 Self::C32(this).mul(that)
             }
-            (Self::C32((a, b)), Self::C32((c, d))) => {
+            (Self::C64((a, b)), Self::C64((c, d))) => {
                 ComplexMath::mul((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
@@ -683,10 +710,9 @@ impl<FE: AsType<Node> + ThreadSafe> TensorMath<Self> for SparseView<FE> {
 
 impl<FE: AsType<Node> + ThreadSafe> TensorMathConst for SparseView<FE> {
     type Combine = Self;
-    type DenseCombine = Self;
 
-    fn add_const(self, other: Number) -> TCResult<Self::DenseCombine> {
-        todo!()
+    fn add_const(self, other: Number) -> TCResult<Self::Combine> {
+        Err(bad_request!("cannot add {} to {:?} because the result would not be sparse (consider converting to a dense tensor first)", other, self))
     }
 
     fn div_const(self, other: Number) -> TCResult<Self::Combine> {
@@ -705,8 +731,8 @@ impl<FE: AsType<Node> + ThreadSafe> TensorMathConst for SparseView<FE> {
         todo!()
     }
 
-    fn sub_const(self, other: Number) -> TCResult<Self::DenseCombine> {
-        todo!()
+    fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
+        Err(bad_request!("cannot subtract {} from {:?} because the result would not be sparse (consider converting to a dense tensor first)", other, self))
     }
 }
 

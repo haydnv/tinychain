@@ -213,17 +213,16 @@ where
     A: DenseInstance + Into<DenseAccessCast<FE>>,
 {
     type Combine = DenseTensor<FE, DenseCompareConst<FE, u8>>;
-    type DenseCombine = DenseTensor<FE, DenseCompareConst<FE, u8>>;
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
         Ok(DenseCompareConst::new(self.accessor, other, Block::and_scalar).into())
     }
 
-    fn or_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+    fn or_const(self, other: Number) -> TCResult<Self::Combine> {
         Ok(DenseCompareConst::new(self.accessor, other, Block::or_scalar).into())
     }
 
-    fn xor_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+    fn xor_const(self, other: Number) -> TCResult<Self::Combine> {
         Ok(DenseCompareConst::new(self.accessor, other, Block::xor_scalar).into())
     }
 }
@@ -388,9 +387,8 @@ where
     Number: CastInto<A::DType>,
 {
     type Combine = DenseTensor<FE, DenseConst<A, A::DType>>;
-    type DenseCombine = DenseTensor<FE, DenseConst<A, A::DType>>;
 
-    fn add_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+    fn add_const(self, other: Number) -> TCResult<Self::Combine> {
         let n = other.cast_into();
 
         let accessor = DenseConst::new(self.accessor, n, |block, n| {
@@ -446,7 +444,7 @@ where
         Ok(accessor.into())
     }
 
-    fn sub_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+    fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
         let n = other.cast_into();
 
         let accessor = DenseConst::new(self.accessor, n, |block, n| {

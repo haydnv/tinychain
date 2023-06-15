@@ -250,7 +250,6 @@ where
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Combine = Self;
-    type DenseCombine = Self;
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
         view_dispatch!(
@@ -264,7 +263,7 @@ where
         )
     }
 
-    fn or_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+    fn or_const(self, other: Number) -> TCResult<Self::Combine> {
         view_dispatch!(
             self,
             this,
@@ -276,7 +275,7 @@ where
         )
     }
 
-    fn xor_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+    fn xor_const(self, other: Number) -> TCResult<Self::Combine> {
         view_dispatch!(
             self,
             this,
@@ -891,9 +890,8 @@ where
 
 impl<FE: ThreadSafe> TensorMathConst for DenseView<FE> {
     type Combine = Self;
-    type DenseCombine = Self;
 
-    fn add_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+    fn add_const(self, other: Number) -> TCResult<Self::Combine> {
         todo!()
     }
 
@@ -913,7 +911,7 @@ impl<FE: ThreadSafe> TensorMathConst for DenseView<FE> {
         todo!()
     }
 
-    fn sub_const(self, other: Number) -> TCResult<Self::DenseCombine> {
+    fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
         todo!()
     }
 }

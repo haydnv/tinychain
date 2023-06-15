@@ -185,17 +185,14 @@ pub trait TensorBooleanConst {
     /// The return type of a boolean operation.
     type Combine: TensorInstance;
 
-    /// The dense return type of a boolean operation.
-    type DenseCombine: TensorInstance;
-
     /// Logical and
     fn and_const(self, other: Number) -> TCResult<Self::Combine>;
 
     /// Logical or
-    fn or_const(self, other: Number) -> TCResult<Self::DenseCombine>;
+    fn or_const(self, other: Number) -> TCResult<Self::Combine>;
 
     /// Logical xor
-    fn xor_const(self, other: Number) -> TCResult<Self::DenseCombine>;
+    fn xor_const(self, other: Number) -> TCResult<Self::Combine>;
 }
 
 pub trait TensorCast {
@@ -326,11 +323,9 @@ pub trait TensorMath<O> {
 pub trait TensorMathConst {
     /// The return type of a math operation
     type Combine: TensorInstance;
-    /// The return type of a math operation with a result expected to be dense
-    type DenseCombine: TensorInstance;
 
     /// Add a constant to this tensor
-    fn add_const(self, other: Number) -> TCResult<Self::DenseCombine>;
+    fn add_const(self, other: Number) -> TCResult<Self::Combine>;
 
     /// Divide `self` by `other`.
     fn div_const(self, other: Number) -> TCResult<Self::Combine>;
@@ -345,7 +340,7 @@ pub trait TensorMathConst {
     fn pow_const(self, other: Number) -> TCResult<Self::Combine>;
 
     /// Subtract `other` from `self`.
-    fn sub_const(self, other: Number) -> TCResult<Self::DenseCombine>;
+    fn sub_const(self, other: Number) -> TCResult<Self::Combine>;
 }
 
 /// [`Tensor`] reduction operations

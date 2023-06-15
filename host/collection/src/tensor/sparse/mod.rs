@@ -14,7 +14,7 @@ use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberClass, NumberCollator, NumberInstance, NumberType};
 use tcgeneric::ThreadSafe;
 
-use super::dense::{DenseAccess, DenseAccessCast, DenseCompareConst, DenseSparse, DenseTensor};
+use super::dense::{DenseAccess, DenseAccessCast, DenseSparse, DenseTensor};
 
 use super::{
     Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCompare,
@@ -171,7 +171,6 @@ where
     SparseAccessCast<FE>: From<SparseAccess<FE, A::DType>>,
 {
     type Combine = SparseTensor<FE, SparseCompareConst<FE, u8>>;
-    type DenseCombine = DenseTensor<FE, DenseCompareConst<FE, u8>>;
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
         let access = SparseCompareConst::new(self.accessor.into(), other, |l, r| {
@@ -185,22 +184,12 @@ where
         Ok(SparseTensor::from(access))
     }
 
-    fn or_const(self, other: Number) -> TCResult<Self::DenseCombine> {
-        let access = DenseSparse::from(self.accessor);
-        let access = DenseCompareConst::new(DenseAccess::from(access), other, |l, r| {
-            l.or_scalar(r).map(Array::from).map_err(TCError::from)
-        });
-
-        Ok(DenseTensor::from(access))
+    fn or_const(self, other: Number) -> TCResult<Self::Combine> {
+        Err(bad_request!("cannot call OR {} on {:?} because the result would not be sparse (consider converting to a dense tensor first)", other, self))
     }
 
-    fn xor_const(self, other: Number) -> TCResult<Self::DenseCombine> {
-        let access = DenseSparse::from(self.accessor);
-        let access = DenseCompareConst::new(DenseAccess::from(access), other, |l, r| {
-            l.xor_scalar(r).map(Array::from).map_err(TCError::from)
-        });
-
-        Ok(DenseTensor::from(access))
+    fn xor_const(self, other: Number) -> TCResult<Self::Combine> {
+        Err(bad_request!("cannot call XOR {} on {:?} because the result would not be sparse (consider converting to a dense tensor first)", other, self))
     }
 }
 
