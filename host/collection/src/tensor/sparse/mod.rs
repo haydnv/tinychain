@@ -125,38 +125,52 @@ where
     type LeftCombine = SparseTensor<FE, SparseCompareLeft<FE, u8>>;
 
     fn and(self, other: SparseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
-        let access =
-            SparseCompareLeft::new(self.accessor.into(), other.accessor.into(), |l, r| {
+        let access = SparseCompareLeft::new(
+            self.accessor.into(),
+            other.accessor.into(),
+            |l, r| l.and(r),
+            |l, r| {
                 if bool::cast_from(l) && bool::cast_from(r) {
                     1
                 } else {
                     0
                 }
-            })?;
+            },
+        )?;
 
         Ok(SparseTensor::from(access))
     }
 
     fn or(self, other: SparseTensor<FE, R>) -> TCResult<Self::Combine> {
-        let access = SparseCompare::new(self.accessor.into(), other.accessor.into(), |l, r| {
-            if bool::cast_from(l) && bool::cast_from(r) {
-                1
-            } else {
-                0
-            }
-        })?;
+        let access = SparseCompare::new(
+            self.accessor.into(),
+            other.accessor.into(),
+            |l, r| l.or(r),
+            |l, r| {
+                if bool::cast_from(l) && bool::cast_from(r) {
+                    1
+                } else {
+                    0
+                }
+            },
+        )?;
 
         Ok(SparseTensor::from(access))
     }
 
     fn xor(self, other: SparseTensor<FE, R>) -> TCResult<Self::Combine> {
-        let access = SparseCompare::new(self.accessor.into(), other.accessor.into(), |l, r| {
-            if bool::cast_from(l) && bool::cast_from(r) {
-                1
-            } else {
-                0
-            }
-        })?;
+        let access = SparseCompare::new(
+            self.accessor.into(),
+            other.accessor.into(),
+            |l, r| l.xor(r),
+            |l, r| {
+                if bool::cast_from(l) && bool::cast_from(r) {
+                    1
+                } else {
+                    0
+                }
+            },
+        )?;
 
         Ok(SparseTensor::from(access))
     }
@@ -224,13 +238,18 @@ where
     }
 
     fn gt(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
-        SparseCompare::new(self.accessor.into(), other.accessor.into(), |l, r| {
-            if l.gt(&r) {
-                1
-            } else {
-                0
-            }
-        })
+        SparseCompare::new(
+            self.accessor.into(),
+            other.accessor.into(),
+            |l, r| l.gt(r),
+            |l, r| {
+                if l.gt(&r) {
+                    1
+                } else {
+                    0
+                }
+            },
+        )
         .map(SparseTensor::from)
     }
 
@@ -243,13 +262,18 @@ where
     }
 
     fn lt(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
-        SparseCompare::new(self.accessor.into(), other.accessor.into(), |l, r| {
-            if l.lt(&r) {
-                1
-            } else {
-                0
-            }
-        })
+        SparseCompare::new(
+            self.accessor.into(),
+            other.accessor.into(),
+            |l, r| l.lt(r),
+            |l, r| {
+                if l.lt(&r) {
+                    1
+                } else {
+                    0
+                }
+            },
+        )
         .map(SparseTensor::from)
     }
 
@@ -262,13 +286,18 @@ where
     }
 
     fn ne(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
-        SparseCompare::new(self.accessor.into(), other.accessor.into(), |l, r| {
-            if l.ne(&r) {
-                1
-            } else {
-                0
-            }
-        })
+        SparseCompare::new(
+            self.accessor.into(),
+            other.accessor.into(),
+            |l, r| l.ne(r),
+            |l, r| {
+                if l.ne(&r) {
+                    1
+                } else {
+                    0
+                }
+            },
+        )
         .map(SparseTensor::from)
     }
 }

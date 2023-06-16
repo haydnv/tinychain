@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::Bound;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -19,7 +20,7 @@ use safecast::{AsType, CastFrom, CastInto};
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::TxnId;
-use tc_value::{DType, Number, NumberClass, NumberCollator, NumberType, Trigonometry};
+use tc_value::{DType, Number, NumberClass, NumberCollator, NumberType};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::block::Block;
@@ -125,6 +126,23 @@ macro_rules! access_cast_dispatch {
     };
 }
 
+macro_rules! access_cast_dispatch_dual {
+    ($self:ident, $other:ident, $this:ident, $that:ident, $call:expr) => {
+        match ($self, $other) {
+            (Self::F32($this), Self::F32($that)) => $call,
+            (Self::F64($this), Self::F64($that)) => $call,
+            (Self::I16($this), Self::I16($that)) => $call,
+            (Self::I32($this), Self::I32($that)) => $call,
+            (Self::I64($this), Self::I64($that)) => $call,
+            (Self::U8($this), Self::U8($that)) => $call,
+            (Self::U16($this), Self::U16($that)) => $call,
+            (Self::U32($this), Self::U32($that)) => $call,
+            (Self::U64($this), Self::U64($that)) => $call,
+            ($this, $that) => Err(bad_request!("cannot merge {:?} and {:?}", $this, $that)),
+        }
+    };
+}
+
 impl<FE: ThreadSafe> SparseAccessCast<FE> {
     pub fn dtype(&self) -> NumberType {
         access_cast_dispatch!(self, this, this.dtype())
@@ -139,6 +157,64 @@ impl<FE> SparseAccessCast<FE>
 where
     FE: AsType<Node> + ThreadSafe,
 {
+    async fn merge_blocks_inner(
+        self,
+        other: Self,
+        range: Range,
+        order: Axes,
+    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<(Array<u64>, (Block, Block))>> + Send>>> {
+        let shape = if self.shape() == other.shape() {
+            Ok(self.shape().clone())
+        } else {
+            Err(bad_request!("cannot merge {:?} with {:?}", self, other))
+        }?;
+
+        access_cast_dispatch_dual!(self, other, this, that, {
+            let zero = this.dtype().zero();
+            let blocks = merge_blocks_inner(this, that, shape, range, order).await?;
+            let blocks = blocks.map_ok(|(coords, (left, right))| {
+                (
+                    coords,
+                    (
+                        Block::from(Array::from(left)),
+                        Block::from(Array::from(right)),
+                    ),
+                )
+            });
+
+            Ok(Box::pin(blocks))
+        })
+    }
+
+    async fn merge_blocks_outer(
+        self,
+        other: Self,
+        range: Range,
+        order: Axes,
+    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<(Array<u64>, (Block, Block))>> + Send>>> {
+        let shape = if self.shape() == other.shape() {
+            Ok(self.shape().clone())
+        } else {
+            Err(bad_request!("cannot merge {:?} with {:?}", self, other))
+        }?;
+
+        access_cast_dispatch_dual!(self, other, this, that, {
+            let zero = this.dtype().zero();
+            let blocks = merge_blocks_outer(this, that, shape, range, order).await?;
+            let blocks = blocks.map_ok(|(coords, (left, right))| {
+                (
+                    coords,
+                    (
+                        Block::from(Array::from(left)),
+                        Block::from(Array::from(right)),
+                    ),
+                )
+            });
+
+            Ok(Box::pin(blocks))
+        })
+    }
+
     async fn blocks(self, range: Range, order: Axes) -> TCResult<Blocks<Array<u64>, Block>> {
         access_cast_dispatch!(self, this, {
             let blocks = this.blocks(range, order).await?;
@@ -1199,40 +1275,6 @@ where
             ))
         }
     }
-
-    async fn source_blocks(
-        self,
-        range: Range,
-        order: Axes,
-    ) -> TCResult<
-        impl Stream<Item = TCResult<(Array<u64>, (ArrayBase<Vec<T>>, ArrayBase<Vec<T>>))>> + Send,
-    > {
-        let size = self.size();
-        let strides = strides_for(self.shape(), self.ndim());
-        let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
-        let shape =
-            ArrayBase::<Arc<Vec<u64>>>::new(vec![self.ndim()], Arc::new(self.shape().to_vec()))?;
-
-        let (left_blocks, right_blocks) = try_join!(
-            self.left.blocks(range.clone(), order.to_vec()),
-            self.right.blocks(range, order)
-        )?;
-
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context.clone(), size_hint(size))?;
-
-        let left = offsets(queue.clone(), strides.clone(), left_blocks);
-        let right = offsets(queue.clone(), strides.clone(), right_blocks);
-
-        let elements = stream::OuterJoin::new(left, right, T::zero());
-        let blocks = stream::BlockOffsetsDual::new(elements);
-        let coord_blocks = blocks.map_ok(move |(offsets, values)| {
-            let coords = (offsets * strides.clone()) % shape.clone();
-            (coords.into(), values)
-        });
-
-        Ok(coord_blocks)
-    }
 }
 
 impl<L, R, T> TensorInstance for SparseCombine<L, R, T>
@@ -1265,7 +1307,9 @@ where
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
         let block_op = self.block_op;
-        let source_blocks = self.source_blocks(range, order).await?;
+        let shape = self.shape().clone();
+        let source_blocks = merge_blocks_outer(self.left, self.right, shape, range, order).await?;
+
         let blocks = source_blocks.map(move |result| {
             result.and_then(|(coords, (left, right))| {
                 (block_op)(left.into(), right.into()).map(|values| (coords, values))
@@ -1365,40 +1409,6 @@ where
             ))
         }
     }
-
-    async fn source_blocks(
-        self,
-        range: Range,
-        order: Axes,
-    ) -> TCResult<
-        impl Stream<Item = TCResult<(Array<u64>, (ArrayBase<Vec<T>>, ArrayBase<Vec<T>>))>> + Send,
-    > {
-        let size = self.size();
-        let strides = strides_for(self.shape(), self.ndim());
-        let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
-        let shape =
-            ArrayBase::<Arc<Vec<u64>>>::new(vec![self.ndim()], Arc::new(self.shape().to_vec()))?;
-
-        let (left_blocks, right_blocks) = try_join!(
-            self.left.blocks(range.clone(), order.to_vec()),
-            self.right.blocks(range, order)
-        )?;
-
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context.clone(), size_hint(size))?;
-
-        let left = offsets(queue.clone(), strides.clone(), left_blocks);
-        let right = offsets(queue.clone(), strides.clone(), right_blocks);
-
-        let elements = stream::InnerJoin::new(left, right);
-        let blocks = stream::BlockOffsetsDual::new(elements);
-        let coord_blocks = blocks.map_ok(move |(offsets, values)| {
-            let coords = (offsets * strides.clone()) % shape.clone();
-            (coords.into(), values)
-        });
-
-        Ok(coord_blocks)
-    }
 }
 
 impl<L, R, T> TensorInstance for SparseCombineLeft<L, R, T>
@@ -1431,7 +1441,9 @@ where
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
         let block_op = self.block_op;
-        let source_blocks = self.source_blocks(range, order).await?;
+        let shape = self.shape().clone();
+        let source_blocks = merge_blocks_inner(self.left, self.right, shape, range, order).await?;
+
         let blocks = source_blocks.map(move |result| {
             result.and_then(|(coords, (left, right))| {
                 (block_op)(left.into(), right.into()).map(|values| (coords, values))
@@ -1609,27 +1621,31 @@ where
     }
 }
 
-pub struct SparseCompare<FE, T> {
+pub struct SparseCompare<FE, T: CDatatype> {
     left: SparseAccessCast<FE>,
     right: SparseAccessCast<FE>,
-    op: fn(Number, Number) -> T,
+    block_op: fn(Block, Block) -> TCResult<Array<T>>,
+    value_op: fn(Number, Number) -> T,
 }
 
-impl<FE, T> Clone for SparseCompare<FE, T> {
+impl<FE, T: CDatatype> Clone for SparseCompare<FE, T> {
     fn clone(&self) -> Self {
         Self {
             left: self.left.clone(),
             right: self.right.clone(),
-            op: self.op,
+            block_op: self.block_op,
+            value_op: self.value_op,
         }
     }
 }
 
-impl<FE, T> SparseCompare<FE, T>
-where
-    FE: ThreadSafe,
-{
-    pub fn new<L, R>(left: L, right: R, op: fn(Number, Number) -> T) -> TCResult<Self>
+impl<FE: ThreadSafe, T: CDatatype> SparseCompare<FE, T> {
+    pub fn new<L, R>(
+        left: L,
+        right: R,
+        block_op: fn(Block, Block) -> TCResult<Array<T>>,
+        value_op: fn(Number, Number) -> T,
+    ) -> TCResult<Self>
     where
         L: Into<SparseAccessCast<FE>>,
         R: Into<SparseAccessCast<FE>>,
@@ -1638,7 +1654,12 @@ where
         let right = right.into();
 
         if left.shape() == right.shape() {
-            Ok(Self { left, right, op })
+            Ok(Self {
+                left,
+                right,
+                block_op,
+                value_op,
+            })
         } else {
             Err(bad_request!(
                 "cannot combine {:?} with {:?} (wrong shape)",
@@ -1649,11 +1670,7 @@ where
     }
 }
 
-impl<FE, T> TensorInstance for SparseCompare<FE, T>
-where
-    FE: ThreadSafe,
-    T: CDatatype + DType,
-{
+impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for SparseCompare<FE, T> {
     fn dtype(&self) -> NumberType {
         T::dtype()
     }
@@ -1670,23 +1687,31 @@ where
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType,
 {
-    type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<T>>;
-    type Blocks = stream::BlockCoords<Elements<Self::DType>, T>;
+    type CoordBlock = Array<u64>;
+    type ValueBlock = Array<T>;
+    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
-        let ndim = self.ndim();
-        let elements = self.elements(range, order).await?;
-        Ok(stream::BlockCoords::new(elements, ndim))
+        let source_blocks = self
+            .left
+            .merge_blocks_outer(self.right, range, order)
+            .await?;
+
+        let blocks = source_blocks.map(move |result| {
+            let (coords, (left, right)) = result?;
+            let values = (self.block_op)(left, right)?;
+            Ok((coords, values))
+        });
+
+        Ok(Box::pin(blocks))
     }
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        let elements = self.left.outer_join(self.right, range, order).await?;
-        Ok(Box::pin(elements.map_ok(move |(coord, (l, r))| {
-            let value = (self.op)(l, r);
-            (coord, value)
-        })))
+        let ndim = self.ndim();
+        let size = self.size();
+        let blocks = self.blocks(range, order).await?;
+        block_elements(blocks, ndim, size)
     }
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1695,12 +1720,12 @@ where
             self.right.read_value(coord)
         )?;
 
-        Ok((self.op)(left, right))
+        Ok((self.value_op)(left, right))
     }
 }
 
 #[async_trait]
-impl<FE: ThreadSafe, T> TensorPermitRead for SparseCompare<FE, T> {
+impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for SparseCompare<FE, T> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         // always acquire these in-order to avoid the risk of a deadlock
         let mut left = self.left.read_permit(txn_id, range.clone()).await?;
@@ -1716,33 +1741,37 @@ impl<FE, T: CDatatype> From<SparseCompare<FE, T>> for SparseAccess<FE, T> {
     }
 }
 
-impl<FE, T> fmt::Debug for SparseCompare<FE, T> {
+impl<FE, T: CDatatype> fmt::Debug for SparseCompare<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} and {:?}", self.left, self.right)
     }
 }
 
-pub struct SparseCompareLeft<FE, T> {
+pub struct SparseCompareLeft<FE, T: CDatatype> {
     left: SparseAccessCast<FE>,
     right: SparseAccessCast<FE>,
-    op: fn(Number, Number) -> T,
+    block_op: fn(Block, Block) -> TCResult<Array<T>>,
+    value_op: fn(Number, Number) -> T,
 }
 
-impl<FE, T> Clone for SparseCompareLeft<FE, T> {
+impl<FE, T: CDatatype> Clone for SparseCompareLeft<FE, T> {
     fn clone(&self) -> Self {
         Self {
             left: self.left.clone(),
             right: self.right.clone(),
-            op: self.op,
+            block_op: self.block_op,
+            value_op: self.value_op,
         }
     }
 }
 
-impl<FE, T> SparseCompareLeft<FE, T>
-where
-    FE: ThreadSafe,
-{
-    pub fn new<L, R>(left: L, right: R, op: fn(Number, Number) -> T) -> TCResult<Self>
+impl<FE: ThreadSafe, T: CDatatype> SparseCompareLeft<FE, T> {
+    pub fn new<L, R>(
+        left: L,
+        right: R,
+        block_op: fn(Block, Block) -> TCResult<Array<T>>,
+        value_op: fn(Number, Number) -> T,
+    ) -> TCResult<Self>
     where
         L: Into<SparseAccessCast<FE>>,
         R: Into<SparseAccessCast<FE>>,
@@ -1751,7 +1780,12 @@ where
         let right = right.into();
 
         if left.shape() == right.shape() {
-            Ok(Self { left, right, op })
+            Ok(Self {
+                left,
+                right,
+                block_op,
+                value_op,
+            })
         } else {
             Err(bad_request!(
                 "cannot combine {:?} with {:?} (wrong shape)",
@@ -1783,23 +1817,31 @@ where
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType,
 {
-    type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<T>>;
-    type Blocks = stream::BlockCoords<Elements<Self::DType>, T>;
+    type CoordBlock = Array<u64>;
+    type ValueBlock = Array<T>;
+    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
-        let ndim = self.ndim();
-        let elements = self.elements(range, order).await?;
-        Ok(stream::BlockCoords::new(elements, ndim))
+        let source_blocks = self
+            .left
+            .merge_blocks_inner(self.right, range, order)
+            .await?;
+
+        let blocks = source_blocks.map(move |result| {
+            let (coords, (left, right)) = result?;
+            let values = (self.block_op)(left, right)?;
+            Ok((coords, values))
+        });
+
+        Ok(Box::pin(blocks))
     }
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        let elements = self.left.inner_join(self.right, range, order).await?;
-        Ok(Box::pin(elements.map_ok(move |(coord, (l, r))| {
-            let value = (self.op)(l, r);
-            (coord, value)
-        })))
+        let ndim = self.ndim();
+        let size = self.size();
+        let blocks = self.blocks(range, order).await?;
+        block_elements(blocks, ndim, size)
     }
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1808,12 +1850,12 @@ where
             self.right.read_value(coord)
         )?;
 
-        Ok((self.op)(left, right))
+        Ok((self.value_op)(left, right))
     }
 }
 
 #[async_trait]
-impl<FE: ThreadSafe, T> TensorPermitRead for SparseCompareLeft<FE, T> {
+impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for SparseCompareLeft<FE, T> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         // always acquire these locks in-order to avoid the risk of a deadlock
         let mut left = self.left.read_permit(txn_id, range.clone()).await?;
@@ -1829,7 +1871,7 @@ impl<FE, T: CDatatype> From<SparseCompareLeft<FE, T>> for SparseAccess<FE, T> {
     }
 }
 
-impl<FE, T> fmt::Debug for SparseCompareLeft<FE, T> {
+impl<FE, T: CDatatype> fmt::Debug for SparseCompareLeft<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} and {:?}", self.left, self.right)
     }
@@ -3549,6 +3591,92 @@ where
         .try_flatten();
 
     Box::pin(offsets)
+}
+
+async fn merge_blocks_inner<L, R, T>(
+    left: L,
+    right: R,
+    shape: Shape,
+    range: Range,
+    order: Axes,
+) -> TCResult<
+    impl Stream<Item = TCResult<(Array<u64>, (ArrayBase<Vec<T>>, ArrayBase<Vec<T>>))>> + Send,
+>
+where
+    L: SparseInstance<DType = T>,
+    R: SparseInstance<DType = T>,
+    T: CDatatype,
+{
+    debug_assert_eq!(&shape, left.shape());
+    debug_assert_eq!(&shape, right.shape());
+
+    let size = shape.as_slice().iter().product();
+    let strides = strides_for(&shape, shape.len());
+    let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
+    let shape = ArrayBase::<Arc<Vec<u64>>>::new(vec![shape.len()], Arc::new(shape.to_vec()))?;
+
+    let (left_blocks, right_blocks) = try_join!(
+        left.blocks(range.clone(), order.to_vec()),
+        right.blocks(range, order)
+    )?;
+
+    let context = ha_ndarray::Context::default()?;
+    let queue = ha_ndarray::Queue::new(context.clone(), size_hint(size))?;
+
+    let left = offsets(queue.clone(), strides.clone(), left_blocks);
+    let right = offsets(queue.clone(), strides.clone(), right_blocks);
+
+    let elements = stream::InnerJoin::new(left, right);
+    let blocks = stream::BlockOffsetsDual::new(elements);
+    let coord_blocks = blocks.map_ok(move |(offsets, values)| {
+        let coords = (offsets * strides.clone()) % shape.clone();
+        (coords.into(), values)
+    });
+
+    Ok(coord_blocks)
+}
+
+async fn merge_blocks_outer<L, R, T>(
+    left: L,
+    right: R,
+    shape: Shape,
+    range: Range,
+    order: Axes,
+) -> TCResult<
+    impl Stream<Item = TCResult<(Array<u64>, (ArrayBase<Vec<T>>, ArrayBase<Vec<T>>))>> + Send,
+>
+where
+    L: SparseInstance<DType = T>,
+    R: SparseInstance<DType = T>,
+    T: CDatatype,
+{
+    debug_assert_eq!(&shape, left.shape());
+    debug_assert_eq!(&shape, right.shape());
+
+    let size = shape.as_slice().iter().product();
+    let strides = strides_for(&shape, shape.len());
+    let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
+    let shape = ArrayBase::<Arc<Vec<u64>>>::new(vec![shape.len()], Arc::new(shape.to_vec()))?;
+
+    let (left_blocks, right_blocks) = try_join!(
+        left.blocks(range.clone(), order.to_vec()),
+        right.blocks(range, order)
+    )?;
+
+    let context = ha_ndarray::Context::default()?;
+    let queue = ha_ndarray::Queue::new(context.clone(), size_hint(size))?;
+
+    let left = offsets(queue.clone(), strides.clone(), left_blocks);
+    let right = offsets(queue.clone(), strides.clone(), right_blocks);
+
+    let elements = stream::OuterJoin::new(left, right, T::zero());
+    let blocks = stream::BlockOffsetsDual::new(elements);
+    let coord_blocks = blocks.map_ok(move |(offsets, values)| {
+        let coords = (offsets * strides.clone()) % shape.clone();
+        (coords.into(), values)
+    });
+
+    Ok(coord_blocks)
 }
 
 #[inline]
