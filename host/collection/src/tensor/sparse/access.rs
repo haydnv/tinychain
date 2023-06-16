@@ -1922,31 +1922,39 @@ impl<FE, T: CDatatype> fmt::Debug for SparseCompareLeft<FE, T> {
     }
 }
 
-pub struct SparseCompareConst<FE, T> {
+pub struct SparseCompareConst<FE, T: CDatatype> {
     left: SparseAccessCast<FE>,
     right: Number,
-    op: fn(Number, Number) -> T,
+    block_op: fn(Block, Number) -> TCResult<Array<T>>,
+    value_op: fn(Number, Number) -> T,
 }
 
-impl<FE, T> Clone for SparseCompareConst<FE, T> {
+impl<FE, T: CDatatype> Clone for SparseCompareConst<FE, T> {
     fn clone(&self) -> Self {
         Self {
             left: self.left.clone(),
             right: self.right,
-            op: self.op,
+            block_op: self.block_op,
+            value_op: self.value_op,
         }
     }
 }
 
-impl<FE, T> SparseCompareConst<FE, T> {
-    pub fn new<L>(left: L, right: Number, op: fn(Number, Number) -> T) -> Self
+impl<FE, T: CDatatype> SparseCompareConst<FE, T> {
+    pub fn new<L>(
+        left: L,
+        right: Number,
+        block_op: fn(Block, Number) -> TCResult<Array<T>>,
+        value_op: fn(Number, Number) -> T,
+    ) -> Self
     where
         L: Into<SparseAccessCast<FE>>,
     {
         Self {
             left: left.into(),
             right,
-            op,
+            block_op,
+            value_op,
         }
     }
 }
@@ -1968,22 +1976,36 @@ where
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
-    type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<T>>;
-    type Blocks = stream::BlockCoords<Elements<T>, T>;
+    type CoordBlock = Array<u64>;
+    type ValueBlock = Array<T>;
+    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let elements = self.elements(range, order).await?;
-        Ok(stream::BlockCoords::new(elements, ndim))
+        let context = ha_ndarray::Context::default()?;
+        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
+
+        let left_blocks = self.left.blocks(range, order).await?;
+        let blocks = left_blocks
+            .map(move |result| {
+                result.and_then(|(coords, block)| {
+                    (self.block_op)(block, self.right).map(|values| (coords, values))
+                })
+            })
+            .try_filter_map(move |(coords, values)| {
+                let queue = queue.clone();
+                async move { filter_zeros(&queue, coords, values, ndim) }
+            });
+
+        Ok(Box::pin(blocks))
     }
 
     async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
         let left_elements = self.left.elements(range, order).await?;
 
         let elements = left_elements.map_ok(move |(coord, l)| {
-            let value = (self.op)(l, self.right);
+            let value = (self.value_op)(l, self.right);
             (coord, value)
         });
 
@@ -1993,7 +2015,7 @@ where
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
         self.left
             .read_value(coord)
-            .map_ok(move |l| (self.op)(l, self.right))
+            .map_ok(move |l| (self.value_op)(l, self.right))
             .await
     }
 }
@@ -2011,7 +2033,7 @@ impl<FE, T: CDatatype> From<SparseCompareConst<FE, T>> for SparseAccess<FE, T> {
     }
 }
 
-impl<FE, T> fmt::Debug for SparseCompareConst<FE, T> {
+impl<FE, T: CDatatype> fmt::Debug for SparseCompareConst<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} with {:?}", self.left, self.right)
     }

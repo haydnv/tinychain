@@ -14,6 +14,7 @@ use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberClass, NumberCollator, NumberInstance, NumberType};
 use tcgeneric::ThreadSafe;
 
+use super::block::Block;
 use super::dense::{DenseAccess, DenseAccessCast, DenseSparse, DenseTensor};
 
 use super::{
@@ -187,13 +188,15 @@ where
     type Combine = SparseTensor<FE, SparseCompareConst<FE, u8>>;
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
-        let access = SparseCompareConst::new(self.accessor.into(), other, |l, r| {
-            if l.and(r).cast_into() {
+        let cmp = |l: Number, r: Number| {
+            if bool::cast_from(l.and(r)) {
                 1
             } else {
                 0
             }
-        });
+        };
+
+        let access = SparseCompareConst::new(self.accessor.into(), other, Block::and_scalar, cmp);
 
         Ok(SparseTensor::from(access))
     }
@@ -312,37 +315,37 @@ where
 
     fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
         let cmp = |l: Number, r: Number| if l.eq(&r) { 1 } else { 0 };
-        let sparse = SparseCompareConst::new(self.accessor.into(), other, cmp);
+        let sparse = SparseCompareConst::new(self.accessor.into(), other, Block::eq_scalar, cmp);
         Ok(sparse.into())
     }
 
     fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
         let cmp = |l: Number, r: Number| if l.gt(&r) { 1 } else { 0 };
-        let sparse = SparseCompareConst::new(self.accessor.into(), other, cmp);
+        let sparse = SparseCompareConst::new(self.accessor.into(), other, Block::gt_scalar, cmp);
         Ok(sparse.into())
     }
 
     fn ge_const(self, other: Number) -> TCResult<Self::Compare> {
         let cmp = |l: Number, r: Number| if l.ge(&r) { 1 } else { 0 };
-        let sparse = SparseCompareConst::new(self.accessor.into(), other, cmp);
+        let sparse = SparseCompareConst::new(self.accessor.into(), other, Block::ge_scalar, cmp);
         Ok(sparse.into())
     }
 
     fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
         let cmp = |l: Number, r: Number| if l.lt(&r) { 1 } else { 0 };
-        let sparse = SparseCompareConst::new(self.accessor.into(), other, cmp);
+        let sparse = SparseCompareConst::new(self.accessor.into(), other, Block::lt_scalar, cmp);
         Ok(sparse.into())
     }
 
     fn le_const(self, other: Number) -> TCResult<Self::Compare> {
         let cmp = |l: Number, r: Number| if l.le(&r) { 1 } else { 0 };
-        let sparse = SparseCompareConst::new(self.accessor.into(), other, cmp);
+        let sparse = SparseCompareConst::new(self.accessor.into(), other, Block::le_scalar, cmp);
         Ok(sparse.into())
     }
 
     fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
         let cmp = |l: Number, r: Number| if l.ne(&r) { 1 } else { 0 };
-        let sparse = SparseCompareConst::new(self.accessor.into(), other, cmp);
+        let sparse = SparseCompareConst::new(self.accessor.into(), other, Block::ne_scalar, cmp);
         Ok(sparse.into())
     }
 }
