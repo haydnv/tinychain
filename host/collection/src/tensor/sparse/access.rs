@@ -1306,15 +1306,24 @@ where
     type DType = T;
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        let ndim = self.ndim();
+        let context = ha_ndarray::Context::default()?;
+        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
+
         let block_op = self.block_op;
         let shape = self.shape().clone();
         let source_blocks = merge_blocks_outer(self.left, self.right, shape, range, order).await?;
 
-        let blocks = source_blocks.map(move |result| {
-            result.and_then(|(coords, (left, right))| {
-                (block_op)(left.into(), right.into()).map(|values| (coords, values))
+        let blocks = source_blocks
+            .map(move |result| {
+                result.and_then(|(coords, (left, right))| {
+                    (block_op)(left.into(), right.into()).map(|values| (coords, values))
+                })
             })
-        });
+            .try_filter_map(move |(coords, values)| {
+                let queue = queue.clone();
+                async move { filter_zeros(&queue, coords, values, ndim) }
+            });
 
         Ok(Box::pin(blocks))
     }
@@ -1440,15 +1449,24 @@ where
     type DType = T;
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        let ndim = self.ndim();
+        let context = ha_ndarray::Context::default()?;
+        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
+
         let block_op = self.block_op;
         let shape = self.shape().clone();
         let source_blocks = merge_blocks_inner(self.left, self.right, shape, range, order).await?;
 
-        let blocks = source_blocks.map(move |result| {
-            result.and_then(|(coords, (left, right))| {
-                (block_op)(left.into(), right.into()).map(|values| (coords, values))
+        let blocks = source_blocks
+            .map(move |result| {
+                result.and_then(|(coords, (left, right))| {
+                    (block_op)(left.into(), right.into()).map(|values| (coords, values))
+                })
             })
-        });
+            .try_filter_map(move |(coords, values)| {
+                let queue = queue.clone();
+                async move { filter_zeros(&queue, coords, values, ndim) }
+            });
 
         Ok(Box::pin(blocks))
     }
@@ -1553,19 +1571,28 @@ where
     S: SparseInstance<DType = T>,
     T: CDatatype + DType,
 {
-    type CoordBlock = S::CoordBlock;
+    type CoordBlock = Array<u64>;
     type ValueBlock = Array<T>;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        let ndim = self.ndim();
+        let context = ha_ndarray::Context::default()?;
+        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
+
         let left_blocks = self.left.blocks(range, order).await?;
 
-        let blocks = left_blocks.map(move |result| {
-            let (coords, values) = result?;
-            let values = (self.block_op)(values.into(), self.right)?;
-            Ok((coords, values))
-        });
+        let blocks = left_blocks
+            .map(move |result| {
+                let (coords, values) = result?;
+                let values = (self.block_op)(values.into(), self.right)?;
+                Ok((coords, values))
+            })
+            .try_filter_map(move |(coords, values)| {
+                let queue = queue.clone();
+                async move { filter_zeros(&queue, coords.into(), values, ndim) }
+            });
 
         Ok(Box::pin(blocks))
     }
@@ -1693,16 +1720,25 @@ where
     type DType = T;
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        let ndim = self.ndim();
+        let context = ha_ndarray::Context::default()?;
+        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
+
         let source_blocks = self
             .left
             .merge_blocks_outer(self.right, range, order)
             .await?;
 
-        let blocks = source_blocks.map(move |result| {
-            let (coords, (left, right)) = result?;
-            let values = (self.block_op)(left, right)?;
-            Ok((coords, values))
-        });
+        let blocks = source_blocks
+            .map(move |result| {
+                let (coords, (left, right)) = result?;
+                let values = (self.block_op)(left, right)?;
+                Ok((coords, values))
+            })
+            .try_filter_map(move |(coords, values)| {
+                let queue = queue.clone();
+                async move { filter_zeros(&queue, coords, values, ndim) }
+            });
 
         Ok(Box::pin(blocks))
     }
@@ -1823,16 +1859,25 @@ where
     type DType = T;
 
     async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+        let ndim = self.ndim();
+        let context = ha_ndarray::Context::default()?;
+        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
+
         let source_blocks = self
             .left
             .merge_blocks_inner(self.right, range, order)
             .await?;
 
-        let blocks = source_blocks.map(move |result| {
-            let (coords, (left, right)) = result?;
-            let values = (self.block_op)(left, right)?;
-            Ok((coords, values))
-        });
+        let blocks = source_blocks
+            .map(move |result| {
+                let (coords, (left, right)) = result?;
+                let values = (self.block_op)(left, right)?;
+                Ok((coords, values))
+            })
+            .try_filter_map(move |(coords, values)| {
+                let queue = queue.clone();
+                async move { filter_zeros(&queue, coords, values, ndim) }
+            });
 
         Ok(Box::pin(blocks))
     }
@@ -2979,7 +3024,7 @@ where
 impl<S> SparseInstance for SparseTranspose<S>
 where
     S: SparseInstance,
-    <S::CoordBlock as NDArrayTransform>::Transpose: NDArrayRead<DType = u64>,
+    <S::CoordBlock as NDArrayTransform>::Transpose: NDArrayRead<DType = u64> + Into<Array<u64>>,
 {
     type CoordBlock = <S::CoordBlock as NDArrayTransform>::Transpose;
     type ValueBlock = S::ValueBlock;
@@ -3591,6 +3636,56 @@ where
         .try_flatten();
 
     Box::pin(offsets)
+}
+
+#[inline]
+fn filter_zeros<T: CDatatype>(
+    queue: &ha_ndarray::Queue,
+    coords: Array<u64>,
+    values: Array<T>,
+    ndim: usize,
+) -> TCResult<Option<(Array<u64>, Array<T>)>> {
+    let zero = T::zero();
+
+    if values.all()? {
+        Ok(Some((coords, values)))
+    } else {
+        let coord_slice = coords.read(queue)?.to_slice()?;
+        let value_slice = values.read(queue)?.to_slice()?;
+        debug_assert_eq!(coord_slice.len() % ndim, 0);
+
+        // let mut filtered_coords = Vec::with_capacity(coord_slice.len());
+        // let mut filtered_values = Vec::with_capacity(value_slice.len());
+
+        let (filtered_coords, filtered_values): (Vec<&[u64]>, Vec<T>) = coord_slice
+            .as_ref()
+            .par_chunks(ndim)
+            .zip(value_slice.as_ref().par_iter().copied())
+            .filter_map(|(coord, value)| {
+                if value == zero {
+                    None
+                } else {
+                    Some((coord, value))
+                }
+            })
+            .unzip();
+
+        let filtered_coords = filtered_coords
+            .into_par_iter()
+            .map(|coord| coord.into_par_iter().copied())
+            .flatten()
+            .collect();
+
+        if filtered_values.is_empty() {
+            Ok(None)
+        } else {
+            let num_values = filtered_values.len();
+            let coords = ArrayBase::<Vec<u64>>::new(vec![ndim, num_values], filtered_coords)?;
+            let values = ArrayBase::<Vec<T>>::new(vec![num_values], filtered_values)?;
+
+            Ok(Some((coords.into(), values.into())))
+        }
+    }
 }
 
 async fn merge_blocks_inner<L, R, T>(

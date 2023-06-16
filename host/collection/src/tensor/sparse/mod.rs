@@ -41,7 +41,7 @@ pub type Node = b_table::b_tree::Node<Vec<Vec<Number>>>;
 
 #[async_trait]
 pub trait SparseInstance: TensorInstance + fmt::Debug {
-    type CoordBlock: NDArrayRead<DType = u64> + NDArrayMath + NDArrayTransform;
+    type CoordBlock: NDArrayRead<DType = u64> + NDArrayMath + NDArrayTransform + Into<Array<u64>>;
     type ValueBlock: NDArrayRead<DType = Self::DType> + Into<Array<Self::DType>>;
     type Blocks: Stream<Item = Result<(Self::CoordBlock, Self::ValueBlock), TCError>> + Send;
     type DType: CDatatype + DType;
@@ -372,7 +372,7 @@ where
             self.accessor,
             other.accessor,
             |l, r| l.div(r).map(Array::from).map_err(TCError::from),
-            |l, r| l / r,
+            |l, r| if r == T::zero() { T::zero() } else { l / r },
         )
         .map(SparseTensor::from)
     }

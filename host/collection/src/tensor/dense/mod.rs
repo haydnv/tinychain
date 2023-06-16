@@ -480,14 +480,18 @@ where
     fn div_const(self, other: Number) -> TCResult<Self::Combine> {
         let n = other.cast_into();
 
-        let accessor = DenseConst::new(
-            self.accessor,
-            n,
-            |block, n| block.div_scalar(n).map(Array::from).map_err(TCError::from),
-            |l, r| l / r,
-        );
+        if n != A::DType::zero() {
+            let accessor = DenseConst::new(
+                self.accessor,
+                n,
+                |block, n| block.div_scalar(n).map(Array::from).map_err(TCError::from),
+                |l, r| l / r,
+            );
 
-        Ok(accessor.into())
+            Ok(accessor.into())
+        } else {
+            Err(bad_request!("cannot divide {self:?} by {other}"))
+        }
     }
 
     fn log_const(self, base: Number) -> TCResult<Self::Combine> {
@@ -557,7 +561,7 @@ where
 impl<FE, A> TensorReduce for DenseTensor<FE, A>
 where
     FE: DenseCacheFile + AsType<Buffer<A::DType>> + AsType<Node>,
-    A: DenseInstance + TensorPermitRead + Into<DenseAccess<FE, A::DType>>,
+    A: DenseInstance + TensorPermitRead + Into<DenseAccess<FE, A::DType>> + Clone,
     A::DType: fmt::Debug,
     Buffer<A::DType>: de::FromStream<Context = ()>,
     Number: From<A::DType> + CastInto<A::DType>,
@@ -646,16 +650,21 @@ where
 
     async fn product_all(self, txn_id: TxnId) -> TCResult<Number> {
         let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-        let blocks = self.accessor.read_blocks().await?;
 
-        let product = blocks
-            .map(|result| result.and_then(|block| block.product().map_err(TCError::from)))
-            .try_fold(A::DType::one(), |product, block_product| {
-                future::ready(Ok(product * block_product))
-            })
-            .await?;
+        if self.clone().all(txn_id).await? {
+            let blocks = self.accessor.read_blocks().await?;
 
-        Ok(product.into())
+            let product = blocks
+                .map(|result| result.and_then(|block| block.product().map_err(TCError::from)))
+                .try_fold(A::DType::one(), |product, block_product| {
+                    future::ready(Ok(product * block_product))
+                })
+                .await?;
+
+            Ok(product.into())
+        } else {
+            Ok(A::DType::zero().into())
+        }
     }
 
     fn sum(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
