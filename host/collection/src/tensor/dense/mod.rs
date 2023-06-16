@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use collate::Collate;
 use destream::de;
 use freqfs::FileLoad;
-use futures::future;
+use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use ha_ndarray::*;
 use safecast::{AsType, CastFrom, CastInto};
@@ -22,7 +22,7 @@ use super::sparse::{Node, SparseDense, SparseTensor};
 use super::{
     Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCompare,
     TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance, TensorMath, TensorMathConst,
-    TensorPermitRead, TensorReduce, TensorTransform, TensorUnary, TensorUnaryBoolean,
+    TensorPermitRead, TensorRead, TensorReduce, TensorTransform, TensorUnary, TensorUnaryBoolean,
     IDEAL_BLOCK_SIZE,
 };
 
@@ -554,6 +554,23 @@ where
         );
 
         Ok(accessor.into())
+    }
+}
+
+#[async_trait]
+impl<FE, A> TensorRead for DenseTensor<FE, A>
+where
+    FE: DenseCacheFile + AsType<Buffer<A::DType>> + AsType<Node>,
+    A: DenseInstance + TensorPermitRead,
+    Number: From<A::DType>,
+{
+    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
+        let _permit = self
+            .accessor
+            .read_permit(txn_id, coord.to_vec().into())
+            .await?;
+
+        self.accessor.read_value(coord).map_ok(Number::from).await
     }
 }
 

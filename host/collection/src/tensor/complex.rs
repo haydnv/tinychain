@@ -1,16 +1,37 @@
-use safecast::AsType;
+use async_trait::async_trait;
+use futures::try_join;
+use safecast::{AsType, CastFrom};
 
 use tc_error::*;
-use tc_value::{Number, NumberClass, NumberInstance};
+use tc_transact::TxnId;
+use tc_value::{Float, Number, NumberClass, NumberInstance};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::{
-    TensorBoolean, TensorCompare, TensorCompareConst, TensorInstance, TensorMath, TensorMathConst,
-    TensorTrig, TensorUnary, TensorUnaryBoolean,
+    Coord, TensorBoolean, TensorCompare, TensorCompareConst, TensorInstance, TensorMath,
+    TensorMathConst, TensorRead, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::dense::{DenseCacheFile, DenseView};
 use super::sparse::{Node, SparseView};
+
+#[async_trait]
+pub(crate) trait ComplexRead: TensorInstance + TensorRead {
+    async fn read_value(this: (Self, Self), txn_id: TxnId, coord: Coord) -> TCResult<Number> {
+        let (re, im) = this;
+        let (re, im) = try_join!(
+            re.read_value(txn_id, coord.to_vec()),
+            im.read_value(txn_id, coord)
+        )?;
+
+        let re = Float::cast_from(re);
+        let im = Float::cast_from(im);
+        Ok(Number::Complex((re, im).into()))
+    }
+}
+
+impl<FE: DenseCacheFile + AsType<Node> + Clone> ComplexRead for DenseView<FE> {}
+impl<FE: ThreadSafe + AsType<Node>> ComplexRead for SparseView<FE> {}
 
 pub(crate) trait ComplexUnary:
     TensorInstance

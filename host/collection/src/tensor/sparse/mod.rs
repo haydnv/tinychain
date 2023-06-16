@@ -20,7 +20,7 @@ use super::dense::{DenseAccess, DenseAccessCast, DenseSparse, DenseTensor};
 use super::{
     Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCompare,
     TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorMathConst,
-    TensorPermitRead, TensorReduce, TensorTransform, TensorUnary, TensorUnaryBoolean,
+    TensorPermitRead, TensorRead, TensorReduce, TensorTransform, TensorUnary, TensorUnaryBoolean,
 };
 
 pub use access::*;
@@ -509,6 +509,23 @@ where
 
     fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
         Err(bad_request!("cannot subtract {other} from {self:?} because the result would not be sparse (consider converting to a dense tensor first)"))
+    }
+}
+
+#[async_trait]
+impl<FE, A> TensorRead for SparseTensor<FE, A>
+where
+    FE: ThreadSafe,
+    A: SparseInstance + TensorPermitRead,
+    Number: From<A::DType>,
+{
+    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
+        let _permit = self
+            .accessor
+            .read_permit(txn_id, coord.to_vec().into())
+            .await?;
+
+        self.accessor.read_value(coord).map_ok(Number::from).await
     }
 }
 

@@ -9,12 +9,12 @@ use tc_transact::TxnId;
 use tc_value::{ComplexType, FloatType, IntType, Number, NumberClass, NumberType, UIntType};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexTrig, ComplexUnary};
+use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTrig, ComplexUnary};
 use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
-    Axes, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare,
-    TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorMathConst, TensorReduce,
-    TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
+    Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare,
+    TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorMathConst, TensorRead,
+    TensorReduce, TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
@@ -844,6 +844,19 @@ impl<FE: AsType<Node> + ThreadSafe> TensorMathConst for SparseView<FE> {
 
     fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
         Err(bad_request!("cannot subtract {} from {:?} because the result would not be sparse (consider converting to a dense tensor first)", other, self))
+    }
+}
+
+#[async_trait]
+impl<FE: AsType<Node> + ThreadSafe> TensorRead for SparseView<FE> {
+    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
+        view_dispatch!(
+            self,
+            this,
+            this.read_value(txn_id, coord).await,
+            ComplexRead::read_value((Self::from(this.0), Self::from(this.1)), txn_id, coord).await,
+            this.read_value(txn_id, coord).await
+        )
     }
 }
 

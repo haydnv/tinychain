@@ -9,12 +9,12 @@ use tc_transact::TxnId;
 use tc_value::{ComplexType, FloatType, IntType, Number, NumberClass, NumberType, UIntType};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexTrig, ComplexUnary};
+use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTrig, ComplexUnary};
 use crate::tensor::sparse::Node;
 use crate::tensor::{
-    Axes, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare,
-    TensorCompareConst, TensorInstance, TensorMath, TensorMathConst, TensorReduce, TensorTransform,
-    TensorTrig, TensorUnary, TensorUnaryBoolean,
+    Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare,
+    TensorCompareConst, TensorInstance, TensorMath, TensorMathConst, TensorRead, TensorReduce,
+    TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{dense_from, DenseAccess, DenseCacheFile, DenseTensor, DenseUnaryCast};
@@ -888,6 +888,22 @@ where
             other,
             ComplexMath::sub_const,
             TensorMathConst::sub_const
+        )
+    }
+}
+
+#[async_trait]
+impl<FE> TensorRead for DenseView<FE>
+where
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
+        view_dispatch!(
+            self,
+            this,
+            this.read_value(txn_id, coord).await,
+            ComplexRead::read_value((Self::from(this.0), Self::from(this.1)), txn_id, coord).await,
+            this.read_value(txn_id, coord).await
         )
     }
 }

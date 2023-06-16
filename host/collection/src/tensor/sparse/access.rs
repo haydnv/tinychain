@@ -3662,27 +3662,26 @@ where
 
 #[inline]
 fn filter_zeros<T: CDatatype>(
-    queue: &ha_ndarray::Queue,
+    queue: &Queue,
     coords: Array<u64>,
     values: Array<T>,
     ndim: usize,
 ) -> TCResult<Option<(Array<u64>, Array<T>)>> {
     let zero = T::zero();
 
+    let values = ArrayBase::<Vec<T>>::copy(&values)?;
+
     if values.all()? {
-        Ok(Some((coords, values)))
+        Ok(Some((coords, values.into())))
     } else {
         let coord_slice = coords.read(queue)?.to_slice()?;
-        let value_slice = values.read(queue)?.to_slice()?;
+        let value_slice = values.into_inner();
         debug_assert_eq!(coord_slice.len() % ndim, 0);
-
-        // let mut filtered_coords = Vec::with_capacity(coord_slice.len());
-        // let mut filtered_values = Vec::with_capacity(value_slice.len());
 
         let (filtered_coords, filtered_values): (Vec<&[u64]>, Vec<T>) = coord_slice
             .as_ref()
             .par_chunks(ndim)
-            .zip(value_slice.as_ref().par_iter().copied())
+            .zip(value_slice.into_par_iter())
             .filter_map(|(coord, value)| {
                 if value == zero {
                     None
