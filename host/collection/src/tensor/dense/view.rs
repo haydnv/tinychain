@@ -2,7 +2,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use ha_ndarray::CDatatype;
-use safecast::AsType;
+use safecast::{AsType, CastInto};
 
 use tc_error::*;
 use tc_transact::TxnId;
@@ -189,8 +189,8 @@ where
             },
             { left.and(right).map(dense_from).map(Self::Bool) },
             {
-                let left = left.cast_into(NumberType::Bool)?;
-                let right = right.cast_into(NumberType::Bool)?;
+                let left = TensorCast::cast_into(left, NumberType::Bool)?;
+                let right = TensorCast::cast_into(right, NumberType::Bool)?;
                 left.and(right)
             }
         )
@@ -213,8 +213,8 @@ where
             },
             { left.or(right).map(dense_from).map(Self::Bool) },
             {
-                let left = left.cast_into(NumberType::Bool)?;
-                let right = right.cast_into(NumberType::Bool)?;
+                let left = TensorCast::cast_into(left, NumberType::Bool)?;
+                let right = TensorCast::cast_into(right, NumberType::Bool)?;
                 left.or(right)
             }
         )
@@ -237,8 +237,8 @@ where
             },
             { left.xor(right).map(dense_from).map(Self::Bool) },
             {
-                let left = left.cast_into(NumberType::Bool)?;
-                let right = right.cast_into(NumberType::Bool)?;
+                let left = TensorCast::cast_into(left, NumberType::Bool)?;
+                let right = TensorCast::cast_into(right, NumberType::Bool)?;
                 left.xor(right)
             }
         )
@@ -256,8 +256,7 @@ where
             self,
             this,
             this.and_const(other).map(dense_from).map(Self::Bool),
-            Self::from(this)
-                .cast_into(NumberType::Bool)
+            TensorCast::cast_into(Self::from(this), NumberType::Bool)
                 .and_then(|this| this.and_const(other)),
             this.and_const(other).map(dense_from).map(Self::Bool)
         )
@@ -268,8 +267,7 @@ where
             self,
             this,
             this.or_const(other).map(dense_from).map(Self::Bool),
-            Self::from(this)
-                .cast_into(NumberType::Bool)
+            TensorCast::cast_into(Self::from(this), NumberType::Bool)
                 .and_then(|this| this.or_const(other)),
             this.or_const(other).map(dense_from).map(Self::Bool)
         )
@@ -280,8 +278,7 @@ where
             self,
             this,
             this.xor_const(other).map(dense_from).map(Self::Bool),
-            Self::from(this)
-                .cast_into(NumberType::Bool)
+            TensorCast::cast_into(Self::from(this), NumberType::Bool)
                 .and_then(|this| this.xor_const(other)),
             this.xor_const(other).map(dense_from).map(Self::Bool)
         )
@@ -459,7 +456,11 @@ where
                         }
                     },
                     {
-                        let cast = DenseUnaryCast::new(this.accessor, |block| block.cast());
+                        let cast = DenseUnaryCast::new(
+                            this.accessor,
+                            |block| block.cast(),
+                            |n| n.cast_into(),
+                        );
                         Ok(Self::$var(dense_from(cast.into())))
                     }
                 )
@@ -478,11 +479,14 @@ where
                     real.or(imag)
                 },
                 {
-                    let cast = DenseUnaryCast::new(this.accessor, |block| block.cast());
+                    let cast =
+                        DenseUnaryCast::new(this.accessor, |block| block.cast(), |n| n.cast_into());
                     Ok(Self::Bool(dense_from(cast.into())))
                 }
             ),
-            NumberType::Complex(ComplexType::Complex) => self.cast_into(ComplexType::C32.into()),
+            NumberType::Complex(ComplexType::Complex) => {
+                TensorCast::cast_into(self, ComplexType::C32.into())
+            }
             NumberType::Complex(ComplexType::C32) => {
                 view_dispatch!(
                     self,
@@ -490,8 +494,8 @@ where
                     Err(TCError::unsupported(ERR_COMPLEX)),
                     {
                         let ftype = NumberType::Float(FloatType::F32);
-                        let real = Self::from(this.0).cast_into(ftype)?;
-                        let imag = Self::from(this.1).cast_into(ftype)?;
+                        let real = TensorCast::cast_into(Self::from(this.0), ftype)?;
+                        let imag = TensorCast::cast_into(Self::from(this.1), ftype)?;
 
                         match (real, imag) {
                             (Self::F32(real), Self::F32(imag)) => Ok(Self::C32((real, imag))),
@@ -510,8 +514,8 @@ where
                     Err(TCError::unsupported(ERR_COMPLEX)),
                     {
                         let ftype = NumberType::Float(FloatType::F64);
-                        let real = Self::from(this.0).cast_into(ftype)?;
-                        let imag = Self::from(this.1).cast_into(ftype)?;
+                        let real = TensorCast::cast_into(Self::from(this.0), ftype)?;
+                        let imag = TensorCast::cast_into(Self::from(this.1), ftype)?;
 
                         match (real, imag) {
                             (Self::F64(real), Self::F64(imag)) => Ok(Self::C64((real, imag))),
@@ -523,15 +527,17 @@ where
                     Err(TCError::unsupported(ERR_COMPLEX))
                 )
             }
-            NumberType::Float(FloatType::Float) => self.cast_into(FloatType::F32.into()),
+            NumberType::Float(FloatType::Float) => {
+                TensorCast::cast_into(self, FloatType::F32.into())
+            }
             NumberType::Float(FloatType::F32) => view_dispatch_cast!(F32),
             NumberType::Float(FloatType::F64) => view_dispatch_cast!(F64),
-            NumberType::Int(IntType::Int) => self.cast_into(IntType::I32.into()),
+            NumberType::Int(IntType::Int) => TensorCast::cast_into(self, IntType::I32.into()),
             NumberType::Int(IntType::I16) => view_dispatch_cast!(I16),
             NumberType::Int(IntType::I8) => Err(TCError::unsupported(IntType::I8)),
             NumberType::Int(IntType::I32) => view_dispatch_cast!(I32),
             NumberType::Int(IntType::I64) => view_dispatch_cast!(I64),
-            NumberType::UInt(UIntType::UInt) => self.cast_into(UIntType::U32.into()),
+            NumberType::UInt(UIntType::UInt) => TensorCast::cast_into(self, UIntType::U32.into()),
             NumberType::UInt(UIntType::U8) => view_dispatch_cast!(U8),
             NumberType::UInt(UIntType::U16) => view_dispatch_cast!(U16),
             NumberType::UInt(UIntType::U32) => view_dispatch_cast!(U32),
@@ -560,7 +566,7 @@ where
                 Ok(Self::C32((real, imag)))
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C32(this).add(that)
             }
             (Self::C64((a, b)), Self::C64((c, d))) => {
@@ -573,7 +579,7 @@ where
                 Ok(Self::C64((real, imag)))
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C64(this).add(that)
             }
             (Self::F32(this), Self::F32(that)) => this.add(that).map(dense_from).map(Self::F32),
@@ -588,8 +594,8 @@ where
             (this, that) if this.dtype().is_real() && that.dtype().is_complex() => that.add(this),
             (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
-                let this = this.cast_into(dtype)?;
-                let that = that.cast_into(dtype)?;
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
                 this.add(that)
             }
         }
@@ -608,7 +614,7 @@ where
                 Ok(Self::C32((dense_from(real), dense_from(imag))))
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C32(this).div(that)
             }
             (Self::C64((a, b)), Self::C64((c, d))) => {
@@ -621,7 +627,7 @@ where
                 Ok(Self::C64((dense_from(real), dense_from(imag))))
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C64(this).div(that)
             }
             (Self::F32(this), Self::F32(that)) => this.div(that).map(dense_from).map(Self::F32),
@@ -635,8 +641,8 @@ where
             (Self::U64(this), Self::U64(that)) => this.div(that).map(dense_from).map(Self::U64),
             (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
-                let this = this.cast_into(dtype)?;
-                let that = that.cast_into(dtype)?;
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
                 this.div(that)
             }
         }
@@ -658,8 +664,8 @@ where
             (Self::U64(this), Self::U64(that)) => this.log(that).map(dense_from).map(Self::U64),
             (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
-                let this = this.cast_into(dtype)?;
-                let that = that.cast_into(dtype)?;
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
                 this.log(that)
             }
         }
@@ -678,7 +684,7 @@ where
                 Ok(Self::C32((dense_from(real), dense_from(imag))))
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C32(this).mul(that)
             }
             (Self::C64((a, b)), Self::C64((c, d))) => {
@@ -691,7 +697,7 @@ where
                 Ok(Self::C64((dense_from(real), dense_from(imag))))
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C64(this).mul(that)
             }
             (Self::F32(this), Self::F32(that)) => this.mul(that).map(dense_from).map(Self::F32),
@@ -706,8 +712,8 @@ where
             (this, that) if this.dtype().is_real() && that.dtype().is_complex() => that.mul(this),
             (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
-                let this = this.cast_into(dtype)?;
-                let that = that.cast_into(dtype)?;
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
                 this.mul(that)
             }
         }
@@ -720,14 +726,14 @@ where
                 ComplexMath::pow((x.into(), y.into()), that.into()).and_then(Self::complex_from)
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C32(this).pow(that)
             }
             (Self::C64((x, y)), Self::F64(that)) => {
                 ComplexMath::pow((x.into(), y.into()), that.into()).and_then(Self::complex_from)
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C64(this).pow(that)
             }
             (Self::F32(this), Self::F32(that)) => this.pow(that).map(dense_from).map(Self::F32),
@@ -746,8 +752,8 @@ where
             )),
             (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
-                let this = this.cast_into(dtype)?;
-                let that = that.cast_into(dtype)?;
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
                 this.pow(that)
             }
         }
@@ -766,7 +772,7 @@ where
                 Ok(Self::C32((real, imag)))
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C32(this).sub(that)
             }
             (Self::C64((a, b)), Self::C64((c, d))) => {
@@ -779,7 +785,7 @@ where
                 Ok(Self::C64((real, imag)))
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C64(this).sub(that)
             }
             (Self::F32(this), Self::F32(that)) => this.sub(that).map(dense_from).map(Self::F32),
@@ -794,8 +800,8 @@ where
             (this, that) if this.dtype().is_real() && that.dtype().is_complex() => that.sub(this),
             (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
-                let this = this.cast_into(dtype)?;
-                let that = that.cast_into(dtype)?;
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
                 this.sub(that)
             }
         }
@@ -897,11 +903,11 @@ where
         match self {
             Self::Bool(this) => this.all(txn_id).await,
             Self::C32(this) => {
-                let this = Self::C32(this).cast_into(NumberType::Bool)?;
+                let this = TensorCast::cast_into(Self::C32(this), NumberType::Bool)?;
                 this.all(txn_id).await
             }
             Self::C64(this) => {
-                let this = Self::C64(this).cast_into(NumberType::Bool)?;
+                let this = TensorCast::cast_into(Self::C64(this), NumberType::Bool)?;
                 this.all(txn_id).await
             }
             Self::F32(this) => this.all(txn_id).await,
@@ -920,11 +926,11 @@ where
         match self {
             Self::Bool(this) => this.any(txn_id).await,
             Self::C32(this) => {
-                let this = Self::C32(this).cast_into(NumberType::Bool)?;
+                let this = TensorCast::cast_into(Self::C32(this), NumberType::Bool)?;
                 this.any(txn_id).await
             }
             Self::C64(this) => {
-                let this = Self::C64(this).cast_into(NumberType::Bool)?;
+                let this = TensorCast::cast_into(Self::C64(this), NumberType::Bool)?;
                 this.any(txn_id).await
             }
             Self::F32(this) => this.any(txn_id).await,

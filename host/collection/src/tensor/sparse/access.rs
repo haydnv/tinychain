@@ -2842,7 +2842,7 @@ where
 
     async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
         self.shape().validate_coord(&coord)?;
-        let source_coord = self.transform.invert_coord(coord)?;
+        let source_coord = self.transform.invert_coord(coord);
         self.source.read_value(source_coord).await
     }
 }
@@ -2944,7 +2944,7 @@ where
 
     async fn write_value(&mut self, coord: Coord, value: T) -> Result<(), TCError> {
         self.transform.shape().validate_coord(&coord)?;
-        let coord = self.transform.invert_coord(coord)?;
+        let coord = self.transform.invert_coord(coord);
         self.guard.write_value(coord, value).await
     }
 }

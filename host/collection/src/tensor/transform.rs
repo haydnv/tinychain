@@ -473,15 +473,7 @@ impl Slice {
         source_range.into()
     }
 
-    pub fn invert_coord(&self, coord: Coord) -> TCResult<Coord> {
-        if coord.len() < self.shape.len() {
-            return Err(bad_request!(
-                "{:?} does not contain {:?}",
-                self.range,
-                coord
-            ));
-        }
-
+    pub fn invert_coord(&self, coord: Coord) -> Coord {
         let mut source_coord = Coord::with_capacity(self.range.len() + coord.len());
 
         let mut axis = 0;
@@ -490,36 +482,19 @@ impl Slice {
                 AxisRange::At(i) => source_coord.push(*i),
                 AxisRange::In(range, step) => {
                     let i = range.start + (coord[axis] * step);
-                    if i < range.end {
-                        source_coord.push(i);
-                    } else {
-                        return Err(bad_request!(
-                            "{} is out of range at axis {}",
-                            coord[axis],
-                            axis
-                        ));
-                    }
-
+                    source_coord.push(i);
                     axis += 1;
                 }
                 AxisRange::Of(indices) => {
-                    if coord[axis] < indices.len() as u64 {
-                        source_coord.push(indices[coord[axis] as usize]);
-                        axis += 1;
-                    } else {
-                        return Err(bad_request!(
-                            "{} is out of range at axis {}",
-                            coord[axis],
-                            axis
-                        ));
-                    }
+                    source_coord.push(indices[coord[axis] as usize]);
+                    axis += 1;
                 }
             }
         }
 
         source_coord.extend(coord.into_iter().skip(source_coord.len()));
 
-        Ok(source_coord)
+        source_coord
     }
 }
 

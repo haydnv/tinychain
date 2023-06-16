@@ -10,17 +10,17 @@ use freqfs::FileLoad;
 use futures::future;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use ha_ndarray::*;
-use safecast::{AsType, CastInto};
+use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
 use tc_transact::TxnId;
-use tc_value::{DType, Number, NumberCollator, NumberType};
+use tc_value::{DType, Number, NumberCollator, NumberInstance, NumberType};
 use tcgeneric::ThreadSafe;
 
 use super::block::Block;
 use super::sparse::{Node, SparseDense, SparseTensor};
 use super::{
-    offset_of, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCompare,
+    Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCompare,
     TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance, TensorMath, TensorMathConst,
     TensorPermitRead, TensorReduce, TensorTransform, TensorUnary, TensorUnaryBoolean,
     IDEAL_BLOCK_SIZE,
@@ -78,20 +78,7 @@ pub trait DenseInstance: TensorInstance + ThreadSafe + fmt::Debug {
 
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>>;
 
-    // TODO: remove this generic implementation
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
-        self.shape().validate_coord(&coord)?;
-
-        let offset = offset_of(coord, self.shape());
-        let block_id = offset / self.block_size() as u64;
-        let block_offset = (offset % self.block_size() as u64) as usize;
-
-        let block = self.read_block(block_id).await?;
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, self.block_size())?;
-        let buffer = block.read(&queue)?;
-        Ok(buffer.to_slice()?.as_ref()[block_offset])
-    }
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType>;
 }
 
 #[async_trait]
@@ -109,6 +96,10 @@ impl<T: DenseInstance> DenseInstance for Box<T> {
 
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
         (*self).read_blocks().await
+    }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        (**self).read_value(coord).await
     }
 }
 
@@ -192,18 +183,33 @@ where
     type LeftCombine = DenseTensor<FE, DenseCompare<FE, u8>>;
 
     fn and(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
-        DenseCompare::new(self.accessor.into(), other.accessor.into(), Block::and)
-            .map(DenseTensor::from)
+        DenseCompare::new(
+            self.accessor.into(),
+            other.accessor.into(),
+            Block::and,
+            |l, r| bool_u8(l.and(r)),
+        )
+        .map(DenseTensor::from)
     }
 
     fn or(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
-        DenseCompare::new(self.accessor.into(), other.accessor.into(), Block::or)
-            .map(DenseTensor::from)
+        DenseCompare::new(
+            self.accessor.into(),
+            other.accessor.into(),
+            Block::or,
+            |l, r| bool_u8(l.or(r)),
+        )
+        .map(DenseTensor::from)
     }
 
     fn xor(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
-        DenseCompare::new(self.accessor.into(), other.accessor.into(), Block::xor)
-            .map(DenseTensor::from)
+        DenseCompare::new(
+            self.accessor.into(),
+            other.accessor.into(),
+            Block::xor,
+            |l, r| bool_u8(l.xor(r)),
+        )
+        .map(DenseTensor::from)
     }
 }
 
@@ -216,15 +222,30 @@ where
     type Combine = DenseTensor<FE, DenseCompareConst<FE, u8>>;
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
-        Ok(DenseCompareConst::new(self.accessor.into(), other, Block::and_scalar).into())
+        Ok(
+            DenseCompareConst::new(self.accessor.into(), other, Block::and_scalar, |l, r| {
+                bool_u8(l.and(r))
+            })
+            .into(),
+        )
     }
 
     fn or_const(self, other: Number) -> TCResult<Self::Combine> {
-        Ok(DenseCompareConst::new(self.accessor.into(), other, Block::or_scalar).into())
+        Ok(
+            DenseCompareConst::new(self.accessor.into(), other, Block::or_scalar, |l, r| {
+                bool_u8(l.or(r))
+            })
+            .into(),
+        )
     }
 
     fn xor_const(self, other: Number) -> TCResult<Self::Combine> {
-        Ok(DenseCompareConst::new(self.accessor.into(), other, Block::xor_scalar).into())
+        Ok(
+            DenseCompareConst::new(self.accessor.into(), other, Block::xor_scalar, |l, r| {
+                bool_u8(l.xor(r))
+            })
+            .into(),
+        )
     }
 }
 
@@ -238,27 +259,45 @@ where
     type Compare = DenseTensor<FE, DenseCompare<FE, u8>>;
 
     fn eq(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
-        DenseCompare::new(self.accessor, other.accessor, Block::eq).map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::eq, |l, r| {
+            bool_u8(l.eq(&r))
+        })
+        .map(DenseTensor::from)
     }
 
     fn gt(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
-        DenseCompare::new(self.accessor, other.accessor, Block::gt).map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::gt, |l, r| {
+            bool_u8(l.gt(&r))
+        })
+        .map(DenseTensor::from)
     }
 
     fn ge(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
-        DenseCompare::new(self.accessor, other.accessor, Block::ge).map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::ge, |l, r| {
+            bool_u8(l.ge(&r))
+        })
+        .map(DenseTensor::from)
     }
 
     fn lt(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
-        DenseCompare::new(self.accessor, other.accessor, Block::lt).map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::lt, |l, r| {
+            bool_u8(l.lt(&r))
+        })
+        .map(DenseTensor::from)
     }
 
     fn le(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
-        DenseCompare::new(self.accessor, other.accessor, Block::le).map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::le, |l, r| {
+            bool_u8(l.le(&r))
+        })
+        .map(DenseTensor::from)
     }
 
     fn ne(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
-        DenseCompare::new(self.accessor, other.accessor, Block::ne).map(DenseTensor::from)
+        DenseCompare::new(self.accessor, other.accessor, Block::ne, |l, r| {
+            bool_u8(l.ne(&r))
+        })
+        .map(DenseTensor::from)
     }
 }
 
@@ -270,27 +309,57 @@ where
     type Compare = DenseTensor<FE, DenseCompareConst<FE, u8>>;
 
     fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
-        Ok(DenseCompareConst::new(self.accessor, other, Block::eq_scalar).into())
+        Ok(
+            DenseCompareConst::new(self.accessor, other, Block::eq_scalar, |l, r| {
+                bool_u8(l.eq(&r))
+            })
+            .into(),
+        )
     }
 
     fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
-        Ok(DenseCompareConst::new(self.accessor, other, Block::gt_scalar).into())
+        Ok(
+            DenseCompareConst::new(self.accessor, other, Block::gt_scalar, |l, r| {
+                bool_u8(l.gt(&r))
+            })
+            .into(),
+        )
     }
 
     fn ge_const(self, other: Number) -> TCResult<Self::Compare> {
-        Ok(DenseCompareConst::new(self.accessor, other, Block::ge_scalar).into())
+        Ok(
+            DenseCompareConst::new(self.accessor, other, Block::ge_scalar, |l, r| {
+                bool_u8(l.ge(&r))
+            })
+            .into(),
+        )
     }
 
     fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
-        Ok(DenseCompareConst::new(self.accessor, other, Block::lt_scalar).into())
+        Ok(
+            DenseCompareConst::new(self.accessor, other, Block::lt_scalar, |l, r| {
+                bool_u8(l.lt(&r))
+            })
+            .into(),
+        )
     }
 
     fn le_const(self, other: Number) -> TCResult<Self::Compare> {
-        Ok(DenseCompareConst::new(self.accessor, other, Block::le_scalar).into())
+        Ok(
+            DenseCompareConst::new(self.accessor, other, Block::le_scalar, |l, r| {
+                bool_u8(l.le(&r))
+            })
+            .into(),
+        )
     }
 
     fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
-        Ok(DenseCompareConst::new(self.accessor, other, Block::ne_scalar).into())
+        Ok(
+            DenseCompareConst::new(self.accessor, other, Block::ne_scalar, |l, r| {
+                bool_u8(l.ne(&r))
+            })
+            .into(),
+        )
     }
 }
 
@@ -337,7 +406,7 @@ where
             left.add(right).map(Array::from).map_err(TCError::from)
         }
 
-        DenseCombine::new(self.accessor, other.accessor, add).map(DenseTensor::from)
+        DenseCombine::new(self.accessor, other.accessor, add, |l, r| l + r).map(DenseTensor::from)
     }
 
     fn div(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
@@ -345,7 +414,7 @@ where
             left.div(right).map(Array::from).map_err(TCError::from)
         }
 
-        DenseCombine::new(self.accessor, other.accessor, div).map(DenseTensor::from)
+        DenseCombine::new(self.accessor, other.accessor, div, |l, r| l / r).map(DenseTensor::from)
     }
 
     fn log(self, base: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
@@ -354,7 +423,10 @@ where
             left.log(right).map(Array::from).map_err(TCError::from)
         }
 
-        DenseCombine::new(self.accessor, base.accessor, log).map(DenseTensor::from)
+        DenseCombine::new(self.accessor, base.accessor, log, |l: T, r: T| {
+            T::from_float(l.to_float().log(r.to_float()))
+        })
+        .map(DenseTensor::from)
     }
 
     fn mul(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
@@ -362,7 +434,7 @@ where
             left.mul(right).map(Array::from).map_err(TCError::from)
         }
 
-        DenseCombine::new(self.accessor, other.accessor, mul).map(DenseTensor::from)
+        DenseCombine::new(self.accessor, other.accessor, mul, |l, r| l * r).map(DenseTensor::from)
     }
 
     fn pow(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
@@ -371,7 +443,10 @@ where
             left.pow(right).map(Array::from).map_err(TCError::from)
         }
 
-        DenseCombine::new(self.accessor, other.accessor, pow).map(DenseTensor::from)
+        DenseCombine::new(self.accessor, other.accessor, pow, |l: T, r: T| {
+            T::from_float(l.to_float().pow(r.to_float()))
+        })
+        .map(DenseTensor::from)
     }
 
     fn sub(self, other: DenseTensor<FE, R>) -> TCResult<Self::Combine> {
@@ -379,7 +454,7 @@ where
             left.sub(right).map(Array::from).map_err(TCError::from)
         }
 
-        DenseCombine::new(self.accessor, other.accessor, sub).map(DenseTensor::from)
+        DenseCombine::new(self.accessor, other.accessor, sub, |l, r| l - r).map(DenseTensor::from)
     }
 }
 
@@ -392,9 +467,12 @@ where
     fn add_const(self, other: Number) -> TCResult<Self::Combine> {
         let n = other.cast_into();
 
-        let accessor = DenseConst::new(self.accessor, n, |block, n| {
-            block.add_scalar(n).map(Array::from).map_err(TCError::from)
-        });
+        let accessor = DenseConst::new(
+            self.accessor,
+            n,
+            |block, n| block.add_scalar(n).map(Array::from).map_err(TCError::from),
+            |l, r| l + r,
+        );
 
         Ok(accessor.into())
     }
@@ -402,9 +480,12 @@ where
     fn div_const(self, other: Number) -> TCResult<Self::Combine> {
         let n = other.cast_into();
 
-        let accessor = DenseConst::new(self.accessor, n, |block, n| {
-            block.div_scalar(n).map(Array::from).map_err(TCError::from)
-        });
+        let accessor = DenseConst::new(
+            self.accessor,
+            n,
+            |block, n| block.div_scalar(n).map(Array::from).map_err(TCError::from),
+            |l, r| l / r,
+        );
 
         Ok(accessor.into())
     }
@@ -412,12 +493,17 @@ where
     fn log_const(self, base: Number) -> TCResult<Self::Combine> {
         let n = base.cast_into();
 
-        let accessor = DenseConst::new(self.accessor, n, |block, n| {
-            block
-                .log_scalar(n.to_float())
-                .map(Array::from)
-                .map_err(TCError::from)
-        });
+        let accessor = DenseConst::new(
+            self.accessor,
+            n,
+            |block, n| {
+                block
+                    .log_scalar(n.to_float())
+                    .map(Array::from)
+                    .map_err(TCError::from)
+            },
+            |l, r| A::DType::from_float(l.to_float().log(r.to_float())),
+        );
 
         Ok(accessor.into())
     }
@@ -425,9 +511,12 @@ where
     fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
         let n = other.cast_into();
 
-        let accessor = DenseConst::new(self.accessor, n, |block, n| {
-            block.mul_scalar(n).map(Array::from).map_err(TCError::from)
-        });
+        let accessor = DenseConst::new(
+            self.accessor,
+            n,
+            |block, n| block.mul_scalar(n).map(Array::from).map_err(TCError::from),
+            |l, r| l * r,
+        );
 
         Ok(accessor.into())
     }
@@ -435,12 +524,17 @@ where
     fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
         let n = other.cast_into();
 
-        let accessor = DenseConst::new(self.accessor, n, |block, n| {
-            block
-                .pow_scalar(n.to_float())
-                .map(Array::from)
-                .map_err(TCError::from)
-        });
+        let accessor = DenseConst::new(
+            self.accessor,
+            n,
+            |block, n| {
+                block
+                    .pow_scalar(n.to_float())
+                    .map(Array::from)
+                    .map_err(TCError::from)
+            },
+            |l, r| A::DType::from_float(l.to_float().pow(r.to_float())),
+        );
 
         Ok(accessor.into())
     }
@@ -448,9 +542,12 @@ where
     fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
         let n = other.cast_into();
 
-        let accessor = DenseConst::new(self.accessor, n, |block, n| {
-            block.sub_scalar(n).map(Array::from).map_err(TCError::from)
-        });
+        let accessor = DenseConst::new(
+            self.accessor,
+            n,
+            |block, n| block.sub_scalar(n).map(Array::from).map_err(TCError::from),
+            |l, r| l - r,
+        );
 
         Ok(accessor.into())
     }
@@ -662,6 +759,18 @@ where
     T: CDatatype,
 {
     DenseTensor::from_access(tensor.into_inner())
+}
+
+#[inline]
+fn bool_u8<N>(n: N) -> u8
+where
+    bool: CastFrom<N>,
+{
+    if bool::cast_from(n) {
+        1
+    } else {
+        0
+    }
 }
 
 #[inline]

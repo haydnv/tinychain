@@ -5,18 +5,21 @@ use std::sync::Arc;
 use std::{fmt, io};
 
 use async_trait::async_trait;
+use collate::Collate;
 use destream::de;
 use freqfs::*;
 use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 use ha_ndarray::*;
-use safecast::{AsType, CastInto};
+use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::TxnId;
-use tc_value::{DType, Number, NumberClass, NumberInstance, NumberType};
+use tc_value::{
+    DType, Number, NumberClass, NumberCollator, NumberInstance, NumberType, Trigonometry,
+};
 use tcgeneric::ThreadSafe;
 
 use super::{
@@ -96,6 +99,14 @@ where
             let blocks = blocks.map_ok(Block::from);
             Ok(Box::pin(blocks))
         })
+    }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Number> {
+        cast_dispatch!(
+            self,
+            this,
+            this.read_value(coord).map_ok(Number::from).await
+        )
     }
 }
 
@@ -269,6 +280,10 @@ where
                 Ok(Box::pin(version.read_blocks().await?.map_ok(Array::from)))
             }
         }
+    }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        access_dispatch!(self, this, this.read_value(coord).await)
     }
 }
 
@@ -571,6 +586,20 @@ where
 
         Ok(Box::pin(blocks))
     }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        self.shape().validate_coord(&coord)?;
+
+        let offset = offset_of(coord, self.shape());
+        let block_id = offset / self.block_size() as u64;
+        let block_offset = (offset % self.block_size() as u64) as usize;
+
+        let block = self.read_block(block_id).await?;
+        let context = ha_ndarray::Context::default()?;
+        let queue = ha_ndarray::Queue::new(context, self.block_size())?;
+        let buffer = block.read(&queue)?;
+        Ok(buffer.to_slice()?.as_ref()[block_offset])
+    }
 }
 
 #[async_trait]
@@ -822,6 +851,10 @@ where
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
         self.file.read_blocks().await
     }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        self.file.read_value(coord).await
+    }
 }
 
 #[async_trait]
@@ -987,6 +1020,12 @@ where
 
         Ok(Box::pin(blocks))
     }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        self.shape().validate_coord(&coord)?;
+        let coord = self.transform.invert_coord(&coord);
+        self.source.read_value(coord).await
+    }
 }
 
 #[async_trait]
@@ -1132,6 +1171,20 @@ where
             .buffered(num_cpus::get());
 
         Ok(Box::pin(blocks))
+    }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        self.shape().validate_coord(&coord)?;
+
+        let offset = offset_of(coord, self.shape());
+        let block_id = offset / self.block_size() as u64;
+        let block_offset = (offset % self.block_size() as u64) as usize;
+
+        let block = self.read_block(block_id).await?;
+        let context = ha_ndarray::Context::default()?;
+        let queue = ha_ndarray::Queue::new(context, self.block_size())?;
+        let buffer = block.read(&queue)?;
+        Ok(buffer.to_slice()?.as_ref()[block_offset])
     }
 }
 
@@ -1333,6 +1386,13 @@ impl<S: DenseInstance> DenseInstance for DenseDiagonal<S> {
 
         Ok(Box::pin(blocks))
     }
+
+    async fn read_value(&self, mut coord: Coord) -> TCResult<Self::DType> {
+        self.shape.validate_coord(&coord)?;
+        let i = coord.last().copied().expect("i");
+        coord.push(i);
+        self.source.read_value(coord).await
+    }
 }
 
 #[async_trait]
@@ -1400,6 +1460,12 @@ impl<S: DenseInstance> DenseInstance for DenseExpand<S> {
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
         self.source.read_blocks().await
     }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        self.shape().validate_coord(&coord)?;
+        let coord = self.transform.invert_coord(coord);
+        self.source.read_value(coord).await
+    }
 }
 
 #[async_trait]
@@ -1437,7 +1503,8 @@ type Combine<T> = fn(Array<T>, Array<T>) -> TCResult<Array<T>>;
 pub struct DenseCombine<L, R, T: CDatatype> {
     left: L,
     right: R,
-    op: Combine<T>,
+    block_op: Combine<T>,
+    value_op: fn(T, T) -> T,
 }
 
 impl<L, R, T> DenseCombine<L, R, T>
@@ -1446,9 +1513,14 @@ where
     R: DenseInstance + fmt::Debug,
     T: CDatatype + DType,
 {
-    pub fn new(left: L, right: R, op: Combine<T>) -> TCResult<Self> {
+    pub fn new(left: L, right: R, block_op: Combine<T>, value_op: fn(T, T) -> T) -> TCResult<Self> {
         if left.block_size() == right.block_size() && left.shape() == right.shape() {
-            Ok(Self { left, right, op })
+            Ok(Self {
+                left,
+                right,
+                block_op,
+                value_op,
+            })
         } else {
             Err(bad_request!("cannot combine {:?} with {:?}", left, right))
         }
@@ -1491,11 +1563,11 @@ where
             self.right.read_block(block_id)
         )?;
 
-        (self.op)(left.into(), right.into())
+        (self.block_op)(left.into(), right.into())
     }
 
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        let op = self.op;
+        let op = self.block_op;
 
         let (left, right) = try_join!(self.left.read_blocks(), self.right.read_blocks())?;
 
@@ -1506,6 +1578,15 @@ where
         });
 
         Ok(Box::pin(blocks))
+    }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        let (left, right) = try_join!(
+            self.left.read_value(coord.to_vec()),
+            self.right.read_value(coord)
+        )?;
+
+        Ok((self.value_op)(left, right))
     }
 }
 
@@ -1535,7 +1616,8 @@ where
         Self::Combine(Box::new(DenseCombine {
             left: combine.left.into(),
             right: combine.right.into(),
-            op: combine.op,
+            block_op: combine.block_op,
+            value_op: combine.value_op,
         }))
     }
 }
@@ -1594,6 +1676,11 @@ where
 
         Ok(Box::pin(blocks))
     }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        let left = self.left.read_value(coord).await?;
+        Ok((self.value_op)(left, self.right))
+    }
 }
 
 #[async_trait]
@@ -1629,7 +1716,8 @@ type ArrayCmp<T> = fn(Block, Block) -> TCResult<Array<T>>;
 pub struct DenseCompare<FE, T: CDatatype> {
     left: DenseAccessCast<FE>,
     right: DenseAccessCast<FE>,
-    cmp: ArrayCmp<T>,
+    block_op: ArrayCmp<T>,
+    value_op: fn(Number, Number) -> T,
 }
 
 impl<FE, T: CDatatype> Clone for DenseCompare<FE, T> {
@@ -1637,13 +1725,19 @@ impl<FE, T: CDatatype> Clone for DenseCompare<FE, T> {
         Self {
             left: self.left.clone(),
             right: self.right.clone(),
-            cmp: self.cmp,
+            block_op: self.block_op,
+            value_op: self.value_op,
         }
     }
 }
 
 impl<FE, T: CDatatype> DenseCompare<FE, T> {
-    pub fn new<L, R>(left: L, right: R, cmp: ArrayCmp<T>) -> TCResult<Self>
+    pub fn new<L, R>(
+        left: L,
+        right: R,
+        block_op: ArrayCmp<T>,
+        value_op: fn(Number, Number) -> T,
+    ) -> TCResult<Self>
     where
         L: DenseInstance + Into<DenseAccessCast<FE>> + fmt::Debug,
         R: DenseInstance + Into<DenseAccessCast<FE>> + fmt::Debug,
@@ -1652,7 +1746,8 @@ impl<FE, T: CDatatype> DenseCompare<FE, T> {
             Ok(Self {
                 left: left.into(),
                 right: right.into(),
-                cmp,
+                block_op,
+                value_op,
             })
         } else {
             Err(bad_request!("cannot compare {:?} with {:?}", left, right))
@@ -1692,7 +1787,7 @@ where
             self.right.read_block(block_id)
         )?;
 
-        (self.cmp)(left, right)
+        (self.block_op)(left, right)
     }
 
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
@@ -1700,10 +1795,19 @@ where
 
         let blocks = left.zip(right).map(move |(l, r)| {
             let (l, r) = (l?, r?);
-            (self.cmp)(l, r)
+            (self.block_op)(l, r)
         });
 
         Ok(Box::pin(blocks))
+    }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        let (left, right) = try_join!(
+            self.left.read_value(coord.to_vec()),
+            self.right.read_value(coord)
+        )?;
+
+        Ok((self.value_op)(left, right))
     }
 }
 
@@ -1735,7 +1839,8 @@ type ArrayCmpScalar<T> = fn(Block, Number) -> TCResult<Array<T>>;
 pub struct DenseCompareConst<FE, T: CDatatype> {
     left: DenseAccessCast<FE>,
     right: Number,
-    cmp: ArrayCmpScalar<T>,
+    block_op: ArrayCmpScalar<T>,
+    value_op: fn(Number, Number) -> T,
 }
 
 impl<FE, T: CDatatype> Clone for DenseCompareConst<FE, T> {
@@ -1743,13 +1848,19 @@ impl<FE, T: CDatatype> Clone for DenseCompareConst<FE, T> {
         Self {
             left: self.left.clone(),
             right: self.right,
-            cmp: self.cmp,
+            block_op: self.block_op,
+            value_op: self.value_op,
         }
     }
 }
 
 impl<FE, T: CDatatype> DenseCompareConst<FE, T> {
-    pub fn new<L, R>(left: L, right: R, cmp: ArrayCmpScalar<T>) -> Self
+    pub fn new<L, R>(
+        left: L,
+        right: R,
+        block_op: ArrayCmpScalar<T>,
+        value_op: fn(Number, Number) -> T,
+    ) -> Self
     where
         L: Into<DenseAccessCast<FE>>,
         R: Into<Number>,
@@ -1757,7 +1868,8 @@ impl<FE, T: CDatatype> DenseCompareConst<FE, T> {
         Self {
             left: left.into(),
             right: right.into(),
-            cmp,
+            block_op,
+            value_op,
         }
     }
 }
@@ -1790,14 +1902,21 @@ where
     async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
         self.left
             .read_block(block_id)
-            .map(|result| result.and_then(move |block| (self.cmp)(block, self.right)))
+            .map(|result| result.and_then(move |block| (self.block_op)(block, self.right)))
             .await
     }
 
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
         let left = self.left.read_blocks().await?;
-        let blocks = left.map(move |result| result.and_then(|block| (self.cmp)(block, self.right)));
+        let blocks =
+            left.map(move |result| result.and_then(|block| (self.block_op)(block, self.right)));
+
         Ok(Box::pin(blocks))
+    }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        let left = self.left.read_value(coord).await?;
+        Ok((self.value_op)(left, self.right))
     }
 }
 
@@ -1824,12 +1943,23 @@ impl<FE, T: CDatatype> fmt::Debug for DenseCompareConst<FE, T> {
 pub struct DenseConst<L, T: CDatatype> {
     left: L,
     right: T,
-    op: fn(Array<T>, T) -> TCResult<Array<T>>,
+    block_op: fn(Array<T>, T) -> TCResult<Array<T>>,
+    value_op: fn(T, T) -> T,
 }
 
 impl<L, T: CDatatype> DenseConst<L, T> {
-    pub fn new(left: L, right: T, op: fn(Array<T>, T) -> TCResult<Array<T>>) -> Self {
-        Self { left, right, op }
+    pub fn new(
+        left: L,
+        right: T,
+        block_op: fn(Array<T>, T) -> TCResult<Array<T>>,
+        value_op: fn(T, T) -> T,
+    ) -> Self {
+        Self {
+            left,
+            right,
+            block_op,
+            value_op,
+        }
     }
 }
 
@@ -1863,16 +1993,21 @@ where
     async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
         self.left
             .read_block(block_id)
-            .map(move |result| result.and_then(|block| (self.op)(block.into(), self.right)))
+            .map(move |result| result.and_then(|block| (self.block_op)(block.into(), self.right)))
             .await
     }
 
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
         let left = self.left.read_blocks().await?;
-        let blocks =
-            left.map(move |result| result.and_then(|block| (self.op)(block.into(), self.right)));
+        let blocks = left
+            .map(move |result| result.and_then(|block| (self.block_op)(block.into(), self.right)));
 
         Ok(Box::pin(blocks))
+    }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        let left = self.left.read_value(coord).await?;
+        Ok((self.value_op)(left, self.right))
     }
 }
 
@@ -1888,7 +2023,8 @@ impl<FE, L: Into<DenseAccess<FE, T>>, T: CDatatype> From<DenseConst<L, T>> for D
         Self::Const(Box::new(DenseConst {
             left: combine.left.into(),
             right: combine.right,
-            op: combine.op,
+            block_op: combine.block_op,
+            value_op: combine.value_op,
         }))
     }
 }
@@ -1906,6 +2042,8 @@ pub struct DenseReduce<S, T: CDatatype> {
     block_map: ArrayBase<Arc<Vec<u64>>>,
     map_axes: Axes,
     block_axes: Axes,
+    id: T,
+    reduce_all: fn(Array<T>, T) -> TCResult<T>,
     reduce_blocks: Combine<T>,
     reduce_op: fn(Array<T>, &[usize], bool) -> TCResult<Array<T>>,
 }
@@ -1915,6 +2053,8 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
         source: S,
         axes: Axes,
         keepdims: bool,
+        id: S::DType,
+        reduce_all: fn(Array<S::DType>, S::DType) -> TCResult<S::DType>,
         reduce_blocks: Combine<S::DType>,
         reduce_op: fn(Array<S::DType>, &[usize], bool) -> TCResult<Array<S::DType>>,
     ) -> TCResult<Self> {
@@ -1946,16 +2086,31 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             block_map,
             map_axes,
             block_axes,
+            id,
+            reduce_all,
             reduce_blocks,
             reduce_op,
         })
     }
 
-    pub fn max(source: S, axes: Axes, keepdims: bool) -> TCResult<Self> {
+    pub fn max(source: S, axes: Axes, keepdims: bool) -> TCResult<Self>
+    where
+        Number: From<S::DType>,
+    {
         Self::new(
             source,
             axes,
             keepdims,
+            S::DType::min(),
+            |block, max| {
+                let block_max = block.max()?;
+                let max = match NumberCollator::default().cmp(&max.into(), &block_max.into()) {
+                    Ordering::Less => block_max,
+                    Ordering::Equal | Ordering::Greater => max,
+                };
+
+                Ok(max)
+            },
             |l, r| {
                 let l = ArrayBase::<Arc<Buffer<S::DType>>>::copy(&l)?;
                 let r = ArrayBase::<Arc<Buffer<S::DType>>>::copy(&r)?;
@@ -1976,11 +2131,24 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
         )
     }
 
-    pub fn min(source: S, axes: Axes, keepdims: bool) -> TCResult<Self> {
+    pub fn min(source: S, axes: Axes, keepdims: bool) -> TCResult<Self>
+    where
+        Number: From<S::DType>,
+    {
         Self::new(
             source,
             axes,
             keepdims,
+            S::DType::max(),
+            |block, min| {
+                let block_min = block.min()?;
+                let min = match NumberCollator::default().cmp(&min.into(), &block_min.into()) {
+                    Ordering::Less | Ordering::Equal => min,
+                    Ordering::Greater => block_min,
+                };
+
+                Ok(min)
+            },
             |l, r| {
                 let l = ArrayBase::<Arc<Buffer<S::DType>>>::copy(&l)?;
                 let r = ArrayBase::<Arc<Buffer<S::DType>>>::copy(&r)?;
@@ -2006,6 +2174,13 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             source,
             axes,
             keepdims,
+            S::DType::zero(),
+            |block, sum| {
+                block
+                    .sum()
+                    .map(|block_sum| block_sum + sum)
+                    .map_err(TCError::from)
+            },
             |l, r| l.add(r).map(Array::from).map_err(TCError::from),
             |mut block, axes, keepdims| {
                 for x in axes.iter().rev().copied() {
@@ -2022,6 +2197,11 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             source,
             axes,
             keepdims,
+            S::DType::one(),
+            |block, product| {
+                let block_product = block.product()?;
+                Ok(block_product * product)
+            },
             |l, r| l.mul(r).map(Array::from).map_err(TCError::from),
             |mut block, axes, keepdims| {
                 for x in axes.iter().rev().copied() {
@@ -2140,6 +2320,18 @@ where
 
         Ok(Box::pin(blocks))
     }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        self.shape().validate_coord(&coord)?;
+        let range = self.transform.invert_coord(&coord);
+        let slice = DenseSlice::new(self.source.clone(), range)?;
+        let source_blocks = slice.read_blocks().await?;
+        source_blocks
+            .try_fold(self.id, |reduced, block| async move {
+                (self.reduce_all)(block, reduced)
+            })
+            .await
+    }
 }
 
 #[async_trait]
@@ -2158,7 +2350,9 @@ impl<FE, S: Into<DenseAccess<FE, T>>, T: CDatatype> From<DenseReduce<S, T>> for 
             block_map: reduce.block_map,
             block_axes: reduce.block_axes,
             map_axes: reduce.map_axes,
+            id: reduce.id,
             transform: reduce.transform,
+            reduce_all: reduce.reduce_all,
             reduce_blocks: reduce.reduce_blocks,
             reduce_op: reduce.reduce_op,
         }))
@@ -2247,6 +2441,12 @@ where
         });
 
         Ok(Box::pin(blocks))
+    }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        self.shape().validate_coord(&coord)?;
+        let coord = self.transform.invert_coord(coord);
+        self.source.read_value(coord).await
     }
 }
 
@@ -2542,6 +2742,12 @@ where
 
         Ok(Box::pin(blocks))
     }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        self.shape().validate_coord(&coord)?;
+        let coord = self.transform.invert_coord(coord);
+        self.source.read_value(coord).await
+    }
 }
 
 #[async_trait]
@@ -2669,7 +2875,7 @@ where
     }
 
     async fn write_value(&self, coord: Coord, value: S::DType) -> TCResult<()> {
-        let source_coord = self.dest.transform.invert_coord(coord)?;
+        let source_coord = self.dest.transform.invert_coord(coord);
         let source = self.dest.source.write().await;
         source.write_value(source_coord, value).await
     }
@@ -2779,6 +2985,10 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
             });
 
         Ok(Box::pin(blocks))
+    }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        self.source.read_value(coord).await
     }
 }
 
@@ -2909,6 +3119,12 @@ where
 
         Ok(Box::pin(blocks))
     }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        self.shape().validate_coord(&coord)?;
+        let coord = self.transform.invert_coord(coord);
+        self.source.read_value(coord).await
+    }
 }
 
 #[async_trait]
@@ -2945,36 +3161,53 @@ impl<S: fmt::Debug> fmt::Debug for DenseTranspose<S> {
 #[derive(Clone)]
 pub struct DenseUnary<S, T: CDatatype> {
     source: S,
-    op: fn(Array<T>) -> TCResult<Array<T>>,
+    block_op: fn(Array<T>) -> TCResult<Array<T>>,
+    value_op: fn(T) -> T,
 }
 
 impl<S: DenseInstance> DenseUnary<S, S::DType> {
-    fn new(source: S, op: fn(Array<S::DType>) -> TCResult<Array<S::DType>>) -> Self {
-        Self { source, op }
+    fn new(
+        source: S,
+        block_op: fn(Array<S::DType>) -> TCResult<Array<S::DType>>,
+        value_op: fn(S::DType) -> S::DType,
+    ) -> Self {
+        Self {
+            source,
+            block_op,
+            value_op,
+        }
     }
 
     pub fn abs(source: S) -> Self {
-        Self::new(source, |block| {
-            block.abs().map(Array::from).map_err(TCError::from)
-        })
+        Self::new(
+            source,
+            |block| block.abs().map(Array::from).map_err(TCError::from),
+            S::DType::abs,
+        )
     }
 
     pub fn exp(source: S) -> Self {
-        Self::new(source, |block| {
-            block.exp().map(Array::from).map_err(TCError::from)
-        })
+        Self::new(
+            source,
+            |block| block.exp().map(Array::from).map_err(TCError::from),
+            |n| S::DType::from_float(n.to_float().exp()),
+        )
     }
 
     pub fn ln(source: S) -> Self {
-        Self::new(source, |block| {
-            block.ln().map(Array::from).map_err(TCError::from)
-        })
+        Self::new(
+            source,
+            |block| block.ln().map(Array::from).map_err(TCError::from),
+            |n| S::DType::from_float(n.to_float().ln()),
+        )
     }
 
     pub fn round(source: S) -> Self {
-        Self::new(source, |block| {
-            block.round().map(Array::from).map_err(TCError::from)
-        })
+        Self::new(
+            source,
+            |block| block.round().map(Array::from).map_err(TCError::from),
+            S::DType::round,
+        )
     }
 }
 
@@ -3004,7 +3237,7 @@ where
         self.source
             .read_block(block_id)
             .map_ok(Array::from)
-            .map(move |result| result.and_then(|block| (self.op)(block)))
+            .map(move |result| result.and_then(|block| (self.block_op)(block)))
             .await
     }
 
@@ -3012,9 +3245,14 @@ where
         let source_blocks = self.source.read_blocks().await?;
         let blocks = source_blocks
             .map_ok(Array::from)
-            .map(move |result| result.and_then(|block| (self.op)(block)));
+            .map(move |result| result.and_then(|block| (self.block_op)(block)));
 
         Ok(Box::pin(blocks))
+    }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        let source_value = self.source.read_value(coord).await?;
+        Ok((self.value_op)(source_value))
     }
 }
 
@@ -3029,7 +3267,8 @@ impl<FE, S: Into<DenseAccess<FE, T>>, T: CDatatype> From<DenseUnary<S, T>> for D
     fn from(unary: DenseUnary<S, T>) -> Self {
         Self::Unary(Box::new(DenseUnary {
             source: unary.source.into(),
-            op: unary.op,
+            block_op: unary.block_op,
+            value_op: unary.value_op,
         }))
     }
 }
@@ -3042,26 +3281,33 @@ impl<S: fmt::Debug, T: CDatatype> fmt::Debug for DenseUnary<S, T> {
 
 pub struct DenseUnaryCast<FE, T: CDatatype> {
     source: DenseAccessCast<FE>,
-    op: fn(Block) -> TCResult<Array<T>>,
+    block_op: fn(Block) -> TCResult<Array<T>>,
+    value_op: fn(Number) -> T,
 }
 
 impl<FE, T: CDatatype> Clone for DenseUnaryCast<FE, T> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
-            op: self.op,
+            block_op: self.block_op,
+            value_op: self.value_op,
         }
     }
 }
 
 impl<FE, T: CDatatype> DenseUnaryCast<FE, T> {
-    pub fn new<S>(source: S, op: fn(Block) -> TCResult<Array<T>>) -> Self
+    pub fn new<S>(
+        source: S,
+        block_op: fn(Block) -> TCResult<Array<T>>,
+        value_op: fn(Number) -> T,
+    ) -> Self
     where
         S: Into<DenseAccessCast<FE>>,
     {
         Self {
             source: source.into(),
-            op,
+            block_op,
+            value_op,
         }
     }
 }
@@ -3084,117 +3330,126 @@ impl<FE> DenseUnaryCast<FE, f32> {
     pub fn asin_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f32_cast!(
                     block,
                     array,
                     array.asin().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.asin().cast_into(),
         }
     }
 
     pub fn sin_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f32_cast!(
                     block,
                     array,
                     array.sin().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.sin().cast_into(),
         }
     }
 
     pub fn sinh_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f32_cast!(
                     block,
                     array,
                     array.sinh().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.sinh().cast_into(),
         }
     }
 
     pub fn acos_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f32_cast!(
                     block,
                     array,
                     array.acos().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.acos().cast_into(),
         }
     }
 
     pub fn cos_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f32_cast!(
                     block,
                     array,
                     array.cos().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.cos().cast_into(),
         }
     }
 
     pub fn cosh_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f32_cast!(
                     block,
                     array,
                     array.cosh().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.cosh().cast_into(),
         }
     }
 
     pub fn atan_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f32_cast!(
                     block,
                     array,
                     array.atan().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.atan().cast_into(),
         }
     }
 
     pub fn tan_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f32_cast!(
                     block,
                     array,
                     array.tan().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.tan().cast_into(),
         }
     }
 
     pub fn tanh_f32<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f32_cast!(
                     block,
                     array,
                     array.tanh().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.tanh().cast_into(),
         }
     }
 }
@@ -3214,117 +3469,126 @@ impl<FE> DenseUnaryCast<FE, f64> {
     pub fn asin_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f64_cast!(
                     block,
                     array,
                     array.asin().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.asin().cast_into(),
         }
     }
 
     pub fn sin_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f64_cast!(
                     block,
                     array,
                     array.sin().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.sin().cast_into(),
         }
     }
 
     pub fn sinh_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f64_cast!(
                     block,
                     array,
                     array.sinh().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.sinh().cast_into(),
         }
     }
 
     pub fn acos_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f64_cast!(
                     block,
                     array,
                     array.acos().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.acos().cast_into(),
         }
     }
 
     pub fn cos_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f64_cast!(
                     block,
                     array,
                     array.cos().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.cos().cast_into(),
         }
     }
 
     pub fn cosh_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f64_cast!(
                     block,
                     array,
                     array.cosh().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.cosh().cast_into(),
         }
     }
 
     pub fn atan_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f64_cast!(
                     block,
                     array,
                     array.atan().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.atan().cast_into(),
         }
     }
 
     pub fn tan_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f64_cast!(
                     block,
                     array,
                     array.tan().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.tan().cast_into(),
         }
     }
 
     pub fn tanh_f64<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: |block| {
+            block_op: |block| {
                 block_f64_cast!(
                     block,
                     array,
                     array.tanh().map(Array::from).map_err(TCError::from)
                 )
             },
+            value_op: |n| n.tanh().cast_into(),
         }
     }
 }
@@ -3333,7 +3597,8 @@ impl<FE> DenseUnaryCast<FE, u8> {
     pub fn not<S: Into<DenseAccessCast<FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
-            op: Block::not,
+            block_op: Block::not,
+            value_op: |n| if bool::cast_from(n.not()) { 1 } else { 0 },
         }
     }
 }
@@ -3367,14 +3632,21 @@ where
     async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
         self.source
             .read_block(block_id)
-            .map(|result| result.and_then(|block| (self.op)(block)))
+            .map(|result| result.and_then(|block| (self.block_op)(block)))
             .await
     }
 
     async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
         let source_blocks = self.source.read_blocks().await?;
-        let blocks = source_blocks.map(move |result| result.and_then(|block| (self.op)(block)));
+        let blocks =
+            source_blocks.map(move |result| result.and_then(|block| (self.block_op)(block)));
+
         Ok(Box::pin(blocks))
+    }
+
+    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+        let source_value = self.source.read_value(coord).await?;
+        Ok((self.value_op)(source_value))
     }
 }
 
