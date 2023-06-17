@@ -21,13 +21,13 @@ use tcgeneric::{label, Instance, Label, ThreadSafe};
 use crate::tensor::sparse::{Blocks, Elements};
 use crate::tensor::{
     Axes, Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
-    TensorRead, TensorType, TensorWrite, TensorWriteDual,
+    TensorType,
 };
 
 use super::access::{
     SparseAccess, SparseCow, SparseFile, SparseVersion, SparseWriteGuard, SparseWriteLock,
 };
-use super::{Node, Schema, SparseInstance, SparseSlice, SparseTensor};
+use super::{Node, Schema, SparseInstance};
 
 const CANON: Label = label("canon");
 const FILLED: Label = label("filled");
@@ -351,103 +351,6 @@ where
             .await
     }
 }
-
-// #[async_trait]
-// impl<Txn, FE, T> TensorRead for SparseBase<Txn, FE, T>
-// where
-//     Txn: Transaction<FE>,
-//     FE: AsType<Node> + ThreadSafe,
-//     T: CDatatype + DType + fmt::Debug,
-//     Number: From<T> + CastInto<T>,
-// {
-//     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
-//         let _permit = self.read_permit(txn_id, coord.to_vec().into()).await?;
-//
-//         let version = {
-//             let state = self.state.read().expect("sparse state");
-//             state.latest_version(txn_id, self.canon.clone().into())?
-//         };
-//
-//         version
-//             .read_value(coord)
-//             .map_ok(Number::from)
-//             .map_err(TCError::from)
-//             .await
-//     }
-// }
-//
-// #[async_trait]
-// impl<Txn, FE, T> TensorWrite for SparseBase<Txn, FE, T>
-// where
-//     Txn: Transaction<FE>,
-//     FE: AsType<Node> + ThreadSafe,
-//     T: CDatatype + DType + fmt::Debug,
-//     Number: From<T> + CastInto<T>,
-// {
-//     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
-//         let _permit = self.write_permit(txn_id, range.clone().into()).await?;
-//
-//         let value = value.cast_into();
-//
-//         let version = {
-//             let mut state = self.state.write().expect("sparse state");
-//             state.pending_version(txn_id, self.canon.clone().into())?
-//         };
-//
-//         let mut version = version.write().await;
-//
-//         for coord in range.affected() {
-//             version.write_value(coord, value).await?;
-//         }
-//
-//         Ok(())
-//     }
-//
-//     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-//         let _permit = self.write_permit(txn_id, coord.to_vec().into()).await?;
-//
-//         let version = {
-//             let mut state = self.state.write().expect("sparse state");
-//             state.pending_version(txn_id, self.canon.clone().into())?
-//         };
-//
-//         let mut version = version.write().await;
-//
-//         version
-//             .write_value(coord, value.cast_into())
-//             .map_err(TCError::from)
-//             .await
-//     }
-// }
-// #[async_trait]
-// impl<Txn, FE, A> TensorWriteDual<SparseTensor<FE, A>> for SparseBase<Txn, FE, A::DType>
-// where
-//     Txn: Transaction<FE>,
-//     FE: AsType<Node> + ThreadSafe,
-//     A: SparseInstance + TensorPermitRead,
-//     A::DType: fmt::Debug,
-//     Number: From<A::DType> + CastInto<A::DType>,
-// {
-//     async fn write(self, txn_id: TxnId, range: Range, value: SparseTensor<FE, A>) -> TCResult<()> {
-//         // always acquire these permits in-order to avoid the risk of a deadlock
-//         let _write_permit = self.write_permit(txn_id, range.clone()).await?;
-//         let _read_permit = value.accessor.read_permit(txn_id, range.clone()).await?;
-//
-//         let version = {
-//             let mut state = self.state.write().expect("dense state");
-//             state.pending_version(txn_id, self.canon.clone().into())?
-//         };
-//
-//         if range.is_empty() || range == Range::all(self.canon.shape()) {
-//             let mut guard = version.write().await;
-//             guard.overwrite(value.accessor).await
-//         } else {
-//             let slice = SparseSlice::new(version, range)?;
-//             let mut guard = slice.write().await;
-//             guard.overwrite(value.accessor).await
-//         }
-//     }
-// }
 
 #[async_trait]
 impl<Txn, FE, T> Persist<FE> for SparseBase<Txn, FE, T>

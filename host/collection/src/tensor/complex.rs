@@ -8,7 +8,7 @@ use tc_value::{Float, Number, NumberClass, NumberInstance};
 use tcgeneric::ThreadSafe;
 
 use super::dense::{DenseBase, DenseCacheFile, DenseView};
-use super::sparse::{Node, SparseView};
+use super::sparse::{Node, SparseBase, SparseView};
 use super::{
     Coord, TensorBoolean, TensorCompare, TensorCompareConst, TensorInstance, TensorMath,
     TensorMathConst, TensorRead, TensorTrig, TensorUnary, TensorUnaryBoolean,
@@ -37,7 +37,7 @@ where
 {
 }
 
-// impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> ComplexRead for SparseBase<Txn, FE> {}
+impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> ComplexRead for SparseBase<Txn, FE> {}
 impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> ComplexRead for SparseView<Txn, FE> {}
 
 pub(crate) trait ComplexUnary:

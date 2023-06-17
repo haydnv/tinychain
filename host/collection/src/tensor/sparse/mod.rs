@@ -5,7 +5,7 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use collate::Collate;
-use futures::{try_join, Stream, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{join, try_join, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ha_ndarray::*;
 use safecast::{AsType, CastFrom, CastInto};
 
@@ -23,8 +23,8 @@ use super::dense::{DenseAccess, DenseAccessCast, DenseSparse, DenseTensor};
 use super::{
     Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare,
     TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorMathConst,
-    TensorPermitRead, TensorRead, TensorReduce, TensorTransform, TensorUnary, TensorUnaryBoolean,
-    TensorWrite, TensorWriteDual,
+    TensorPermitRead, TensorPermitWrite, TensorRead, TensorReduce, TensorTransform, TensorUnary,
+    TensorUnaryBoolean, TensorWrite, TensorWriteDual,
 };
 
 pub use access::*;
@@ -910,204 +910,293 @@ impl<Txn, FE, A: fmt::Debug> fmt::Debug for SparseTensor<Txn, FE, A> {
     }
 }
 
-// macro_rules! base_dispatch {
-//     ($this:ident, $var:ident, $bool:expr, $complex:expr, $general:expr) => {
-//         match $this {
-//             SparseBase::Bool($var) => $bool,
-//             SparseBase::C32($var) => $complex,
-//             SparseBase::C64($var) => $complex,
-//             SparseBase::F32($var) => $general,
-//             SparseBase::F64($var) => $general,
-//             SparseBase::I16($var) => $general,
-//             SparseBase::I32($var) => $general,
-//             SparseBase::I64($var) => $general,
-//             SparseBase::U8($var) => $general,
-//             SparseBase::U16($var) => $general,
-//             SparseBase::U32($var) => $general,
-//             SparseBase::U64($var) => $general,
-//         }
-//     };
-// }
-//
-// pub enum SparseBase<Txn, FE> {
-//     Bool(base::SparseBase<Txn, FE, u8>),
-//     C32(
-//         (
-//             base::SparseBase<Txn, FE, f32>,
-//             base::SparseBase<Txn, FE, f32>,
-//         ),
-//     ),
-//     C64(
-//         (
-//             base::SparseBase<Txn, FE, f64>,
-//             base::SparseBase<Txn, FE, f64>,
-//         ),
-//     ),
-//     F32(base::SparseBase<Txn, FE, f32>),
-//     F64(base::SparseBase<Txn, FE, f64>),
-//     I16(base::SparseBase<Txn, FE, i16>),
-//     I32(base::SparseBase<Txn, FE, i32>),
-//     I64(base::SparseBase<Txn, FE, i64>),
-//     U8(base::SparseBase<Txn, FE, u8>),
-//     U16(base::SparseBase<Txn, FE, u16>),
-//     U32(base::SparseBase<Txn, FE, u32>),
-//     U64(base::SparseBase<Txn, FE, u64>),
-// }
-//
-// impl<Txn, FE> SparseBase<Txn, FE>
-// where
-//     FE: AsType<Node> + ThreadSafe,
-// {
-//     pub fn into_view(self) -> TCResult<SparseView<FE>> {
-//          todo!()
-//     }
-// }
-//
-// impl<Txn, FE> TensorInstance for SparseBase<Txn, FE>
-// where
-//     Txn: ThreadSafe,
-//     FE: ThreadSafe,
-// {
-//     fn dtype(&self) -> NumberType {
-//         match self {
-//             Self::Bool(this) => this.dtype(),
-//             Self::C32(_) => NumberType::Complex(ComplexType::C32),
-//             Self::C64(_) => NumberType::Complex(ComplexType::C64),
-//             Self::F32(this) => this.dtype(),
-//             Self::F64(this) => this.dtype(),
-//             Self::I16(this) => this.dtype(),
-//             Self::I32(this) => this.dtype(),
-//             Self::I64(this) => this.dtype(),
-//             Self::U8(this) => this.dtype(),
-//             Self::U16(this) => this.dtype(),
-//             Self::U32(this) => this.dtype(),
-//             Self::U64(this) => this.dtype(),
-//         }
-//     }
-//
-//     fn shape(&self) -> &Shape {
-//         base_dispatch!(self, this, this.shape(), this.0.shape(), this.shape())
-//     }
-// }
-//
-// #[async_trait]
-// impl<Txn, FE> TensorRead for SparseBase<Txn, FE>
-// where
-//     Txn: Transaction<FE>,
-//     FE: AsType<Node> + ThreadSafe,
-// {
-//     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
-//         base_dispatch!(
-//             self,
-//             this,
-//             this.read_value(txn_id, coord).await,
-//             ComplexRead::read_value((Self::from(this.0), Self::from(this.1)), txn_id, coord).await,
-//             this.read_value(txn_id, coord).await
-//         )
-//     }
-// }
-//
-// #[async_trait]
-// impl<Txn, FE> TensorWrite for SparseBase<Txn, FE>
-// where
-//     Txn: Transaction<FE>,
-//     FE: AsType<Node> + ThreadSafe,
-// {
-//     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
-//         base_dispatch!(
-//             self,
-//             this,
-//             this.write_value(txn_id, range, value).await,
-//             {
-//                 let (r_value, i_value) = Complex::cast_from(value).into();
-//
-//                 try_join!(
-//                     this.0
-//                         .write_value(txn_id, range.clone(), Number::Float(r_value)),
-//                     this.1.write_value(txn_id, range, Number::Float(i_value))
-//                 )?;
-//
-//                 Ok(())
-//             },
-//             this.write_value(txn_id, range, value).await
-//         )
-//     }
-//
-//     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-//         base_dispatch!(
-//             self,
-//             this,
-//             this.write_value_at(txn_id, coord, value).await,
-//             {
-//                 let (r_value, i_value) = Complex::cast_from(value).into();
-//
-//                 try_join!(
-//                     this.0
-//                         .write_value_at(txn_id, coord.to_vec(), Number::Float(r_value)),
-//                     this.1
-//                         .write_value_at(txn_id, coord.to_vec(), Number::Float(i_value))
-//                 )?;
-//
-//                 Ok(())
-//             },
-//             this.write_value_at(txn_id, coord, value).await
-//         )
-//     }
-// }
-//
-// #[async_trait]
-// impl<Txn, FE> TensorWriteDual<SparseView<FE>> for SparseBase<Txn, FE>
-// where
-//     Txn: Transaction<FE>,
-//     FE: AsType<Node> + ThreadSafe,
-// {
-//     async fn write(self, txn_id: TxnId, range: Range, value: SparseView<FE>) -> TCResult<()> {
-//         match (self, value) {
-//             (Self::Bool(this), SparseView::Bool(that)) => this.write(txn_id, range, that).await,
-//             (Self::C32((lr, li)), SparseView::C32((rr, ri))) => {
-//                 try_join!(
-//                     TensorWriteDual::write(lr, txn_id, range.clone(), rr),
-//                     TensorWriteDual::write(li, txn_id, range, ri),
-//                 )?;
-//
-//                 Ok(())
-//             }
-//             (Self::C64((lr, li)), SparseView::C64((rr, ri))) => {
-//                 try_join!(
-//                     TensorWriteDual::write(lr, txn_id, range.clone(), rr),
-//                     TensorWriteDual::write(li, txn_id, range, ri),
-//                 )?;
-//
-//                 Ok(())
-//             }
-//             (Self::F32(this), SparseView::F32(that)) => this.write(txn_id, range, that).await,
-//             (Self::F64(this), SparseView::F64(that)) => this.write(txn_id, range, that).await,
-//             (Self::I16(this), SparseView::I16(that)) => this.write(txn_id, range, that).await,
-//             (Self::I32(this), SparseView::I32(that)) => this.write(txn_id, range, that).await,
-//             (Self::I64(this), SparseView::I64(that)) => this.write(txn_id, range, that).await,
-//             (Self::U8(this), SparseView::U8(that)) => this.write(txn_id, range, that).await,
-//             (Self::U16(this), SparseView::U16(that)) => this.write(txn_id, range, that).await,
-//             (Self::U32(this), SparseView::U32(that)) => this.write(txn_id, range, that).await,
-//             (Self::U64(this), SparseView::U64(that)) => this.write(txn_id, range, that).await,
-//             (this, that) => {
-//                 let value = TensorCast::cast_into(that, this.dtype())?;
-//                 this.write(txn_id, range, value).await
-//             }
-//         }
-//     }
-// }
-//
-// impl<Txn, FE> From<base::SparseBase<Txn, FE, f32>> for SparseBase<Txn, FE> {
-//     fn from(base: base::SparseBase<Txn, FE, f32>) -> Self {
-//         Self::F32(base)
-//     }
-// }
-//
-// impl<Txn, FE> From<base::SparseBase<Txn, FE, f64>> for SparseBase<Txn, FE> {
-//     fn from(base: base::SparseBase<Txn, FE, f64>) -> Self {
-//         Self::F64(base)
-//     }
-// }
+macro_rules! base_dispatch {
+    ($this:ident, $var:ident, $bool:expr, $complex:expr, $general:expr) => {
+        match $this {
+            SparseBase::Bool($var) => $bool,
+            SparseBase::C32($var) => $complex,
+            SparseBase::C64($var) => $complex,
+            SparseBase::F32($var) => $general,
+            SparseBase::F64($var) => $general,
+            SparseBase::I16($var) => $general,
+            SparseBase::I32($var) => $general,
+            SparseBase::I64($var) => $general,
+            SparseBase::U8($var) => $general,
+            SparseBase::U16($var) => $general,
+            SparseBase::U32($var) => $general,
+            SparseBase::U64($var) => $general,
+        }
+    };
+}
+
+macro_rules! base_view_dispatch {
+    ($self:ident, $other:ident, $this:ident, $that:ident, $bool:expr, $complex:expr, $general:expr, $mismatch:expr) => {
+        match ($self, $other) {
+            (SparseBase::Bool($this), SparseView::Bool($that)) => $bool,
+            (SparseBase::C32($this), SparseView::C32($that)) => $complex,
+            (SparseBase::C64($this), SparseView::C64($that)) => $complex,
+            (SparseBase::F32($this), SparseView::F32($that)) => $general,
+            (SparseBase::F64($this), SparseView::F64($that)) => $general,
+            (SparseBase::I16($this), SparseView::I16($that)) => $general,
+            (SparseBase::I32($this), SparseView::I32($that)) => $general,
+            (SparseBase::I64($this), SparseView::I64($that)) => $general,
+            (SparseBase::U8($this), SparseView::U8($that)) => $general,
+            (SparseBase::U16($this), SparseView::U16($that)) => $general,
+            (SparseBase::U32($this), SparseView::U32($that)) => $general,
+            (SparseBase::U64($this), SparseView::U64($that)) => $general,
+            ($this, $that) => $mismatch,
+        }
+    };
+}
+
+pub enum SparseBase<Txn, FE> {
+    Bool(base::SparseBase<Txn, FE, u8>),
+    C32(
+        (
+            base::SparseBase<Txn, FE, f32>,
+            base::SparseBase<Txn, FE, f32>,
+        ),
+    ),
+    C64(
+        (
+            base::SparseBase<Txn, FE, f64>,
+            base::SparseBase<Txn, FE, f64>,
+        ),
+    ),
+    F32(base::SparseBase<Txn, FE, f32>),
+    F64(base::SparseBase<Txn, FE, f64>),
+    I16(base::SparseBase<Txn, FE, i16>),
+    I32(base::SparseBase<Txn, FE, i32>),
+    I64(base::SparseBase<Txn, FE, i64>),
+    U8(base::SparseBase<Txn, FE, u8>),
+    U16(base::SparseBase<Txn, FE, u16>),
+    U32(base::SparseBase<Txn, FE, u32>),
+    U64(base::SparseBase<Txn, FE, u64>),
+}
+
+impl<Txn, FE> TensorInstance for SparseBase<Txn, FE>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+{
+    fn dtype(&self) -> NumberType {
+        match self {
+            Self::Bool(this) => this.dtype(),
+            Self::C32(_) => NumberType::Complex(ComplexType::C32),
+            Self::C64(_) => NumberType::Complex(ComplexType::C64),
+            Self::F32(this) => this.dtype(),
+            Self::F64(this) => this.dtype(),
+            Self::I16(this) => this.dtype(),
+            Self::I32(this) => this.dtype(),
+            Self::I64(this) => this.dtype(),
+            Self::U8(this) => this.dtype(),
+            Self::U16(this) => this.dtype(),
+            Self::U32(this) => this.dtype(),
+            Self::U64(this) => this.dtype(),
+        }
+    }
+
+    fn shape(&self) -> &Shape {
+        base_dispatch!(self, this, this.shape(), this.0.shape(), this.shape())
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> TensorRead for SparseBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
+    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
+        base_dispatch!(
+            self,
+            this,
+            this.read_value(txn_id, coord).map_ok(Number::from).await,
+            ComplexRead::read_value((Self::from(this.0), Self::from(this.1)), txn_id, coord).await,
+            this.read_value(txn_id, coord).map_ok(Number::from).await
+        )
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> TensorWrite for SparseBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
+    async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
+        if !bool::cast_from(value) {
+            return Err(bad_request!("cannot write a scalar value {} to a sparse range {:?} because the result would be dense", value, range));
+        }
+
+        base_dispatch!(
+            self,
+            this,
+            {
+                let _write_permit = this.write_permit(txn_id, range.clone()).await?;
+                let mut guard = this.write().await;
+                guard.clear(txn_id, range).await
+            },
+            {
+                // always acquire these permits in-order to prevent the risk of a deadlock
+                let _write_permit = this.0.write_permit(txn_id, range.clone()).await?;
+                let _write_permit = this.1.write_permit(txn_id, range.clone()).await?;
+
+                let (mut r_guard, mut i_guard) = join!(this.0.write(), this.1.write());
+
+                try_join!(
+                    r_guard.clear(txn_id, range.clone()),
+                    i_guard.clear(txn_id, range)
+                )?;
+
+                Ok(())
+            },
+            {
+                let _write_permit = this.write_permit(txn_id, range.clone()).await?;
+                let mut guard = this.write().await;
+                guard.clear(txn_id, range).await
+            }
+        )
+    }
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        base_dispatch!(
+            self,
+            this,
+            {
+                let _write_permit = this.write_permit(txn_id, coord.to_vec().into()).await?;
+                let mut guard = this.write().await;
+                guard.write_value(txn_id, coord, value.cast_into()).await
+            },
+            {
+                let (r_value, i_value) = Complex::cast_from(value).into();
+
+                // always acquire these permits in-order to prevent the risk of a deadlock
+                let _write_permit = this.0.write_permit(txn_id, coord.to_vec().into()).await?;
+                let _write_permit = this.1.write_permit(txn_id, coord.to_vec().into()).await?;
+
+                let (mut r_guard, mut i_guard) = join!(this.0.write(), this.1.write());
+
+                try_join!(
+                    r_guard.write_value(txn_id, coord.to_vec(), r_value.cast_into()),
+                    i_guard.write_value(txn_id, coord, i_value.cast_into())
+                )?;
+
+                Ok(())
+            },
+            {
+                let _write_permit = this.write_permit(txn_id, coord.to_vec().into()).await?;
+                let mut guard = this.write().await;
+                guard.write_value(txn_id, coord, value.cast_into()).await
+            }
+        )
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> TensorWriteDual<SparseView<Txn, FE>> for SparseBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
+    async fn write(self, txn_id: TxnId, range: Range, value: SparseView<Txn, FE>) -> TCResult<()> {
+        base_view_dispatch!(
+            self,
+            value,
+            this,
+            that,
+            {
+                // always acquire these permits in-order to prevent the risk of a deadlock
+                let _write_permit = this.write_permit(txn_id, range.clone().into()).await?;
+                let _read_permit = that
+                    .accessor
+                    .read_permit(txn_id, range.clone().into())
+                    .await?;
+
+                if range.is_empty() || range == Range::all(this.shape()) {
+                    let mut guard = this.write().await;
+                    guard.overwrite(txn_id, that.accessor).await
+                } else {
+                    let slice = SparseSlice::new(this.clone(), range)?;
+                    let mut guard = slice.write().await;
+                    guard.overwrite(txn_id, that.accessor).await
+                }
+            },
+            {
+                // always acquire these permits in-order to prevent the risk of a deadlock
+                let _r_write_permit = this.0.write_permit(txn_id, range.clone().into()).await?;
+                let _i_write_permit = this.1.write_permit(txn_id, range.clone().into()).await?;
+                let _r_read_permit = that
+                    .0
+                    .accessor
+                    .read_permit(txn_id, range.clone().into())
+                    .await?;
+                let _i_read_permit = that
+                    .1
+                    .accessor
+                    .read_permit(txn_id, range.clone().into())
+                    .await?;
+
+                debug_assert_eq!(this.0.shape(), this.1.shape());
+                if range.is_empty() || range == Range::all(this.0.shape()) {
+                    let (mut r_guard, mut i_guard) = join!(this.0.write(), this.1.write());
+
+                    try_join!(
+                        r_guard.overwrite(txn_id, that.0.accessor),
+                        i_guard.overwrite(txn_id, that.1.accessor)
+                    )?;
+
+                    Ok(())
+                } else {
+                    let r_slice = SparseSlice::new(this.0.clone(), range.clone())?;
+                    let i_slice = SparseSlice::new(this.1.clone(), range)?;
+
+                    let (mut r_guard, mut i_guard) = join!(r_slice.write(), i_slice.write());
+
+                    try_join!(
+                        r_guard.overwrite(txn_id, that.0.accessor),
+                        i_guard.overwrite(txn_id, that.1.accessor)
+                    )?;
+
+                    Ok(())
+                }
+            },
+            {
+                // always acquire these permits in-order to prevent the risk of a deadlock
+                let _write_permit = this.write_permit(txn_id, range.clone().into()).await?;
+                let _read_permit = that
+                    .accessor
+                    .read_permit(txn_id, range.clone().into())
+                    .await?;
+
+                if range.is_empty() || range == Range::all(this.shape()) {
+                    let mut guard = this.write().await;
+                    guard.overwrite(txn_id, that.accessor).await
+                } else {
+                    let slice = SparseSlice::new(this.clone(), range)?;
+                    let mut guard = slice.write().await;
+                    guard.overwrite(txn_id, that.accessor).await
+                }
+            },
+            {
+                let value = TensorCast::cast_into(that, this.dtype())?;
+                this.write(txn_id, range, value).await
+            }
+        )
+    }
+}
+
+impl<Txn, FE> From<base::SparseBase<Txn, FE, f32>> for SparseBase<Txn, FE> {
+    fn from(base: base::SparseBase<Txn, FE, f32>) -> Self {
+        Self::F32(base)
+    }
+}
+
+impl<Txn, FE> From<base::SparseBase<Txn, FE, f64>> for SparseBase<Txn, FE> {
+    fn from(base: base::SparseBase<Txn, FE, f64>) -> Self {
+        Self::F64(base)
+    }
+}
 
 #[inline]
 pub fn sparse_from<Txn, FE, A, T>(

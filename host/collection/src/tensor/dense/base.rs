@@ -20,8 +20,7 @@ use tcgeneric::{label, Instance, Label, ThreadSafe};
 
 use crate::tensor::sparse::Node;
 use crate::tensor::{
-    Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
-    TensorRead, TensorType,
+    Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite, TensorType,
 };
 
 use super::access::{DenseAccess, DenseCow, DenseFile, DenseVersion};
