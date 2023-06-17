@@ -43,10 +43,11 @@ pub trait SparseWriteLock<'a>: SparseInstance {
 
 #[async_trait]
 pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
-    async fn clear(&mut self, range: Range) -> TCResult<()>;
+    async fn clear(&mut self, txn_id: TxnId, range: Range) -> TCResult<()>;
 
     async fn merge<FE>(
         &mut self,
+        txn_id: TxnId,
         filled: SparseFile<FE, T>,
         zeros: SparseFile<FE, T>,
     ) -> TCResult<()>
@@ -61,7 +62,7 @@ pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
 
         while let Some(row) = zeros.try_next().await? {
             let (coord, zero) = unwrap_row(row);
-            self.write_value(coord, zero).await?;
+            self.write_value(txn_id, coord, zero).await?;
         }
 
         let mut filled = filled
@@ -71,15 +72,17 @@ pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
 
         while let Some(row) = filled.try_next().await? {
             let (coord, value) = unwrap_row(row);
-            self.write_value(coord, value).await?;
+            self.write_value(txn_id, coord, value).await?;
         }
 
         Ok(())
     }
 
-    async fn overwrite<O: SparseInstance<DType = T>>(&mut self, other: O) -> TCResult<()>;
+    async fn overwrite<O>(&mut self, txn_id: TxnId, other: O) -> TCResult<()>
+    where
+        O: SparseInstance<DType = T> + TensorPermitRead;
 
-    async fn write_value(&mut self, coord: Coord, value: T) -> TCResult<()>;
+    async fn write_value(&mut self, txn_id: TxnId, coord: Coord, value: T) -> TCResult<()>;
 }
 
 pub enum SparseAccessCast<FE> {
@@ -160,6 +163,7 @@ where
     async fn merge_blocks_inner(
         self,
         other: Self,
+        txn_id: TxnId,
         range: Range,
         order: Axes,
     ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<(Array<u64>, (Block, Block))>> + Send>>> {
@@ -171,7 +175,7 @@ where
 
         access_cast_dispatch_dual!(self, other, this, that, {
             let zero = this.dtype().zero();
-            let blocks = merge_blocks_inner(this, that, shape, range, order).await?;
+            let blocks = merge_blocks_inner(this, that, txn_id, shape, range, order).await?;
             let blocks = blocks.map_ok(|(coords, (left, right))| {
                 (
                     coords,
@@ -189,6 +193,7 @@ where
     async fn merge_blocks_outer(
         self,
         other: Self,
+        txn_id: TxnId,
         range: Range,
         order: Axes,
     ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<(Array<u64>, (Block, Block))>> + Send>>> {
@@ -200,7 +205,7 @@ where
 
         access_cast_dispatch_dual!(self, other, this, that, {
             let zero = this.dtype().zero();
-            let blocks = merge_blocks_outer(this, that, shape, range, order).await?;
+            let blocks = merge_blocks_outer(this, that, txn_id, shape, range, order).await?;
             let blocks = blocks.map_ok(|(coords, (left, right))| {
                 (
                     coords,
@@ -215,17 +220,28 @@ where
         })
     }
 
-    async fn blocks(self, range: Range, order: Axes) -> TCResult<Blocks<Array<u64>, Block>> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> TCResult<Blocks<Array<u64>, Block>> {
         access_cast_dispatch!(self, this, {
-            let blocks = this.blocks(range, order).await?;
+            let blocks = this.blocks(txn_id, range, order).await?;
             let blocks = blocks.map_ok(|(coords, values)| (coords.into(), values.into()));
             Ok(Box::pin(blocks))
         })
     }
 
-    pub async fn elements(self, range: Range, order: Axes) -> TCResult<Elements<Number>> {
+    pub async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> TCResult<Elements<Number>> {
         access_cast_dispatch!(self, this, {
-            let elements = this.elements(range, order).await?;
+            let elements = this.elements(txn_id, range, order).await?;
+
             Ok(Box::pin(
                 elements.map_ok(|(coord, value)| (coord, Number::from(value))),
             ))
@@ -235,6 +251,7 @@ where
     pub async fn inner_join(
         self,
         other: Self,
+        txn_id: TxnId,
         range: Range,
         order: Axes,
     ) -> TCResult<Elements<(Number, Number)>> {
@@ -245,8 +262,8 @@ where
         let that_shape = other.shape().to_vec();
 
         let (this, that) = try_join!(
-            self.elements(range.clone(), order.to_vec()),
-            other.elements(range, order)
+            self.elements(txn_id, range.clone(), order.to_vec()),
+            other.elements(txn_id, range, order)
         )?;
 
         let this = this.map_ok(move |(coord, value)| (offset_of(coord, &this_shape), value));
@@ -263,6 +280,7 @@ where
     pub async fn outer_join(
         self,
         other: Self,
+        txn_id: TxnId,
         range: Range,
         order: Axes,
     ) -> TCResult<Elements<(Number, Number)>> {
@@ -274,8 +292,8 @@ where
         let that_shape = other.shape().to_vec();
 
         let (this, that) = try_join!(
-            self.elements(range.clone(), order.to_vec()),
-            other.elements(range, order)
+            self.elements(txn_id, range.clone(), order.to_vec()),
+            other.elements(txn_id, range, order)
         )?;
 
         let this = this.map_ok(move |(coord, value)| (offset_of(coord, &this_shape), value));
@@ -290,11 +308,11 @@ where
         Ok(Box::pin(elements))
     }
 
-    pub async fn read_value(&self, coord: Coord) -> TCResult<Number> {
+    pub async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
         access_cast_dispatch!(
             self,
             this,
-            this.read_value(coord).map_ok(Number::from).await
+            this.read_value(txn_id, coord).map_ok(Number::from).await
         )
     }
 }
@@ -429,9 +447,14 @@ where
     type Blocks = Blocks<Array<u64>, Array<T>>;
     type DType = T;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         access_dispatch!(self, this, {
-            let blocks = this.blocks(range, order).await?;
+            let blocks = this.blocks(txn_id, range, order).await?;
             let blocks =
                 blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
 
@@ -439,12 +462,17 @@ where
         })
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        access_dispatch!(self, this, this.elements(range, order).await)
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
+        access_dispatch!(self, this, this.elements(txn_id, range, order).await)
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
-        access_dispatch!(self, this, this.read_value(coord).await)
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
+        access_dispatch!(self, this, this.read_value(txn_id, coord).await)
     }
 }
 
@@ -578,13 +606,23 @@ where
     type Blocks = stream::BlockCoords<Elements<T>, T>;
     type DType = T;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let elements = self.elements(range, order).await?;
+        let elements = self.elements(txn_id, range, order).await?;
         Ok(stream::BlockCoords::new(elements, ndim))
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        _txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         self.shape().validate_range(&range)?;
         debug_assert!(validate_order(&order, self.ndim()));
 
@@ -594,7 +632,7 @@ where
         Ok(Box::pin(elements))
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, _txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         self.shape().validate_coord(&coord)?;
 
         let key = coord.into_iter().map(Number::from).collect();
@@ -655,7 +693,7 @@ where
     T: CDatatype + DType + fmt::Debug,
     Number: From<T>,
 {
-    async fn clear(&mut self, range: Range) -> TCResult<()> {
+    async fn clear(&mut self, _txn_id: TxnId, range: Range) -> TCResult<()> {
         if range == Range::default() || range == Range::all(&self.shape) {
             self.table.truncate().map_err(TCError::from).await
         } else {
@@ -663,7 +701,11 @@ where
         }
     }
 
-    async fn overwrite<O: SparseInstance<DType = T>>(&mut self, other: O) -> TCResult<()> {
+    async fn overwrite<O: SparseInstance<DType = T>>(
+        &mut self,
+        txn_id: TxnId,
+        other: O,
+    ) -> TCResult<()> {
         if self.shape != other.shape() {
             return Err(bad_request!(
                 "cannot overwrite a tensor of shape {:?} with {:?}",
@@ -672,9 +714,9 @@ where
             ));
         }
 
-        self.clear(Range::default()).await?;
+        self.clear(txn_id, Range::default()).await?;
 
-        let mut elements = other.elements(Range::default(), vec![]).await?;
+        let mut elements = other.elements(txn_id, Range::default(), vec![]).await?;
 
         while let Some((coord, value)) = elements.try_next().await? {
             let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
@@ -684,7 +726,7 @@ where
         Ok(())
     }
 
-    async fn write_value(&mut self, coord: Coord, value: T) -> Result<(), TCError> {
+    async fn write_value(&mut self, _txn_id: TxnId, coord: Coord, value: T) -> Result<(), TCError> {
         self.shape.validate_coord(&coord)?;
 
         let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
@@ -733,9 +775,8 @@ impl<FE, T> SparseVersion<FE, T> {
 
 impl<FE, T> TensorInstance for SparseVersion<FE, T>
 where
-    FE: Send + Sync,
+    FE: ThreadSafe,
     T: CDatatype + DType,
-    SparseFile<FE, T>: TensorInstance,
 {
     fn dtype(&self) -> NumberType {
         self.file.dtype()
@@ -749,25 +790,35 @@ where
 #[async_trait]
 impl<FE, T> SparseInstance for SparseVersion<FE, T>
 where
-    FE: Send + Sync,
+    FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType,
-    SparseFile<FE, T>: SparseInstance,
+    Number: From<T> + CastInto<T>,
 {
     type CoordBlock = <SparseFile<FE, T> as SparseInstance>::CoordBlock;
     type ValueBlock = <SparseFile<FE, T> as SparseInstance>::ValueBlock;
     type Blocks = <SparseFile<FE, T> as SparseInstance>::Blocks;
     type DType = <SparseFile<FE, T> as SparseInstance>::DType;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
-        self.file.blocks(range, order).await
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
+        self.file.blocks(txn_id, range, order).await
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        self.file.elements(range, order).await
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
+        self.file.elements(txn_id, range, order).await
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
-        self.file.read_value(coord).await
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
+        self.file.read_value(txn_id, coord).await
     }
 }
 
@@ -803,9 +854,9 @@ where
 #[async_trait]
 impl<'a, FE, T> SparseWriteLock<'a> for SparseVersion<FE, T>
 where
-    FE: Send + Sync,
-    T: CDatatype + DType,
-    SparseFile<FE, T>: SparseWriteLock<'a>,
+    FE: AsType<Node> + ThreadSafe,
+    T: CDatatype + DType + fmt::Debug,
+    Number: From<T> + CastInto<T>,
 {
     type Guard = <SparseFile<FE, T> as SparseWriteLock<'a>>::Guard;
 
@@ -820,10 +871,7 @@ impl<FE, T: CDatatype> From<SparseVersion<FE, T>> for SparseAccess<FE, T> {
     }
 }
 
-impl<FE, T> fmt::Debug for SparseVersion<FE, T>
-where
-    SparseFile<FE, T>: fmt::Debug,
-{
+impl<FE, T> fmt::Debug for SparseVersion<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "transactional version of {:?}", self.file)
     }
@@ -903,14 +951,20 @@ where
     type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
     type DType = T;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let elements = self.elements(range, order).await?;
+        let elements = self.elements(txn_id, range, order).await?;
         Ok(stream::BlockCoords::new(elements, ndim))
     }
 
     async fn elements(
         self,
+        txn_id: TxnId,
         mut range: Range,
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
@@ -918,7 +972,7 @@ where
         let offset = ndim - self.inner.ndim();
 
         if offset == 0 {
-            return self.inner.elements(range, order).await;
+            return self.inner.elements(txn_id, range, order).await;
         }
 
         self.shape.validate_range(&range)?;
@@ -953,7 +1007,9 @@ where
                 let inner_order = inner_order.to_vec();
 
                 async move {
-                    let inner_elements = inner.elements(inner_range.into(), inner_order).await?;
+                    let inner_elements = inner
+                        .elements(txn_id, inner_range.into(), inner_order)
+                        .await?;
 
                     let elements = inner_elements.map_ok(move |(inner_coord, value)| {
                         let mut coord = Vec::with_capacity(ndim);
@@ -970,12 +1026,12 @@ where
         Ok(Box::pin(elements))
     }
 
-    async fn read_value(&self, mut coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, mut coord: Coord) -> Result<Self::DType, TCError> {
         while coord.len() > self.inner.ndim() {
             coord.remove(0);
         }
 
-        self.inner.read_value(coord).await
+        self.inner.read_value(txn_id, coord).await
     }
 }
 
@@ -1064,14 +1120,20 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
     type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
     type DType = S::DType;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let elements = self.elements(range, order).await?;
+        let elements = self.elements(txn_id, range, order).await?;
         Ok(stream::BlockCoords::new(elements, ndim))
     }
 
     async fn elements(
         self,
+        txn_id: TxnId,
         range: Range,
         mut order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
@@ -1122,7 +1184,10 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
         }?;
 
         if self.axis == self.ndim() - 1 {
-            let source_elements = self.source.elements(source_range, source_order).await?;
+            let source_elements = self
+                .source
+                .elements(txn_id, source_range, source_order)
+                .await?;
 
             // TODO: write a range to a slice of a coordinate block instead
             let elements = source_elements
@@ -1142,7 +1207,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
             let inner_range = source_range.iter().skip(axis).cloned().collect::<Vec<_>>();
 
             let source = self.source;
-            let filled = source.clone().filled_at(source_range, axes).await?;
+            let filled = source.clone().filled_at(txn_id, source_range, axes).await?;
 
             let elements = filled
                 .map(move |result| {
@@ -1170,7 +1235,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
 
                             async move {
                                 let inner_elements =
-                                    slice.elements(inner_range, inner_order).await?;
+                                    slice.elements(txn_id, inner_range, inner_order).await?;
 
                                 let elements =
                                     inner_elements.map_ok(move |(inner_coord, value)| {
@@ -1195,10 +1260,10 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
         }
     }
 
-    async fn read_value(&self, mut coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, mut coord: Coord) -> Result<Self::DType, TCError> {
         self.shape.validate_coord(&coord)?;
         coord[self.axis] = 0;
-        self.source.read_value(coord).await
+        self.source.read_value(txn_id, coord).await
     }
 }
 
@@ -1305,14 +1370,20 @@ where
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
         let context = ha_ndarray::Context::default()?;
         let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let block_op = self.block_op;
         let shape = self.shape().clone();
-        let source_blocks = merge_blocks_outer(self.left, self.right, shape, range, order).await?;
+        let source_blocks =
+            merge_blocks_outer(self.left, self.right, txn_id, shape, range, order).await?;
 
         let blocks = source_blocks
             .map(move |result| {
@@ -1328,17 +1399,22 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
         let size = self.size();
-        let blocks = self.blocks(range, order).await?;
+        let blocks = self.blocks(txn_id, range, order).await?;
         block_elements(blocks, ndim, size)
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         let (left, right) = try_join!(
-            self.left.read_value(coord.to_vec()),
-            self.right.read_value(coord)
+            self.left.read_value(txn_id, coord.to_vec()),
+            self.right.read_value(txn_id, coord)
         )?;
 
         Ok((self.value_op)(left, right))
@@ -1448,14 +1524,20 @@ where
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
         let context = ha_ndarray::Context::default()?;
         let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let block_op = self.block_op;
         let shape = self.shape().clone();
-        let source_blocks = merge_blocks_inner(self.left, self.right, shape, range, order).await?;
+        let source_blocks =
+            merge_blocks_inner(self.left, self.right, txn_id, shape, range, order).await?;
 
         let blocks = source_blocks
             .map(move |result| {
@@ -1471,17 +1553,22 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
         let size = self.size();
-        let blocks = self.blocks(range, order).await?;
+        let blocks = self.blocks(txn_id, range, order).await?;
         block_elements(blocks, ndim, size)
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         let (left, right) = try_join!(
-            self.left.read_value(coord.to_vec()),
-            self.right.read_value(coord)
+            self.left.read_value(txn_id, coord.to_vec()),
+            self.right.read_value(txn_id, coord)
         )?;
 
         Ok((self.value_op)(left, right))
@@ -1576,12 +1663,17 @@ where
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
         let context = ha_ndarray::Context::default()?;
         let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
-        let left_blocks = self.left.blocks(range, order).await?;
+        let left_blocks = self.left.blocks(txn_id, range, order).await?;
 
         let blocks = left_blocks
             .map(move |result| {
@@ -1597,16 +1689,21 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
         let size = self.size();
-        let blocks = self.blocks(range, order).await?;
+        let blocks = self.blocks(txn_id, range, order).await?;
         block_elements(blocks, ndim, size)
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         self.left
-            .read_value(coord)
+            .read_value(txn_id, coord)
             .map_ok(|value| (self.value_op)(value, self.right))
             .await
     }
@@ -1719,14 +1816,19 @@ where
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
         let context = ha_ndarray::Context::default()?;
         let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let source_blocks = self
             .left
-            .merge_blocks_outer(self.right, range, order)
+            .merge_blocks_outer(self.right, txn_id, range, order)
             .await?;
 
         let blocks = source_blocks
@@ -1743,17 +1845,22 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
         let size = self.size();
-        let blocks = self.blocks(range, order).await?;
+        let blocks = self.blocks(txn_id, range, order).await?;
         block_elements(blocks, ndim, size)
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         let (left, right) = try_join!(
-            self.left.read_value(coord.to_vec()),
-            self.right.read_value(coord)
+            self.left.read_value(txn_id, coord.to_vec()),
+            self.right.read_value(txn_id, coord)
         )?;
 
         Ok((self.value_op)(left, right))
@@ -1858,14 +1965,19 @@ where
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
         let context = ha_ndarray::Context::default()?;
         let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let source_blocks = self
             .left
-            .merge_blocks_inner(self.right, range, order)
+            .merge_blocks_inner(self.right, txn_id, range, order)
             .await?;
 
         let blocks = source_blocks
@@ -1882,17 +1994,22 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
         let size = self.size();
-        let blocks = self.blocks(range, order).await?;
+        let blocks = self.blocks(txn_id, range, order).await?;
         block_elements(blocks, ndim, size)
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         let (left, right) = try_join!(
-            self.left.read_value(coord.to_vec()),
-            self.right.read_value(coord)
+            self.left.read_value(txn_id, coord.to_vec()),
+            self.right.read_value(txn_id, coord)
         )?;
 
         Ok((self.value_op)(left, right))
@@ -1981,12 +2098,17 @@ where
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
         let context = ha_ndarray::Context::default()?;
         let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
-        let left_blocks = self.left.blocks(range, order).await?;
+        let left_blocks = self.left.blocks(txn_id, range, order).await?;
         let blocks = left_blocks
             .map(move |result| {
                 result.and_then(|(coords, block)| {
@@ -2001,8 +2123,13 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
-        let left_elements = self.left.elements(range, order).await?;
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
+        let left_elements = self.left.elements(txn_id, range, order).await?;
 
         let elements = left_elements.map_ok(move |(coord, l)| {
             let value = (self.value_op)(l, self.right);
@@ -2012,9 +2139,9 @@ where
         Ok(Box::pin(elements))
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         self.left
-            .read_value(coord)
+            .read_value(txn_id, coord)
             .map_ok(move |l| (self.value_op)(l, self.right))
             .await
     }
@@ -2097,7 +2224,12 @@ where
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         let shape = self.source.shape().to_vec();
         let ndim = shape.len();
 
@@ -2112,9 +2244,9 @@ where
         )?;
 
         let (source_blocks, filled_blocks, zero_blocks) = try_join!(
-            self.source.blocks(range.clone(), order.to_vec()),
-            self.filled.blocks(range.clone(), order.to_vec()),
-            self.zeros.blocks(range, order)
+            self.source.blocks(txn_id, range.clone(), order.to_vec()),
+            self.filled.blocks(txn_id, range.clone(), order.to_vec()),
+            self.zeros.blocks(txn_id, range, order)
         )?;
 
         let source_elements = offsets(queue.clone(), strides.clone(), source_blocks);
@@ -2145,9 +2277,14 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let blocks = self.blocks(range, order).await?;
+        let blocks = self.blocks(txn_id, range, order).await?;
         let elements = blocks
             .map_ok(move |(coords, values)| {
                 let tuples = coords
@@ -2163,7 +2300,7 @@ where
         Ok(Box::pin(elements))
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         self.shape().validate_coord(&coord)?;
 
         let key = coord.iter().copied().map(Number::from).collect();
@@ -2183,7 +2320,7 @@ where
             }
         }
 
-        self.source.read_value(coord).await
+        self.source.read_value(txn_id, coord).await
     }
 }
 
@@ -2264,20 +2401,24 @@ where
     T: CDatatype + DType + fmt::Debug,
     Number: From<T>,
 {
-    async fn clear(&mut self, range: Range) -> TCResult<()> {
-        self.filled.clear(range.clone()).await?;
-        self.zeros.clear(range.clone()).await?;
+    async fn clear(&mut self, txn_id: TxnId, range: Range) -> TCResult<()> {
+        self.filled.clear(txn_id, range.clone()).await?;
+        self.zeros.clear(txn_id, range.clone()).await?;
 
-        let mut elements = self.source.clone().elements(range, vec![]).await?;
+        let mut elements = self.source.clone().elements(txn_id, range, vec![]).await?;
 
         while let Some((coord, value)) = elements.try_next().await? {
-            self.zeros.write_value(coord, value).await?;
+            self.zeros.write_value(txn_id, coord, value).await?;
         }
 
         Ok(())
     }
 
-    async fn overwrite<O: SparseInstance<DType = T>>(&mut self, other: O) -> TCResult<()> {
+    async fn overwrite<O: SparseInstance<DType = T>>(
+        &mut self,
+        txn_id: TxnId,
+        other: O,
+    ) -> TCResult<()> {
         if self.source.shape() != other.shape() {
             return Err(bad_request!(
                 "cannot overwrite a sparse tensor of shape {:?} with one of shape {:?}",
@@ -2286,18 +2427,18 @@ where
             ));
         }
 
-        self.clear(Range::default()).await?;
+        self.clear(txn_id, Range::default()).await?;
 
-        let mut elements = other.elements(Range::default(), vec![]).await?;
+        let mut elements = other.elements(txn_id, Range::default(), vec![]).await?;
 
         while let Some((coord, value)) = elements.try_next().await? {
-            self.write_value(coord, value).await?;
+            self.write_value(txn_id, coord, value).await?;
         }
 
         Ok(())
     }
 
-    async fn write_value(&mut self, coord: Coord, value: T) -> Result<(), TCError> {
+    async fn write_value(&mut self, txn_id: TxnId, coord: Coord, value: T) -> Result<(), TCError> {
         let inverse = if value == T::zero() {
             T::one()
         } else {
@@ -2305,8 +2446,8 @@ where
         };
 
         try_join!(
-            self.filled.write_value(coord.to_vec(), value),
-            self.zeros.write_value(coord, inverse)
+            self.filled.write_value(txn_id, coord.to_vec(), value),
+            self.zeros.write_value(txn_id, coord, inverse)
         )
         .map(|_| ())
     }
@@ -2346,7 +2487,12 @@ where
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
 
         if !order.is_empty() {
@@ -2370,14 +2516,17 @@ where
             .map(move |coords| ArrayBase::<Vec<u64>>::new(vec![coords.len() / ndim, ndim], coords));
 
         if range.is_empty() || range == Range::all(self.shape()) {
-            let source_blocks = self.source.read_blocks().await?;
+            let source_blocks = self.source.read_blocks(txn_id).await?;
             let blocks = coords
                 .zip(source_blocks)
                 .map(|(coords, values)| Ok((coords?, values?.into())));
 
             Ok(Box::pin(blocks))
         } else {
-            let source_blocks = DenseSlice::new(self.source, range)?.read_blocks().await?;
+            let source_blocks = DenseSlice::new(self.source, range)?
+                .read_blocks(txn_id)
+                .await?;
+
             let blocks = coords
                 .zip(source_blocks)
                 .map(|(coords, values)| Ok((coords?, values?.into())));
@@ -2386,15 +2535,20 @@ where
         }
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
         let size = self.size();
-        let blocks = self.blocks(range, order).await?;
+        let blocks = self.blocks(txn_id, range, order).await?;
         block_elements(blocks, ndim, size)
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
-        self.source.read_value(coord).await
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
+        self.source.read_value(txn_id, coord).await
     }
 }
 
@@ -2440,13 +2594,23 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
     type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
     type DType = S::DType;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let elements = self.elements(range, order).await?;
+        let elements = self.elements(txn_id, range, order).await?;
         Ok(stream::BlockCoords::new(elements, ndim))
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         self.shape().validate_range(&range)?;
         debug_assert!(validate_order(&order, self.ndim()));
 
@@ -2466,7 +2630,10 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
         let axes = self.transform.expand_axes().to_vec();
         debug_assert_eq!(self.source.ndim() + 1, ndim);
 
-        let source_elements = self.source.elements(source_range, source_order).await?;
+        let source_elements = self
+            .source
+            .elements(txn_id, source_range, source_order)
+            .await?;
 
         let elements = source_elements.map_ok(move |(source_coord, value)| {
             let mut coord = Coord::with_capacity(ndim);
@@ -2482,10 +2649,10 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
         Ok(Box::pin(elements))
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         self.shape().validate_coord(&coord)?;
         let source_coord = self.transform.invert_coord(coord);
-        self.source.read_value(source_coord).await
+        self.source.read_value(txn_id, source_coord).await
     }
 }
 
@@ -2555,10 +2722,10 @@ where
             })
     }
 
-    async fn reduce_element(&self, coord: Coord) -> TCResult<(Coord, T)> {
+    async fn reduce_element(&self, txn_id: TxnId, coord: Coord) -> TCResult<(Coord, T)> {
         let source_range = self.transform.invert_coord(&coord);
         let slice = SparseSlice::new(self.source.clone(), source_range.into())?;
-        let blocks = slice.blocks(Range::default(), vec![]).await?;
+        let blocks = slice.blocks(txn_id, Range::default(), vec![]).await?;
 
         let reduced = blocks
             .try_fold(self.id, |reduced, (_coords, values)| async move {
@@ -2596,13 +2763,23 @@ where
     type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
     type DType = S::DType;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let elements = self.elements(range, order).await?;
+        let elements = self.elements(txn_id, range, order).await?;
         Ok(stream::BlockCoords::new(elements, ndim))
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         self.transform.shape().validate_range(&range)?;
         self.transform.shape().validate_axes(&order)?;
 
@@ -2611,22 +2788,22 @@ where
         let filled_at = self
             .source
             .clone()
-            .filled_at(source_range, source_axes)
+            .filled_at(txn_id, source_range, source_axes)
             .await?;
 
         let elements = filled_at
             .map(move |result| {
                 let coord = result?;
                 let this = self.clone();
-                Ok(async move { this.reduce_element(coord).await })
+                Ok(async move { this.reduce_element(txn_id, coord).await })
             })
             .try_buffered(num_cpus::get());
 
         Ok(Box::pin(elements))
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
-        self.reduce_element(coord)
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
+        self.reduce_element(txn_id, coord)
             .map_ok(|(_coord, value)| value)
             .await
     }
@@ -2699,7 +2876,12 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         self.shape().validate_range(&range)?;
         debug_assert!(validate_order(&order, self.ndim()));
 
@@ -2725,7 +2907,10 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
         }?;
 
         let source_ndim = self.source.ndim();
-        let source_blocks = self.source.blocks(source_range, source_order).await?;
+        let source_blocks = self
+            .source
+            .blocks(txn_id, source_range, source_order)
+            .await?;
         let source_strides = Arc::new(self.transform.source_strides().to_vec());
         let source_strides = ArrayBase::<Arc<Vec<_>>>::new(vec![source_ndim], source_strides)?;
 
@@ -2765,13 +2950,18 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
         Ok(Box::pin(blocks))
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
 
         let context = ha_ndarray::Context::default()?;
         let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
-        let blocks = self.blocks(range, order).await?;
+        let blocks = self.blocks(txn_id, range, order).await?;
 
         let elements = blocks
             .map(move |result| {
@@ -2792,10 +2982,10 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
         Ok(Box::pin(elements))
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         self.shape().validate_coord(&coord)?;
         let source_coord = self.transform.invert_coord(coord);
-        self.source.read_value(source_coord).await
+        self.source.read_value(txn_id, source_coord).await
     }
 }
 
@@ -2889,28 +3079,40 @@ where
     type Blocks = S::Blocks;
     type DType = S::DType;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         self.shape().validate_range(&range)?;
 
         let source_order = self.source_order(order)?;
         let source_range = self.transform.invert_range(range);
 
-        self.source.blocks(source_range, source_order).await
+        self.source.blocks(txn_id, source_range, source_order).await
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         self.shape().validate_range(&range)?;
 
         let source_order = self.source_order(order)?;
         let source_range = self.transform.invert_range(range);
 
-        self.source.elements(source_range, source_order).await
+        self.source
+            .elements(txn_id, source_range, source_order)
+            .await
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         self.shape().validate_coord(&coord)?;
         let source_coord = self.transform.invert_coord(coord);
-        self.source.read_value(source_coord).await
+        self.source.read_value(txn_id, source_coord).await
     }
 }
 
@@ -2984,12 +3186,18 @@ where
     G: SparseWriteGuard<T>,
     T: CDatatype + DType,
 {
-    async fn clear(&mut self, range: Range) -> TCResult<()> {
+    async fn clear(&mut self, txn_id: TxnId, range: Range) -> TCResult<()> {
         self.transform.shape().validate_range(&range)?;
-        self.guard.clear(self.transform.invert_range(range)).await
+        self.guard
+            .clear(txn_id, self.transform.invert_range(range))
+            .await
     }
 
-    async fn overwrite<O: SparseInstance<DType = T>>(&mut self, other: O) -> TCResult<()> {
+    async fn overwrite<O: SparseInstance<DType = T>>(
+        &mut self,
+        txn_id: TxnId,
+        other: O,
+    ) -> TCResult<()> {
         if self.transform.shape() != other.shape() {
             return Err(bad_request!(
                 "cannot overwrite a sparse tensor of shape {:?} with one of shape {:?}",
@@ -2998,21 +3206,21 @@ where
             ));
         }
 
-        self.clear(Range::default()).await?;
+        self.clear(txn_id, Range::default()).await?;
 
-        let mut elements = other.elements(Range::default(), vec![]).await?;
+        let mut elements = other.elements(txn_id, Range::default(), vec![]).await?;
 
         while let Some((coord, value)) = elements.try_next().await? {
-            self.write_value(coord, value).await?;
+            self.write_value(txn_id, coord, value).await?;
         }
 
         Ok(())
     }
 
-    async fn write_value(&mut self, coord: Coord, value: T) -> Result<(), TCError> {
+    async fn write_value(&mut self, txn_id: TxnId, coord: Coord, value: T) -> Result<(), TCError> {
         self.transform.shape().validate_coord(&coord)?;
         let coord = self.transform.invert_coord(coord);
-        self.guard.write_value(coord, value).await
+        self.guard.write_value(txn_id, coord, value).await
     }
 }
 
@@ -3053,7 +3261,12 @@ where
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
         self.shape().validate_range(&range)?;
         debug_assert!(validate_order(&order, self.ndim()));
 
@@ -3067,7 +3280,10 @@ where
 
         let source_range = self.transform.invert_range(&range);
 
-        let source_blocks = self.source.blocks(source_range, source_order).await?;
+        let source_blocks = self
+            .source
+            .blocks(txn_id, source_range, source_order)
+            .await?;
 
         let permutation = self.transform.axes().to_vec();
         let blocks = source_blocks.map(move |result| {
@@ -3079,17 +3295,22 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
         let size = self.size();
-        let blocks = self.blocks(range, order).await?;
+        let blocks = self.blocks(txn_id, range, order).await?;
         block_elements(blocks, ndim, size)
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         self.shape().validate_coord(&coord)?;
         let source_coord = self.transform.invert_coord(coord);
-        self.source.read_value(source_coord).await
+        self.source.read_value(txn_id, source_coord).await
     }
 }
 
@@ -3164,8 +3385,13 @@ impl<S: SparseInstance<DType = T>, T: CDatatype + DType> SparseInstance for Spar
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
-        let source_blocks = self.source.blocks(range, order).await?;
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
+        let source_blocks = self.source.blocks(txn_id, range, order).await?;
         let blocks = source_blocks.map(move |result| {
             let (coords, values) = result?;
             (self.block_op)(values.into()).map(|values| (coords, values))
@@ -3174,16 +3400,21 @@ impl<S: SparseInstance<DType = T>, T: CDatatype + DType> SparseInstance for Spar
         Ok(Box::pin(blocks))
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
         let size = self.size();
-        let blocks = self.blocks(range, order).await?;
+        let blocks = self.blocks(txn_id, range, order).await?;
         block_elements(blocks, ndim, size)
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         self.source
-            .read_value(coord)
+            .read_value(txn_id, coord)
             .map_ok(|value| (self.value_op)(value))
             .await
     }
@@ -3547,8 +3778,13 @@ where
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
-    async fn blocks(self, range: Range, order: Axes) -> Result<Self::Blocks, TCError> {
-        let source_blocks = self.source.blocks(range, order).await?;
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
+        let source_blocks = self.source.blocks(txn_id, range, order).await?;
         let blocks = source_blocks.map(move |result| {
             let (coords, values) = result?;
 
@@ -3560,16 +3796,21 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn elements(self, range: Range, order: Axes) -> Result<Elements<Self::DType>, TCError> {
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
         let size = self.size();
-        let blocks = self.blocks(range, order).await?;
+        let blocks = self.blocks(txn_id, range, order).await?;
         block_elements(blocks, ndim, size)
     }
 
-    async fn read_value(&self, coord: Coord) -> Result<Self::DType, TCError> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         self.source
-            .read_value(coord)
+            .read_value(txn_id, coord)
             .map_ok(|value| (self.value_op)(value))
             .await
     }
@@ -3712,6 +3953,7 @@ fn filter_zeros<T: CDatatype>(
 async fn merge_blocks_inner<L, R, T>(
     left: L,
     right: R,
+    txn_id: TxnId,
     shape: Shape,
     range: Range,
     order: Axes,
@@ -3732,8 +3974,8 @@ where
     let shape = ArrayBase::<Arc<Vec<u64>>>::new(vec![shape.len()], Arc::new(shape.to_vec()))?;
 
     let (left_blocks, right_blocks) = try_join!(
-        left.blocks(range.clone(), order.to_vec()),
-        right.blocks(range, order)
+        left.blocks(txn_id, range.clone(), order.to_vec()),
+        right.blocks(txn_id, range, order)
     )?;
 
     let context = ha_ndarray::Context::default()?;
@@ -3755,6 +3997,7 @@ where
 async fn merge_blocks_outer<L, R, T>(
     left: L,
     right: R,
+    txn_id: TxnId,
     shape: Shape,
     range: Range,
     order: Axes,
@@ -3775,8 +4018,8 @@ where
     let shape = ArrayBase::<Arc<Vec<u64>>>::new(vec![shape.len()], Arc::new(shape.to_vec()))?;
 
     let (left_blocks, right_blocks) = try_join!(
-        left.blocks(range.clone(), order.to_vec()),
-        right.blocks(range, order)
+        left.blocks(txn_id, range.clone(), order.to_vec()),
+        right.blocks(txn_id, range, order)
     )?;
 
     let context = ha_ndarray::Context::default()?;

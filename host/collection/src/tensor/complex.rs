@@ -7,8 +7,8 @@ use tc_transact::{Transaction, TxnId};
 use tc_value::{Float, Number, NumberClass, NumberInstance};
 use tcgeneric::ThreadSafe;
 
-use super::dense::{DenseBase, DenseCacheFile, DenseView};
-use super::sparse::{Node, SparseBase, SparseView};
+use super::dense::{DenseCacheFile, DenseView};
+use super::sparse::{Node, SparseView};
 use super::{
     Coord, TensorBoolean, TensorCompare, TensorCompareConst, TensorInstance, TensorMath,
     TensorMathConst, TensorRead, TensorTrig, TensorUnary, TensorUnaryBoolean,
@@ -29,10 +29,10 @@ pub(crate) trait ComplexRead: TensorInstance + TensorRead {
     }
 }
 
-impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> ComplexRead for DenseBase<Txn, FE> {}
+// impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> ComplexRead for DenseBase<Txn, FE> {}
 impl<FE: DenseCacheFile + AsType<Node> + Clone> ComplexRead for DenseView<FE> {}
 
-impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> ComplexRead for SparseBase<Txn, FE> {}
+// impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> ComplexRead for SparseBase<Txn, FE> {}
 impl<FE: AsType<Node> + ThreadSafe> ComplexRead for SparseView<FE> {}
 
 pub(crate) trait ComplexUnary:

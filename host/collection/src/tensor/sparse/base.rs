@@ -7,7 +7,7 @@ use collate::Collator;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::DirLock;
 use futures::TryFutureExt;
-use ha_ndarray::CDatatype;
+use ha_ndarray::{Array, CDatatype};
 use log::debug;
 use safecast::{AsType, CastInto};
 
@@ -18,8 +18,9 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
+use crate::tensor::sparse::{Blocks, Elements};
 use crate::tensor::{
-    Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
+    Axes, Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
     TensorRead, TensorType, TensorWrite, TensorWriteDual,
 };
 
@@ -154,7 +155,7 @@ where
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType,
 {
-    pub fn access(&self, txn_id: TxnId) -> TCResult<SparseAccess<FE, T>> {
+    fn access(&self, txn_id: TxnId) -> TCResult<SparseAccess<FE, T>> {
         let state = self.state.read().expect("sparse state");
         state.latest_version(txn_id, self.canon.clone().into())
     }
@@ -236,101 +237,216 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE, T> TensorRead for SparseBase<Txn, FE, T>
+impl<Txn, FE, T> SparseInstance for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
-    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
-        let _permit = self.read_permit(txn_id, coord.to_vec().into()).await?;
+    type CoordBlock = Array<u64>;
+    type ValueBlock = Array<T>;
+    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type DType = T;
 
-        let version = {
-            let state = self.state.read().expect("sparse state");
-            state.latest_version(txn_id, self.canon.clone().into())?
-        };
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
+        let version = self.access(txn_id)?;
+        version.blocks(txn_id, range, order).await
+    }
 
-        version
-            .read_value(coord)
-            .map_ok(Number::from)
-            .map_err(TCError::from)
-            .await
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
+        let version = self.access(txn_id)?;
+        version.elements(txn_id, range, order).await
+    }
+
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
+        let version = self.access(txn_id)?;
+        version.read_value(txn_id, coord).await
     }
 }
 
 #[async_trait]
-impl<Txn, FE, T> TensorWrite for SparseBase<Txn, FE, T>
+impl<'a, Txn, FE, T> SparseWriteLock<'a> for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
-    async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
-        let _permit = self.write_permit(txn_id, range.clone().into()).await?;
+    type Guard = SparseBaseWriteGuard<'a, Txn, FE, T>;
 
-        let value = value.cast_into();
-
-        let version = {
-            let mut state = self.state.write().expect("sparse state");
-            state.pending_version(txn_id, self.canon.clone().into())?
-        };
-
-        let mut version = version.write().await;
-
-        for coord in range.affected() {
-            version.write_value(coord, value).await?;
-        }
-
-        Ok(())
-    }
-
-    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        let _permit = self.write_permit(txn_id, coord.to_vec().into()).await?;
-
-        let version = {
-            let mut state = self.state.write().expect("sparse state");
-            state.pending_version(txn_id, self.canon.clone().into())?
-        };
-
-        let mut version = version.write().await;
-
-        version
-            .write_value(coord, value.cast_into())
-            .map_err(TCError::from)
-            .await
+    async fn write(&'a self) -> Self::Guard {
+        SparseBaseWriteGuard { base: self }
     }
 }
+
+pub struct SparseBaseWriteGuard<'a, Txn, FE, T> {
+    base: &'a SparseBase<Txn, FE, T>,
+}
+
 #[async_trait]
-impl<Txn, FE, A> TensorWriteDual<SparseTensor<FE, A>> for SparseBase<Txn, FE, A::DType>
+impl<'a, Txn, FE, T> SparseWriteGuard<T> for SparseBaseWriteGuard<'a, Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
-    A: SparseInstance + TensorPermitRead,
-    A::DType: fmt::Debug,
-    Number: From<A::DType> + CastInto<A::DType>,
+    T: CDatatype + DType + fmt::Debug,
+    Number: From<T> + CastInto<T>,
 {
-    async fn write(self, txn_id: TxnId, range: Range, value: SparseTensor<FE, A>) -> TCResult<()> {
+    async fn clear(&mut self, txn_id: TxnId, range: Range) -> TCResult<()> {
+        let _write_permit = self.base.write_permit(txn_id, range.clone()).await?;
+
+        let version = {
+            let mut state = self.base.state.write().expect("dense state");
+            state.pending_version(txn_id, self.base.canon.clone().into())?
+        };
+
+        let mut guard = version.write().await;
+        guard.clear(txn_id, range).await
+    }
+
+    async fn overwrite<O>(&mut self, txn_id: TxnId, other: O) -> TCResult<()>
+    where
+        O: SparseInstance<DType = T> + TensorPermitRead,
+    {
         // always acquire these permits in-order to avoid the risk of a deadlock
-        let _write_permit = self.write_permit(txn_id, range.clone()).await?;
-        let _read_permit = value.accessor.read_permit(txn_id, range.clone()).await?;
+        let _write_permit = self.base.write_permit(txn_id, Range::default()).await?;
+        let _read_permit = other.read_permit(txn_id, Range::default()).await?;
 
         let version = {
-            let mut state = self.state.write().expect("dense state");
-            state.pending_version(txn_id, self.canon.clone().into())?
+            let mut state = self.base.state.write().expect("dense state");
+            state.pending_version(txn_id, self.base.canon.clone().into())?
         };
 
-        if range.is_empty() || range == Range::all(self.canon.shape()) {
-            let mut guard = version.write().await;
-            guard.overwrite(value.accessor).await
-        } else {
-            let slice = SparseSlice::new(version, range)?;
-            let mut guard = slice.write().await;
-            guard.overwrite(value.accessor).await
-        }
+        let mut guard = version.write().await;
+        guard.overwrite(txn_id, other).await
+    }
+
+    async fn write_value(&mut self, txn_id: TxnId, coord: Coord, value: T) -> TCResult<()> {
+        let _permit = self
+            .base
+            .write_permit(txn_id, coord.to_vec().into())
+            .await?;
+
+        let version = {
+            let mut state = self.base.state.write().expect("sparse state");
+            state.pending_version(txn_id, self.base.canon.clone().into())?
+        };
+
+        let mut version = version.write().await;
+
+        version
+            .write_value(txn_id, coord, value.cast_into())
+            .map_err(TCError::from)
+            .await
     }
 }
+
+// #[async_trait]
+// impl<Txn, FE, T> TensorRead for SparseBase<Txn, FE, T>
+// where
+//     Txn: Transaction<FE>,
+//     FE: AsType<Node> + ThreadSafe,
+//     T: CDatatype + DType + fmt::Debug,
+//     Number: From<T> + CastInto<T>,
+// {
+//     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
+//         let _permit = self.read_permit(txn_id, coord.to_vec().into()).await?;
+//
+//         let version = {
+//             let state = self.state.read().expect("sparse state");
+//             state.latest_version(txn_id, self.canon.clone().into())?
+//         };
+//
+//         version
+//             .read_value(coord)
+//             .map_ok(Number::from)
+//             .map_err(TCError::from)
+//             .await
+//     }
+// }
+//
+// #[async_trait]
+// impl<Txn, FE, T> TensorWrite for SparseBase<Txn, FE, T>
+// where
+//     Txn: Transaction<FE>,
+//     FE: AsType<Node> + ThreadSafe,
+//     T: CDatatype + DType + fmt::Debug,
+//     Number: From<T> + CastInto<T>,
+// {
+//     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
+//         let _permit = self.write_permit(txn_id, range.clone().into()).await?;
+//
+//         let value = value.cast_into();
+//
+//         let version = {
+//             let mut state = self.state.write().expect("sparse state");
+//             state.pending_version(txn_id, self.canon.clone().into())?
+//         };
+//
+//         let mut version = version.write().await;
+//
+//         for coord in range.affected() {
+//             version.write_value(coord, value).await?;
+//         }
+//
+//         Ok(())
+//     }
+//
+//     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+//         let _permit = self.write_permit(txn_id, coord.to_vec().into()).await?;
+//
+//         let version = {
+//             let mut state = self.state.write().expect("sparse state");
+//             state.pending_version(txn_id, self.canon.clone().into())?
+//         };
+//
+//         let mut version = version.write().await;
+//
+//         version
+//             .write_value(coord, value.cast_into())
+//             .map_err(TCError::from)
+//             .await
+//     }
+// }
+// #[async_trait]
+// impl<Txn, FE, A> TensorWriteDual<SparseTensor<FE, A>> for SparseBase<Txn, FE, A::DType>
+// where
+//     Txn: Transaction<FE>,
+//     FE: AsType<Node> + ThreadSafe,
+//     A: SparseInstance + TensorPermitRead,
+//     A::DType: fmt::Debug,
+//     Number: From<A::DType> + CastInto<A::DType>,
+// {
+//     async fn write(self, txn_id: TxnId, range: Range, value: SparseTensor<FE, A>) -> TCResult<()> {
+//         // always acquire these permits in-order to avoid the risk of a deadlock
+//         let _write_permit = self.write_permit(txn_id, range.clone()).await?;
+//         let _read_permit = value.accessor.read_permit(txn_id, range.clone()).await?;
+//
+//         let version = {
+//             let mut state = self.state.write().expect("dense state");
+//             state.pending_version(txn_id, self.canon.clone().into())?
+//         };
+//
+//         if range.is_empty() || range == Range::all(self.canon.shape()) {
+//             let mut guard = version.write().await;
+//             guard.overwrite(value.accessor).await
+//         } else {
+//             let slice = SparseSlice::new(version, range)?;
+//             let mut guard = slice.write().await;
+//             guard.overwrite(value.accessor).await
+//         }
+//     }
+// }
 
 #[async_trait]
 impl<Txn, FE, T> Persist<FE> for SparseBase<Txn, FE, T>
@@ -462,11 +578,21 @@ where
 
         for delta in deltas {
             canon
-                .merge(delta.filled, delta.zeros)
+                .merge(*txn_id, delta.filled, delta.zeros)
                 .await
                 .expect("write dense tensor delta");
         }
 
         self.canon.finalize(txn_id);
+    }
+}
+
+impl<Txn, FE, T> fmt::Debug for SparseBase<Txn, FE, T>
+where
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "sparse tensor of shape {:?}", self.canon.shape())
     }
 }

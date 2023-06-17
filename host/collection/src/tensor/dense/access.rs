@@ -85,27 +85,30 @@ impl<FE> DenseAccessCast<FE>
 where
     FE: DenseCacheFile + AsType<Node>,
 {
-    async fn read_block(&self, block_id: u64) -> TCResult<Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Block> {
         cast_dispatch!(
             self,
             this,
-            this.read_block(block_id).map_ok(Block::from).await
+            this.read_block(txn_id, block_id).map_ok(Block::from).await
         )
     }
 
-    async fn read_blocks(self) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<Block>> + Send>>> {
+    async fn read_blocks(
+        self,
+        txn_id: TxnId,
+    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<Block>> + Send>>> {
         cast_dispatch!(self, this, {
-            let blocks = this.read_blocks().await?;
+            let blocks = this.read_blocks(txn_id).await?;
             let blocks = blocks.map_ok(Block::from);
             Ok(Box::pin(blocks))
         })
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Number> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
         cast_dispatch!(
             self,
             this,
-            this.read_value(coord).map_ok(Number::from).await
+            this.read_value(txn_id, coord).map_ok(Number::from).await
         )
     }
 }
@@ -243,47 +246,57 @@ where
         access_dispatch!(self, this, this.block_size())
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         access_dispatch!(
             self,
             this,
-            this.read_block(block_id).map_ok(Array::from).await
+            this.read_block(txn_id, block_id).map_ok(Array::from).await
         )
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         match self {
-            Self::File(file) => Ok(Box::pin(file.read_blocks().await?.map_ok(Array::from))),
-            Self::Broadcast(broadcast) => {
-                Ok(Box::pin(broadcast.read_blocks().await?.map_ok(Array::from)))
-            }
-            Self::Combine(combine) => combine.read_blocks().await,
-            Self::CombineConst(combine) => combine.read_blocks().await,
-            Self::Compare(compare) => compare.read_blocks().await,
-            Self::CompareConst(compare) => compare.read_blocks().await,
-            Self::Const(combine) => combine.read_blocks().await,
-            Self::Cow(cow) => cow.read_blocks().await,
-            Self::Diagonal(diag) => Ok(Box::pin(diag.read_blocks().await?.map_ok(Array::from))),
-            Self::Expand(expand) => Ok(Box::pin(expand.read_blocks().await?.map_ok(Array::from))),
-            Self::Reduce(reduce) => reduce.read_blocks().await,
-            Self::Reshape(reshape) => {
-                Ok(Box::pin(reshape.read_blocks().await?.map_ok(Array::from)))
-            }
-            Self::Slice(slice) => Ok(Box::pin(slice.read_blocks().await?.map_ok(Array::from))),
-            Self::Sparse(sparse) => Ok(Box::pin(sparse.read_blocks().await?.map_ok(Array::from))),
-            Self::Transpose(transpose) => {
-                Ok(Box::pin(transpose.read_blocks().await?.map_ok(Array::from)))
-            }
-            Self::Unary(unary) => unary.read_blocks().await,
-            Self::UnaryCast(unary) => unary.read_blocks().await,
-            Self::Version(version) => {
-                Ok(Box::pin(version.read_blocks().await?.map_ok(Array::from)))
-            }
+            Self::File(file) => Ok(Box::pin(
+                file.read_blocks(txn_id).await?.map_ok(Array::from),
+            )),
+            Self::Broadcast(broadcast) => Ok(Box::pin(
+                broadcast.read_blocks(txn_id).await?.map_ok(Array::from),
+            )),
+            Self::Combine(combine) => combine.read_blocks(txn_id).await,
+            Self::CombineConst(combine) => combine.read_blocks(txn_id).await,
+            Self::Compare(compare) => compare.read_blocks(txn_id).await,
+            Self::CompareConst(compare) => compare.read_blocks(txn_id).await,
+            Self::Const(combine) => combine.read_blocks(txn_id).await,
+            Self::Cow(cow) => cow.read_blocks(txn_id).await,
+            Self::Diagonal(diag) => Ok(Box::pin(
+                diag.read_blocks(txn_id).await?.map_ok(Array::from),
+            )),
+            Self::Expand(expand) => Ok(Box::pin(
+                expand.read_blocks(txn_id).await?.map_ok(Array::from),
+            )),
+            Self::Reduce(reduce) => reduce.read_blocks(txn_id).await,
+            Self::Reshape(reshape) => Ok(Box::pin(
+                reshape.read_blocks(txn_id).await?.map_ok(Array::from),
+            )),
+            Self::Slice(slice) => Ok(Box::pin(
+                slice.read_blocks(txn_id).await?.map_ok(Array::from),
+            )),
+            Self::Sparse(sparse) => Ok(Box::pin(
+                sparse.read_blocks(txn_id).await?.map_ok(Array::from),
+            )),
+            Self::Transpose(transpose) => Ok(Box::pin(
+                transpose.read_blocks(txn_id).await?.map_ok(Array::from),
+            )),
+            Self::Unary(unary) => unary.read_blocks(txn_id).await,
+            Self::UnaryCast(unary) => unary.read_blocks(txn_id).await,
+            Self::Version(version) => Ok(Box::pin(
+                version.read_blocks(txn_id).await?.map_ok(Array::from),
+            )),
         }
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
-        access_dispatch!(self, this, this.read_value(coord).await)
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        access_dispatch!(self, this, this.read_value(txn_id, coord).await)
     }
 }
 
@@ -544,7 +557,7 @@ where
         self.block_size
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, _txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         let dir = self.dir.read().await;
         let file = dir.get_file(&block_id).ok_or_else(|| {
             io::Error::new(
@@ -560,7 +573,7 @@ where
             .map_err(TCError::from)
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, _txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         let shape = self.shape;
         let block_axis = block_axis_for(&shape, self.block_size);
         let dir = self.dir.into_read().await;
@@ -587,14 +600,14 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         self.shape().validate_coord(&coord)?;
 
         let offset = offset_of(coord, self.shape());
         let block_id = offset / self.block_size() as u64;
         let block_offset = (offset % self.block_size() as u64) as usize;
 
-        let block = self.read_block(block_id).await?;
+        let block = self.read_block(txn_id, block_id).await?;
         let context = ha_ndarray::Context::default()?;
         let queue = ha_ndarray::Queue::new(context, self.block_size())?;
         let buffer = block.read(&queue)?;
@@ -611,7 +624,7 @@ where
 {
     type BlockWrite = ArrayBase<FileWriteGuardOwned<FE, Buffer<T>>>;
 
-    async fn write_block(&self, block_id: u64) -> TCResult<Self::BlockWrite> {
+    async fn write_block(&self, _txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
         let dir = self.dir.read().await;
         let file = dir.get_file(&block_id).ok_or_else(|| {
             io::Error::new(
@@ -627,7 +640,7 @@ where
             .map_err(TCError::from)
     }
 
-    async fn write_blocks(self) -> TCResult<BlockStream<Self::BlockWrite>> {
+    async fn write_blocks(self, _txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>> {
         let shape = self.shape;
         let block_axis = block_axis_for(&shape, self.block_size);
         let dir = self.dir.into_read().await;
@@ -729,14 +742,18 @@ where
     T: CDatatype + DType + 'static,
     Buffer<T>: de::FromStream<Context = ()>,
 {
-    async fn overwrite<O: DenseInstance<DType = T>>(&self, other: O) -> TCResult<()> {
+    async fn overwrite<O: DenseInstance<DType = T>>(
+        &self,
+        txn_id: TxnId,
+        other: O,
+    ) -> TCResult<()> {
         let block_axis = block_axis_for(&self.shape, self.block_size);
         let block_shape = block_shape_for(block_axis, &self.shape, self.block_size);
 
         let context = ha_ndarray::Context::default()?;
         let queue = ha_ndarray::Queue::new(context, block_shape.iter().product())?;
 
-        let blocks = other.read_blocks().await?;
+        let blocks = other.read_blocks(txn_id).await?;
         let blocks = BlockResize::new(blocks, block_shape)?;
 
         blocks
@@ -759,7 +776,7 @@ where
             .await
     }
 
-    async fn overwrite_value(&self, value: T) -> TCResult<()> {
+    async fn overwrite_value(&self, txn_id: TxnId, value: T) -> TCResult<()> {
         let num_blocks = div_ceil(self.shape.size(), self.block_size as u64);
 
         stream::iter(0..num_blocks)
@@ -772,7 +789,7 @@ where
             .await
     }
 
-    async fn write_value(&self, coord: Coord, value: T) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: T) -> TCResult<()> {
         self.shape.validate_coord(&coord)?;
 
         let offset = offset_of(coord, &self.shape);
@@ -819,7 +836,8 @@ impl<FE, T> DenseVersion<FE, T> {
 
 impl<FE, T> TensorInstance for DenseVersion<FE, T>
 where
-    DenseFile<FE, T>: TensorInstance,
+    FE: ThreadSafe,
+    T: DType + ThreadSafe,
 {
     fn dtype(&self) -> NumberType {
         self.file.dtype()
@@ -833,9 +851,9 @@ where
 #[async_trait]
 impl<FE, T> DenseInstance for DenseVersion<FE, T>
 where
-    FE: Send + Sync,
-    T: CDatatype + DType,
-    DenseFile<FE, T>: DenseInstance,
+    FE: FileLoad + AsType<Buffer<T>>,
+    T: CDatatype + DType + 'static,
+    Buffer<T>: de::FromStream<Context = ()>,
 {
     type Block = <DenseFile<FE, T> as DenseInstance>::Block;
     type DType = <DenseFile<FE, T> as DenseInstance>::DType;
@@ -844,16 +862,16 @@ where
         self.file.block_size()
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
-        self.file.read_block(block_id).await
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        self.file.read_block(txn_id, block_id).await
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        self.file.read_blocks().await
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        self.file.read_blocks(txn_id).await
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
-        self.file.read_value(coord).await
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        self.file.read_value(txn_id, coord).await
     }
 }
 
@@ -889,9 +907,9 @@ where
 #[async_trait]
 impl<'a, FE, T> DenseWriteLock<'a> for DenseVersion<FE, T>
 where
-    FE: Send + Sync,
+    FE: FileLoad + AsType<Buffer<T>>,
     T: CDatatype + DType,
-    DenseFile<FE, T>: DenseWriteLock<'a>,
+    Buffer<T>: de::FromStream<Context = ()>,
 {
     type WriteGuard = <DenseFile<FE, T> as DenseWriteLock<'a>>::WriteGuard;
 
@@ -906,10 +924,7 @@ impl<FE, T: CDatatype> From<DenseVersion<FE, T>> for DenseAccess<FE, T> {
     }
 }
 
-impl<FE, T> fmt::Debug for DenseVersion<FE, T>
-where
-    DenseFile<FE, T>: fmt::Debug,
-{
+impl<FE, T> fmt::Debug for DenseVersion<FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "transactional version of {:?}", self.file)
     }
@@ -993,22 +1008,22 @@ where
         self.block_size
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         let source_block_id = source_block_id_for(&self.block_map, block_id)?;
         let block_axis = block_axis_for(self.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
-        let source_block = self.source.read_block(source_block_id).await?;
+        let source_block = self.source.read_block(txn_id, source_block_id).await?;
         source_block.broadcast(block_shape).map_err(TCError::from)
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         let block_axis = block_axis_for(self.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
 
         let blocks = stream::iter(self.block_map.into_inner())
             .map(move |block_id| {
                 let source = self.source.clone();
-                async move { source.read_block(block_id).await }
+                async move { source.read_block(txn_id, block_id).await }
             })
             .buffered(num_cpus::get())
             .map(move |result| {
@@ -1021,10 +1036,10 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         self.shape().validate_coord(&coord)?;
         let coord = self.transform.invert_coord(&coord);
-        self.source.read_value(coord).await
+        self.source.read_value(txn_id, coord).await
     }
 }
 
@@ -1088,6 +1103,7 @@ where
 {
     async fn write_buffer(
         &self,
+        txn_id: TxnId,
         block_id: u64,
     ) -> TCResult<FileWriteGuardOwned<FE, Buffer<S::DType>>> {
         let mut dir = self.dir.write().await;
@@ -1095,7 +1111,7 @@ where
         if let Some(buffer) = dir.get_file(&block_id) {
             buffer.write_owned().map_err(TCError::from).await
         } else {
-            let block = self.source.read_block(block_id).await?;
+            let block = self.source.read_block(txn_id, block_id).await?;
 
             let context = ha_ndarray::Context::default()?;
             let queue = ha_ndarray::Queue::new(context, block.size())?;
@@ -1139,7 +1155,7 @@ where
         self.source.block_size()
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         let dir = self.dir.read().await;
 
         if let Some(block) = dir.get_file(&block_id) {
@@ -1156,31 +1172,34 @@ where
 
             Ok(block.into())
         } else {
-            self.source.read_block(block_id).map_ok(Array::from).await
+            self.source
+                .read_block(txn_id, block_id)
+                .map_ok(Array::from)
+                .await
         }
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         let num_blocks = div_ceil(self.size(), self.block_size() as u64);
 
         let blocks = stream::iter(0..num_blocks)
             .map(move |block_id| {
                 let this = self.clone();
-                async move { this.read_block(block_id).await }
+                async move { this.read_block(txn_id, block_id).await }
             })
             .buffered(num_cpus::get());
 
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         self.shape().validate_coord(&coord)?;
 
         let offset = offset_of(coord, self.shape());
         let block_id = offset / self.block_size() as u64;
         let block_offset = (offset % self.block_size() as u64) as usize;
 
-        let block = self.read_block(block_id).await?;
+        let block = self.read_block(txn_id, block_id).await?;
         let context = ha_ndarray::Context::default()?;
         let queue = ha_ndarray::Queue::new(context, self.block_size())?;
         let buffer = block.read(&queue)?;
@@ -1220,19 +1239,19 @@ where
 {
     type BlockWrite = ArrayBase<FileWriteGuardOwned<FE, Buffer<S::DType>>>;
 
-    async fn write_block(&self, block_id: u64) -> TCResult<Self::BlockWrite> {
-        let buffer = self.write_buffer(block_id).await?;
+    async fn write_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
+        let buffer = self.write_buffer(txn_id, block_id).await?;
         let block_axis = block_axis_for(self.shape(), self.block_size());
         let block_shape = block_shape_for(block_axis, self.shape(), buffer.len());
         ArrayBase::<FileWriteGuardOwned<FE, Buffer<S::DType>>>::new(block_shape, buffer)
             .map_err(TCError::from)
     }
 
-    async fn write_blocks(self) -> TCResult<BlockStream<Self::BlockWrite>> {
+    async fn write_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>> {
         let num_blocks = div_ceil(self.size(), self.block_size() as u64);
         let blocks = stream::iter(0..num_blocks).then(move |block_id| {
             let this = self.clone();
-            async move { this.write_block(block_id).await }
+            async move { this.write_block(txn_id, block_id).await }
         });
 
         Ok(Box::pin(blocks))
@@ -1285,14 +1304,18 @@ where
     Array<S::DType>: From<S::Block>,
     Buffer<S::DType>: de::FromStream<Context = ()>,
 {
-    async fn overwrite<O: DenseInstance<DType = S::DType>>(&self, other: O) -> TCResult<()> {
-        let source = other.read_blocks().await?;
+    async fn overwrite<O: DenseInstance<DType = S::DType>>(
+        &self,
+        txn_id: TxnId,
+        other: O,
+    ) -> TCResult<()> {
+        let source = other.read_blocks(txn_id).await?;
 
         let block_axis = block_axis_for(self.cow.shape(), self.cow.block_size());
         let block_shape = block_shape_for(block_axis, self.cow.shape(), self.cow.block_size());
         let source = BlockResize::new(source, block_shape)?;
 
-        let dest = self.cow.clone().write_blocks().await?;
+        let dest = self.cow.clone().write_blocks(txn_id).await?;
 
         dest.zip(source)
             .map(|(dest, source)| {
@@ -1304,20 +1327,20 @@ where
             .await
     }
 
-    async fn overwrite_value(&self, value: S::DType) -> TCResult<()> {
-        let dest = self.cow.clone().write_blocks().await?;
+    async fn overwrite_value(&self, txn_id: TxnId, value: S::DType) -> TCResult<()> {
+        let dest = self.cow.clone().write_blocks(txn_id).await?;
         dest.map_ok(|mut block| block.write_value(value))
             .try_fold((), |(), _| futures::future::ready(Ok(())))
             .await
     }
 
-    async fn write_value(&self, coord: Coord, value: S::DType) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: S::DType) -> TCResult<()> {
         self.cow.shape().validate_coord(&coord)?;
 
         let offset = offset_of(coord, self.cow.shape());
         let block_id = offset / self.cow.block_size() as u64;
         let block_offset = offset % self.cow.block_size() as u64;
-        let mut buffer = self.cow.write_buffer(block_id).await?;
+        let mut buffer = self.cow.write_buffer(txn_id, block_id).await?;
 
         buffer
             .write_value_at(block_offset as usize, value)
@@ -1372,26 +1395,26 @@ impl<S: DenseInstance> DenseInstance for DenseDiagonal<S> {
         self.source.block_size() / matrix_dim
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         self.source
-            .read_block(block_id)
+            .read_block(txn_id, block_id)
             .map(|result| result.and_then(|block| block.diagonal().map_err(TCError::from)))
             .await
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        let source_blocks = self.source.read_blocks().await?;
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        let source_blocks = self.source.read_blocks(txn_id).await?;
         let blocks = source_blocks
             .map(|result| result.and_then(|block| block.diagonal().map_err(TCError::from)));
 
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, mut coord: Coord) -> TCResult<Self::DType> {
+    async fn read_value(&self, txn_id: TxnId, mut coord: Coord) -> TCResult<Self::DType> {
         self.shape.validate_coord(&coord)?;
         let i = coord.last().copied().expect("i");
         coord.push(i);
-        self.source.read_value(coord).await
+        self.source.read_value(txn_id, coord).await
     }
 }
 
@@ -1453,18 +1476,18 @@ impl<S: DenseInstance> DenseInstance for DenseExpand<S> {
         self.source.block_size()
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
-        self.source.read_block(block_id).await
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        self.source.read_block(txn_id, block_id).await
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        self.source.read_blocks().await
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        self.source.read_blocks(txn_id).await
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         self.shape().validate_coord(&coord)?;
         let coord = self.transform.invert_coord(coord);
-        self.source.read_value(coord).await
+        self.source.read_value(txn_id, coord).await
     }
 }
 
@@ -1557,19 +1580,22 @@ where
         self.left.block_size()
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         let (left, right) = try_join!(
-            self.left.read_block(block_id),
-            self.right.read_block(block_id)
+            self.left.read_block(txn_id, block_id),
+            self.right.read_block(txn_id, block_id)
         )?;
 
         (self.block_op)(left.into(), right.into())
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         let op = self.block_op;
 
-        let (left, right) = try_join!(self.left.read_blocks(), self.right.read_blocks())?;
+        let (left, right) = try_join!(
+            self.left.read_blocks(txn_id),
+            self.right.read_blocks(txn_id)
+        )?;
 
         let blocks = left.zip(right).map(move |(l, r)| {
             let l = l?;
@@ -1580,10 +1606,10 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         let (left, right) = try_join!(
-            self.left.read_value(coord.to_vec()),
-            self.right.read_value(coord)
+            self.left.read_value(txn_id, coord.to_vec()),
+            self.right.read_value(txn_id, coord)
         )?;
 
         Ok((self.value_op)(left, right))
@@ -1664,21 +1690,21 @@ where
         self.left.block_size()
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
-        let source_block = self.left.read_block(block_id).await?;
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        let source_block = self.left.read_block(txn_id, block_id).await?;
         (self.block_op)(source_block.into(), self.right)
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        let source_blocks = self.left.read_blocks().await?;
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        let source_blocks = self.left.read_blocks(txn_id).await?;
         let blocks = source_blocks
             .map(move |result| result.and_then(|block| (self.block_op)(block.into(), self.right)));
 
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
-        let left = self.left.read_value(coord).await?;
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        let left = self.left.read_value(txn_id, coord).await?;
         Ok((self.value_op)(left, self.right))
     }
 }
@@ -1781,17 +1807,20 @@ where
         cast_dispatch!(left, this, this.block_size())
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         let (left, right) = try_join!(
-            self.left.read_block(block_id),
-            self.right.read_block(block_id)
+            self.left.read_block(txn_id, block_id),
+            self.right.read_block(txn_id, block_id)
         )?;
 
         (self.block_op)(left, right)
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        let (left, right) = try_join!(self.left.read_blocks(), self.right.read_blocks())?;
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        let (left, right) = try_join!(
+            self.left.read_blocks(txn_id),
+            self.right.read_blocks(txn_id)
+        )?;
 
         let blocks = left.zip(right).map(move |(l, r)| {
             let (l, r) = (l?, r?);
@@ -1801,10 +1830,10 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         let (left, right) = try_join!(
-            self.left.read_value(coord.to_vec()),
-            self.right.read_value(coord)
+            self.left.read_value(txn_id, coord.to_vec()),
+            self.right.read_value(txn_id, coord)
         )?;
 
         Ok((self.value_op)(left, right))
@@ -1899,23 +1928,23 @@ where
         cast_dispatch!(left, this, this.block_size())
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         self.left
-            .read_block(block_id)
+            .read_block(txn_id, block_id)
             .map(|result| result.and_then(move |block| (self.block_op)(block, self.right)))
             .await
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        let left = self.left.read_blocks().await?;
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        let left = self.left.read_blocks(txn_id).await?;
         let blocks =
             left.map(move |result| result.and_then(|block| (self.block_op)(block, self.right)));
 
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
-        let left = self.left.read_value(coord).await?;
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        let left = self.left.read_value(txn_id, coord).await?;
         Ok((self.value_op)(left, self.right))
     }
 }
@@ -1990,23 +2019,23 @@ where
         self.left.block_size()
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         self.left
-            .read_block(block_id)
+            .read_block(txn_id, block_id)
             .map(move |result| result.and_then(|block| (self.block_op)(block.into(), self.right)))
             .await
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        let left = self.left.read_blocks().await?;
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        let left = self.left.read_blocks(txn_id).await?;
         let blocks = left
             .map(move |result| result.and_then(|block| (self.block_op)(block.into(), self.right)));
 
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
-        let left = self.left.read_value(coord).await?;
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        let left = self.left.read_value(txn_id, coord).await?;
         Ok((self.value_op)(left, self.right))
     }
 }
@@ -2251,7 +2280,7 @@ where
             .product()
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         let source_blocks_per_block = self
             .map_axes
             .iter()
@@ -2285,7 +2314,7 @@ where
 
         let block = self
             .source
-            .read_block(source_block_id)
+            .read_block(txn_id, source_block_id)
             .map(|result| {
                 result.and_then(|block| {
                     (self.reduce_op)(block, &self.block_axes, self.transform.keepdims())
@@ -2295,11 +2324,13 @@ where
 
         futures::stream::iter(source_blocks.as_ref().iter().skip(1).copied())
             .map(|source_block_id| {
-                self.source.read_block(source_block_id).map(|result| {
-                    result.and_then(|block| {
-                        (self.reduce_op)(block, &self.block_axes, self.transform.keepdims())
+                self.source
+                    .read_block(txn_id, source_block_id)
+                    .map(|result| {
+                        result.and_then(|block| {
+                            (self.reduce_op)(block, &self.block_axes, self.transform.keepdims())
+                        })
                     })
-                })
             })
             .buffer_unordered(num_cpus::get())
             .try_fold(block, |block, source_block| async move {
@@ -2309,23 +2340,23 @@ where
     }
 
     // TODO: optimize
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         let num_blocks = div_ceil(self.size(), self.block_size() as u64);
         let blocks = futures::stream::iter(0..num_blocks)
             .map(move |block_id| {
                 let this = self.clone();
-                async move { this.read_block(block_id).await }
+                async move { this.read_block(txn_id, block_id).await }
             })
             .buffered(num_cpus::get());
 
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         self.shape().validate_coord(&coord)?;
         let range = self.transform.invert_coord(&coord);
         let slice = DenseSlice::new(self.source.clone(), range)?;
-        let source_blocks = slice.read_blocks().await?;
+        let source_blocks = slice.read_blocks(txn_id).await?;
         source_blocks
             .try_fold(self.id, |reduced, block| async move {
                 (self.reduce_all)(block, reduced)
@@ -2406,11 +2437,11 @@ where
         self.source.block_size()
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         let block_axis = block_axis_for(self.shape(), self.block_size());
         let mut block_shape = block_shape_for(block_axis, self.shape(), self.block_size());
 
-        let block = self.source.read_block(block_id).await?;
+        let block = self.source.read_block(txn_id, block_id).await?;
 
         if block.size() < self.block_size() {
             // this must be the trailing block
@@ -2421,12 +2452,12 @@ where
         block.reshape(block_shape).map_err(TCError::from)
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         let block_size = self.block_size();
         let block_axis = block_axis_for(self.shape(), block_size);
         let block_shape = block_shape_for(block_axis, self.shape(), block_size);
 
-        let source_blocks = self.source.read_blocks().await?;
+        let source_blocks = self.source.read_blocks(txn_id).await?;
         let blocks = source_blocks.map(move |result| {
             let block = result?;
             let mut block_shape = block_shape.to_vec();
@@ -2443,10 +2474,10 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         self.shape().validate_coord(&coord)?;
         let coord = self.transform.invert_coord(coord);
-        self.source.read_value(coord).await
+        self.source.read_value(txn_id, coord).await
     }
 }
 
@@ -2729,24 +2760,26 @@ where
         self.block_size
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         let (source_block_id, block_bounds) = self.block_bounds(block_id)?;
-        let source_block = self.source.read_block(source_block_id).await?;
+        let source_block = self.source.read_block(txn_id, source_block_id).await?;
         source_block.slice(block_bounds).map_err(TCError::from)
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         let blocks = self
-            .block_stream(|source, block_id| async move { source.read_block(block_id).await })
+            .block_stream(move |source, block_id| async move {
+                source.read_block(txn_id, block_id).await
+            })
             .await?;
 
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         self.shape().validate_coord(&coord)?;
         let coord = self.transform.invert_coord(coord);
-        self.source.read_value(coord).await
+        self.source.read_value(txn_id, coord).await
     }
 }
 
@@ -2780,15 +2813,17 @@ where
 {
     type BlockWrite = <S::BlockWrite as NDArrayTransform>::Slice;
 
-    async fn write_block(&self, block_id: u64) -> TCResult<Self::BlockWrite> {
+    async fn write_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
         let (source_block_id, block_bounds) = self.block_bounds(block_id)?;
-        let source_block = self.source.write_block(source_block_id).await?;
+        let source_block = self.source.write_block(txn_id, source_block_id).await?;
         source_block.slice(block_bounds).map_err(TCError::from)
     }
 
-    async fn write_blocks(self) -> TCResult<BlockStream<Self::BlockWrite>> {
+    async fn write_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>> {
         let blocks = self
-            .block_stream(|source, block_id| async move { source.write_block(block_id).await })
+            .block_stream(move |source, block_id| async move {
+                source.write_block(txn_id, block_id).await
+            })
             .await?;
 
         Ok(Box::pin(blocks))
@@ -2849,12 +2884,16 @@ where
     <S::BlockWrite as NDArrayTransform>::Slice:
         NDArrayRead<DType = S::DType> + NDArrayTransform + NDArrayWrite + Into<Array<S::DType>>,
 {
-    async fn overwrite<O: DenseInstance<DType = S::DType>>(&self, other: O) -> TCResult<()> {
+    async fn overwrite<O: DenseInstance<DType = S::DType>>(
+        &self,
+        txn_id: TxnId,
+        other: O,
+    ) -> TCResult<()> {
         let block_axis = block_axis_for(self.dest.shape(), self.dest.block_size);
         let block_shape = block_shape_for(block_axis, self.dest.shape(), self.dest.block_size);
 
-        let dest = self.dest.clone().write_blocks().await?;
-        let source = other.read_blocks().await?;
+        let dest = self.dest.clone().write_blocks(txn_id).await?;
+        let source = other.read_blocks(txn_id).await?;
         let source = BlockResize::new(source, block_shape)?;
 
         dest.zip(source)
@@ -2867,17 +2906,17 @@ where
             .await
     }
 
-    async fn overwrite_value(&self, value: S::DType) -> TCResult<()> {
-        let dest = self.dest.clone().write_blocks().await?;
+    async fn overwrite_value(&self, txn_id: TxnId, value: S::DType) -> TCResult<()> {
+        let dest = self.dest.clone().write_blocks(txn_id).await?;
         dest.map_ok(|mut block| block.write_value(value))
             .try_fold((), |(), _| futures::future::ready(Ok(())))
             .await
     }
 
-    async fn write_value(&self, coord: Coord, value: S::DType) -> TCResult<()> {
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: S::DType) -> TCResult<()> {
         let source_coord = self.dest.transform.invert_coord(coord);
         let source = self.dest.source.write().await;
-        source.write_value(source_coord, value).await
+        source.write_value(txn_id, source_coord, value).await
     }
 }
 
@@ -2913,7 +2952,7 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
         self.block_size
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         let start = block_id * self.block_size() as u64;
         let stop = if (start + self.block_size() as u64) < self.size() {
             start + self.block_size() as u64
@@ -2953,20 +2992,20 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
             .collect();
 
         let order = (0..self.ndim()).into_iter().collect();
-        let elements = self.source.clone().elements(range, order).await?;
+        let elements = self.source.clone().elements(txn_id, range, order).await?;
         let values = ValueStream::new(elements, Range::all(self.source.shape()), S::DType::zero());
         let block = values.try_collect().await?;
 
         ArrayBase::<Vec<S::DType>>::new(shape, block).map_err(TCError::from)
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         let block_axis = block_axis_for(self.shape(), self.block_size());
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size());
 
         let range = Range::all(self.shape());
         let order = (0..self.ndim()).into_iter().collect();
-        let elements = self.source.elements(Range::default(), order).await?;
+        let elements = self.source.elements(txn_id, range.clone(), order).await?;
         let values = ValueStream::new(elements, range, S::DType::zero());
         let blocks = values
             .try_chunks(self.block_size)
@@ -2987,8 +3026,8 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
-        self.source.read_value(coord).await
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        self.source.read_value(txn_id, coord).await
     }
 }
 
@@ -3091,22 +3130,22 @@ where
         self.source.block_size()
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         let source_block_id = source_block_id_for(&self.block_map, block_id)?;
-        let block = self.source.read_block(source_block_id).await?;
+        let block = self.source.read_block(txn_id, source_block_id).await?;
 
         block
             .transpose(Some(self.transform.axes().to_vec()))
             .map_err(TCError::from)
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         let block_axes = self.block_axes;
 
         let blocks = stream::iter(self.block_map.into_inner())
             .map(move |block_id| {
                 let source = self.source.clone();
-                async move { source.read_block(block_id).await }
+                async move { source.read_block(txn_id, block_id).await }
             })
             .buffered(num_cpus::get())
             .map(move |result| {
@@ -3120,10 +3159,10 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         self.shape().validate_coord(&coord)?;
         let coord = self.transform.invert_coord(coord);
-        self.source.read_value(coord).await
+        self.source.read_value(txn_id, coord).await
     }
 }
 
@@ -3233,16 +3272,16 @@ where
         self.source.block_size()
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         self.source
-            .read_block(block_id)
+            .read_block(txn_id, block_id)
             .map_ok(Array::from)
             .map(move |result| result.and_then(|block| (self.block_op)(block)))
             .await
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        let source_blocks = self.source.read_blocks().await?;
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        let source_blocks = self.source.read_blocks(txn_id).await?;
         let blocks = source_blocks
             .map_ok(Array::from)
             .map(move |result| result.and_then(|block| (self.block_op)(block)));
@@ -3250,8 +3289,8 @@ where
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
-        let source_value = self.source.read_value(coord).await?;
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        let source_value = self.source.read_value(txn_id, coord).await?;
         Ok((self.value_op)(source_value))
     }
 }
@@ -3629,23 +3668,23 @@ where
         cast_dispatch!(source, this, this.block_size())
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         self.source
-            .read_block(block_id)
+            .read_block(txn_id, block_id)
             .map(|result| result.and_then(|block| (self.block_op)(block)))
             .await
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        let source_blocks = self.source.read_blocks().await?;
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        let source_blocks = self.source.read_blocks(txn_id).await?;
         let blocks =
             source_blocks.map(move |result| result.and_then(|block| (self.block_op)(block)));
 
         Ok(Box::pin(blocks))
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
-        let source_value = self.source.read_value(coord).await?;
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        let source_value = self.source.read_value(txn_id, coord).await?;
         Ok((self.value_op)(source_value))
     }
 }

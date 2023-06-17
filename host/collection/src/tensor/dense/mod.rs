@@ -76,11 +76,11 @@ pub trait DenseInstance: TensorInstance + ThreadSafe + fmt::Debug {
 
     fn block_size(&self) -> usize;
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block>;
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block>;
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>>;
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>>;
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType>;
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType>;
 }
 
 #[async_trait]
@@ -92,16 +92,16 @@ impl<T: DenseInstance> DenseInstance for Box<T> {
         (&**self).block_size()
     }
 
-    async fn read_block(&self, block_id: u64) -> TCResult<Self::Block> {
-        (**self).read_block(block_id).await
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        (**self).read_block(txn_id, block_id).await
     }
 
-    async fn read_blocks(self) -> TCResult<BlockStream<Self::Block>> {
-        (*self).read_blocks().await
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        (*self).read_blocks(txn_id).await
     }
 
-    async fn read_value(&self, coord: Coord) -> TCResult<Self::DType> {
-        (**self).read_value(coord).await
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        (**self).read_value(txn_id, coord).await
     }
 }
 
@@ -109,9 +109,9 @@ impl<T: DenseInstance> DenseInstance for Box<T> {
 pub trait DenseWrite: DenseInstance {
     type BlockWrite: NDArrayWrite<DType = Self::DType>;
 
-    async fn write_block(&self, block_id: u64) -> TCResult<Self::BlockWrite>;
+    async fn write_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite>;
 
-    async fn write_blocks(self) -> TCResult<BlockStream<Self::BlockWrite>>;
+    async fn write_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>>;
 }
 
 #[async_trait]
@@ -123,11 +123,13 @@ pub trait DenseWriteLock<'a>: DenseInstance {
 
 #[async_trait]
 pub trait DenseWriteGuard<T>: Send + Sync {
-    async fn overwrite<O: DenseInstance<DType = T>>(&self, other: O) -> TCResult<()>;
+    async fn overwrite<O>(&self, txn_id: TxnId, other: O) -> TCResult<()>
+    where
+        O: DenseInstance<DType = T> + TensorPermitRead;
 
-    async fn overwrite_value(&self, value: T) -> TCResult<()>;
+    async fn overwrite_value(&self, txn_id: TxnId, value: T) -> TCResult<()>;
 
-    async fn write_value(&self, coord: Coord, value: T) -> TCResult<()>;
+    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: T) -> TCResult<()>;
 }
 
 pub struct DenseTensor<FE, A> {
@@ -572,7 +574,10 @@ where
             .read_permit(txn_id, coord.to_vec().into())
             .await?;
 
-        self.accessor.read_value(coord).map_ok(Number::from).await
+        self.accessor
+            .read_value(txn_id, coord)
+            .map_ok(Number::from)
+            .await
     }
 }
 
@@ -589,7 +594,7 @@ where
 
     async fn all(self, txn_id: TxnId) -> TCResult<bool> {
         let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-        let mut blocks = self.accessor.read_blocks().await?;
+        let mut blocks = self.accessor.read_blocks(txn_id).await?;
 
         while let Some(block) = blocks.try_next().await? {
             if !block.all()? {
@@ -602,7 +607,7 @@ where
 
     async fn any(self, txn_id: TxnId) -> TCResult<bool> {
         let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-        let mut blocks = self.accessor.read_blocks().await?;
+        let mut blocks = self.accessor.read_blocks(txn_id).await?;
 
         while let Some(block) = blocks.try_next().await? {
             if block.any()? {
@@ -619,7 +624,7 @@ where
 
     async fn max_all(self, txn_id: TxnId) -> TCResult<Number> {
         let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-        let blocks = self.accessor.read_blocks().await?;
+        let blocks = self.accessor.read_blocks(txn_id).await?;
         let collator = NumberCollator::default();
 
         let max = blocks
@@ -644,7 +649,7 @@ where
 
     async fn min_all(self, txn_id: TxnId) -> TCResult<Number> {
         let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-        let blocks = self.accessor.read_blocks().await?;
+        let blocks = self.accessor.read_blocks(txn_id).await?;
         let collator = NumberCollator::default();
 
         let min = blocks
@@ -671,7 +676,7 @@ where
         let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
 
         if self.clone().all(txn_id).await? {
-            let blocks = self.accessor.read_blocks().await?;
+            let blocks = self.accessor.read_blocks(txn_id).await?;
 
             let product = blocks
                 .map(|result| result.and_then(|block| block.product().map_err(TCError::from)))
@@ -692,7 +697,7 @@ where
 
     async fn sum_all(self, txn_id: TxnId) -> TCResult<Number> {
         let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-        let blocks = self.accessor.read_blocks().await?;
+        let blocks = self.accessor.read_blocks(txn_id).await?;
 
         let sum = blocks
             .map(|result| result.and_then(|block| block.sum().map_err(TCError::from)))
@@ -780,256 +785,194 @@ impl<FE, A: fmt::Debug> fmt::Debug for DenseTensor<FE, A> {
     }
 }
 
-macro_rules! base_dispatch {
-    ($this:ident, $var:ident, $bool:expr, $complex:expr, $general:expr) => {
-        match $this {
-            DenseBase::Bool($var) => $bool,
-            DenseBase::C32($var) => $complex,
-            DenseBase::C64($var) => $complex,
-            DenseBase::F32($var) => $general,
-            DenseBase::F64($var) => $general,
-            DenseBase::I16($var) => $general,
-            DenseBase::I32($var) => $general,
-            DenseBase::I64($var) => $general,
-            DenseBase::U8($var) => $general,
-            DenseBase::U16($var) => $general,
-            DenseBase::U32($var) => $general,
-            DenseBase::U64($var) => $general,
-        }
-    };
-}
-
-pub enum DenseBase<Txn, FE> {
-    Bool(base::DenseBase<Txn, FE, u8>),
-    C32((base::DenseBase<Txn, FE, f32>, base::DenseBase<Txn, FE, f32>)),
-    C64((base::DenseBase<Txn, FE, f64>, base::DenseBase<Txn, FE, f64>)),
-    F32(base::DenseBase<Txn, FE, f32>),
-    F64(base::DenseBase<Txn, FE, f64>),
-    I16(base::DenseBase<Txn, FE, i16>),
-    I32(base::DenseBase<Txn, FE, i32>),
-    I64(base::DenseBase<Txn, FE, i64>),
-    U8(base::DenseBase<Txn, FE, u8>),
-    U16(base::DenseBase<Txn, FE, u16>),
-    U32(base::DenseBase<Txn, FE, u32>),
-    U64(base::DenseBase<Txn, FE, u64>),
-}
-
-impl<Txn, FE> DenseBase<Txn, FE>
-where
-    FE: DenseCacheFile,
-{
-    pub fn to_view(&self, txn_id: TxnId) -> TCResult<DenseView<FE>> {
-        match self {
-            Self::Bool(this) => this
-                .access(txn_id)
-                .map(DenseTensor::from)
-                .map(DenseView::Bool),
-
-            Self::C32((re, im)) => {
-                let re = re.access(txn_id)?;
-                let im = im.access(txn_id)?;
-                Ok(DenseView::C32((re.into(), im.into())))
-            }
-
-            Self::C64((re, im)) => {
-                let re = re.access(txn_id)?;
-                let im = im.access(txn_id)?;
-                Ok(DenseView::C64((re.into(), im.into())))
-            }
-
-            Self::F32(this) => this
-                .access(txn_id)
-                .map(DenseTensor::from)
-                .map(DenseView::F32),
-
-            Self::F64(this) => this
-                .access(txn_id)
-                .map(DenseTensor::from)
-                .map(DenseView::F64),
-
-            Self::I16(this) => this
-                .access(txn_id)
-                .map(DenseTensor::from)
-                .map(DenseView::I16),
-
-            Self::I32(this) => this
-                .access(txn_id)
-                .map(DenseTensor::from)
-                .map(DenseView::I32),
-
-            Self::I64(this) => this
-                .access(txn_id)
-                .map(DenseTensor::from)
-                .map(DenseView::I64),
-
-            Self::U8(this) => this
-                .access(txn_id)
-                .map(DenseTensor::from)
-                .map(DenseView::U8),
-
-            Self::U16(this) => this
-                .access(txn_id)
-                .map(DenseTensor::from)
-                .map(DenseView::U16),
-
-            Self::U32(this) => this
-                .access(txn_id)
-                .map(DenseTensor::from)
-                .map(DenseView::U32),
-
-            Self::U64(this) => this
-                .access(txn_id)
-                .map(DenseTensor::from)
-                .map(DenseView::U64),
-        }
-    }
-}
-
-impl<Txn, FE> TensorInstance for DenseBase<Txn, FE>
-where
-    Txn: ThreadSafe,
-    FE: ThreadSafe,
-{
-    fn dtype(&self) -> NumberType {
-        match self {
-            Self::Bool(this) => this.dtype(),
-            Self::C32(_) => NumberType::Complex(ComplexType::C32),
-            Self::C64(_) => NumberType::Complex(ComplexType::C64),
-            Self::F32(this) => this.dtype(),
-            Self::F64(this) => this.dtype(),
-            Self::I16(this) => this.dtype(),
-            Self::I32(this) => this.dtype(),
-            Self::I64(this) => this.dtype(),
-            Self::U8(this) => this.dtype(),
-            Self::U16(this) => this.dtype(),
-            Self::U32(this) => this.dtype(),
-            Self::U64(this) => this.dtype(),
-        }
-    }
-
-    fn shape(&self) -> &Shape {
-        base_dispatch!(self, this, this.shape(), this.0.shape(), this.shape())
-    }
-}
-
-#[async_trait]
-impl<Txn, FE> TensorRead for DenseBase<Txn, FE>
-where
-    Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node>,
-{
-    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
-        base_dispatch!(
-            self,
-            this,
-            this.read_value(txn_id, coord).await,
-            ComplexRead::read_value((Self::from(this.0), Self::from(this.1)), txn_id, coord).await,
-            this.read_value(txn_id, coord).await
-        )
-    }
-}
-
-#[async_trait]
-impl<Txn, FE> TensorWrite for DenseBase<Txn, FE>
-where
-    Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node>,
-{
-    async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
-        base_dispatch!(
-            self,
-            this,
-            this.write_value(txn_id, range, value).await,
-            {
-                let (r_value, i_value) = Complex::cast_from(value).into();
-
-                try_join!(
-                    this.0
-                        .write_value(txn_id, range.clone(), Number::Float(r_value)),
-                    this.1.write_value(txn_id, range, Number::Float(i_value))
-                )?;
-
-                Ok(())
-            },
-            this.write_value(txn_id, range, value).await
-        )
-    }
-
-    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        base_dispatch!(
-            self,
-            this,
-            this.write_value_at(txn_id, coord, value).await,
-            {
-                let (r_value, i_value) = Complex::cast_from(value).into();
-
-                try_join!(
-                    this.0
-                        .write_value_at(txn_id, coord.to_vec(), Number::Float(r_value)),
-                    this.1
-                        .write_value_at(txn_id, coord.to_vec(), Number::Float(i_value))
-                )?;
-
-                Ok(())
-            },
-            this.write_value_at(txn_id, coord, value).await
-        )
-    }
-}
-
-#[async_trait]
-impl<Txn, FE> TensorWriteDual<DenseView<FE>> for DenseBase<Txn, FE>
-where
-    Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node> + Clone,
-{
-    async fn write(self, txn_id: TxnId, range: Range, value: DenseView<FE>) -> TCResult<()> {
-        match (self, value) {
-            (Self::Bool(this), DenseView::Bool(that)) => this.write(txn_id, range, that).await,
-            (Self::C32((lr, li)), DenseView::C32((rr, ri))) => {
-                try_join!(
-                    TensorWriteDual::write(lr, txn_id, range.clone(), rr),
-                    TensorWriteDual::write(li, txn_id, range, ri),
-                )?;
-
-                Ok(())
-            }
-            (Self::C64((lr, li)), DenseView::C64((rr, ri))) => {
-                try_join!(
-                    TensorWriteDual::write(lr, txn_id, range.clone(), rr),
-                    TensorWriteDual::write(li, txn_id, range, ri),
-                )?;
-
-                Ok(())
-            }
-            (Self::F32(this), DenseView::F32(that)) => this.write(txn_id, range, that).await,
-            (Self::F64(this), DenseView::F64(that)) => this.write(txn_id, range, that).await,
-            (Self::I16(this), DenseView::I16(that)) => this.write(txn_id, range, that).await,
-            (Self::I32(this), DenseView::I32(that)) => this.write(txn_id, range, that).await,
-            (Self::I64(this), DenseView::I64(that)) => this.write(txn_id, range, that).await,
-            (Self::U8(this), DenseView::U8(that)) => this.write(txn_id, range, that).await,
-            (Self::U16(this), DenseView::U16(that)) => this.write(txn_id, range, that).await,
-            (Self::U32(this), DenseView::U32(that)) => this.write(txn_id, range, that).await,
-            (Self::U64(this), DenseView::U64(that)) => this.write(txn_id, range, that).await,
-            (this, that) => {
-                let value = TensorCast::cast_into(that, this.dtype())?;
-                this.write(txn_id, range, value).await
-            }
-        }
-    }
-}
-
-impl<Txn, FE> From<base::DenseBase<Txn, FE, f32>> for DenseBase<Txn, FE> {
-    fn from(base: base::DenseBase<Txn, FE, f32>) -> Self {
-        Self::F32(base)
-    }
-}
-
-impl<Txn, FE> From<base::DenseBase<Txn, FE, f64>> for DenseBase<Txn, FE> {
-    fn from(base: base::DenseBase<Txn, FE, f64>) -> Self {
-        Self::F64(base)
-    }
-}
+// macro_rules! base_dispatch {
+//     ($this:ident, $var:ident, $bool:expr, $complex:expr, $general:expr) => {
+//         match $this {
+//             DenseBase::Bool($var) => $bool,
+//             DenseBase::C32($var) => $complex,
+//             DenseBase::C64($var) => $complex,
+//             DenseBase::F32($var) => $general,
+//             DenseBase::F64($var) => $general,
+//             DenseBase::I16($var) => $general,
+//             DenseBase::I32($var) => $general,
+//             DenseBase::I64($var) => $general,
+//             DenseBase::U8($var) => $general,
+//             DenseBase::U16($var) => $general,
+//             DenseBase::U32($var) => $general,
+//             DenseBase::U64($var) => $general,
+//         }
+//     };
+// }
+//
+// pub enum DenseBase<Txn, FE> {
+//     Bool(base::DenseBase<Txn, FE, u8>),
+//     C32((base::DenseBase<Txn, FE, f32>, base::DenseBase<Txn, FE, f32>)),
+//     C64((base::DenseBase<Txn, FE, f64>, base::DenseBase<Txn, FE, f64>)),
+//     F32(base::DenseBase<Txn, FE, f32>),
+//     F64(base::DenseBase<Txn, FE, f64>),
+//     I16(base::DenseBase<Txn, FE, i16>),
+//     I32(base::DenseBase<Txn, FE, i32>),
+//     I64(base::DenseBase<Txn, FE, i64>),
+//     U8(base::DenseBase<Txn, FE, u8>),
+//     U16(base::DenseBase<Txn, FE, u16>),
+//     U32(base::DenseBase<Txn, FE, u32>),
+//     U64(base::DenseBase<Txn, FE, u64>),
+// }
+//
+// impl<Txn, FE> DenseBase<Txn, FE>
+// where
+//     FE: DenseCacheFile,
+// {
+//     pub fn into_view(self) -> DenseView<Txn, FE> {
+//          todo!()
+//     }
+// }
+//
+// impl<Txn, FE> TensorInstance for DenseBase<Txn, FE>
+// where
+//     Txn: ThreadSafe,
+//     FE: ThreadSafe,
+// {
+//     fn dtype(&self) -> NumberType {
+//         match self {
+//             Self::Bool(this) => this.dtype(),
+//             Self::C32(_) => NumberType::Complex(ComplexType::C32),
+//             Self::C64(_) => NumberType::Complex(ComplexType::C64),
+//             Self::F32(this) => this.dtype(),
+//             Self::F64(this) => this.dtype(),
+//             Self::I16(this) => this.dtype(),
+//             Self::I32(this) => this.dtype(),
+//             Self::I64(this) => this.dtype(),
+//             Self::U8(this) => this.dtype(),
+//             Self::U16(this) => this.dtype(),
+//             Self::U32(this) => this.dtype(),
+//             Self::U64(this) => this.dtype(),
+//         }
+//     }
+//
+//     fn shape(&self) -> &Shape {
+//         base_dispatch!(self, this, this.shape(), this.0.shape(), this.shape())
+//     }
+// }
+//
+// #[async_trait]
+// impl<Txn, FE> TensorRead for DenseBase<Txn, FE>
+// where
+//     Txn: Transaction<FE>,
+//     FE: DenseCacheFile + AsType<Node>,
+// {
+//     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
+//         base_dispatch!(
+//             self,
+//             this,
+//             this.read_value(txn_id, coord).await,
+//             ComplexRead::read_value((Self::from(this.0), Self::from(this.1)), txn_id, coord).await,
+//             this.read_value(txn_id, coord).await
+//         )
+//     }
+// }
+//
+// #[async_trait]
+// impl<Txn, FE> TensorWrite for DenseBase<Txn, FE>
+// where
+//     Txn: Transaction<FE>,
+//     FE: DenseCacheFile + AsType<Node>,
+// {
+//     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
+//         base_dispatch!(
+//             self,
+//             this,
+//             this.write_value(txn_id, range, value).await,
+//             {
+//                 let (r_value, i_value) = Complex::cast_from(value).into();
+//
+//                 try_join!(
+//                     this.0
+//                         .write_value(txn_id, range.clone(), Number::Float(r_value)),
+//                     this.1.write_value(txn_id, range, Number::Float(i_value))
+//                 )?;
+//
+//                 Ok(())
+//             },
+//             this.write_value(txn_id, range, value).await
+//         )
+//     }
+//
+//     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+//         base_dispatch!(
+//             self,
+//             this,
+//             this.write_value_at(txn_id, coord, value).await,
+//             {
+//                 let (r_value, i_value) = Complex::cast_from(value).into();
+//
+//                 try_join!(
+//                     this.0
+//                         .write_value_at(txn_id, coord.to_vec(), Number::Float(r_value)),
+//                     this.1
+//                         .write_value_at(txn_id, coord.to_vec(), Number::Float(i_value))
+//                 )?;
+//
+//                 Ok(())
+//             },
+//             this.write_value_at(txn_id, coord, value).await
+//         )
+//     }
+// }
+//
+// #[async_trait]
+// impl<Txn, FE> TensorWriteDual<DenseView<FE>> for DenseBase<Txn, FE>
+// where
+//     Txn: Transaction<FE>,
+//     FE: DenseCacheFile + AsType<Node> + Clone,
+// {
+//     async fn write(self, txn_id: TxnId, range: Range, value: DenseView<FE>) -> TCResult<()> {
+//         match (self, value) {
+//             (Self::Bool(this), DenseView::Bool(that)) => this.write(txn_id, range, that).await,
+//             (Self::C32((lr, li)), DenseView::C32((rr, ri))) => {
+//                 try_join!(
+//                     TensorWriteDual::write(lr, txn_id, range.clone(), rr),
+//                     TensorWriteDual::write(li, txn_id, range, ri),
+//                 )?;
+//
+//                 Ok(())
+//             }
+//             (Self::C64((lr, li)), DenseView::C64((rr, ri))) => {
+//                 try_join!(
+//                     TensorWriteDual::write(lr, txn_id, range.clone(), rr),
+//                     TensorWriteDual::write(li, txn_id, range, ri),
+//                 )?;
+//
+//                 Ok(())
+//             }
+//             (Self::F32(this), DenseView::F32(that)) => this.write(txn_id, range, that).await,
+//             (Self::F64(this), DenseView::F64(that)) => this.write(txn_id, range, that).await,
+//             (Self::I16(this), DenseView::I16(that)) => this.write(txn_id, range, that).await,
+//             (Self::I32(this), DenseView::I32(that)) => this.write(txn_id, range, that).await,
+//             (Self::I64(this), DenseView::I64(that)) => this.write(txn_id, range, that).await,
+//             (Self::U8(this), DenseView::U8(that)) => this.write(txn_id, range, that).await,
+//             (Self::U16(this), DenseView::U16(that)) => this.write(txn_id, range, that).await,
+//             (Self::U32(this), DenseView::U32(that)) => this.write(txn_id, range, that).await,
+//             (Self::U64(this), DenseView::U64(that)) => this.write(txn_id, range, that).await,
+//             (this, that) => {
+//                 let value = TensorCast::cast_into(that, this.dtype())?;
+//                 this.write(txn_id, range, value).await
+//             }
+//         }
+//     }
+// }
+//
+// impl<Txn, FE> From<base::DenseBase<Txn, FE, f32>> for DenseBase<Txn, FE> {
+//     fn from(base: base::DenseBase<Txn, FE, f32>) -> Self {
+//         Self::F32(base)
+//     }
+// }
+//
+// impl<Txn, FE> From<base::DenseBase<Txn, FE, f64>> for DenseBase<Txn, FE> {
+//     fn from(base: base::DenseBase<Txn, FE, f64>) -> Self {
+//         Self::F64(base)
+//     }
+// }
 
 #[inline]
 pub fn dense_from<FE, A, T>(tensor: DenseTensor<FE, A>) -> DenseTensor<FE, DenseAccess<FE, T>>
