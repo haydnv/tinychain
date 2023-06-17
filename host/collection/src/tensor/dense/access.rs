@@ -788,7 +788,7 @@ where
             .await
     }
 
-    async fn overwrite_value(&self, txn_id: TxnId, value: T) -> TCResult<()> {
+    async fn overwrite_value(&self, _txn_id: TxnId, value: T) -> TCResult<()> {
         let num_blocks = div_ceil(self.shape.size(), self.block_size as u64);
 
         stream::iter(0..num_blocks)
@@ -801,7 +801,7 @@ where
             .await
     }
 
-    async fn write_value(&self, txn_id: TxnId, coord: Coord, value: T) -> TCResult<()> {
+    async fn write_value(&self, _txn_id: TxnId, coord: Coord, value: T) -> TCResult<()> {
         self.shape.validate_coord(&coord)?;
 
         let offset = offset_of(coord, &self.shape);

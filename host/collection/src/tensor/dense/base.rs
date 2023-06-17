@@ -6,9 +6,8 @@ use async_trait::async_trait;
 use collate::Collator;
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
-use freqfs::{DirLock, FileLoad};
-use futures::TryFutureExt;
-use ha_ndarray::{Array, Buffer, CDatatype};
+use freqfs::{DirLock, FileLoad, FileWriteGuardOwned};
+use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype};
 use log::debug;
 use safecast::{AsType, CastInto};
 
@@ -19,15 +18,16 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberInstance, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
-use crate::tensor::dense::{BlockStream, DenseCowWriteGuard};
 use crate::tensor::sparse::Node;
 use crate::tensor::{
     Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
-    TensorRead, TensorType, TensorWrite, TensorWriteDual,
+    TensorRead, TensorType,
 };
 
-use super::access::{DenseAccess, DenseCow, DenseFile, DenseSlice, DenseVersion};
-use super::{DenseCacheFile, DenseInstance, DenseTensor, DenseWriteGuard, DenseWriteLock};
+use super::access::{DenseAccess, DenseCow, DenseFile, DenseVersion};
+use super::{
+    BlockStream, DenseCacheFile, DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock,
+};
 
 const CANON: Label = label("canon");
 
@@ -241,6 +241,36 @@ where
 }
 
 #[async_trait]
+impl<Txn, FE, T> DenseWrite for DenseBase<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
+    T: CDatatype + DType + fmt::Debug,
+    Buffer<T>: de::FromStream<Context = ()>,
+    Number: From<T> + CastInto<T>,
+{
+    type BlockWrite = ArrayBase<FileWriteGuardOwned<FE, Buffer<T>>>;
+
+    async fn write_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
+        let version = {
+            let mut state = self.state.write().expect("dense state");
+            state.pending_version(txn_id, self.canon.clone().into())?
+        };
+
+        version.write_block(txn_id, block_id).await
+    }
+
+    async fn write_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>> {
+        let version = {
+            let mut state = self.state.write().expect("dense state");
+            state.pending_version(txn_id, self.canon.clone().into())?
+        };
+
+        version.write_blocks(txn_id).await
+    }
+}
+
+#[async_trait]
 impl<'a, Txn, FE, T> DenseWriteLock<'a> for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
@@ -273,10 +303,6 @@ where
     where
         O: DenseInstance<DType = T> + TensorPermitRead,
     {
-        // always acquire these permits in-order to avoid the risk of a deadlock
-        let _write_permit = self.base.write_permit(txn_id, Range::default()).await?;
-        let _read_permit = other.read_permit(txn_id, Range::default()).await?;
-
         let version = {
             let mut state = self.base.state.write().expect("dense state");
             state.pending_version(txn_id, self.base.canon.clone().into())?
@@ -287,8 +313,6 @@ where
     }
 
     async fn overwrite_value(&self, txn_id: TxnId, value: T) -> TCResult<()> {
-        let _permit = self.base.write_permit(txn_id, Range::default()).await?;
-
         let version = {
             let mut state = self.base.state.write().expect("dense state");
             let canon = state.latest_version(txn_id, self.base.canon.clone().into())?;
@@ -300,11 +324,6 @@ where
     }
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: T) -> TCResult<()> {
-        let _permit = self
-            .base
-            .write_permit(txn_id, coord.to_vec().into())
-            .await?;
-
         let version = {
             let mut state = self.base.state.write().expect("dense state");
             let canon = state.latest_version(txn_id, self.base.canon.clone().into())?;
@@ -315,103 +334,6 @@ where
         guard.write_value(txn_id, coord, value).await
     }
 }
-
-// #[async_trait]
-// impl<Txn, FE, T> TensorRead for DenseBase<Txn, FE, T>
-// where
-//     Txn: Transaction<FE>,
-//     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + 'static,
-//     T: CDatatype + DType + fmt::Debug,
-//     Buffer<T>: de::FromStream<Context = ()>,
-//     Number: From<T> + CastInto<T>,
-// {
-//     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
-//         let _permit = self.read_permit(txn_id, coord.to_vec().into()).await?;
-//
-//         let version = self.access(txn_id)?;
-//
-//         version
-//             .read_value(coord)
-//             .map_ok(Number::from)
-//             .map_err(TCError::from)
-//             .await
-//     }
-// }
-//
-// #[async_trait]
-// impl<Txn, FE, T> TensorWrite for DenseBase<Txn, FE, T>
-// where
-//     Txn: Transaction<FE>,
-//     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + 'static,
-//     T: CDatatype + DType + fmt::Debug,
-//     Buffer<T>: de::FromStream<Context = ()>,
-//     Number: From<T> + CastInto<T>,
-// {
-//     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
-//         let _permit = self.write_permit(txn_id, range.clone().into()).await?;
-//
-//         let version = {
-//             let mut state = self.state.write().expect("dense state");
-//             let canon = state.latest_version(txn_id, self.canon.clone().into())?;
-//             state.pending_version(txn_id, canon)?
-//         };
-//
-//         let slice = DenseSlice::new(version, range)?;
-//         let slice = slice.write().await;
-//         slice
-//             .overwrite_value(value.cast_into())
-//             .map_err(TCError::from)
-//             .await
-//     }
-//
-//     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-//         let _permit = self.write_permit(txn_id, coord.to_vec().into()).await?;
-//
-//         let version = {
-//             let mut state = self.state.write().expect("dense state");
-//             let canon = state.latest_version(txn_id, self.canon.clone().into())?;
-//             state.pending_version(txn_id, canon)?
-//         };
-//
-//         let version = version.write().await;
-//
-//         version
-//             .write_value(coord, value.cast_into())
-//             .map_err(TCError::from)
-//             .await
-//     }
-// }
-//
-// #[async_trait]
-// impl<Txn, FE, T, A> TensorWriteDual<DenseTensor<FE, A>> for DenseBase<Txn, FE, T>
-// where
-//     Txn: Transaction<FE>,
-//     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + 'static,
-//     T: CDatatype + DType + fmt::Debug,
-//     A: DenseInstance<DType = T> + TensorPermitRead,
-//     Buffer<T>: de::FromStream<Context = ()>,
-//     Number: From<T> + CastInto<T>,
-// {
-//     async fn write(self, txn_id: TxnId, range: Range, value: DenseTensor<FE, A>) -> TCResult<()> {
-//         // always acquire these permits in-order to avoid the risk of a deadlock
-//         let _write_permit = self.write_permit(txn_id, range.clone()).await?;
-//         let _read_permit = value.accessor.read_permit(txn_id, range.clone()).await?;
-//
-//         let version = {
-//             let mut state = self.state.write().expect("dense state");
-//             state.pending_version(txn_id, self.canon.clone().into())?
-//         };
-//
-//         if range.is_empty() || range == Range::all(self.canon.shape()) {
-//             let guard = version.write().await;
-//             guard.overwrite(value.accessor).await
-//         } else {
-//             let slice = DenseSlice::new(version, range)?;
-//             let guard = slice.write().await;
-//             guard.overwrite(value.accessor).await
-//         }
-//     }
-// }
 
 #[async_trait]
 impl<Txn, FE, T> Persist<FE> for DenseBase<Txn, FE, T>

@@ -7,7 +7,7 @@ use tc_transact::{Transaction, TxnId};
 use tc_value::{Float, Number, NumberClass, NumberInstance};
 use tcgeneric::ThreadSafe;
 
-use super::dense::{DenseCacheFile, DenseView};
+use super::dense::{DenseBase, DenseCacheFile, DenseView};
 use super::sparse::{Node, SparseView};
 use super::{
     Coord, TensorBoolean, TensorCompare, TensorCompareConst, TensorInstance, TensorMath,
@@ -29,7 +29,7 @@ pub(crate) trait ComplexRead: TensorInstance + TensorRead {
     }
 }
 
-// impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> ComplexRead for DenseBase<Txn, FE> {}
+impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> ComplexRead for DenseBase<Txn, FE> {}
 impl<Txn, FE> ComplexRead for DenseView<Txn, FE>
 where
     Txn: Transaction<FE>,
