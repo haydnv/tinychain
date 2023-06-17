@@ -13,13 +13,14 @@ use safecast::{AsType, CastInto};
 
 use tc_error::*;
 use tc_transact::fs::{Dir, Inner, Persist, VERSIONS};
+use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
 use crate::tensor::{
-    Coord, Range, Semaphore, Shape, TensorDualIO, TensorInstance, TensorPermitRead,
-    TensorPermitWrite, TensorRead, TensorType, TensorWrite,
+    Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
+    TensorRead, TensorType, TensorWrite, TensorWriteDual,
 };
 
 use super::access::{
@@ -150,6 +151,17 @@ impl<Txn, FE, T> Clone for SparseBase<Txn, FE, T> {
 
 impl<Txn, FE, T> SparseBase<Txn, FE, T>
 where
+    FE: AsType<Node> + ThreadSafe,
+    T: CDatatype + DType,
+{
+    pub fn access(&self, txn_id: TxnId) -> TCResult<SparseAccess<FE, T>> {
+        let state = self.state.read().expect("sparse state");
+        state.latest_version(txn_id, self.canon.clone().into())
+    }
+}
+
+impl<Txn, FE, T> SparseBase<Txn, FE, T>
+where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
@@ -200,6 +212,30 @@ where
 }
 
 #[async_trait]
+impl<Txn, FE, T> TensorPermitRead for SparseBase<Txn, FE, T>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+    T: CDatatype + DType,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        self.canon.read_permit(txn_id, range).await
+    }
+}
+
+#[async_trait]
+impl<Txn, FE, T> TensorPermitWrite for SparseBase<Txn, FE, T>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+    T: CDatatype + DType,
+{
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
+        self.canon.write_permit(txn_id, range).await
+    }
+}
+
+#[async_trait]
 impl<Txn, FE, T> TensorRead for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
@@ -208,10 +244,7 @@ where
     Number: From<T> + CastInto<T>,
 {
     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
-        let _permit = self
-            .canon
-            .read_permit(txn_id, coord.to_vec().into())
-            .await?;
+        let _permit = self.read_permit(txn_id, coord.to_vec().into()).await?;
 
         let version = {
             let state = self.state.read().expect("sparse state");
@@ -235,10 +268,7 @@ where
     Number: From<T> + CastInto<T>,
 {
     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
-        let _permit = self
-            .canon
-            .write_permit(txn_id, range.clone().into())
-            .await?;
+        let _permit = self.write_permit(txn_id, range.clone().into()).await?;
 
         let value = value.cast_into();
 
@@ -257,10 +287,7 @@ where
     }
 
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
-        let _permit = self
-            .canon
-            .write_permit(txn_id, coord.to_vec().into())
-            .await?;
+        let _permit = self.write_permit(txn_id, coord.to_vec().into()).await?;
 
         let version = {
             let mut state = self.state.write().expect("sparse state");
@@ -276,7 +303,7 @@ where
     }
 }
 #[async_trait]
-impl<Txn, FE, A> TensorDualIO<SparseTensor<FE, A>> for SparseBase<Txn, FE, A::DType>
+impl<Txn, FE, A> TensorWriteDual<SparseTensor<FE, A>> for SparseBase<Txn, FE, A::DType>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
@@ -286,7 +313,7 @@ where
 {
     async fn write(self, txn_id: TxnId, range: Range, value: SparseTensor<FE, A>) -> TCResult<()> {
         // always acquire these permits in-order to avoid the risk of a deadlock
-        let _write_permit = self.canon.write_permit(txn_id, range.clone()).await?;
+        let _write_permit = self.write_permit(txn_id, range.clone()).await?;
         let _read_permit = value.accessor.read_permit(txn_id, range.clone()).await?;
 
         let version = {

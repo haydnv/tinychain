@@ -291,7 +291,7 @@ pub trait TensorWrite {
 
 /// [`Tensor`] I/O operations which accept another [`Tensor`] as an argument
 #[async_trait]
-pub trait TensorDualIO<O> {
+pub trait TensorWriteDual<O> {
     /// Overwrite the slice of this [`Tensor`] given by [`Range`] with the given `value`.
     async fn write(self, txn_id: TxnId, range: Range, value: O) -> TCResult<()>;
 }

@@ -3,17 +3,16 @@ use futures::try_join;
 use safecast::{AsType, CastFrom};
 
 use tc_error::*;
-use tc_transact::TxnId;
+use tc_transact::{Transaction, TxnId};
 use tc_value::{Float, Number, NumberClass, NumberInstance};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::{
+use super::dense::{DenseBase, DenseCacheFile, DenseView};
+use super::sparse::{Node, SparseBase, SparseView};
+use super::{
     Coord, TensorBoolean, TensorCompare, TensorCompareConst, TensorInstance, TensorMath,
     TensorMathConst, TensorRead, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
-
-use super::dense::{DenseCacheFile, DenseView};
-use super::sparse::{Node, SparseView};
 
 #[async_trait]
 pub(crate) trait ComplexRead: TensorInstance + TensorRead {
@@ -30,8 +29,11 @@ pub(crate) trait ComplexRead: TensorInstance + TensorRead {
     }
 }
 
+impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> ComplexRead for DenseBase<Txn, FE> {}
 impl<FE: DenseCacheFile + AsType<Node> + Clone> ComplexRead for DenseView<FE> {}
-impl<FE: ThreadSafe + AsType<Node>> ComplexRead for SparseView<FE> {}
+
+impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> ComplexRead for SparseBase<Txn, FE> {}
+impl<FE: AsType<Node> + ThreadSafe> ComplexRead for SparseView<FE> {}
 
 pub(crate) trait ComplexUnary:
     TensorInstance
@@ -81,7 +83,7 @@ pub(crate) trait ComplexUnary:
 }
 
 impl<FE: DenseCacheFile + AsType<Node> + Clone> ComplexUnary for DenseView<FE> {}
-impl<FE: ThreadSafe + AsType<Node>> ComplexUnary for SparseView<FE> {}
+impl<FE: AsType<Node> + ThreadSafe> ComplexUnary for SparseView<FE> {}
 
 pub(crate) trait ComplexCompare:
     ComplexUnary + TensorCompare<Self, Compare = Self> + TensorCompareConst<Compare = Self>
@@ -205,7 +207,7 @@ pub(crate) trait ComplexCompare:
 }
 
 impl<FE: DenseCacheFile + AsType<Node> + Clone> ComplexCompare for DenseView<FE> {}
-impl<FE: ThreadSafe + AsType<Node>> ComplexCompare for SparseView<FE> {}
+impl<FE: AsType<Node> + ThreadSafe> ComplexCompare for SparseView<FE> {}
 
 pub(crate) trait ComplexMath: ComplexUnary + Clone {
     fn add(this: (Self, Self), that: (Self, Self)) -> TCResult<(Self, Self)> {
@@ -367,7 +369,7 @@ pub(crate) trait ComplexMath: ComplexUnary + Clone {
 }
 
 impl<FE: DenseCacheFile + AsType<Node> + Clone> ComplexMath for DenseView<FE> {}
-impl<FE: ThreadSafe + AsType<Node>> ComplexMath for SparseView<FE> {}
+impl<FE: AsType<Node> + ThreadSafe> ComplexMath for SparseView<FE> {}
 
 pub(crate) trait ComplexTrig: ComplexMath + Clone {
     fn sin(this: (Self, Self)) -> TCResult<(Self, Self)> {
@@ -428,7 +430,7 @@ pub(crate) trait ComplexTrig: ComplexMath + Clone {
 }
 
 impl<FE: DenseCacheFile + AsType<Node> + Clone> ComplexTrig for DenseView<FE> {}
-impl<FE: ThreadSafe + AsType<Node>> ComplexTrig for SparseView<FE> {}
+impl<FE: AsType<Node> + ThreadSafe> ComplexTrig for SparseView<FE> {}
 
 #[inline]
 fn atan2<F>(_y: F, _x: F) -> TCResult<F>
