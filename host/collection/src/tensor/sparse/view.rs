@@ -5,7 +5,7 @@ use ha_ndarray::{Array, NDArrayBoolean};
 use safecast::{AsType, CastFrom};
 
 use tc_error::*;
-use tc_transact::TxnId;
+use tc_transact::{Transaction, TxnId};
 use tc_value::{ComplexType, FloatType, IntType, Number, NumberClass, NumberType, UIntType};
 use tcgeneric::ThreadSafe;
 
@@ -19,27 +19,27 @@ use crate::tensor::{
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
 
-type SparseComplex<FE, T> = (
-    SparseTensor<FE, SparseAccess<FE, T>>,
-    SparseTensor<FE, SparseAccess<FE, T>>,
+type SparseComplex<Txn, FE, T> = (
+    SparseTensor<Txn, FE, SparseAccess<Txn, FE, T>>,
+    SparseTensor<Txn, FE, SparseAccess<Txn, FE, T>>,
 );
 
-pub enum SparseView<FE> {
-    Bool(SparseTensor<FE, SparseAccess<FE, u8>>),
-    C32(SparseComplex<FE, f32>),
-    C64(SparseComplex<FE, f64>),
-    F32(SparseTensor<FE, SparseAccess<FE, f32>>),
-    F64(SparseTensor<FE, SparseAccess<FE, f64>>),
-    I16(SparseTensor<FE, SparseAccess<FE, i16>>),
-    I32(SparseTensor<FE, SparseAccess<FE, i32>>),
-    I64(SparseTensor<FE, SparseAccess<FE, i64>>),
-    U8(SparseTensor<FE, SparseAccess<FE, u8>>),
-    U16(SparseTensor<FE, SparseAccess<FE, u16>>),
-    U32(SparseTensor<FE, SparseAccess<FE, u32>>),
-    U64(SparseTensor<FE, SparseAccess<FE, u64>>),
+pub enum SparseView<Txn, FE> {
+    Bool(SparseTensor<Txn, FE, SparseAccess<Txn, FE, u8>>),
+    C32(SparseComplex<Txn, FE, f32>),
+    C64(SparseComplex<Txn, FE, f64>),
+    F32(SparseTensor<Txn, FE, SparseAccess<Txn, FE, f32>>),
+    F64(SparseTensor<Txn, FE, SparseAccess<Txn, FE, f64>>),
+    I16(SparseTensor<Txn, FE, SparseAccess<Txn, FE, i16>>),
+    I32(SparseTensor<Txn, FE, SparseAccess<Txn, FE, i32>>),
+    I64(SparseTensor<Txn, FE, SparseAccess<Txn, FE, i64>>),
+    U8(SparseTensor<Txn, FE, SparseAccess<Txn, FE, u8>>),
+    U16(SparseTensor<Txn, FE, SparseAccess<Txn, FE, u16>>),
+    U32(SparseTensor<Txn, FE, SparseAccess<Txn, FE, u32>>),
+    U64(SparseTensor<Txn, FE, SparseAccess<Txn, FE, u64>>),
 }
 
-impl<FE> Clone for SparseView<FE> {
+impl<Txn, FE> Clone for SparseView<Txn, FE> {
     fn clone(&self) -> Self {
         match self {
             Self::Bool(this) => Self::Bool(this.clone()),
@@ -77,7 +77,7 @@ macro_rules! view_dispatch {
     };
 }
 
-impl<FE: ThreadSafe> SparseView<FE> {
+impl<Txn: ThreadSafe, FE: ThreadSafe> SparseView<Txn, FE> {
     fn complex_from(complex: (Self, Self)) -> TCResult<Self> {
         match complex {
             (Self::F32(real), Self::F32(imag)) => Ok(Self::C32((real, imag))),
@@ -89,7 +89,7 @@ impl<FE: ThreadSafe> SparseView<FE> {
     }
 }
 
-impl<FE: ThreadSafe> TensorInstance for SparseView<FE> {
+impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for SparseView<Txn, FE> {
     fn dtype(&self) -> NumberType {
         match self {
             Self::Bool(_) => NumberType::Bool,
@@ -121,7 +121,11 @@ impl<FE: ThreadSafe> TensorInstance for SparseView<FE> {
     }
 }
 
-impl<FE: AsType<Node> + ThreadSafe> TensorBoolean<Self> for SparseView<FE> {
+impl<Txn, FE> TensorBoolean<Self> for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
     type Combine = Self;
     type LeftCombine = Self;
 
@@ -171,8 +175,9 @@ impl<FE: AsType<Node> + ThreadSafe> TensorBoolean<Self> for SparseView<FE> {
     }
 }
 
-impl<FE> TensorBooleanConst for SparseView<FE>
+impl<Txn, FE> TensorBooleanConst for SparseView<Txn, FE>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Combine = Self;
@@ -197,7 +202,11 @@ where
     }
 }
 
-impl<FE: AsType<Node> + ThreadSafe> TensorCast for SparseView<FE> {
+impl<Txn, FE> TensorCast for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
     type Cast = Self;
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
@@ -313,8 +322,12 @@ impl<FE: AsType<Node> + ThreadSafe> TensorCast for SparseView<FE> {
     }
 }
 
-impl<FE: AsType<Node> + ThreadSafe> TensorConvert for SparseView<FE> {
-    type Dense = DenseView<FE>;
+impl<Txn, FE> TensorConvert for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
+    type Dense = DenseView<Txn, FE>;
     type Sparse = Self;
 
     fn into_dense(self) -> Self::Dense {
@@ -396,7 +409,11 @@ macro_rules! view_compare {
     };
 }
 
-impl<FE: AsType<Node> + ThreadSafe> TensorCompare<Self> for SparseView<FE> {
+impl<Txn, FE> TensorCompare<Self> for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
     type Compare = Self;
 
     fn eq(self, other: Self) -> TCResult<Self::Compare> {
@@ -424,7 +441,11 @@ impl<FE: AsType<Node> + ThreadSafe> TensorCompare<Self> for SparseView<FE> {
     }
 }
 
-impl<FE: AsType<Node> + ThreadSafe> TensorCompareConst for SparseView<FE> {
+impl<Txn, FE> TensorCompareConst for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
     type Compare = Self;
 
     fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
@@ -517,7 +538,11 @@ impl<FE: AsType<Node> + ThreadSafe> TensorCompareConst for SparseView<FE> {
     }
 }
 
-impl<FE: AsType<Node> + ThreadSafe> TensorMath<Self> for SparseView<FE> {
+impl<Txn, FE> TensorMath<Self> for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
     type Combine = Self;
     type LeftCombine = Self;
 
@@ -799,7 +824,7 @@ macro_rules! math_const {
     };
 }
 
-impl<FE: AsType<Node> + ThreadSafe> TensorMathConst for SparseView<FE> {
+impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> TensorMathConst for SparseView<Txn, FE> {
     type Combine = Self;
 
     fn add_const(self, other: Number) -> TCResult<Self::Combine> {
@@ -848,7 +873,7 @@ impl<FE: AsType<Node> + ThreadSafe> TensorMathConst for SparseView<FE> {
 }
 
 #[async_trait]
-impl<FE: AsType<Node> + ThreadSafe> TensorRead for SparseView<FE> {
+impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> TensorRead for SparseView<Txn, FE> {
     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
         view_dispatch!(
             self,
@@ -861,7 +886,7 @@ impl<FE: AsType<Node> + ThreadSafe> TensorRead for SparseView<FE> {
 }
 
 #[async_trait]
-impl<FE: AsType<Node> + ThreadSafe> TensorReduce for SparseView<FE> {
+impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> TensorReduce for SparseView<Txn, FE> {
     type Reduce = Self;
 
     async fn all(self, txn_id: TxnId) -> TCResult<bool> {
@@ -1023,7 +1048,7 @@ impl<FE: AsType<Node> + ThreadSafe> TensorReduce for SparseView<FE> {
     }
 }
 
-impl<FE: AsType<Node> + ThreadSafe> TensorTransform for SparseView<FE> {
+impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> TensorTransform for SparseView<Txn, FE> {
     type Broadcast = Self;
     type Expand = Self;
     type Reshape = Self;
@@ -1205,7 +1230,7 @@ macro_rules! view_trig {
     };
 }
 
-impl<FE: ThreadSafe + AsType<Node>> TensorTrig for SparseView<FE> {
+impl<Txn: Transaction<FE>, FE: ThreadSafe + AsType<Node>> TensorTrig for SparseView<Txn, FE> {
     type Unary = Self;
 
     fn asin(self) -> TCResult<Self::Unary> {
@@ -1251,7 +1276,7 @@ impl<FE: ThreadSafe + AsType<Node>> TensorTrig for SparseView<FE> {
     }
 }
 
-impl<FE: AsType<Node> + ThreadSafe> TensorUnary for SparseView<FE> {
+impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> TensorUnary for SparseView<Txn, FE> {
     type Unary = Self;
 
     fn abs(self) -> TCResult<Self::Unary> {
@@ -1335,7 +1360,7 @@ impl<FE: AsType<Node> + ThreadSafe> TensorUnary for SparseView<FE> {
     }
 }
 
-impl<FE: ThreadSafe> TensorUnaryBoolean for SparseView<FE> {
+impl<Txn: ThreadSafe, FE: ThreadSafe> TensorUnaryBoolean for SparseView<Txn, FE> {
     type Unary = Self;
 
     fn not(self) -> TCResult<Self::Unary> {
@@ -1343,31 +1368,31 @@ impl<FE: ThreadSafe> TensorUnaryBoolean for SparseView<FE> {
     }
 }
 
-impl<FE> From<SparseTensor<FE, SparseAccess<FE, f32>>> for SparseView<FE> {
-    fn from(tensor: SparseTensor<FE, SparseAccess<FE, f32>>) -> Self {
+impl<Txn, FE> From<SparseTensor<Txn, FE, SparseAccess<Txn, FE, f32>>> for SparseView<Txn, FE> {
+    fn from(tensor: SparseTensor<Txn, FE, SparseAccess<Txn, FE, f32>>) -> Self {
         Self::F32(tensor)
     }
 }
 
-impl<FE> From<SparseTensor<FE, SparseAccess<FE, f64>>> for SparseView<FE> {
-    fn from(tensor: SparseTensor<FE, SparseAccess<FE, f64>>) -> Self {
+impl<Txn, FE> From<SparseTensor<Txn, FE, SparseAccess<Txn, FE, f64>>> for SparseView<Txn, FE> {
+    fn from(tensor: SparseTensor<Txn, FE, SparseAccess<Txn, FE, f64>>) -> Self {
         Self::F64(tensor)
     }
 }
 
-impl<FE> From<SparseComplex<FE, f32>> for SparseView<FE> {
-    fn from(tensors: SparseComplex<FE, f32>) -> Self {
+impl<Txn, FE> From<SparseComplex<Txn, FE, f32>> for SparseView<Txn, FE> {
+    fn from(tensors: SparseComplex<Txn, FE, f32>) -> Self {
         Self::C32(tensors)
     }
 }
 
-impl<FE> From<SparseComplex<FE, f64>> for SparseView<FE> {
-    fn from(tensors: SparseComplex<FE, f64>) -> Self {
+impl<Txn, FE> From<SparseComplex<Txn, FE, f64>> for SparseView<Txn, FE> {
+    fn from(tensors: SparseComplex<Txn, FE, f64>) -> Self {
         Self::C64(tensors)
     }
 }
 
-impl<FE: ThreadSafe> fmt::Debug for SparseView<FE> {
+impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for SparseView<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -1379,8 +1404,11 @@ impl<FE: ThreadSafe> fmt::Debug for SparseView<FE> {
 }
 
 #[inline]
-fn expect_bool<FE>(view: SparseView<FE>) -> TCResult<SparseTensor<FE, SparseAccess<FE, u8>>>
+fn expect_bool<Txn, FE>(
+    view: SparseView<Txn, FE>,
+) -> TCResult<SparseTensor<Txn, FE, SparseAccess<Txn, FE, u8>>>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
     match TensorCast::cast_into(view, NumberType::Bool)? {

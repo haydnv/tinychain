@@ -5,7 +5,7 @@ use ha_ndarray::CDatatype;
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
-use tc_transact::TxnId;
+use tc_transact::{Transaction, TxnId};
 use tc_value::{ComplexType, FloatType, IntType, Number, NumberClass, NumberType, UIntType};
 use tcgeneric::ThreadSafe;
 
@@ -19,27 +19,27 @@ use crate::tensor::{
 
 use super::{dense_from, DenseAccess, DenseCacheFile, DenseTensor, DenseUnaryCast};
 
-type DenseComplex<FE, T> = (
-    DenseTensor<FE, DenseAccess<FE, T>>,
-    DenseTensor<FE, DenseAccess<FE, T>>,
+type DenseComplex<Txn, FE, T> = (
+    DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>,
+    DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>,
 );
 
-pub enum DenseView<FE> {
-    Bool(DenseTensor<FE, DenseAccess<FE, u8>>),
-    C32(DenseComplex<FE, f32>),
-    C64(DenseComplex<FE, f64>),
-    F32(DenseTensor<FE, DenseAccess<FE, f32>>),
-    F64(DenseTensor<FE, DenseAccess<FE, f64>>),
-    I16(DenseTensor<FE, DenseAccess<FE, i16>>),
-    I32(DenseTensor<FE, DenseAccess<FE, i32>>),
-    I64(DenseTensor<FE, DenseAccess<FE, i64>>),
-    U8(DenseTensor<FE, DenseAccess<FE, u8>>),
-    U16(DenseTensor<FE, DenseAccess<FE, u16>>),
-    U32(DenseTensor<FE, DenseAccess<FE, u32>>),
-    U64(DenseTensor<FE, DenseAccess<FE, u64>>),
+pub enum DenseView<Txn, FE> {
+    Bool(DenseTensor<Txn, FE, DenseAccess<Txn, FE, u8>>),
+    C32(DenseComplex<Txn, FE, f32>),
+    C64(DenseComplex<Txn, FE, f64>),
+    F32(DenseTensor<Txn, FE, DenseAccess<Txn, FE, f32>>),
+    F64(DenseTensor<Txn, FE, DenseAccess<Txn, FE, f64>>),
+    I16(DenseTensor<Txn, FE, DenseAccess<Txn, FE, i16>>),
+    I32(DenseTensor<Txn, FE, DenseAccess<Txn, FE, i32>>),
+    I64(DenseTensor<Txn, FE, DenseAccess<Txn, FE, i64>>),
+    U8(DenseTensor<Txn, FE, DenseAccess<Txn, FE, u8>>),
+    U16(DenseTensor<Txn, FE, DenseAccess<Txn, FE, u16>>),
+    U32(DenseTensor<Txn, FE, DenseAccess<Txn, FE, u32>>),
+    U64(DenseTensor<Txn, FE, DenseAccess<Txn, FE, u64>>),
 }
 
-impl<FE> Clone for DenseView<FE> {
+impl<Txn, FE> Clone for DenseView<Txn, FE> {
     fn clone(&self) -> Self {
         match self {
             Self::Bool(this) => Self::Bool(this.clone()),
@@ -58,7 +58,7 @@ impl<FE> Clone for DenseView<FE> {
     }
 }
 
-impl<FE: ThreadSafe> DenseView<FE> {
+impl<Txn: ThreadSafe, FE: ThreadSafe> DenseView<Txn, FE> {
     fn complex_from(complex: (Self, Self)) -> TCResult<Self> {
         match complex {
             (Self::F32(real), Self::F32(imag)) => Ok(Self::C32((real, imag))),
@@ -70,26 +70,26 @@ impl<FE: ThreadSafe> DenseView<FE> {
     }
 }
 
-impl<FE> From<DenseTensor<FE, DenseAccess<FE, f32>>> for DenseView<FE> {
-    fn from(tensor: DenseTensor<FE, DenseAccess<FE, f32>>) -> Self {
+impl<Txn, FE> From<DenseTensor<Txn, FE, DenseAccess<Txn, FE, f32>>> for DenseView<Txn, FE> {
+    fn from(tensor: DenseTensor<Txn, FE, DenseAccess<Txn, FE, f32>>) -> Self {
         Self::F32(tensor)
     }
 }
 
-impl<FE> From<DenseTensor<FE, DenseAccess<FE, f64>>> for DenseView<FE> {
-    fn from(tensor: DenseTensor<FE, DenseAccess<FE, f64>>) -> Self {
+impl<Txn, FE> From<DenseTensor<Txn, FE, DenseAccess<Txn, FE, f64>>> for DenseView<Txn, FE> {
+    fn from(tensor: DenseTensor<Txn, FE, DenseAccess<Txn, FE, f64>>) -> Self {
         Self::F64(tensor)
     }
 }
 
-impl<FE> From<DenseComplex<FE, f32>> for DenseView<FE> {
-    fn from(tensors: DenseComplex<FE, f32>) -> Self {
+impl<Txn, FE> From<DenseComplex<Txn, FE, f32>> for DenseView<Txn, FE> {
+    fn from(tensors: DenseComplex<Txn, FE, f32>) -> Self {
         Self::C32(tensors)
     }
 }
 
-impl<FE> From<DenseComplex<FE, f64>> for DenseView<FE> {
-    fn from(tensors: DenseComplex<FE, f64>) -> Self {
+impl<Txn, FE> From<DenseComplex<Txn, FE, f64>> for DenseView<Txn, FE> {
+    fn from(tensors: DenseComplex<Txn, FE, f64>) -> Self {
         Self::C64(tensors)
     }
 }
@@ -133,7 +133,7 @@ macro_rules! view_dispatch_compare {
     };
 }
 
-impl<FE: ThreadSafe> TensorInstance for DenseView<FE> {
+impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for DenseView<Txn, FE> {
     fn dtype(&self) -> NumberType {
         match self {
             Self::Bool(_) => NumberType::Bool,
@@ -165,8 +165,9 @@ impl<FE: ThreadSafe> TensorInstance for DenseView<FE> {
     }
 }
 
-impl<FE> TensorBoolean<Self> for DenseView<FE>
+impl<Txn, FE> TensorBoolean<Self> for DenseView<Txn, FE>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Combine = Self;
@@ -245,8 +246,9 @@ where
     }
 }
 
-impl<FE> TensorBooleanConst for DenseView<FE>
+impl<Txn, FE> TensorBooleanConst for DenseView<Txn, FE>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Combine = Self;
@@ -334,8 +336,9 @@ macro_rules! view_compare {
     };
 }
 
-impl<FE> TensorCompare<Self> for DenseView<FE>
+impl<Txn, FE> TensorCompare<Self> for DenseView<Txn, FE>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Compare = Self;
@@ -365,8 +368,9 @@ where
     }
 }
 
-impl<FE> TensorCompareConst for DenseView<FE>
+impl<Txn, FE> TensorCompareConst for DenseView<Txn, FE>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Compare = Self;
@@ -432,8 +436,9 @@ where
     }
 }
 
-impl<FE> TensorCast for DenseView<FE>
+impl<Txn, FE> TensorCast for DenseView<Txn, FE>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Cast = Self;
@@ -546,8 +551,9 @@ where
     }
 }
 
-impl<FE> TensorMath<Self> for DenseView<FE>
+impl<Txn, FE> TensorMath<Self> for DenseView<Txn, FE>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Combine = Self;
@@ -831,8 +837,9 @@ macro_rules! math_const {
     };
 }
 
-impl<FE> TensorMathConst for DenseView<FE>
+impl<Txn, FE> TensorMathConst for DenseView<Txn, FE>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Combine = Self;
@@ -893,8 +900,9 @@ where
 }
 
 #[async_trait]
-impl<FE> TensorRead for DenseView<FE>
+impl<Txn, FE> TensorRead for DenseView<Txn, FE>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
@@ -909,8 +917,9 @@ where
 }
 
 #[async_trait]
-impl<FE> TensorReduce for DenseView<FE>
+impl<Txn, FE> TensorReduce for DenseView<Txn, FE>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Reduce = Self;
@@ -1071,7 +1080,11 @@ where
     }
 }
 
-impl<FE: DenseCacheFile + AsType<Node> + Clone> TensorTransform for DenseView<FE> {
+impl<Txn, FE> TensorTransform for DenseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
     type Broadcast = Self;
     type Expand = Self;
     type Reshape = Self;
@@ -1253,8 +1266,9 @@ macro_rules! view_trig {
     };
 }
 
-impl<FE> TensorTrig for DenseView<FE>
+impl<Txn, FE> TensorTrig for DenseView<Txn, FE>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Unary = Self;
@@ -1302,8 +1316,9 @@ where
     }
 }
 
-impl<FE> TensorUnary for DenseView<FE>
+impl<Txn, FE> TensorUnary for DenseView<Txn, FE>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Unary = Self;
@@ -1389,8 +1404,9 @@ where
     }
 }
 
-impl<FE> TensorUnaryBoolean for DenseView<FE>
+impl<Txn, FE> TensorUnaryBoolean for DenseView<Txn, FE>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Unary = Self;
@@ -1406,7 +1422,7 @@ where
     }
 }
 
-impl<FE: ThreadSafe> fmt::Debug for DenseView<FE> {
+impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for DenseView<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -1418,9 +1434,9 @@ impl<FE: ThreadSafe> fmt::Debug for DenseView<FE> {
 }
 
 #[inline]
-fn atan2<FE, T: CDatatype>(
-    _y: DenseTensor<FE, DenseAccess<FE, T>>,
-    _x: DenseTensor<FE, DenseAccess<FE, T>>,
-) -> TCResult<DenseTensor<FE, DenseAccess<FE, T>>> {
+fn atan2<Txn, FE, T: CDatatype>(
+    _y: DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>,
+    _x: DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>,
+) -> TCResult<DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>> {
     Err(not_implemented!("atan2"))
 }

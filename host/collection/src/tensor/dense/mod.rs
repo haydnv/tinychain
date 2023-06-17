@@ -132,12 +132,12 @@ pub trait DenseWriteGuard<T>: Send + Sync {
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: T) -> TCResult<()>;
 }
 
-pub struct DenseTensor<FE, A> {
+pub struct DenseTensor<Txn, FE, A> {
     accessor: A,
-    phantom: PhantomData<FE>,
+    phantom: PhantomData<(Txn, FE)>,
 }
 
-impl<FE, A: Clone> Clone for DenseTensor<FE, A> {
+impl<Txn, FE, A: Clone> Clone for DenseTensor<Txn, FE, A> {
     fn clone(&self) -> Self {
         Self {
             accessor: self.accessor.clone(),
@@ -146,14 +146,14 @@ impl<FE, A: Clone> Clone for DenseTensor<FE, A> {
     }
 }
 
-impl<FE, A> DenseTensor<FE, A> {
+impl<Txn, FE, A> DenseTensor<Txn, FE, A> {
     pub fn into_inner(self) -> A {
         self.accessor
     }
 }
 
-impl<FE, T: CDatatype> DenseTensor<FE, DenseAccess<FE, T>> {
-    pub fn from_access<A: Into<DenseAccess<FE, T>>>(accessor: A) -> Self {
+impl<Txn, FE, T: CDatatype> DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>> {
+    pub fn from_access<A: Into<DenseAccess<Txn, FE, T>>>(accessor: A) -> Self {
         Self {
             accessor: accessor.into(),
             phantom: PhantomData,
@@ -161,7 +161,12 @@ impl<FE, T: CDatatype> DenseTensor<FE, DenseAccess<FE, T>> {
     }
 }
 
-impl<FE: ThreadSafe, A: TensorInstance> TensorInstance for DenseTensor<FE, A> {
+impl<Txn, FE, A> TensorInstance for DenseTensor<Txn, FE, A>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    A: TensorInstance,
+{
     fn dtype(&self) -> NumberType {
         self.accessor.dtype()
     }
@@ -171,22 +176,23 @@ impl<FE: ThreadSafe, A: TensorInstance> TensorInstance for DenseTensor<FE, A> {
     }
 }
 
-impl<FE, L, R, T> TensorBoolean<DenseTensor<FE, R>> for DenseTensor<FE, L>
+impl<Txn, FE, L, R, T> TensorBoolean<DenseTensor<Txn, FE, R>> for DenseTensor<Txn, FE, L>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
-    L: DenseInstance<DType = T> + Into<DenseAccess<FE, T>> + fmt::Debug,
-    R: DenseInstance<DType = T> + Into<DenseAccess<FE, T>> + fmt::Debug,
+    L: DenseInstance<DType = T> + Into<DenseAccess<Txn, FE, T>> + fmt::Debug,
+    R: DenseInstance<DType = T> + Into<DenseAccess<Txn, FE, T>> + fmt::Debug,
     T: CDatatype + DType + fmt::Debug,
-    DenseAccessCast<FE>: From<DenseAccess<FE, T>>,
-    DenseTensor<FE, R>: fmt::Debug,
+    DenseAccessCast<Txn, FE>: From<DenseAccess<Txn, FE, T>>,
+    DenseTensor<Txn, FE, R>: fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
     Self: fmt::Debug,
 {
-    type Combine = DenseTensor<FE, DenseCompare<FE, u8>>;
-    type LeftCombine = DenseTensor<FE, DenseCompare<FE, u8>>;
+    type Combine = DenseTensor<Txn, FE, DenseCompare<Txn, FE, u8>>;
+    type LeftCombine = DenseTensor<Txn, FE, DenseCompare<Txn, FE, u8>>;
 
-    fn and(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+    fn and(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
         DenseCompare::new(
             self.accessor.into(),
             other.accessor.into(),
@@ -196,7 +202,7 @@ where
         .map(DenseTensor::from)
     }
 
-    fn or(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+    fn or(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
         DenseCompare::new(
             self.accessor.into(),
             other.accessor.into(),
@@ -206,7 +212,7 @@ where
         .map(DenseTensor::from)
     }
 
-    fn xor(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+    fn xor(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
         DenseCompare::new(
             self.accessor.into(),
             other.accessor.into(),
@@ -217,13 +223,14 @@ where
     }
 }
 
-impl<FE, A> TensorBooleanConst for DenseTensor<FE, A>
+impl<Txn, FE, A> TensorBooleanConst for DenseTensor<Txn, FE, A>
 where
+    Txn: ThreadSafe,
     FE: ThreadSafe,
-    A: DenseInstance + Into<DenseAccess<FE, A::DType>>,
-    DenseAccessCast<FE>: From<DenseAccess<FE, A::DType>>,
+    A: DenseInstance + Into<DenseAccess<Txn, FE, A::DType>>,
+    DenseAccessCast<Txn, FE>: From<DenseAccess<Txn, FE, A::DType>>,
 {
-    type Combine = DenseTensor<FE, DenseCompareConst<FE, u8>>;
+    type Combine = DenseTensor<Txn, FE, DenseCompareConst<Txn, FE, u8>>;
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
         Ok(
@@ -253,51 +260,52 @@ where
     }
 }
 
-impl<FE, L, R, T> TensorCompare<DenseTensor<FE, R>> for DenseTensor<FE, L>
+impl<Txn, FE, L, R, T> TensorCompare<DenseTensor<Txn, FE, R>> for DenseTensor<Txn, FE, L>
 where
+    Txn: ThreadSafe,
     FE: ThreadSafe,
-    L: DenseInstance<DType = T> + Into<DenseAccessCast<FE>>,
-    R: DenseInstance<DType = T> + Into<DenseAccessCast<FE>>,
+    L: DenseInstance<DType = T> + Into<DenseAccessCast<Txn, FE>>,
+    R: DenseInstance<DType = T> + Into<DenseAccessCast<Txn, FE>>,
     T: CDatatype + DType,
 {
-    type Compare = DenseTensor<FE, DenseCompare<FE, u8>>;
+    type Compare = DenseTensor<Txn, FE, DenseCompare<Txn, FE, u8>>;
 
-    fn eq(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
+    fn eq(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::Compare> {
         DenseCompare::new(self.accessor, other.accessor, Block::eq, |l, r| {
             bool_u8(l.eq(&r))
         })
         .map(DenseTensor::from)
     }
 
-    fn gt(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
+    fn gt(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::Compare> {
         DenseCompare::new(self.accessor, other.accessor, Block::gt, |l, r| {
             bool_u8(l.gt(&r))
         })
         .map(DenseTensor::from)
     }
 
-    fn ge(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
+    fn ge(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::Compare> {
         DenseCompare::new(self.accessor, other.accessor, Block::ge, |l, r| {
             bool_u8(l.ge(&r))
         })
         .map(DenseTensor::from)
     }
 
-    fn lt(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
+    fn lt(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::Compare> {
         DenseCompare::new(self.accessor, other.accessor, Block::lt, |l, r| {
             bool_u8(l.lt(&r))
         })
         .map(DenseTensor::from)
     }
 
-    fn le(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
+    fn le(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::Compare> {
         DenseCompare::new(self.accessor, other.accessor, Block::le, |l, r| {
             bool_u8(l.le(&r))
         })
         .map(DenseTensor::from)
     }
 
-    fn ne(self, other: DenseTensor<FE, R>) -> TCResult<Self::Compare> {
+    fn ne(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::Compare> {
         DenseCompare::new(self.accessor, other.accessor, Block::ne, |l, r| {
             bool_u8(l.ne(&r))
         })
@@ -305,12 +313,13 @@ where
     }
 }
 
-impl<FE, A> TensorCompareConst for DenseTensor<FE, A>
+impl<Txn, FE, A> TensorCompareConst for DenseTensor<Txn, FE, A>
 where
+    Txn: ThreadSafe,
     FE: ThreadSafe,
-    A: DenseInstance + Into<DenseAccessCast<FE>>,
+    A: DenseInstance + Into<DenseAccessCast<Txn, FE>>,
 {
-    type Compare = DenseTensor<FE, DenseCompareConst<FE, u8>>;
+    type Compare = DenseTensor<Txn, FE, DenseCompareConst<Txn, FE, u8>>;
 
     fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
         Ok(
@@ -367,8 +376,9 @@ where
     }
 }
 
-impl<FE, A> TensorConvert for DenseTensor<FE, A>
+impl<Txn, FE, A> TensorConvert for DenseTensor<Txn, FE, A>
 where
+    Txn: ThreadSafe,
     FE: ThreadSafe,
     A: DenseInstance + Clone,
     A::Block: NDArrayTransform,
@@ -376,7 +386,7 @@ where
         NDArrayRead<DType = A::DType> + NDArrayTransform + Into<Array<A::DType>>,
 {
     type Dense = Self;
-    type Sparse = SparseTensor<FE, SparseDense<A>>;
+    type Sparse = SparseTensor<Txn, FE, SparseDense<A>>;
 
     fn into_dense(self) -> Self::Dense {
         self
@@ -387,25 +397,31 @@ where
     }
 }
 
-impl<FE: ThreadSafe, A: DenseInstance> TensorDiagonal for DenseTensor<FE, A> {
-    type Diagonal = DenseTensor<FE, DenseDiagonal<A>>;
+impl<Txn, FE, A> TensorDiagonal for DenseTensor<Txn, FE, A>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    A: DenseInstance,
+{
+    type Diagonal = DenseTensor<Txn, FE, DenseDiagonal<A>>;
 
     fn diagonal(self) -> TCResult<Self::Diagonal> {
         DenseDiagonal::new(self.accessor).map(DenseTensor::from)
     }
 }
 
-impl<FE, L, R, T> TensorMath<DenseTensor<FE, R>> for DenseTensor<FE, L>
+impl<Txn, FE, L, R, T> TensorMath<DenseTensor<Txn, FE, R>> for DenseTensor<Txn, FE, L>
 where
+    Txn: ThreadSafe,
     FE: ThreadSafe,
     L: DenseInstance<DType = T>,
     R: DenseInstance<DType = T>,
     T: CDatatype + DType,
 {
-    type Combine = DenseTensor<FE, DenseCombine<L, R, T>>;
-    type LeftCombine = DenseTensor<FE, DenseCombine<L, R, T>>;
+    type Combine = DenseTensor<Txn, FE, DenseCombine<L, R, T>>;
+    type LeftCombine = DenseTensor<Txn, FE, DenseCombine<L, R, T>>;
 
-    fn add(self, other: DenseTensor<FE, R>) -> TCResult<Self::Combine> {
+    fn add(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::Combine> {
         fn add<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             left.add(right).map(Array::from).map_err(TCError::from)
         }
@@ -413,7 +429,7 @@ where
         DenseCombine::new(self.accessor, other.accessor, add, |l, r| l + r).map(DenseTensor::from)
     }
 
-    fn div(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+    fn div(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
         fn div<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             left.div(right).map(Array::from).map_err(TCError::from)
         }
@@ -421,7 +437,7 @@ where
         DenseCombine::new(self.accessor, other.accessor, div, |l, r| l / r).map(DenseTensor::from)
     }
 
-    fn log(self, base: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+    fn log(self, base: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
         fn log<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             let right = right.cast()?;
             left.log(right).map(Array::from).map_err(TCError::from)
@@ -433,7 +449,7 @@ where
         .map(DenseTensor::from)
     }
 
-    fn mul(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+    fn mul(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
         fn mul<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             left.mul(right).map(Array::from).map_err(TCError::from)
         }
@@ -441,7 +457,7 @@ where
         DenseCombine::new(self.accessor, other.accessor, mul, |l, r| l * r).map(DenseTensor::from)
     }
 
-    fn pow(self, other: DenseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+    fn pow(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
         fn pow<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             let right = right.cast()?;
             left.pow(right).map(Array::from).map_err(TCError::from)
@@ -453,7 +469,7 @@ where
         .map(DenseTensor::from)
     }
 
-    fn sub(self, other: DenseTensor<FE, R>) -> TCResult<Self::Combine> {
+    fn sub(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::Combine> {
         fn sub<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             left.sub(right).map(Array::from).map_err(TCError::from)
         }
@@ -462,11 +478,14 @@ where
     }
 }
 
-impl<FE: ThreadSafe, A: DenseInstance> TensorMathConst for DenseTensor<FE, A>
+impl<Txn, FE, A> TensorMathConst for DenseTensor<Txn, FE, A>
 where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    A: DenseInstance,
     Number: CastInto<A::DType>,
 {
-    type Combine = DenseTensor<FE, DenseConst<A, A::DType>>;
+    type Combine = DenseTensor<Txn, FE, DenseConst<A, A::DType>>;
 
     fn add_const(self, other: Number) -> TCResult<Self::Combine> {
         let n = other.cast_into();
@@ -562,8 +581,9 @@ where
 }
 
 #[async_trait]
-impl<FE, A> TensorRead for DenseTensor<FE, A>
+impl<Txn, FE, A> TensorRead for DenseTensor<Txn, FE, A>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<A::DType>> + AsType<Node>,
     A: DenseInstance + TensorPermitRead,
     Number: From<A::DType>,
@@ -582,15 +602,16 @@ where
 }
 
 #[async_trait]
-impl<FE, A> TensorReduce for DenseTensor<FE, A>
+impl<Txn, FE, A> TensorReduce for DenseTensor<Txn, FE, A>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<A::DType>> + AsType<Node>,
-    A: DenseInstance + TensorPermitRead + Into<DenseAccess<FE, A::DType>> + Clone,
+    A: DenseInstance + TensorPermitRead + Into<DenseAccess<Txn, FE, A::DType>> + Clone,
     A::DType: fmt::Debug,
     Buffer<A::DType>: de::FromStream<Context = ()>,
     Number: From<A::DType> + CastInto<A::DType>,
 {
-    type Reduce = DenseTensor<FE, DenseReduce<DenseAccess<FE, A::DType>, A::DType>>;
+    type Reduce = DenseTensor<Txn, FE, DenseReduce<DenseAccess<Txn, FE, A::DType>, A::DType>>;
 
     async fn all(self, txn_id: TxnId) -> TCResult<bool> {
         let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
@@ -710,12 +731,17 @@ where
     }
 }
 
-impl<FE: ThreadSafe, A: DenseInstance> TensorTransform for DenseTensor<FE, A> {
-    type Broadcast = DenseTensor<FE, DenseBroadcast<A>>;
-    type Expand = DenseTensor<FE, DenseExpand<A>>;
-    type Reshape = DenseTensor<FE, DenseReshape<A>>;
-    type Slice = DenseTensor<FE, DenseSlice<A>>;
-    type Transpose = DenseTensor<FE, DenseTranspose<A>>;
+impl<Txn, FE, A> TensorTransform for DenseTensor<Txn, FE, A>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    A: DenseInstance,
+{
+    type Broadcast = DenseTensor<Txn, FE, DenseBroadcast<A>>;
+    type Expand = DenseTensor<Txn, FE, DenseExpand<A>>;
+    type Reshape = DenseTensor<Txn, FE, DenseReshape<A>>;
+    type Slice = DenseTensor<Txn, FE, DenseSlice<A>>;
+    type Transpose = DenseTensor<Txn, FE, DenseTranspose<A>>;
 
     fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
         DenseBroadcast::new(self.accessor, shape).map(DenseTensor::from)
@@ -738,8 +764,8 @@ impl<FE: ThreadSafe, A: DenseInstance> TensorTransform for DenseTensor<FE, A> {
     }
 }
 
-impl<FE: ThreadSafe, A: DenseInstance> TensorUnary for DenseTensor<FE, A> {
-    type Unary = DenseTensor<FE, DenseUnary<A, A::DType>>;
+impl<Txn: ThreadSafe, FE: ThreadSafe, A: DenseInstance> TensorUnary for DenseTensor<Txn, FE, A> {
+    type Unary = DenseTensor<Txn, FE, DenseUnary<A, A::DType>>;
 
     fn abs(self) -> TCResult<Self::Unary> {
         Ok(DenseUnary::abs(self.accessor).into())
@@ -758,19 +784,20 @@ impl<FE: ThreadSafe, A: DenseInstance> TensorUnary for DenseTensor<FE, A> {
     }
 }
 
-impl<FE, A> TensorUnaryBoolean for DenseTensor<FE, A>
+impl<Txn, FE, A> TensorUnaryBoolean for DenseTensor<Txn, FE, A>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile,
-    A: DenseInstance + Into<DenseAccessCast<FE>>,
+    A: DenseInstance + Into<DenseAccessCast<Txn, FE>>,
 {
-    type Unary = DenseTensor<FE, DenseUnaryCast<FE, u8>>;
+    type Unary = DenseTensor<Txn, FE, DenseUnaryCast<Txn, FE, u8>>;
 
     fn not(self) -> TCResult<Self::Unary> {
         Ok(DenseUnaryCast::not(self.accessor).into())
     }
 }
 
-impl<FE, A> From<A> for DenseTensor<FE, A> {
+impl<Txn, FE, A> From<A> for DenseTensor<Txn, FE, A> {
     fn from(accessor: A) -> Self {
         Self {
             accessor,
@@ -779,7 +806,7 @@ impl<FE, A> From<A> for DenseTensor<FE, A> {
     }
 }
 
-impl<FE, A: fmt::Debug> fmt::Debug for DenseTensor<FE, A> {
+impl<Txn, FE, A: fmt::Debug> fmt::Debug for DenseTensor<Txn, FE, A> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.accessor.fmt(f)
     }
@@ -975,9 +1002,11 @@ impl<FE, A: fmt::Debug> fmt::Debug for DenseTensor<FE, A> {
 // }
 
 #[inline]
-pub fn dense_from<FE, A, T>(tensor: DenseTensor<FE, A>) -> DenseTensor<FE, DenseAccess<FE, T>>
+pub fn dense_from<Txn, FE, A, T>(
+    tensor: DenseTensor<Txn, FE, A>,
+) -> DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>
 where
-    A: Into<DenseAccess<FE, T>>,
+    A: Into<DenseAccess<Txn, FE, T>>,
     T: CDatatype,
 {
     DenseTensor::from_access(tensor.into_inner())

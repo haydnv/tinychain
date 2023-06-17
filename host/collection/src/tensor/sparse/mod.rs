@@ -89,19 +89,19 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError>;
 }
 
-pub struct SparseTensor<FE, A> {
+pub struct SparseTensor<Txn, FE, A> {
     accessor: A,
-    phantom: PhantomData<FE>,
+    phantom: PhantomData<(Txn, FE)>,
 }
 
-impl<FE, A> SparseTensor<FE, A> {
+impl<Txn, FE, A> SparseTensor<Txn, FE, A> {
     pub fn into_inner(self) -> A {
         self.accessor
     }
 }
 
-impl<FE, T: CDatatype> SparseTensor<FE, SparseAccess<FE, T>> {
-    pub fn from_access<A: Into<SparseAccess<FE, T>>>(accessor: A) -> Self {
+impl<Txn, FE, T: CDatatype> SparseTensor<Txn, FE, SparseAccess<Txn, FE, T>> {
+    pub fn from_access<A: Into<SparseAccess<Txn, FE, T>>>(accessor: A) -> Self {
         Self {
             accessor: accessor.into(),
             phantom: PhantomData,
@@ -109,7 +109,7 @@ impl<FE, T: CDatatype> SparseTensor<FE, SparseAccess<FE, T>> {
     }
 }
 
-impl<FE, A: Clone> Clone for SparseTensor<FE, A> {
+impl<Txn, FE, A: Clone> Clone for SparseTensor<Txn, FE, A> {
     fn clone(&self) -> Self {
         Self {
             accessor: self.accessor.clone(),
@@ -118,7 +118,12 @@ impl<FE, A: Clone> Clone for SparseTensor<FE, A> {
     }
 }
 
-impl<FE: ThreadSafe, A: TensorInstance> TensorInstance for SparseTensor<FE, A> {
+impl<Txn, FE, A> TensorInstance for SparseTensor<Txn, FE, A>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    A: TensorInstance,
+{
     fn dtype(&self) -> NumberType {
         self.accessor.dtype()
     }
@@ -128,18 +133,19 @@ impl<FE: ThreadSafe, A: TensorInstance> TensorInstance for SparseTensor<FE, A> {
     }
 }
 
-impl<FE, L, R> TensorBoolean<SparseTensor<FE, R>> for SparseTensor<FE, L>
+impl<Txn, FE, L, R> TensorBoolean<SparseTensor<Txn, FE, R>> for SparseTensor<Txn, FE, L>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
-    L: SparseInstance + Into<SparseAccess<FE, L::DType>>,
-    R: SparseInstance<DType = L::DType> + Into<SparseAccess<FE, R::DType>>,
+    L: SparseInstance + Into<SparseAccess<Txn, FE, L::DType>>,
+    R: SparseInstance<DType = L::DType> + Into<SparseAccess<Txn, FE, R::DType>>,
     Number: From<L::DType> + From<R::DType>,
-    SparseAccessCast<FE>: From<SparseAccess<FE, L::DType>>,
+    SparseAccessCast<Txn, FE>: From<SparseAccess<Txn, FE, L::DType>>,
 {
-    type Combine = SparseTensor<FE, SparseCompare<FE, u8>>;
-    type LeftCombine = SparseTensor<FE, SparseCompareLeft<FE, u8>>;
+    type Combine = SparseTensor<Txn, FE, SparseCompare<Txn, FE, u8>>;
+    type LeftCombine = SparseTensor<Txn, FE, SparseCompareLeft<Txn, FE, u8>>;
 
-    fn and(self, other: SparseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+    fn and(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
         let access = SparseCompareLeft::new(
             self.accessor.into(),
             other.accessor.into(),
@@ -156,7 +162,7 @@ where
         Ok(SparseTensor::from(access))
     }
 
-    fn or(self, other: SparseTensor<FE, R>) -> TCResult<Self::Combine> {
+    fn or(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::Combine> {
         let access = SparseCompare::new(
             self.accessor.into(),
             other.accessor.into(),
@@ -173,7 +179,7 @@ where
         Ok(SparseTensor::from(access))
     }
 
-    fn xor(self, other: SparseTensor<FE, R>) -> TCResult<Self::Combine> {
+    fn xor(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::Combine> {
         let access = SparseCompare::new(
             self.accessor.into(),
             other.accessor.into(),
@@ -191,15 +197,16 @@ where
     }
 }
 
-impl<FE, A> TensorBooleanConst for SparseTensor<FE, A>
+impl<Txn, FE, A> TensorBooleanConst for SparseTensor<Txn, FE, A>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
-    A: SparseInstance + Into<SparseAccess<FE, A::DType>>,
-    DenseAccess<FE, A::DType>: From<DenseSparse<A>>,
-    DenseAccessCast<FE>: From<DenseAccess<FE, A::DType>>,
-    SparseAccessCast<FE>: From<SparseAccess<FE, A::DType>>,
+    A: SparseInstance + Into<SparseAccess<Txn, FE, A::DType>>,
+    DenseAccess<Txn, FE, A::DType>: From<DenseSparse<A>>,
+    DenseAccessCast<Txn, FE>: From<DenseAccess<Txn, FE, A::DType>>,
+    SparseAccessCast<Txn, FE>: From<SparseAccess<Txn, FE, A::DType>>,
 {
-    type Combine = SparseTensor<FE, SparseCompareConst<FE, u8>>;
+    type Combine = SparseTensor<Txn, FE, SparseCompareConst<Txn, FE, u8>>;
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
         let cmp = |l: Number, r: Number| {
@@ -224,8 +231,13 @@ where
     }
 }
 
-impl<FE: AsType<Node> + ThreadSafe, A: SparseInstance> TensorConvert for SparseTensor<FE, A> {
-    type Dense = DenseTensor<FE, DenseSparse<A>>;
+impl<Txn, FE, A> TensorConvert for SparseTensor<Txn, FE, A>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+    A: SparseInstance,
+{
+    type Dense = DenseTensor<Txn, FE, DenseSparse<A>>;
     type Sparse = Self;
 
     fn into_dense(self) -> Self::Dense {
@@ -237,16 +249,17 @@ impl<FE: AsType<Node> + ThreadSafe, A: SparseInstance> TensorConvert for SparseT
     }
 }
 
-impl<FE, L, R> TensorCompare<SparseTensor<FE, R>> for SparseTensor<FE, L>
+impl<Txn, FE, L, R> TensorCompare<SparseTensor<Txn, FE, R>> for SparseTensor<Txn, FE, L>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
-    L: SparseInstance + Into<SparseAccess<FE, L::DType>> + fmt::Debug,
-    R: SparseInstance<DType = L::DType> + Into<SparseAccess<FE, R::DType>> + fmt::Debug,
-    SparseAccessCast<FE>: From<SparseAccess<FE, L::DType>>,
+    L: SparseInstance + Into<SparseAccess<Txn, FE, L::DType>> + fmt::Debug,
+    R: SparseInstance<DType = L::DType> + Into<SparseAccess<Txn, FE, R::DType>> + fmt::Debug,
+    SparseAccessCast<Txn, FE>: From<SparseAccess<Txn, FE, L::DType>>,
 {
-    type Compare = SparseTensor<FE, SparseCompare<FE, u8>>;
+    type Compare = SparseTensor<Txn, FE, SparseCompare<Txn, FE, u8>>;
 
-    fn eq(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
+    fn eq(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::Compare> {
         Err(bad_request!(
             "cannot compare {:?} with {:?} because the result would be dense",
             self,
@@ -254,7 +267,7 @@ where
         ))
     }
 
-    fn gt(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
+    fn gt(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::Compare> {
         SparseCompare::new(
             self.accessor.into(),
             other.accessor.into(),
@@ -270,7 +283,7 @@ where
         .map(SparseTensor::from)
     }
 
-    fn ge(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
+    fn ge(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::Compare> {
         Err(bad_request!(
             "cannot compare {:?} with {:?} because the result would be dense",
             self,
@@ -278,7 +291,7 @@ where
         ))
     }
 
-    fn lt(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
+    fn lt(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::Compare> {
         SparseCompare::new(
             self.accessor.into(),
             other.accessor.into(),
@@ -294,7 +307,7 @@ where
         .map(SparseTensor::from)
     }
 
-    fn le(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
+    fn le(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::Compare> {
         Err(bad_request!(
             "cannot compare {:?} with {:?} because the result would be dense",
             self,
@@ -302,7 +315,7 @@ where
         ))
     }
 
-    fn ne(self, other: SparseTensor<FE, R>) -> TCResult<Self::Compare> {
+    fn ne(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::Compare> {
         SparseCompare::new(
             self.accessor.into(),
             other.accessor.into(),
@@ -319,13 +332,14 @@ where
     }
 }
 
-impl<FE, A> TensorCompareConst for SparseTensor<FE, A>
+impl<Txn, FE, A> TensorCompareConst for SparseTensor<Txn, FE, A>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
-    A: SparseInstance + Into<SparseAccess<FE, A::DType>>,
-    SparseAccessCast<FE>: From<SparseAccess<FE, A::DType>>,
+    A: SparseInstance + Into<SparseAccess<Txn, FE, A::DType>>,
+    SparseAccessCast<Txn, FE>: From<SparseAccess<Txn, FE, A::DType>>,
 {
-    type Compare = SparseTensor<FE, SparseCompareConst<FE, u8>>;
+    type Compare = SparseTensor<Txn, FE, SparseCompareConst<Txn, FE, u8>>;
 
     fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
         let cmp = |l: Number, r: Number| if l.eq(&r) { 1 } else { 0 };
@@ -364,17 +378,18 @@ where
     }
 }
 
-impl<FE, L, R, T> TensorMath<SparseTensor<FE, R>> for SparseTensor<FE, L>
+impl<Txn, FE, L, R, T> TensorMath<SparseTensor<Txn, FE, R>> for SparseTensor<Txn, FE, L>
 where
-    FE: ThreadSafe,
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
     L: SparseInstance<DType = T>,
     R: SparseInstance<DType = T>,
     T: CDatatype + DType,
 {
-    type Combine = SparseTensor<FE, SparseCombine<L, R, T>>;
-    type LeftCombine = SparseTensor<FE, SparseCombineLeft<L, R, T>>;
+    type Combine = SparseTensor<Txn, FE, SparseCombine<L, R, T>>;
+    type LeftCombine = SparseTensor<Txn, FE, SparseCombineLeft<L, R, T>>;
 
-    fn add(self, other: SparseTensor<FE, R>) -> TCResult<Self::Combine> {
+    fn add(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::Combine> {
         SparseCombine::new(
             self.accessor,
             other.accessor,
@@ -384,7 +399,7 @@ where
         .map(SparseTensor::from)
     }
 
-    fn div(self, other: SparseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+    fn div(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
         SparseCombineLeft::new(
             self.accessor,
             other.accessor,
@@ -394,7 +409,7 @@ where
         .map(SparseTensor::from)
     }
 
-    fn log(self, base: SparseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+    fn log(self, base: SparseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
         fn log<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             let right = right.cast()?;
             left.log(right).map(Array::from).map_err(TCError::from)
@@ -406,7 +421,7 @@ where
         .map(SparseTensor::from)
     }
 
-    fn mul(self, other: SparseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+    fn mul(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
         SparseCombineLeft::new(
             self.accessor,
             other.accessor,
@@ -416,7 +431,7 @@ where
         .map(SparseTensor::from)
     }
 
-    fn pow(self, other: SparseTensor<FE, R>) -> TCResult<Self::LeftCombine> {
+    fn pow(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
         fn pow<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             let right = right.cast()?;
             left.pow(right).map(Array::from).map_err(TCError::from)
@@ -428,7 +443,7 @@ where
         .map(SparseTensor::from)
     }
 
-    fn sub(self, other: SparseTensor<FE, R>) -> TCResult<Self::Combine> {
+    fn sub(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::Combine> {
         SparseCombine::new(
             self.accessor,
             other.accessor,
@@ -439,15 +454,16 @@ where
     }
 }
 
-impl<FE, A> TensorMathConst for SparseTensor<FE, A>
+impl<Txn, FE, A> TensorMathConst for SparseTensor<Txn, FE, A>
 where
+    Txn: ThreadSafe,
     FE: ThreadSafe,
     A: SparseInstance,
     A::DType: CastFrom<Number>,
     <A::DType as CDatatype>::Float: CastFrom<Number>,
     Number: From<A::DType>,
 {
-    type Combine = SparseTensor<FE, SparseCombineConst<A, A::DType>>;
+    type Combine = SparseTensor<Txn, FE, SparseCombineConst<A, A::DType>>;
 
     fn add_const(self, other: Number) -> TCResult<Self::Combine> {
         Err(bad_request!("cannot add {other} to {self:?} because the result would not be sparse (consider converting to a dense tensor first)"))
@@ -527,8 +543,9 @@ where
 }
 
 #[async_trait]
-impl<FE, A> TensorRead for SparseTensor<FE, A>
+impl<Txn, FE, A> TensorRead for SparseTensor<Txn, FE, A>
 where
+    Txn: Transaction<FE>,
     FE: ThreadSafe,
     A: SparseInstance + TensorPermitRead,
     Number: From<A::DType>,
@@ -547,13 +564,14 @@ where
 }
 
 #[async_trait]
-impl<FE, A> TensorReduce for SparseTensor<FE, A>
+impl<Txn, FE, A> TensorReduce for SparseTensor<Txn, FE, A>
 where
+    Txn: Transaction<FE>,
     FE: ThreadSafe,
     A: SparseInstance + TensorPermitRead + Clone,
     Number: From<A::DType>,
 {
-    type Reduce = SparseTensor<FE, SparseReduce<A, A::DType>>;
+    type Reduce = SparseTensor<Txn, FE, SparseReduce<A, A::DType>>;
 
     async fn all(self, txn_id: TxnId) -> TCResult<bool> {
         let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
@@ -745,18 +763,19 @@ where
     }
 }
 
-impl<FE, A> TensorTransform for SparseTensor<FE, A>
+impl<Txn, FE, A> TensorTransform for SparseTensor<Txn, FE, A>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
-    A: SparseInstance + Into<SparseAccess<FE, A::DType>>,
+    A: SparseInstance + Into<SparseAccess<Txn, FE, A::DType>>,
     A::DType: CastFrom<Number> + fmt::Debug,
     Number: From<A::DType>,
 {
-    type Broadcast = SparseTensor<FE, SparseBroadcast<FE, A::DType>>;
-    type Expand = SparseTensor<FE, SparseExpand<A>>;
-    type Reshape = SparseTensor<FE, SparseReshape<A>>;
-    type Slice = SparseTensor<FE, SparseSlice<A>>;
-    type Transpose = SparseTensor<FE, SparseTranspose<A>>;
+    type Broadcast = SparseTensor<Txn, FE, SparseBroadcast<Txn, FE, A::DType>>;
+    type Expand = SparseTensor<Txn, FE, SparseExpand<A>>;
+    type Reshape = SparseTensor<Txn, FE, SparseReshape<A>>;
+    type Slice = SparseTensor<Txn, FE, SparseSlice<A>>;
+    type Transpose = SparseTensor<Txn, FE, SparseTranspose<A>>;
 
     fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
         let accessor = SparseBroadcast::new(self.accessor, shape)?;
@@ -804,12 +823,13 @@ where
     }
 }
 
-impl<FE, A> TensorUnary for SparseTensor<FE, A>
+impl<Txn, FE, A> TensorUnary for SparseTensor<Txn, FE, A>
 where
+    Txn: ThreadSafe,
     FE: ThreadSafe,
     A: SparseInstance,
 {
-    type Unary = SparseTensor<FE, SparseUnary<A, A::DType>>;
+    type Unary = SparseTensor<Txn, FE, SparseUnary<A, A::DType>>;
 
     fn abs(self) -> TCResult<Self::Unary> {
         let accessor = SparseUnary::new(
@@ -852,13 +872,14 @@ where
     }
 }
 
-impl<FE, A> TensorUnaryBoolean for SparseTensor<FE, A>
+impl<Txn, FE, A> TensorUnaryBoolean for SparseTensor<Txn, FE, A>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
-    A: SparseInstance + Into<SparseAccess<FE, A::DType>>,
-    SparseAccessCast<FE>: From<SparseAccess<FE, A::DType>>,
+    A: SparseInstance + Into<SparseAccess<Txn, FE, A::DType>>,
+    SparseAccessCast<Txn, FE>: From<SparseAccess<Txn, FE, A::DType>>,
 {
-    type Unary = SparseTensor<FE, SparseUnaryCast<FE, u8>>;
+    type Unary = SparseTensor<Txn, FE, SparseUnaryCast<Txn, FE, u8>>;
 
     fn not(self) -> TCResult<Self::Unary> {
         let accessor = SparseUnaryCast::new(
@@ -871,7 +892,7 @@ where
     }
 }
 
-impl<FE, A> From<A> for SparseTensor<FE, A>
+impl<Txn, FE, A> From<A> for SparseTensor<Txn, FE, A>
 where
     A: SparseInstance,
 {
@@ -883,7 +904,7 @@ where
     }
 }
 
-impl<FE, A: fmt::Debug> fmt::Debug for SparseTensor<FE, A> {
+impl<Txn, FE, A: fmt::Debug> fmt::Debug for SparseTensor<Txn, FE, A> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.accessor.fmt(f)
     }
@@ -1089,9 +1110,11 @@ impl<FE, A: fmt::Debug> fmt::Debug for SparseTensor<FE, A> {
 // }
 
 #[inline]
-pub fn sparse_from<FE, A, T>(tensor: SparseTensor<FE, A>) -> SparseTensor<FE, SparseAccess<FE, T>>
+pub fn sparse_from<Txn, FE, A, T>(
+    tensor: SparseTensor<Txn, FE, A>,
+) -> SparseTensor<Txn, FE, SparseAccess<Txn, FE, T>>
 where
-    A: Into<SparseAccess<FE, T>>,
+    A: Into<SparseAccess<Txn, FE, T>>,
     T: CDatatype,
 {
     SparseTensor::from_access(tensor.into_inner())

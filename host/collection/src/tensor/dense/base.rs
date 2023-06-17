@@ -31,16 +31,16 @@ use super::{DenseCacheFile, DenseInstance, DenseTensor, DenseWriteGuard, DenseWr
 
 const CANON: Label = label("canon");
 
-struct State<FE, T> {
+struct State<Txn, FE, T> {
     commits: OrdHashSet<TxnId>,
     deltas: OrdHashMap<TxnId, DirLock<FE>>,
     pending: OrdHashMap<TxnId, DirLock<FE>>,
     versions: DirLock<FE>,
     finalized: Option<TxnId>,
-    dtype: PhantomData<T>,
+    dtype: PhantomData<(Txn, T)>,
 }
 
-impl<FE, T> State<FE, T>
+impl<Txn, FE, T> State<Txn, FE, T>
 where
     FE: DenseCacheFile + AsType<Buffer<T>> + 'static,
     T: CDatatype + DType,
@@ -50,8 +50,8 @@ where
     fn latest_version(
         &self,
         txn_id: TxnId,
-        canon: DenseAccess<FE, T>,
-    ) -> TCResult<DenseAccess<FE, T>> {
+        canon: DenseAccess<Txn, FE, T>,
+    ) -> TCResult<DenseAccess<Txn, FE, T>> {
         if self.finalized > Some(txn_id) {
             return Err(conflict!("dense tensor is already finalized at {txn_id}"));
         }
@@ -72,8 +72,8 @@ where
     fn pending_version(
         &mut self,
         txn_id: TxnId,
-        canon: DenseAccess<FE, T>,
-    ) -> TCResult<DenseCow<FE, DenseAccess<FE, T>>> {
+        canon: DenseAccess<Txn, FE, T>,
+    ) -> TCResult<DenseCow<FE, DenseAccess<Txn, FE, T>>> {
         if self.commits.contains(&txn_id) {
             return Err(conflict!("{txn_id} has already been committed"));
         } else if self.finalized > Some(txn_id) {
@@ -106,8 +106,7 @@ where
 pub struct DenseBase<Txn, FE, T> {
     dir: DirLock<FE>,
     canon: DenseVersion<FE, T>,
-    state: Arc<RwLock<State<FE, T>>>,
-    phantom: PhantomData<Txn>,
+    state: Arc<RwLock<State<Txn, FE, T>>>,
 }
 
 impl<Txn, FE, T> Clone for DenseBase<Txn, FE, T> {
@@ -116,18 +115,18 @@ impl<Txn, FE, T> Clone for DenseBase<Txn, FE, T> {
             dir: self.dir.clone(),
             canon: self.canon.clone(),
             state: self.state.clone(),
-            phantom: self.phantom,
         }
     }
 }
 
 impl<Txn, FE, T> DenseBase<Txn, FE, T>
 where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>>,
     T: CDatatype + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
-    fn access(&self, txn_id: TxnId) -> TCResult<DenseAccess<FE, T>> {
+    fn access(&self, txn_id: TxnId) -> TCResult<DenseAccess<Txn, FE, T>> {
         let state = self.state.read().expect("dense state");
         state.latest_version(txn_id, self.canon.clone().into())
     }
@@ -155,7 +154,6 @@ where
             dir,
             state: Arc::new(RwLock::new(state)),
             canon: DenseVersion::new(canon, semaphore),
-            phantom: PhantomData,
         }
     }
 }
@@ -555,14 +553,8 @@ where
     }
 }
 
-impl<Txn, FE, T> fmt::Debug for DenseBase<Txn, FE, T>
-where
-    Txn: Transaction<FE>,
-    FE: FileLoad + AsType<Buffer<T>>,
-    T: CDatatype + DType,
-    Buffer<T>: de::FromStream<Context = ()>,
-{
+impl<Txn, FE, T> fmt::Debug for DenseBase<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "dense tensor file with shape {:?}", self.canon.shape())
+        write!(f, "transactional dense tensor")
     }
 }

@@ -19,7 +19,7 @@ use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
-use tc_transact::TxnId;
+use tc_transact::{Transaction, TxnId};
 use tc_value::{DType, Number, NumberClass, NumberCollator, NumberType};
 use tcgeneric::ThreadSafe;
 
@@ -31,6 +31,7 @@ use crate::tensor::{
     Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
 };
 
+use super::base::SparseBase;
 use super::schema::{IndexSchema, Schema};
 use super::{stream, Blocks, Elements, Node, SparseInstance};
 
@@ -85,19 +86,19 @@ pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
     async fn write_value(&mut self, txn_id: TxnId, coord: Coord, value: T) -> TCResult<()>;
 }
 
-pub enum SparseAccessCast<FE> {
-    F32(SparseAccess<FE, f32>),
-    F64(SparseAccess<FE, f64>),
-    I16(SparseAccess<FE, i16>),
-    I32(SparseAccess<FE, i32>),
-    I64(SparseAccess<FE, i64>),
-    U8(SparseAccess<FE, u8>),
-    U16(SparseAccess<FE, u16>),
-    U32(SparseAccess<FE, u32>),
-    U64(SparseAccess<FE, u64>),
+pub enum SparseAccessCast<Txn, FE> {
+    F32(SparseAccess<Txn, FE, f32>),
+    F64(SparseAccess<Txn, FE, f64>),
+    I16(SparseAccess<Txn, FE, i16>),
+    I32(SparseAccess<Txn, FE, i32>),
+    I64(SparseAccess<Txn, FE, i64>),
+    U8(SparseAccess<Txn, FE, u8>),
+    U16(SparseAccess<Txn, FE, u16>),
+    U32(SparseAccess<Txn, FE, u32>),
+    U64(SparseAccess<Txn, FE, u64>),
 }
 
-impl<FE> Clone for SparseAccessCast<FE> {
+impl<Txn, FE> Clone for SparseAccessCast<Txn, FE> {
     fn clone(&self) -> Self {
         match self {
             Self::F32(access) => Self::F32(access.clone()),
@@ -146,7 +147,7 @@ macro_rules! access_cast_dispatch_dual {
     };
 }
 
-impl<FE: ThreadSafe> SparseAccessCast<FE> {
+impl<Txn: ThreadSafe, FE: ThreadSafe> SparseAccessCast<Txn, FE> {
     pub fn dtype(&self) -> NumberType {
         access_cast_dispatch!(self, this, this.dtype())
     }
@@ -156,8 +157,9 @@ impl<FE: ThreadSafe> SparseAccessCast<FE> {
     }
 }
 
-impl<FE> SparseAccessCast<FE>
+impl<Txn, FE> SparseAccessCast<Txn, FE>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
     async fn merge_blocks_inner(
@@ -318,7 +320,7 @@ where
 }
 
 #[async_trait]
-impl<FE: ThreadSafe> TensorPermitRead for SparseAccessCast<FE> {
+impl<Txn: ThreadSafe, FE: ThreadSafe> TensorPermitRead for SparseAccessCast<Txn, FE> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         access_cast_dispatch!(self, this, this.read_permit(txn_id, range).await)
     }
@@ -326,8 +328,8 @@ impl<FE: ThreadSafe> TensorPermitRead for SparseAccessCast<FE> {
 
 macro_rules! access_cast_from {
     ($t:ty, $var:ident) => {
-        impl<FE> From<SparseAccess<FE, $t>> for SparseAccessCast<FE> {
-            fn from(access: SparseAccess<FE, $t>) -> Self {
+        impl<Txn, FE> From<SparseAccess<Txn, FE, $t>> for SparseAccessCast<Txn, FE> {
+            fn from(access: SparseAccess<Txn, FE, $t>) -> Self {
                 Self::$var(access)
             }
         }
@@ -344,19 +346,20 @@ access_cast_from!(u16, U16);
 access_cast_from!(u32, U32);
 access_cast_from!(u64, U64);
 
-impl<FE> fmt::Debug for SparseAccessCast<FE> {
+impl<Txn, FE> fmt::Debug for SparseAccessCast<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         access_cast_dispatch!(self, this, this.fmt(f))
     }
 }
 
-pub enum SparseAccess<FE, T: CDatatype> {
+pub enum SparseAccess<Txn, FE, T: CDatatype> {
+    Base(SparseBase<Txn, FE, T>),
     Table(SparseFile<FE, T>),
-    Broadcast(Box<SparseBroadcast<FE, T>>),
+    Broadcast(Box<SparseBroadcast<Txn, FE, T>>),
     BroadcastAxis(Box<SparseBroadcastAxis<Self>>),
-    Compare(Box<SparseCompare<FE, T>>),
-    CompareConst(Box<SparseCompareConst<FE, T>>),
-    CompareLeft(Box<SparseCompareLeft<FE, T>>),
+    Compare(Box<SparseCompare<Txn, FE, T>>),
+    CompareConst(Box<SparseCompareConst<Txn, FE, T>>),
+    CompareLeft(Box<SparseCompareLeft<Txn, FE, T>>),
     Combine(Box<SparseCombine<Self, Self, T>>),
     CombineLeft(Box<SparseCombineLeft<Self, Self, T>>),
     CombineConst(Box<SparseCombineConst<Self, T>>),
@@ -367,13 +370,14 @@ pub enum SparseAccess<FE, T: CDatatype> {
     Slice(Box<SparseSlice<Self>>),
     Transpose(Box<SparseTranspose<Self>>),
     Unary(Box<SparseUnary<Self, T>>),
-    UnaryCast(Box<SparseUnaryCast<FE, T>>),
+    UnaryCast(Box<SparseUnaryCast<Txn, FE, T>>),
     Version(SparseVersion<FE, T>),
 }
 
-impl<FE, T: CDatatype> Clone for SparseAccess<FE, T> {
+impl<Txn, FE, T: CDatatype> Clone for SparseAccess<Txn, FE, T> {
     fn clone(&self) -> Self {
         match self {
+            Self::Base(base) => Self::Base(base.clone()),
             Self::Table(table) => Self::Table(table.clone()),
             Self::Broadcast(broadcast) => Self::Broadcast(broadcast.clone()),
             Self::BroadcastAxis(broadcast) => Self::BroadcastAxis(broadcast.clone()),
@@ -399,6 +403,7 @@ impl<FE, T: CDatatype> Clone for SparseAccess<FE, T> {
 macro_rules! access_dispatch {
     ($this:ident, $var:ident, $call:expr) => {
         match $this {
+            Self::Base($var) => $call,
             Self::Table($var) => $call,
             Self::Broadcast($var) => $call,
             Self::BroadcastAxis($var) => $call,
@@ -421,8 +426,9 @@ macro_rules! access_dispatch {
     };
 }
 
-impl<FE, T: CDatatype> TensorInstance for SparseAccess<FE, T>
+impl<Txn, FE, T: CDatatype> TensorInstance for SparseAccess<Txn, FE, T>
 where
+    Txn: ThreadSafe,
     FE: ThreadSafe,
     T: CDatatype + DType,
 {
@@ -436,8 +442,9 @@ where
 }
 
 #[async_trait]
-impl<FE, T> SparseInstance for SparseAccess<FE, T>
+impl<Txn, FE, T> SparseInstance for SparseAccess<Txn, FE, T>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
@@ -477,8 +484,9 @@ where
 }
 
 #[async_trait]
-impl<FE, T> TensorPermitRead for SparseAccess<FE, T>
+impl<Txn, FE, T> TensorPermitRead for SparseAccess<Txn, FE, T>
 where
+    Txn: ThreadSafe,
     FE: ThreadSafe,
     T: CDatatype + DType,
 {
@@ -509,13 +517,15 @@ where
 }
 
 #[async_trait]
-impl<FE, T> TensorPermitWrite for SparseAccess<FE, T>
+impl<Txn, FE, T> TensorPermitWrite for SparseAccess<Txn, FE, T>
 where
+    Txn: Send + Sync,
     FE: Send + Sync,
     T: CDatatype + DType,
 {
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
         match self {
+            Self::Base(base) => base.write_permit(txn_id, range).await,
             Self::Slice(slice) => slice.write_permit(txn_id, range).await,
             Self::Version(version) => version.write_permit(txn_id, range).await,
             other => Err(bad_request!(
@@ -526,7 +536,7 @@ where
     }
 }
 
-impl<FE, T: CDatatype + DType> fmt::Debug for SparseAccess<FE, T> {
+impl<Txn, FE, T: CDatatype + DType> fmt::Debug for SparseAccess<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         access_dispatch!(self, this, this.fmt(f))
     }
@@ -664,7 +674,7 @@ where
     }
 }
 
-impl<FE, T: CDatatype> From<SparseFile<FE, T>> for SparseAccess<FE, T> {
+impl<Txn, FE, T: CDatatype> From<SparseFile<FE, T>> for SparseAccess<Txn, FE, T> {
     fn from(table: SparseFile<FE, T>) -> Self {
         Self::Table(table)
     }
@@ -865,7 +875,7 @@ where
     }
 }
 
-impl<FE, T: CDatatype> From<SparseVersion<FE, T>> for SparseAccess<FE, T> {
+impl<Txn, FE, T: CDatatype> From<SparseVersion<FE, T>> for SparseAccess<Txn, FE, T> {
     fn from(version: SparseVersion<FE, T>) -> Self {
         Self::Version(version)
     }
@@ -877,12 +887,12 @@ impl<FE, T> fmt::Debug for SparseVersion<FE, T> {
     }
 }
 
-pub struct SparseBroadcast<FE, T: CDatatype> {
+pub struct SparseBroadcast<Txn, FE, T: CDatatype> {
     shape: Shape,
-    inner: SparseAccess<FE, T>,
+    inner: SparseAccess<Txn, FE, T>,
 }
 
-impl<FE, T: CDatatype> Clone for SparseBroadcast<FE, T> {
+impl<Txn, FE, T: CDatatype> Clone for SparseBroadcast<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
             shape: self.shape.clone(),
@@ -891,14 +901,15 @@ impl<FE, T: CDatatype> Clone for SparseBroadcast<FE, T> {
     }
 }
 
-impl<FE, T> SparseBroadcast<FE, T>
+impl<Txn, FE, T> SparseBroadcast<Txn, FE, T>
 where
+    Txn: ThreadSafe,
     FE: ThreadSafe,
     T: CDatatype + DType,
 {
     pub fn new<S>(source: S, shape: Shape) -> Result<Self, TCError>
     where
-        S: TensorInstance + Into<SparseAccess<FE, T>>,
+        S: TensorInstance + Into<SparseAccess<Txn, FE, T>>,
     {
         let source_shape = source.shape().to_vec();
         let mut inner = source.into();
@@ -929,7 +940,12 @@ where
     }
 }
 
-impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for SparseBroadcast<FE, T> {
+impl<Txn, FE, T> TensorInstance for SparseBroadcast<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn dtype(&self) -> NumberType {
         T::dtype()
     }
@@ -940,8 +956,9 @@ impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for SparseBroadcast<FE
 }
 
 #[async_trait]
-impl<FE, T> SparseInstance for SparseBroadcast<FE, T>
+impl<Txn, FE, T> SparseInstance for SparseBroadcast<Txn, FE, T>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
@@ -1036,10 +1053,10 @@ where
 }
 
 #[async_trait]
-impl<FE, T> TensorPermitRead for SparseBroadcast<FE, T>
+impl<Txn, FE, T> TensorPermitRead for SparseBroadcast<Txn, FE, T>
 where
     T: CDatatype,
-    SparseAccess<FE, T>: TensorPermitRead,
+    SparseAccess<Txn, FE, T>: TensorPermitRead,
 {
     async fn read_permit(
         &self,
@@ -1056,13 +1073,13 @@ where
     }
 }
 
-impl<FE, T: CDatatype> From<SparseBroadcast<FE, T>> for SparseAccess<FE, T> {
-    fn from(accessor: SparseBroadcast<FE, T>) -> Self {
+impl<Txn, FE, T: CDatatype> From<SparseBroadcast<Txn, FE, T>> for SparseAccess<Txn, FE, T> {
+    fn from(accessor: SparseBroadcast<Txn, FE, T>) -> Self {
         Self::Broadcast(Box::new(accessor))
     }
 }
 
-impl<FE, T: CDatatype> fmt::Debug for SparseBroadcast<FE, T> {
+impl<Txn, FE, T: CDatatype> fmt::Debug for SparseBroadcast<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "broadcasted sparse tensor with shape {:?}", self.shape)
     }
@@ -1284,10 +1301,10 @@ impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for SparseBroadcastAxis<
     }
 }
 
-impl<FE, T, S> From<SparseBroadcastAxis<S>> for SparseAccess<FE, T>
+impl<Txn, FE, T, S> From<SparseBroadcastAxis<S>> for SparseAccess<Txn, FE, T>
 where
     T: CDatatype,
-    S: Into<SparseAccess<FE, T>>,
+    S: Into<SparseAccess<Txn, FE, T>>,
 {
     fn from(broadcast: SparseBroadcastAxis<S>) -> Self {
         Self::BroadcastAxis(Box::new(SparseBroadcastAxis {
@@ -1437,10 +1454,10 @@ where
     }
 }
 
-impl<FE, L, R, T> From<SparseCombine<L, R, T>> for SparseAccess<FE, T>
+impl<Txn, FE, L, R, T> From<SparseCombine<L, R, T>> for SparseAccess<Txn, FE, T>
 where
-    L: Into<SparseAccess<FE, T>>,
-    R: Into<SparseAccess<FE, T>>,
+    L: Into<SparseAccess<Txn, FE, T>>,
+    R: Into<SparseAccess<Txn, FE, T>>,
     T: CDatatype,
 {
     fn from(combine: SparseCombine<L, R, T>) -> Self {
@@ -1591,11 +1608,11 @@ where
     }
 }
 
-impl<FE, L, R, T> From<SparseCombineLeft<L, R, T>> for SparseAccess<FE, T>
+impl<Txn, FE, L, R, T> From<SparseCombineLeft<L, R, T>> for SparseAccess<Txn, FE, T>
 where
     FE: ThreadSafe,
-    L: Into<SparseAccess<FE, T>>,
-    R: Into<SparseAccess<FE, T>>,
+    L: Into<SparseAccess<Txn, FE, T>>,
+    R: Into<SparseAccess<Txn, FE, T>>,
     T: CDatatype,
 {
     fn from(combine: SparseCombineLeft<L, R, T>) -> Self {
@@ -1720,9 +1737,9 @@ where
     }
 }
 
-impl<FE, S, T> From<SparseCombineConst<S, T>> for SparseAccess<FE, T>
+impl<Txn, FE, S, T> From<SparseCombineConst<S, T>> for SparseAccess<Txn, FE, T>
 where
-    S: Into<SparseAccess<FE, T>>,
+    S: Into<SparseAccess<Txn, FE, T>>,
     T: CDatatype,
 {
     fn from(combine: SparseCombineConst<S, T>) -> Self {
@@ -1745,14 +1762,14 @@ where
     }
 }
 
-pub struct SparseCompare<FE, T: CDatatype> {
-    left: SparseAccessCast<FE>,
-    right: SparseAccessCast<FE>,
+pub struct SparseCompare<Txn, FE, T: CDatatype> {
+    left: SparseAccessCast<Txn, FE>,
+    right: SparseAccessCast<Txn, FE>,
     block_op: fn(Block, Block) -> TCResult<Array<T>>,
     value_op: fn(Number, Number) -> T,
 }
 
-impl<FE, T: CDatatype> Clone for SparseCompare<FE, T> {
+impl<Txn, FE, T: CDatatype> Clone for SparseCompare<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
             left: self.left.clone(),
@@ -1763,7 +1780,7 @@ impl<FE, T: CDatatype> Clone for SparseCompare<FE, T> {
     }
 }
 
-impl<FE: ThreadSafe, T: CDatatype> SparseCompare<FE, T> {
+impl<Txn: ThreadSafe, FE: ThreadSafe, T: CDatatype> SparseCompare<Txn, FE, T> {
     pub fn new<L, R>(
         left: L,
         right: R,
@@ -1771,8 +1788,8 @@ impl<FE: ThreadSafe, T: CDatatype> SparseCompare<FE, T> {
         value_op: fn(Number, Number) -> T,
     ) -> TCResult<Self>
     where
-        L: Into<SparseAccessCast<FE>>,
-        R: Into<SparseAccessCast<FE>>,
+        L: Into<SparseAccessCast<Txn, FE>>,
+        R: Into<SparseAccessCast<Txn, FE>>,
     {
         let left = left.into();
         let right = right.into();
@@ -1794,7 +1811,12 @@ impl<FE: ThreadSafe, T: CDatatype> SparseCompare<FE, T> {
     }
 }
 
-impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for SparseCompare<FE, T> {
+impl<Txn, FE, T> TensorInstance for SparseCompare<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn dtype(&self) -> NumberType {
         T::dtype()
     }
@@ -1806,8 +1828,9 @@ impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for SparseCompare<FE, 
 }
 
 #[async_trait]
-impl<FE, T> SparseInstance for SparseCompare<FE, T>
+impl<Txn, FE, T> SparseInstance for SparseCompare<Txn, FE, T>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType,
 {
@@ -1868,7 +1891,12 @@ where
 }
 
 #[async_trait]
-impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for SparseCompare<FE, T> {
+impl<Txn, FE, T> TensorPermitRead for SparseCompare<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype,
+{
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         // always acquire these in-order to avoid the risk of a deadlock
         let mut left = self.left.read_permit(txn_id, range.clone()).await?;
@@ -1878,26 +1906,26 @@ impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for SparseCompare<FE, T> {
     }
 }
 
-impl<FE, T: CDatatype> From<SparseCompare<FE, T>> for SparseAccess<FE, T> {
-    fn from(compare: SparseCompare<FE, T>) -> Self {
+impl<Txn, FE, T: CDatatype> From<SparseCompare<Txn, FE, T>> for SparseAccess<Txn, FE, T> {
+    fn from(compare: SparseCompare<Txn, FE, T>) -> Self {
         Self::Compare(Box::new(compare))
     }
 }
 
-impl<FE, T: CDatatype> fmt::Debug for SparseCompare<FE, T> {
+impl<Txn, FE, T: CDatatype> fmt::Debug for SparseCompare<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} and {:?}", self.left, self.right)
     }
 }
 
-pub struct SparseCompareLeft<FE, T: CDatatype> {
-    left: SparseAccessCast<FE>,
-    right: SparseAccessCast<FE>,
+pub struct SparseCompareLeft<Txn, FE, T: CDatatype> {
+    left: SparseAccessCast<Txn, FE>,
+    right: SparseAccessCast<Txn, FE>,
     block_op: fn(Block, Block) -> TCResult<Array<T>>,
     value_op: fn(Number, Number) -> T,
 }
 
-impl<FE, T: CDatatype> Clone for SparseCompareLeft<FE, T> {
+impl<Txn, FE, T: CDatatype> Clone for SparseCompareLeft<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
             left: self.left.clone(),
@@ -1908,7 +1936,7 @@ impl<FE, T: CDatatype> Clone for SparseCompareLeft<FE, T> {
     }
 }
 
-impl<FE: ThreadSafe, T: CDatatype> SparseCompareLeft<FE, T> {
+impl<Txn: ThreadSafe, FE: ThreadSafe, T: CDatatype> SparseCompareLeft<Txn, FE, T> {
     pub fn new<L, R>(
         left: L,
         right: R,
@@ -1916,8 +1944,8 @@ impl<FE: ThreadSafe, T: CDatatype> SparseCompareLeft<FE, T> {
         value_op: fn(Number, Number) -> T,
     ) -> TCResult<Self>
     where
-        L: Into<SparseAccessCast<FE>>,
-        R: Into<SparseAccessCast<FE>>,
+        L: Into<SparseAccessCast<Txn, FE>>,
+        R: Into<SparseAccessCast<Txn, FE>>,
     {
         let left = left.into();
         let right = right.into();
@@ -1939,8 +1967,9 @@ impl<FE: ThreadSafe, T: CDatatype> SparseCompareLeft<FE, T> {
     }
 }
 
-impl<FE, T> TensorInstance for SparseCompareLeft<FE, T>
+impl<Txn, FE, T> TensorInstance for SparseCompareLeft<Txn, FE, T>
 where
+    Txn: ThreadSafe,
     FE: ThreadSafe,
     T: CDatatype + DType,
 {
@@ -1955,8 +1984,9 @@ where
 }
 
 #[async_trait]
-impl<FE, T> SparseInstance for SparseCompareLeft<FE, T>
+impl<Txn, FE, T> SparseInstance for SparseCompareLeft<Txn, FE, T>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType,
 {
@@ -2017,7 +2047,12 @@ where
 }
 
 #[async_trait]
-impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for SparseCompareLeft<FE, T> {
+impl<Txn, FE, T> TensorPermitRead for SparseCompareLeft<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype,
+{
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         // always acquire these locks in-order to avoid the risk of a deadlock
         let mut left = self.left.read_permit(txn_id, range.clone()).await?;
@@ -2027,26 +2062,26 @@ impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for SparseCompareLeft<FE, T>
     }
 }
 
-impl<FE, T: CDatatype> From<SparseCompareLeft<FE, T>> for SparseAccess<FE, T> {
-    fn from(compare: SparseCompareLeft<FE, T>) -> Self {
+impl<Txn, FE, T: CDatatype> From<SparseCompareLeft<Txn, FE, T>> for SparseAccess<Txn, FE, T> {
+    fn from(compare: SparseCompareLeft<Txn, FE, T>) -> Self {
         Self::CompareLeft(Box::new(compare))
     }
 }
 
-impl<FE, T: CDatatype> fmt::Debug for SparseCompareLeft<FE, T> {
+impl<Txn, FE, T: CDatatype> fmt::Debug for SparseCompareLeft<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} and {:?}", self.left, self.right)
     }
 }
 
-pub struct SparseCompareConst<FE, T: CDatatype> {
-    left: SparseAccessCast<FE>,
+pub struct SparseCompareConst<Txn, FE, T: CDatatype> {
+    left: SparseAccessCast<Txn, FE>,
     right: Number,
     block_op: fn(Block, Number) -> TCResult<Array<T>>,
     value_op: fn(Number, Number) -> T,
 }
 
-impl<FE, T: CDatatype> Clone for SparseCompareConst<FE, T> {
+impl<Txn, FE, T: CDatatype> Clone for SparseCompareConst<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
             left: self.left.clone(),
@@ -2057,7 +2092,7 @@ impl<FE, T: CDatatype> Clone for SparseCompareConst<FE, T> {
     }
 }
 
-impl<FE, T: CDatatype> SparseCompareConst<FE, T> {
+impl<Txn, FE, T: CDatatype> SparseCompareConst<Txn, FE, T> {
     pub fn new<L>(
         left: L,
         right: Number,
@@ -2065,7 +2100,7 @@ impl<FE, T: CDatatype> SparseCompareConst<FE, T> {
         value_op: fn(Number, Number) -> T,
     ) -> Self
     where
-        L: Into<SparseAccessCast<FE>>,
+        L: Into<SparseAccessCast<Txn, FE>>,
     {
         Self {
             left: left.into(),
@@ -2076,7 +2111,12 @@ impl<FE, T: CDatatype> SparseCompareConst<FE, T> {
     }
 }
 
-impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for SparseCompareConst<FE, T> {
+impl<Txn, FE, T> TensorInstance for SparseCompareConst<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn dtype(&self) -> NumberType {
         T::dtype()
     }
@@ -2087,8 +2127,9 @@ impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for SparseCompareConst
 }
 
 #[async_trait]
-impl<FE, T> SparseInstance for SparseCompareConst<FE, T>
+impl<Txn, FE, T> SparseInstance for SparseCompareConst<Txn, FE, T>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
@@ -2148,19 +2189,24 @@ where
 }
 
 #[async_trait]
-impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for SparseCompareConst<FE, T> {
+impl<Txn, FE, T> TensorPermitRead for SparseCompareConst<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype,
+{
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.left.read_permit(txn_id, range).await
     }
 }
 
-impl<FE, T: CDatatype> From<SparseCompareConst<FE, T>> for SparseAccess<FE, T> {
-    fn from(compare: SparseCompareConst<FE, T>) -> Self {
+impl<Txn, FE, T: CDatatype> From<SparseCompareConst<Txn, FE, T>> for SparseAccess<Txn, FE, T> {
+    fn from(compare: SparseCompareConst<Txn, FE, T>) -> Self {
         Self::CompareConst(Box::new(compare))
     }
 }
 
-impl<FE, T: CDatatype> fmt::Debug for SparseCompareConst<FE, T> {
+impl<Txn, FE, T: CDatatype> fmt::Debug for SparseCompareConst<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} with {:?}", self.left, self.right)
     }
@@ -2367,10 +2413,10 @@ where
     }
 }
 
-impl<FE, T, S> From<SparseCow<FE, T, S>> for SparseAccess<FE, T>
+impl<Txn, FE, T, S> From<SparseCow<FE, T, S>> for SparseAccess<Txn, FE, T>
 where
     T: CDatatype,
-    S: Into<SparseAccess<FE, T>>,
+    S: Into<SparseAccess<Txn, FE, T>>,
 {
     fn from(cow: SparseCow<FE, T, S>) -> Self {
         SparseAccess::Cow(Box::new(SparseCow {
@@ -2665,10 +2711,10 @@ impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for SparseExpand<S> {
     }
 }
 
-impl<FE, T, S> From<SparseExpand<S>> for SparseAccess<FE, T>
+impl<Txn, FE, T, S> From<SparseExpand<S>> for SparseAccess<Txn, FE, T>
 where
     T: CDatatype,
-    S: Into<SparseAccess<FE, T>>,
+    S: Into<SparseAccess<Txn, FE, T>>,
 {
     fn from(expand: SparseExpand<S>) -> Self {
         Self::Expand(Box::new(SparseExpand {
@@ -2822,8 +2868,10 @@ where
     }
 }
 
-impl<FE, S: Into<SparseAccess<FE, T>>, T: CDatatype> From<SparseReduce<S, T>>
-    for SparseAccess<FE, T>
+impl<Txn, FE, S, T> From<SparseReduce<S, T>> for SparseAccess<Txn, FE, T>
+where
+    S: Into<SparseAccess<Txn, FE, T>>,
+    T: CDatatype,
 {
     fn from(reduce: SparseReduce<S, T>) -> Self {
         Self::Reduce(Box::new(SparseReduce {
@@ -3004,10 +3052,10 @@ impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for SparseReshape<S> {
     }
 }
 
-impl<FE, T, S> From<SparseReshape<S>> for SparseAccess<FE, T>
+impl<Txn, FE, T, S> From<SparseReshape<S>> for SparseAccess<Txn, FE, T>
 where
     T: CDatatype,
-    S: Into<SparseAccess<FE, T>>,
+    S: Into<SparseAccess<Txn, FE, T>>,
 {
     fn from(reshape: SparseReshape<S>) -> Self {
         Self::Reshape(Box::new(SparseReshape {
@@ -3150,10 +3198,10 @@ where
     }
 }
 
-impl<FE, T, S> From<SparseSlice<S>> for SparseAccess<FE, T>
+impl<Txn, FE, T, S> From<SparseSlice<S>> for SparseAccess<Txn, FE, T>
 where
     T: CDatatype,
-    S: Into<SparseAccess<FE, T>>,
+    S: Into<SparseAccess<Txn, FE, T>>,
 {
     fn from(slice: SparseSlice<S>) -> Self {
         Self::Slice(Box::new(SparseSlice {
@@ -3323,10 +3371,10 @@ impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for SparseTranspose<S> {
     }
 }
 
-impl<FE, T, S> From<SparseTranspose<S>> for SparseAccess<FE, T>
+impl<Txn, FE, T, S> From<SparseTranspose<S>> for SparseAccess<Txn, FE, T>
 where
     T: CDatatype,
-    S: Into<SparseAccess<FE, T>>,
+    S: Into<SparseAccess<Txn, FE, T>>,
 {
     fn from(transpose: SparseTranspose<S>) -> Self {
         Self::Transpose(Box::new(SparseTranspose {
@@ -3427,8 +3475,10 @@ impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for SparseUnary<S, T> {
     }
 }
 
-impl<FE, S: Into<SparseAccess<FE, T>>, T: CDatatype> From<SparseUnary<S, T>>
-    for SparseAccess<FE, T>
+impl<Txn, FE, S, T> From<SparseUnary<S, T>> for SparseAccess<Txn, FE, T>
+where
+    S: Into<SparseAccess<Txn, FE, T>>,
+    T: CDatatype,
 {
     fn from(unary: SparseUnary<S, T>) -> Self {
         Self::Unary(Box::new(SparseUnary {
@@ -3445,13 +3495,13 @@ impl<S: fmt::Debug, T: CDatatype> fmt::Debug for SparseUnary<S, T> {
     }
 }
 
-pub struct SparseUnaryCast<FE, T: CDatatype> {
-    source: SparseAccessCast<FE>,
+pub struct SparseUnaryCast<Txn, FE, T: CDatatype> {
+    source: SparseAccessCast<Txn, FE>,
     block_op: fn(Block) -> TCResult<Array<T>>,
     value_op: fn(Number) -> T,
 }
 
-impl<FE, T: CDatatype> Clone for SparseUnaryCast<FE, T> {
+impl<Txn, FE, T: CDatatype> Clone for SparseUnaryCast<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
@@ -3461,8 +3511,8 @@ impl<FE, T: CDatatype> Clone for SparseUnaryCast<FE, T> {
     }
 }
 
-impl<FE, T: CDatatype> SparseUnaryCast<FE, T> {
-    pub fn new<S: Into<SparseAccessCast<FE>>>(
+impl<Txn, FE, T: CDatatype> SparseUnaryCast<Txn, FE, T> {
+    pub fn new<S: Into<SparseAccessCast<Txn, FE>>>(
         source: S,
         block_op: fn(Block) -> TCResult<Array<T>>,
         value_op: fn(Number) -> T,
@@ -3489,8 +3539,8 @@ macro_rules! block_f32_cast {
     };
 }
 
-impl<FE> SparseUnaryCast<FE, f32> {
-    pub fn asin_f32<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+impl<Txn, FE> SparseUnaryCast<Txn, FE, f32> {
+    pub fn asin_f32<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3504,7 +3554,7 @@ impl<FE> SparseUnaryCast<FE, f32> {
         }
     }
 
-    pub fn sin_f32<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn sin_f32<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3518,7 +3568,7 @@ impl<FE> SparseUnaryCast<FE, f32> {
         }
     }
 
-    pub fn sinh_f32<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn sinh_f32<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3532,7 +3582,7 @@ impl<FE> SparseUnaryCast<FE, f32> {
         }
     }
 
-    pub fn acos_f32<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn acos_f32<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3546,7 +3596,7 @@ impl<FE> SparseUnaryCast<FE, f32> {
         }
     }
 
-    pub fn cos_f32<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn cos_f32<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3560,7 +3610,7 @@ impl<FE> SparseUnaryCast<FE, f32> {
         }
     }
 
-    pub fn cosh_f32<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn cosh_f32<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3574,7 +3624,7 @@ impl<FE> SparseUnaryCast<FE, f32> {
         }
     }
 
-    pub fn atan_f32<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn atan_f32<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3588,7 +3638,7 @@ impl<FE> SparseUnaryCast<FE, f32> {
         }
     }
 
-    pub fn tan_f32<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn tan_f32<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3602,7 +3652,7 @@ impl<FE> SparseUnaryCast<FE, f32> {
         }
     }
 
-    pub fn tanh_f32<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn tanh_f32<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3628,8 +3678,8 @@ macro_rules! block_f64_cast {
     };
 }
 
-impl<FE> SparseUnaryCast<FE, f64> {
-    pub fn asin_f64<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+impl<Txn, FE> SparseUnaryCast<Txn, FE, f64> {
+    pub fn asin_f64<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3643,7 +3693,7 @@ impl<FE> SparseUnaryCast<FE, f64> {
         }
     }
 
-    pub fn sin_f64<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn sin_f64<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3657,7 +3707,7 @@ impl<FE> SparseUnaryCast<FE, f64> {
         }
     }
 
-    pub fn sinh_f64<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn sinh_f64<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3671,7 +3721,7 @@ impl<FE> SparseUnaryCast<FE, f64> {
         }
     }
 
-    pub fn acos_f64<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn acos_f64<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3685,7 +3735,7 @@ impl<FE> SparseUnaryCast<FE, f64> {
         }
     }
 
-    pub fn cos_f64<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn cos_f64<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3699,7 +3749,7 @@ impl<FE> SparseUnaryCast<FE, f64> {
         }
     }
 
-    pub fn cosh_f64<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn cosh_f64<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3713,7 +3763,7 @@ impl<FE> SparseUnaryCast<FE, f64> {
         }
     }
 
-    pub fn atan_f64<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn atan_f64<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3727,7 +3777,7 @@ impl<FE> SparseUnaryCast<FE, f64> {
         }
     }
 
-    pub fn tan_f64<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn tan_f64<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3741,7 +3791,7 @@ impl<FE> SparseUnaryCast<FE, f64> {
         }
     }
 
-    pub fn tanh_f64<S: Into<SparseAccessCast<FE>>>(source: S) -> Self {
+    pub fn tanh_f64<S: Into<SparseAccessCast<Txn, FE>>>(source: S) -> Self {
         Self {
             source: source.into(),
             block_op: |block| {
@@ -3756,7 +3806,12 @@ impl<FE> SparseUnaryCast<FE, f64> {
     }
 }
 
-impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for SparseUnaryCast<FE, T> {
+impl<Txn, FE, T> TensorInstance for SparseUnaryCast<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn dtype(&self) -> NumberType {
         T::dtype()
     }
@@ -3768,8 +3823,9 @@ impl<FE: ThreadSafe, T: CDatatype + DType> TensorInstance for SparseUnaryCast<FE
 }
 
 #[async_trait]
-impl<FE, T> SparseInstance for SparseUnaryCast<FE, T>
+impl<Txn, FE, T> SparseInstance for SparseUnaryCast<Txn, FE, T>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType,
 {
@@ -3817,20 +3873,25 @@ where
 }
 
 #[async_trait]
-impl<FE: ThreadSafe, T: CDatatype> TensorPermitRead for SparseUnaryCast<FE, T> {
+impl<Txn, FE, T> TensorPermitRead for SparseUnaryCast<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype,
+{
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         let source = &self.source;
         access_cast_dispatch!(source, this, this.read_permit(txn_id, range).await)
     }
 }
 
-impl<FE, T: CDatatype> From<SparseUnaryCast<FE, T>> for SparseAccess<FE, T> {
-    fn from(unary: SparseUnaryCast<FE, T>) -> Self {
+impl<Txn, FE, T: CDatatype> From<SparseUnaryCast<Txn, FE, T>> for SparseAccess<Txn, FE, T> {
+    fn from(unary: SparseUnaryCast<Txn, FE, T>) -> Self {
         Self::UnaryCast(Box::new(unary))
     }
 }
 
-impl<FE, T: CDatatype> fmt::Debug for SparseUnaryCast<FE, T> {
+impl<Txn, FE, T: CDatatype> fmt::Debug for SparseUnaryCast<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "unary operation on {:?}", self.source)
     }

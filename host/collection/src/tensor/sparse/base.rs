@@ -33,7 +33,7 @@ const CANON: Label = label("canon");
 const FILLED: Label = label("filled");
 const ZEROS: Label = label("zeros");
 
-type Version<FE, T> = SparseCow<FE, T, SparseAccess<FE, T>>;
+type Version<Txn, FE, T> = SparseCow<FE, T, SparseAccess<Txn, FE, T>>;
 
 struct Delta<FE, T> {
     filled: SparseFile<FE, T>,
@@ -49,16 +49,18 @@ impl<FE, T> Clone for Delta<FE, T> {
     }
 }
 
-struct State<FE, T> {
+struct State<Txn, FE, T> {
     commits: OrdHashSet<TxnId>,
     deltas: OrdHashMap<TxnId, Delta<FE, T>>,
     pending: OrdHashMap<TxnId, Delta<FE, T>>,
     versions: DirLock<FE>,
     finalized: Option<TxnId>,
+    phantom: PhantomData<Txn>,
 }
 
-impl<FE, T> State<FE, T>
+impl<Txn, FE, T> State<Txn, FE, T>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType,
 {
@@ -66,8 +68,8 @@ where
     fn latest_version(
         &self,
         txn_id: TxnId,
-        canon: SparseAccess<FE, T>,
-    ) -> TCResult<SparseAccess<FE, T>> {
+        canon: SparseAccess<Txn, FE, T>,
+    ) -> TCResult<SparseAccess<Txn, FE, T>> {
         if self.finalized > Some(txn_id) {
             return Err(conflict!("sparse tensor is already finalized at {txn_id}"));
         }
@@ -88,8 +90,8 @@ where
     fn pending_version(
         &mut self,
         txn_id: TxnId,
-        canon: SparseAccess<FE, T>,
-    ) -> TCResult<Version<FE, T>> {
+        canon: SparseAccess<Txn, FE, T>,
+    ) -> TCResult<Version<Txn, FE, T>> {
         if self.commits.contains(&txn_id) {
             return Err(conflict!("{} has already been committed", txn_id));
         } else if self.finalized > Some(txn_id) {
@@ -135,8 +137,7 @@ where
 pub struct SparseBase<Txn, FE, T> {
     dir: DirLock<FE>,
     canon: SparseVersion<FE, T>,
-    state: Arc<RwLock<State<FE, T>>>,
-    phantom: PhantomData<(Txn, T)>,
+    state: Arc<RwLock<State<Txn, FE, T>>>,
 }
 
 impl<Txn, FE, T> Clone for SparseBase<Txn, FE, T> {
@@ -145,17 +146,17 @@ impl<Txn, FE, T> Clone for SparseBase<Txn, FE, T> {
             dir: self.dir.clone(),
             canon: self.canon.clone(),
             state: self.state.clone(),
-            phantom: PhantomData,
         }
     }
 }
 
 impl<Txn, FE, T> SparseBase<Txn, FE, T>
 where
+    Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType,
 {
-    fn access(&self, txn_id: TxnId) -> TCResult<SparseAccess<FE, T>> {
+    fn access(&self, txn_id: TxnId) -> TCResult<SparseAccess<Txn, FE, T>> {
         let state = self.state.read().expect("sparse state");
         state.latest_version(txn_id, self.canon.clone().into())
     }
@@ -175,13 +176,13 @@ where
             pending: OrdHashMap::new(),
             versions,
             finalized: None,
+            phantom: PhantomData,
         };
 
         Self {
             dir,
             state: Arc::new(RwLock::new(state)),
             canon: SparseVersion::new(canon, semaphore),
-            phantom: PhantomData,
         }
     }
 }
@@ -587,12 +588,8 @@ where
     }
 }
 
-impl<Txn, FE, T> fmt::Debug for SparseBase<Txn, FE, T>
-where
-    FE: ThreadSafe,
-    T: CDatatype + DType,
-{
+impl<Txn, FE, T> fmt::Debug for SparseBase<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "sparse tensor of shape {:?}", self.canon.shape())
+        write!(f, "transactional sparse tensor",)
     }
 }
