@@ -1440,6 +1440,121 @@ where
     }
 }
 
+#[async_trait]
+impl<Txn, FE> TensorReduce for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Reduce = Self;
+
+    async fn all(self, txn_id: TxnId) -> TCResult<bool> {
+        match self {
+            Self::Dense(this) => this.into_view().all(txn_id).await,
+            Self::Sparse(this) => this.into_view().all(txn_id).await,
+        }
+    }
+
+    async fn any(self, txn_id: TxnId) -> TCResult<bool> {
+        match self {
+            Self::Dense(this) => this.into_view().any(txn_id).await,
+            Self::Sparse(this) => this.into_view().any(txn_id).await,
+        }
+    }
+
+    fn max(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .max(axes, keepdims)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .max(axes, keepdims)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    async fn max_all(self, txn_id: TxnId) -> TCResult<Number> {
+        match self {
+            Self::Dense(this) => this.into_view().max_all(txn_id).await,
+            Self::Sparse(this) => this.into_view().max_all(txn_id).await,
+        }
+    }
+
+    fn min(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .min(axes, keepdims)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .min(axes, keepdims)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    async fn min_all(self, txn_id: TxnId) -> TCResult<Number> {
+        match self {
+            Self::Dense(this) => this.into_view().min_all(txn_id).await,
+            Self::Sparse(this) => this.into_view().min_all(txn_id).await,
+        }
+    }
+
+    fn product(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .product(axes, keepdims)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .product(axes, keepdims)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    async fn product_all(self, txn_id: TxnId) -> TCResult<Number> {
+        match self {
+            Self::Dense(this) => this.into_view().product_all(txn_id).await,
+            Self::Sparse(this) => this.into_view().product_all(txn_id).await,
+        }
+    }
+
+    fn sum(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .sum(axes, keepdims)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .sum(axes, keepdims)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    async fn sum_all(self, txn_id: TxnId) -> TCResult<Number> {
+        match self {
+            Self::Dense(this) => this.into_view().sum_all(txn_id).await,
+            Self::Sparse(this) => this.into_view().sum_all(txn_id).await,
+        }
+    }
+}
+
 impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Tensor<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
