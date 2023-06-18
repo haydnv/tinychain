@@ -892,10 +892,7 @@ where
     }
 }
 
-impl<Txn, FE, A> From<A> for SparseTensor<Txn, FE, A>
-where
-    A: SparseInstance,
-{
+impl<Txn, FE, A> From<A> for SparseTensor<Txn, FE, A> {
     fn from(accessor: A) -> Self {
         Self {
             accessor,
@@ -1195,6 +1192,29 @@ impl<Txn, FE> From<base::SparseBase<Txn, FE, f32>> for SparseBase<Txn, FE> {
 impl<Txn, FE> From<base::SparseBase<Txn, FE, f64>> for SparseBase<Txn, FE> {
     fn from(base: base::SparseBase<Txn, FE, f64>) -> Self {
         Self::F64(base)
+    }
+}
+
+impl<Txn, FE> From<SparseBase<Txn, FE>> for SparseView<Txn, FE> {
+    fn from(base: SparseBase<Txn, FE>) -> Self {
+        match base {
+            SparseBase::Bool(this) => SparseView::Bool(sparse_from(this.into())),
+            SparseBase::C32((re, im)) => {
+                SparseView::C32((sparse_from(re.into()), sparse_from(im.into())))
+            }
+            SparseBase::C64((re, im)) => {
+                SparseView::C64((sparse_from(re.into()), sparse_from(im.into())))
+            }
+            SparseBase::F32(this) => SparseView::F32(sparse_from(this.into())),
+            SparseBase::F64(this) => SparseView::F64(sparse_from(this.into())),
+            SparseBase::I16(this) => SparseView::I16(sparse_from(this.into())),
+            SparseBase::I32(this) => SparseView::I32(sparse_from(this.into())),
+            SparseBase::I64(this) => SparseView::I64(sparse_from(this.into())),
+            SparseBase::U8(this) => SparseView::U8(sparse_from(this.into())),
+            SparseBase::U16(this) => SparseView::U16(sparse_from(this.into())),
+            SparseBase::U32(this) => SparseView::U32(sparse_from(this.into())),
+            SparseBase::U64(this) => SparseView::U64(sparse_from(this.into())),
+        }
     }
 }
 

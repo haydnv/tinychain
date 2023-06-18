@@ -474,6 +474,12 @@ where
     }
 }
 
+impl<Txn, FE, T: CDatatype> From<DenseBase<Txn, FE, T>> for DenseAccess<Txn, FE, T> {
+    fn from(base: DenseBase<Txn, FE, T>) -> Self {
+        Self::Base(base)
+    }
+}
+
 impl<Txn, FE, T> fmt::Debug for DenseBase<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "transactional dense tensor")

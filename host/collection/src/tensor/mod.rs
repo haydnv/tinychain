@@ -15,7 +15,9 @@ use tcgeneric::{
     label, path_label, Class, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
 };
 
+pub use dense::{DenseBase, DenseView};
 pub use shape::{AxisRange, Range, Shape};
+pub use sparse::{SparseBase, SparseView};
 
 mod block;
 mod complex;
@@ -477,6 +479,42 @@ pub trait TensorUnaryBoolean {
 
     /// Element-wise logical not
     fn not(self) -> TCResult<Self::Unary>;
+}
+
+/// A dense [`Tensor`]
+pub enum Dense<Txn, FE> {
+    Base(DenseBase<Txn, FE>),
+    View(DenseView<Txn, FE>),
+}
+
+impl<Txn, FE> From<Dense<Txn, FE>> for DenseView<Txn, FE> {
+    fn from(dense: Dense<Txn, FE>) -> Self {
+        match dense {
+            Dense::Base(base) => base.into(),
+            Dense::View(view) => view,
+        }
+    }
+}
+
+/// A sparse [`Tensor`]
+pub enum Sparse<Txn, FE> {
+    Base(SparseBase<Txn, FE>),
+    View(SparseView<Txn, FE>),
+}
+
+impl<Txn, FE> From<Sparse<Txn, FE>> for SparseView<Txn, FE> {
+    fn from(sparse: Sparse<Txn, FE>) -> Self {
+        match sparse {
+            Sparse::Base(base) => base.into(),
+            Sparse::View(view) => view.into(),
+        }
+    }
+}
+
+/// An n-dimensional array of numbers which supports transactional reads and writes
+pub enum Tensor<Txn, FE> {
+    Dense(Dense<Txn, FE>),
+    Sparse(Sparse<Txn, FE>),
 }
 
 #[inline]

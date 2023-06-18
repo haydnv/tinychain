@@ -1078,6 +1078,29 @@ impl<Txn, FE> From<base::DenseBase<Txn, FE, f64>> for DenseBase<Txn, FE> {
     }
 }
 
+impl<Txn, FE> From<DenseBase<Txn, FE>> for DenseView<Txn, FE> {
+    fn from(base: DenseBase<Txn, FE>) -> Self {
+        match base {
+            DenseBase::Bool(this) => DenseView::Bool(dense_from(this.into())),
+            DenseBase::C32((re, im)) => {
+                DenseView::C32((dense_from(re.into()), dense_from(im.into())))
+            }
+            DenseBase::C64((re, im)) => {
+                DenseView::C64((dense_from(re.into()), dense_from(im.into())))
+            }
+            DenseBase::F32(this) => DenseView::F32(dense_from(this.into())),
+            DenseBase::F64(this) => DenseView::F64(dense_from(this.into())),
+            DenseBase::I16(this) => DenseView::I16(dense_from(this.into())),
+            DenseBase::I32(this) => DenseView::I32(dense_from(this.into())),
+            DenseBase::I64(this) => DenseView::I64(dense_from(this.into())),
+            DenseBase::U8(this) => DenseView::U8(dense_from(this.into())),
+            DenseBase::U16(this) => DenseView::U16(dense_from(this.into())),
+            DenseBase::U32(this) => DenseView::U32(dense_from(this.into())),
+            DenseBase::U64(this) => DenseView::U64(dense_from(this.into())),
+        }
+    }
+}
+
 #[inline]
 pub fn dense_from<Txn, FE, A, T>(
     tensor: DenseTensor<Txn, FE, A>,
