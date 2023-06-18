@@ -1226,7 +1226,7 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for SparseBase<Txn, FE> {
             this.fmt(f),
             write!(
                 f,
-                "a transactional complex tensor of type {:?}",
+                "a complex transactional sparse tensor of type {:?}",
                 this.0.dtype()
             ),
             this.fmt(f)

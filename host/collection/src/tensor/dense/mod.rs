@@ -1101,6 +1101,22 @@ impl<Txn, FE> From<DenseBase<Txn, FE>> for DenseView<Txn, FE> {
     }
 }
 
+impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for DenseBase<Txn, FE> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        base_dispatch!(
+            self,
+            this,
+            this.fmt(f),
+            write!(
+                f,
+                "a complex transactional dense tensor of type {:?}",
+                this.0.dtype()
+            ),
+            this.fmt(f)
+        )
+    }
+}
+
 #[inline]
 pub fn dense_from<Txn, FE, A, T>(
     tensor: DenseTensor<Txn, FE, A>,

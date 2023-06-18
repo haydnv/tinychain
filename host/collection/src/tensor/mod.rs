@@ -275,30 +275,6 @@ pub trait TensorDiagonal {
     fn diagonal(self) -> TCResult<Self::Diagonal>;
 }
 
-/// [`Tensor`] read operations
-#[async_trait]
-pub trait TensorRead {
-    /// Read a single value from this [`Tensor`].
-    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number>;
-}
-
-/// [`Tensor`] write operations
-#[async_trait]
-pub trait TensorWrite {
-    /// Write a single value to the slice of this [`Tensor`] with the given [`Range`].
-    async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()>;
-
-    /// Overwrite a single element of this [`Tensor`].
-    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>;
-}
-
-/// [`Tensor`] I/O operations which accept another [`Tensor`] as an argument
-#[async_trait]
-pub trait TensorWriteDual<O> {
-    /// Overwrite the slice of this [`Tensor`] given by [`Range`] with the given `value`.
-    async fn write(self, txn_id: TxnId, range: Range, value: O) -> TCResult<()>;
-}
-
 /// [`Tensor`] math operations
 pub trait TensorMath<O> {
     /// The result type of a math operation
@@ -348,6 +324,13 @@ pub trait TensorMathConst {
 
     /// Subtract `other` from `self`.
     fn sub_const(self, other: Number) -> TCResult<Self::Combine>;
+}
+
+/// [`Tensor`] read operations
+#[async_trait]
+pub trait TensorRead {
+    /// Read a single value from this [`Tensor`].
+    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number>;
 }
 
 /// [`Tensor`] reduction operations
@@ -482,6 +465,23 @@ pub trait TensorUnaryBoolean {
     fn not(self) -> TCResult<Self::Unary>;
 }
 
+/// [`Tensor`] write operations
+#[async_trait]
+pub trait TensorWrite {
+    /// Write a single value to the slice of this [`Tensor`] with the given [`Range`].
+    async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()>;
+
+    /// Overwrite a single element of this [`Tensor`].
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()>;
+}
+
+/// [`Tensor`] I/O operations which accept another [`Tensor`] as an argument
+#[async_trait]
+pub trait TensorWriteDual<O> {
+    /// Overwrite the slice of this [`Tensor`] given by [`Range`] with the given `value`.
+    async fn write(self, txn_id: TxnId, range: Range, value: O) -> TCResult<()>;
+}
+
 /// A dense [`Tensor`]
 pub enum Dense<Txn, FE> {
     Base(DenseBase<Txn, FE>),
@@ -515,6 +515,15 @@ impl<Txn, FE> From<Dense<Txn, FE>> for DenseView<Txn, FE> {
         match dense {
             Dense::Base(base) => base.into(),
             Dense::View(view) => view,
+        }
+    }
+}
+
+impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Dense<Txn, FE> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Base(base) => base.fmt(f),
+            Self::View(view) => view.fmt(f),
         }
     }
 }
@@ -759,6 +768,7 @@ where
             Self::Dense(this) => TensorCast::cast_into(this.into_view(), dtype)
                 .map(Dense::View)
                 .map(Self::Dense),
+
             Self::Sparse(this) => TensorCast::cast_into(this.into_view(), dtype)
                 .map(Sparse::View)
                 .map(Self::Sparse),
@@ -1108,6 +1118,191 @@ where
                 .map(Self::Dense),
 
             Self::Sparse(sparse) => Err(not_implemented!("diagonal of {:?}", sparse)),
+        }
+    }
+}
+
+impl<Txn, FE> TensorMath<Self> for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Combine = Self;
+    type LeftCombine = Self;
+
+    fn add(self, other: Self) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .add(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .add(that.into_view().into_dense())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .into_dense()
+                    .add(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .add(that.into_view())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            },
+        }
+    }
+
+    fn div(self, other: Self) -> TCResult<Self::LeftCombine> {
+        if let Self::Dense(that) = other {
+            match self {
+                Self::Dense(this) => this
+                    .into_view()
+                    .div(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(this) => this
+                    .into_view()
+                    .div(that.into_view().into_sparse())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            }
+        } else {
+            Err(bad_request!("cannot divide by {other:?}"))
+        }
+    }
+
+    fn log(self, base: Self) -> TCResult<Self::LeftCombine> {
+        if let Self::Dense(that) = base {
+            match self {
+                Self::Dense(this) => this
+                    .into_view()
+                    .log(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(this) => this
+                    .into_view()
+                    .log(that.into_view().into_sparse())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            }
+        } else {
+            Err(bad_request!("log base {base:?} is undefined"))
+        }
+    }
+
+    fn mul(self, other: Self) -> TCResult<Self::LeftCombine> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .mul(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .into_sparse()
+                    .mul(that.into())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .mul(that.into_view().into_sparse())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .mul(that.into())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            },
+        }
+    }
+
+    fn pow(self, other: Self) -> TCResult<Self::LeftCombine> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .pow(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .pow(that.into_view().into_dense())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .pow(that.into_view().into_sparse())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .pow(that.into())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            },
+        }
+    }
+
+    fn sub(self, other: Self) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .sub(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .sub(that.into_view().into_dense())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .into_dense()
+                    .sub(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .sub(that.into())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            },
+        }
+    }
+}
+
+impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Tensor<Txn, FE> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Dense(this) => this.fmt(f),
+            Self::Sparse(this) => this.fmt(f),
         }
     }
 }
