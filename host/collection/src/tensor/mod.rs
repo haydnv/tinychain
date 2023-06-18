@@ -643,20 +643,20 @@ where
     fn and(self, other: Self) -> TCResult<Self::LeftCombine> {
         match self {
             Self::Dense(this) => match other {
-                Self::Dense(that) => this.into_view().and(that.into()).map(Tensor::from),
+                Self::Dense(that) => this.into_view().and(that.into()).map(Self::from),
 
                 Self::Sparse(that) => that
                     .into_view()
                     .and(this.into_view().into_sparse())
-                    .map(Tensor::from),
+                    .map(Self::from),
             },
             Self::Sparse(this) => match other {
                 Self::Dense(that) => this
                     .into_view()
                     .and(that.into_view().into_sparse())
-                    .map(Tensor::from),
+                    .map(Self::from),
 
-                Self::Sparse(that) => this.into_view().and(that.into()).map(Tensor::from),
+                Self::Sparse(that) => this.into_view().and(that.into()).map(Self::from),
             },
         }
     }
@@ -664,21 +664,21 @@ where
     fn or(self, other: Self) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(this) => match other {
-                Self::Dense(that) => this.into_view().or(that.into()).map(Tensor::from),
+                Self::Dense(that) => this.into_view().or(that.into()).map(Self::from),
 
                 Self::Sparse(that) => this
                     .into_view()
                     .or(that.into_view().into_dense())
-                    .map(Tensor::from),
+                    .map(Self::from),
             },
             Self::Sparse(this) => match other {
                 Self::Dense(that) => this
                     .into_view()
                     .into_dense()
                     .or(that.into())
-                    .map(Tensor::from),
+                    .map(Self::from),
 
-                Self::Sparse(that) => this.into_view().or(that.into()).map(Tensor::from),
+                Self::Sparse(that) => this.into_view().or(that.into()).map(Self::from),
             },
         }
     }
@@ -686,21 +686,21 @@ where
     fn xor(self, other: Self) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(this) => match other {
-                Self::Dense(that) => this.into_view().xor(that.into()).map(Tensor::from),
+                Self::Dense(that) => this.into_view().xor(that.into()).map(Self::from),
 
                 Self::Sparse(that) => this
                     .into_view()
                     .xor(that.into_view().into_dense())
-                    .map(Tensor::from),
+                    .map(Self::from),
             },
             Self::Sparse(this) => match other {
                 Self::Dense(that) => this
                     .into_view()
                     .into_dense()
                     .xor(that.into())
-                    .map(Tensor::from),
+                    .map(Self::from),
 
-                Self::Sparse(that) => this.into_view().xor(that.into()).map(Tensor::from),
+                Self::Sparse(that) => this.into_view().xor(that.into()).map(Self::from),
             },
         }
     }
@@ -715,22 +715,22 @@ where
 
     fn and_const(self, other: Number) -> TCResult<Self::Combine> {
         match self {
-            Self::Dense(this) => this.into_view().and_const(other).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().and_const(other).map(Tensor::from),
+            Self::Dense(this) => this.into_view().and_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().and_const(other).map(Self::from),
         }
     }
 
     fn or_const(self, other: Number) -> TCResult<Self::Combine> {
         match self {
-            Self::Dense(this) => this.into_view().or_const(other).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().or_const(other).map(Tensor::from),
+            Self::Dense(this) => this.into_view().or_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().or_const(other).map(Self::from),
         }
     }
 
     fn xor_const(self, other: Number) -> TCResult<Self::Combine> {
         match self {
-            Self::Dense(this) => this.into_view().xor_const(other).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().xor_const(other).map(Tensor::from),
+            Self::Dense(this) => this.into_view().xor_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().xor_const(other).map(Self::from),
         }
     }
 }
@@ -744,8 +744,8 @@ where
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
         match self {
-            Self::Dense(this) => TensorCast::cast_into(this.into_view(), dtype).map(Tensor::from),
-            Self::Sparse(this) => TensorCast::cast_into(this.into_view(), dtype).map(Tensor::from),
+            Self::Dense(this) => TensorCast::cast_into(this.into_view(), dtype).map(Self::from),
+            Self::Sparse(this) => TensorCast::cast_into(this.into_view(), dtype).map(Self::from),
         }
     }
 }
@@ -760,20 +760,20 @@ where
     fn eq(self, other: Self) -> TCResult<Self::Compare> {
         match self {
             Self::Dense(this) => match other {
-                Self::Dense(that) => this.into_view().eq(that.into()).map(Tensor::from),
+                Self::Dense(that) => this.into_view().eq(that.into()).map(Self::from),
 
                 Self::Sparse(that) => that
                     .into_view()
                     .eq(this.into_view().into_sparse())
-                    .map(Tensor::from),
+                    .map(Self::from),
             },
             Self::Sparse(this) => match other {
                 Self::Dense(that) => this
                     .into_view()
                     .eq(that.into_view().into_sparse())
-                    .map(Tensor::from),
+                    .map(Self::from),
 
-                Self::Sparse(that) => this.into_view().eq(that.into()).map(Tensor::from),
+                Self::Sparse(that) => this.into_view().eq(that.into()).map(Self::from),
             },
         }
     }
@@ -781,21 +781,21 @@ where
     fn gt(self, other: Self) -> TCResult<Self::Compare> {
         match self {
             Self::Dense(this) => match other {
-                Self::Dense(that) => this.into_view().gt(that.into()).map(Tensor::from),
+                Self::Dense(that) => this.into_view().gt(that.into()).map(Self::from),
 
                 Self::Sparse(that) => this
                     .into_view()
                     .gt(that.into_view().into_dense())
-                    .map(Tensor::from),
+                    .map(Self::from),
             },
             Self::Sparse(this) => match other {
                 Self::Dense(that) => this
                     .into_view()
                     .into_dense()
                     .gt(that.into())
-                    .map(Tensor::from),
+                    .map(Self::from),
 
-                Self::Sparse(that) => this.into_view().gt(that.into()).map(Tensor::from),
+                Self::Sparse(that) => this.into_view().gt(that.into()).map(Self::from),
             },
         }
     }
@@ -803,21 +803,21 @@ where
     fn ge(self, other: Self) -> TCResult<Self::Compare> {
         match self {
             Self::Dense(this) => match other {
-                Self::Dense(that) => this.into_view().ge(that.into()).map(Tensor::from),
+                Self::Dense(that) => this.into_view().ge(that.into()).map(Self::from),
 
                 Self::Sparse(that) => this
                     .into_view()
                     .ge(that.into_view().into_dense())
-                    .map(Tensor::from),
+                    .map(Self::from),
             },
             Self::Sparse(this) => match other {
                 Self::Dense(that) => this
                     .into_view()
                     .into_dense()
                     .ge(that.into())
-                    .map(Tensor::from),
+                    .map(Self::from),
 
-                Self::Sparse(that) => this.into_view().ge(that.into()).map(Tensor::from),
+                Self::Sparse(that) => this.into_view().ge(that.into()).map(Self::from),
             },
         }
     }
@@ -825,21 +825,21 @@ where
     fn lt(self, other: Self) -> TCResult<Self::Compare> {
         match self {
             Self::Dense(this) => match other {
-                Self::Dense(that) => this.into_view().lt(that.into()).map(Tensor::from),
+                Self::Dense(that) => this.into_view().lt(that.into()).map(Self::from),
 
                 Self::Sparse(that) => this
                     .into_view()
                     .lt(that.into_view().into_dense())
-                    .map(Tensor::from),
+                    .map(Self::from),
             },
             Self::Sparse(this) => match other {
                 Self::Dense(that) => this
                     .into_view()
                     .into_dense()
                     .lt(that.into())
-                    .map(Tensor::from),
+                    .map(Self::from),
 
-                Self::Sparse(that) => this.into_view().lt(that.into()).map(Tensor::from),
+                Self::Sparse(that) => this.into_view().lt(that.into()).map(Self::from),
             },
         }
     }
@@ -847,21 +847,21 @@ where
     fn le(self, other: Self) -> TCResult<Self::Compare> {
         match self {
             Self::Dense(this) => match other {
-                Self::Dense(that) => this.into_view().le(that.into()).map(Tensor::from),
+                Self::Dense(that) => this.into_view().le(that.into()).map(Self::from),
 
                 Self::Sparse(that) => this
                     .into_view()
                     .le(that.into_view().into_dense())
-                    .map(Tensor::from),
+                    .map(Self::from),
             },
             Self::Sparse(this) => match other {
                 Self::Dense(that) => this
                     .into_view()
                     .into_dense()
                     .le(that.into())
-                    .map(Tensor::from),
+                    .map(Self::from),
 
-                Self::Sparse(that) => this.into_view().le(that.into()).map(Tensor::from),
+                Self::Sparse(that) => this.into_view().le(that.into()).map(Self::from),
             },
         }
     }
@@ -869,21 +869,21 @@ where
     fn ne(self, other: Self) -> TCResult<Self::Compare> {
         match self {
             Self::Dense(this) => match other {
-                Self::Dense(that) => this.into_view().ne(that.into()).map(Tensor::from),
+                Self::Dense(that) => this.into_view().ne(that.into()).map(Self::from),
 
                 Self::Sparse(that) => this
                     .into_view()
                     .ne(that.into_view().into_dense())
-                    .map(Tensor::from),
+                    .map(Self::from),
             },
             Self::Sparse(this) => match other {
                 Self::Dense(that) => this
                     .into_view()
                     .into_dense()
                     .ne(that.into())
-                    .map(Tensor::from),
+                    .map(Self::from),
 
-                Self::Sparse(that) => this.into_view().ne(that.into()).map(Tensor::from),
+                Self::Sparse(that) => this.into_view().ne(that.into()).map(Self::from),
             },
         }
     }
@@ -898,43 +898,43 @@ where
 
     fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
         match self {
-            Self::Dense(this) => this.into_view().eq_const(other).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().eq_const(other).map(Tensor::from),
+            Self::Dense(this) => this.into_view().eq_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().eq_const(other).map(Self::from),
         }
     }
 
     fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
         match self {
-            Self::Dense(this) => this.into_view().gt_const(other).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().gt_const(other).map(Tensor::from),
+            Self::Dense(this) => this.into_view().gt_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().gt_const(other).map(Self::from),
         }
     }
 
     fn ge_const(self, other: Number) -> TCResult<Self::Compare> {
         match self {
-            Self::Dense(this) => this.into_view().ge_const(other).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().ge_const(other).map(Tensor::from),
+            Self::Dense(this) => this.into_view().ge_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().ge_const(other).map(Self::from),
         }
     }
 
     fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
         match self {
-            Self::Dense(this) => this.into_view().ge_const(other).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().eq_const(other).map(Tensor::from),
+            Self::Dense(this) => this.into_view().ge_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().eq_const(other).map(Self::from),
         }
     }
 
     fn le_const(self, other: Number) -> TCResult<Self::Compare> {
         match self {
-            Self::Dense(this) => this.into_view().ge_const(other).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().ge_const(other).map(Tensor::from),
+            Self::Dense(this) => this.into_view().ge_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().ge_const(other).map(Self::from),
         }
     }
 
     fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
         match self {
-            Self::Dense(this) => this.into_view().ne_const(other).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().ne_const(other).map(Tensor::from),
+            Self::Dense(this) => this.into_view().ne_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().ne_const(other).map(Self::from),
         }
     }
 }
@@ -971,7 +971,7 @@ where
 
     fn diagonal(self) -> TCResult<Self::Diagonal> {
         match self {
-            Self::Dense(dense) => dense.into_view().diagonal().map(Tensor::from),
+            Self::Dense(dense) => dense.into_view().diagonal().map(Self::from),
 
             Self::Sparse(sparse) => Err(not_implemented!("diagonal of {:?}", sparse)),
         }
@@ -989,21 +989,21 @@ where
     fn add(self, other: Self) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(this) => match other {
-                Self::Dense(that) => this.into_view().add(that.into()).map(Tensor::from),
+                Self::Dense(that) => this.into_view().add(that.into()).map(Self::from),
 
                 Self::Sparse(that) => this
                     .into_view()
                     .add(that.into_view().into_dense())
-                    .map(Tensor::from),
+                    .map(Self::from),
             },
             Self::Sparse(this) => match other {
                 Self::Dense(that) => this
                     .into_view()
                     .into_dense()
                     .add(that.into())
-                    .map(Tensor::from),
+                    .map(Self::from),
 
-                Self::Sparse(that) => this.into_view().add(that.into_view()).map(Tensor::from),
+                Self::Sparse(that) => this.into_view().add(that.into_view()).map(Self::from),
             },
         }
     }
@@ -1011,12 +1011,12 @@ where
     fn div(self, other: Self) -> TCResult<Self::LeftCombine> {
         if let Self::Dense(that) = other {
             match self {
-                Self::Dense(this) => this.into_view().div(that.into()).map(Tensor::from),
+                Self::Dense(this) => this.into_view().div(that.into()).map(Self::from),
 
                 Self::Sparse(this) => this
                     .into_view()
                     .div(that.into_view().into_sparse())
-                    .map(Tensor::from),
+                    .map(Self::from),
             }
         } else {
             Err(bad_request!("cannot divide by {other:?}"))
@@ -1026,12 +1026,12 @@ where
     fn log(self, base: Self) -> TCResult<Self::LeftCombine> {
         if let Self::Dense(that) = base {
             match self {
-                Self::Dense(this) => this.into_view().log(that.into()).map(Tensor::from),
+                Self::Dense(this) => this.into_view().log(that.into()).map(Self::from),
 
                 Self::Sparse(this) => this
                     .into_view()
                     .log(that.into_view().into_sparse())
-                    .map(Tensor::from),
+                    .map(Self::from),
             }
         } else {
             Err(bad_request!("log base {base:?} is undefined"))
@@ -1041,21 +1041,21 @@ where
     fn mul(self, other: Self) -> TCResult<Self::LeftCombine> {
         match self {
             Self::Dense(this) => match other {
-                Self::Dense(that) => this.into_view().mul(that.into()).map(Tensor::from),
+                Self::Dense(that) => this.into_view().mul(that.into()).map(Self::from),
 
                 Self::Sparse(that) => this
                     .into_view()
                     .into_sparse()
                     .mul(that.into())
-                    .map(Tensor::from),
+                    .map(Self::from),
             },
             Self::Sparse(this) => match other {
                 Self::Dense(that) => this
                     .into_view()
                     .mul(that.into_view().into_sparse())
-                    .map(Tensor::from),
+                    .map(Self::from),
 
-                Self::Sparse(that) => this.into_view().mul(that.into()).map(Tensor::from),
+                Self::Sparse(that) => this.into_view().mul(that.into()).map(Self::from),
             },
         }
     }
@@ -1063,20 +1063,20 @@ where
     fn pow(self, other: Self) -> TCResult<Self::LeftCombine> {
         match self {
             Self::Dense(this) => match other {
-                Self::Dense(that) => this.into_view().pow(that.into()).map(Tensor::from),
+                Self::Dense(that) => this.into_view().pow(that.into()).map(Self::from),
 
                 Self::Sparse(that) => this
                     .into_view()
                     .pow(that.into_view().into_dense())
-                    .map(Tensor::from),
+                    .map(Self::from),
             },
             Self::Sparse(this) => match other {
                 Self::Dense(that) => this
                     .into_view()
                     .pow(that.into_view().into_sparse())
-                    .map(Tensor::from),
+                    .map(Self::from),
 
-                Self::Sparse(that) => this.into_view().pow(that.into()).map(Tensor::from),
+                Self::Sparse(that) => this.into_view().pow(that.into()).map(Self::from),
             },
         }
     }
@@ -1084,21 +1084,21 @@ where
     fn sub(self, other: Self) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(this) => match other {
-                Self::Dense(that) => this.into_view().sub(that.into()).map(Tensor::from),
+                Self::Dense(that) => this.into_view().sub(that.into()).map(Self::from),
 
                 Self::Sparse(that) => this
                     .into_view()
                     .sub(that.into_view().into_dense())
-                    .map(Tensor::from),
+                    .map(Self::from),
             },
             Self::Sparse(this) => match other {
                 Self::Dense(that) => this
                     .into_view()
                     .into_dense()
                     .sub(that.into())
-                    .map(Tensor::from),
+                    .map(Self::from),
 
-                Self::Sparse(that) => this.into_view().sub(that.into()).map(Tensor::from),
+                Self::Sparse(that) => this.into_view().sub(that.into()).map(Self::from),
             },
         }
     }
@@ -1113,44 +1113,44 @@ where
 
     fn add_const(self, other: Number) -> TCResult<Self::Combine> {
         match self {
-            Self::Dense(this) => this.into_view().add_const(other).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().add_const(other).map(Tensor::from),
+            Self::Dense(this) => this.into_view().add_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().add_const(other).map(Self::from),
         }
     }
 
     fn div_const(self, other: Number) -> TCResult<Self::Combine> {
         match self {
-            Self::Dense(this) => this.into_view().div_const(other).map(Tensor::from),
+            Self::Dense(this) => this.into_view().div_const(other).map(Self::from),
 
-            Self::Sparse(this) => this.into_view().div_const(other).map(Tensor::from),
+            Self::Sparse(this) => this.into_view().div_const(other).map(Self::from),
         }
     }
 
     fn log_const(self, base: Number) -> TCResult<Self::Combine> {
         match self {
-            Self::Dense(this) => this.into_view().log_const(base).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().log_const(base).map(Tensor::from),
+            Self::Dense(this) => this.into_view().log_const(base).map(Self::from),
+            Self::Sparse(this) => this.into_view().log_const(base).map(Self::from),
         }
     }
 
     fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
         match self {
-            Self::Dense(this) => this.into_view().mul_const(other).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().mul_const(other).map(Tensor::from),
+            Self::Dense(this) => this.into_view().mul_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().mul_const(other).map(Self::from),
         }
     }
 
     fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
         match self {
-            Self::Dense(this) => this.into_view().pow_const(other).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().pow_const(other).map(Tensor::from),
+            Self::Dense(this) => this.into_view().pow_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().pow_const(other).map(Self::from),
         }
     }
 
     fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
         match self {
-            Self::Dense(this) => this.into_view().sub_const(other).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().sub_const(other).map(Tensor::from),
+            Self::Dense(this) => this.into_view().sub_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().sub_const(other).map(Self::from),
         }
     }
 }
@@ -1193,8 +1193,8 @@ where
 
     fn max(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
         match self {
-            Self::Dense(this) => this.into_view().max(axes, keepdims).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().max(axes, keepdims).map(Tensor::from),
+            Self::Dense(this) => this.into_view().max(axes, keepdims).map(Self::from),
+            Self::Sparse(this) => this.into_view().max(axes, keepdims).map(Self::from),
         }
     }
 
@@ -1207,8 +1207,8 @@ where
 
     fn min(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
         match self {
-            Self::Dense(this) => this.into_view().min(axes, keepdims).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().min(axes, keepdims).map(Tensor::from),
+            Self::Dense(this) => this.into_view().min(axes, keepdims).map(Self::from),
+            Self::Sparse(this) => this.into_view().min(axes, keepdims).map(Self::from),
         }
     }
 
@@ -1221,8 +1221,8 @@ where
 
     fn product(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
         match self {
-            Self::Dense(this) => this.into_view().product(axes, keepdims).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().product(axes, keepdims).map(Tensor::from),
+            Self::Dense(this) => this.into_view().product(axes, keepdims).map(Self::from),
+            Self::Sparse(this) => this.into_view().product(axes, keepdims).map(Self::from),
         }
     }
 
@@ -1235,9 +1235,9 @@ where
 
     fn sum(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
         match self {
-            Self::Dense(this) => this.into_view().sum(axes, keepdims).map(Tensor::from),
+            Self::Dense(this) => this.into_view().sum(axes, keepdims).map(Self::from),
 
-            Self::Sparse(this) => this.into_view().sum(axes, keepdims).map(Tensor::from),
+            Self::Sparse(this) => this.into_view().sum(axes, keepdims).map(Self::from),
         }
     }
 
@@ -1262,36 +1262,107 @@ where
 
     fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
         match self {
-            Self::Dense(this) => this.into_view().broadcast(shape).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().broadcast(shape).map(Tensor::from),
+            Self::Dense(this) => this.into_view().broadcast(shape).map(Self::from),
+            Self::Sparse(this) => this.into_view().broadcast(shape).map(Self::from),
         }
     }
 
     fn expand(self, axes: Axes) -> TCResult<Self::Expand> {
         match self {
-            Self::Dense(this) => this.into_view().expand(axes).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().expand(axes).map(Tensor::from),
+            Self::Dense(this) => this.into_view().expand(axes).map(Self::from),
+            Self::Sparse(this) => this.into_view().expand(axes).map(Self::from),
         }
     }
 
     fn reshape(self, shape: Shape) -> TCResult<Self::Reshape> {
         match self {
-            Self::Dense(this) => this.into_view().reshape(shape).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().reshape(shape).map(Tensor::from),
+            Self::Dense(this) => this.into_view().reshape(shape).map(Self::from),
+            Self::Sparse(this) => this.into_view().reshape(shape).map(Self::from),
         }
     }
 
     fn slice(self, range: Range) -> TCResult<Self::Slice> {
         match self {
-            Self::Dense(this) => this.into_view().slice(range).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().slice(range).map(Tensor::from),
+            Self::Dense(this) => this.into_view().slice(range).map(Self::from),
+            Self::Sparse(this) => this.into_view().slice(range).map(Self::from),
         }
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
         match self {
-            Self::Dense(this) => this.into_view().transpose(permutation).map(Tensor::from),
-            Self::Sparse(this) => this.into_view().transpose(permutation).map(Tensor::from),
+            Self::Dense(this) => this.into_view().transpose(permutation).map(Self::from),
+            Self::Sparse(this) => this.into_view().transpose(permutation).map(Self::from),
+        }
+    }
+}
+
+impl<Txn, FE> TensorTrig for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Unary = Self;
+
+    fn asin(self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.into_view().asin().map(Self::from),
+            Self::Sparse(sparse) => sparse.into_view().asin().map(Self::from),
+        }
+    }
+
+    fn sin(self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.into_view().sin().map(Self::from),
+            Self::Sparse(sparse) => sparse.into_view().sin().map(Self::from),
+        }
+    }
+
+    fn sinh(self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.into_view().sinh().map(Self::from),
+            Self::Sparse(sparse) => sparse.into_view().sinh().map(Self::from),
+        }
+    }
+
+    fn acos(self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.into_view().acos().map(Self::from),
+            Self::Sparse(sparse) => sparse.into_view().acos().map(Self::from),
+        }
+    }
+
+    fn cos(self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.into_view().cos().map(Self::from),
+            Self::Sparse(sparse) => sparse.into_view().cos().map(Self::from),
+        }
+    }
+
+    fn cosh(self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.into_view().cosh().map(Self::from),
+            Self::Sparse(sparse) => sparse.into_view().cosh().map(Self::from),
+        }
+    }
+
+    fn atan(self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.into_view().atan().map(Self::from),
+            Self::Sparse(sparse) => sparse.into_view().atan().map(Self::from),
+        }
+    }
+
+    fn tan(self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.into_view().tan().map(Self::from),
+            Self::Sparse(sparse) => sparse.into_view().tan().map(Self::from),
+        }
+    }
+
+    fn tanh(self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.into_view().tanh().map(Self::from),
+            Self::Sparse(sparse) => sparse.into_view().tanh().map(Self::from),
         }
     }
 }
