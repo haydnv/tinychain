@@ -956,6 +956,110 @@ where
     }
 }
 
+impl<Txn, FE> TensorCompareConst for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Compare = Self;
+
+    fn eq_const(self, other: Number) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .eq_const(other)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .eq_const(other)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn gt_const(self, other: Number) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .gt_const(other)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .gt_const(other)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn ge_const(self, other: Number) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .ge_const(other)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .ge_const(other)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .ge_const(other)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .eq_const(other)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn le_const(self, other: Number) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .ge_const(other)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .ge_const(other)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .ne_const(other)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .ne_const(other)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+}
+
 #[inline]
 fn coord_of<T: Copy + Div<Output = T> + Rem<Output = T>>(
     offset: T,
