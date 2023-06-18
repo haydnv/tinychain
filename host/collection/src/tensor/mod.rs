@@ -1555,6 +1555,98 @@ where
     }
 }
 
+impl<Txn, FE> TensorTransform for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Broadcast = Self;
+    type Expand = Self;
+    type Reshape = Self;
+    type Slice = Self;
+    type Transpose = Self;
+
+    fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .broadcast(shape)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .broadcast(shape)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn expand(self, axes: Axes) -> TCResult<Self::Expand> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .expand(axes)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .expand(axes)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn reshape(self, shape: Shape) -> TCResult<Self::Reshape> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .reshape(shape)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .reshape(shape)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn slice(self, range: Range) -> TCResult<Self::Slice> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .slice(range)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .slice(range)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .transpose(permutation)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .transpose(permutation)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+}
+
 impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Tensor<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
