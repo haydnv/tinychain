@@ -738,6 +738,25 @@ where
     }
 }
 
+impl<Txn, FE> TensorCast for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Cast = Self;
+
+    fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
+        match self {
+            Self::Dense(this) => TensorCast::cast_into(this.into_view(), dtype)
+                .map(Dense::View)
+                .map(Self::Dense),
+            Self::Sparse(this) => TensorCast::cast_into(this.into_view(), dtype)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+}
+
 #[inline]
 fn coord_of<T: Copy + Div<Output = T> + Rem<Output = T>>(
     offset: T,
