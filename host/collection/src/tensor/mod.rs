@@ -1060,6 +1060,29 @@ where
     }
 }
 
+impl<Txn, FE> TensorConvert for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Dense = Dense<Txn, FE>;
+    type Sparse = Sparse<Txn, FE>;
+
+    fn into_dense(self) -> Dense<Txn, FE> {
+        match self {
+            Self::Dense(this) => this,
+            Self::Sparse(this) => Dense::View(this.into_view().into_dense()),
+        }
+    }
+
+    fn into_sparse(self) -> Sparse<Txn, FE> {
+        match self {
+            Self::Dense(this) => Sparse::View(this.into_view().into_sparse()),
+            Self::Sparse(this) => this,
+        }
+    }
+}
+
 #[inline]
 fn coord_of<T: Copy + Div<Output = T> + Rem<Output = T>>(
     offset: T,
