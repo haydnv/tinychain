@@ -757,6 +757,205 @@ where
     }
 }
 
+impl<Txn, FE> TensorCompare<Self> for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Compare = Self;
+
+    fn eq(self, other: Self) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .eq(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => that
+                    .into_view()
+                    .eq(this.into_view().into_sparse())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .eq(that.into_view().into_sparse())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .eq(that.into())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            },
+        }
+    }
+
+    fn gt(self, other: Self) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .gt(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .gt(that.into_view().into_dense())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .into_dense()
+                    .gt(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .gt(that.into())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            },
+        }
+    }
+
+    fn ge(self, other: Self) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .ge(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .ge(that.into_view().into_dense())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .into_dense()
+                    .ge(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .ge(that.into())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            },
+        }
+    }
+
+    fn lt(self, other: Self) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .lt(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .lt(that.into_view().into_dense())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .into_dense()
+                    .lt(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .lt(that.into())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            },
+        }
+    }
+
+    fn le(self, other: Self) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .le(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .le(that.into_view().into_dense())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .into_dense()
+                    .le(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .le(that.into())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            },
+        }
+    }
+
+    fn ne(self, other: Self) -> TCResult<Self::Compare> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .ne(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .ne(that.into_view().into_dense())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .into_dense()
+                    .ne(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .ne(that.into())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            },
+        }
+    }
+}
+
 #[inline]
 fn coord_of<T: Copy + Div<Output = T> + Rem<Output = T>>(
     offset: T,
