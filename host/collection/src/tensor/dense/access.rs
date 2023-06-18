@@ -163,7 +163,7 @@ pub enum DenseAccess<Txn, FE, T: CDatatype> {
     Reduce(Box<DenseReduce<Self, T>>),
     Reshape(Box<DenseReshape<Self>>),
     Slice(Box<DenseSlice<Self>>),
-    Sparse(DenseSparse<SparseAccess<Txn, FE, T>>),
+    Sparse(Box<DenseSparse<SparseAccess<Txn, FE, T>>>),
     Transpose(Box<DenseTranspose<Self>>),
     Unary(Box<DenseUnary<Self, T>>),
     UnaryCast(Box<DenseUnaryCast<Txn, FE, T>>),
@@ -3097,10 +3097,10 @@ where
     T: CDatatype,
 {
     fn from(sparse: DenseSparse<S>) -> Self {
-        Self::Sparse(DenseSparse {
+        Self::Sparse(Box::new(DenseSparse {
             source: sparse.source.into(),
             block_size: sparse.block_size,
-        })
+        }))
     }
 }
 

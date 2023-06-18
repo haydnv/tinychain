@@ -10,11 +10,11 @@ use tc_value::{ComplexType, FloatType, IntType, Number, NumberClass, NumberType,
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTrig, ComplexUnary};
-use crate::tensor::sparse::Node;
+use crate::tensor::sparse::{sparse_from, Node};
 use crate::tensor::{
-    Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare,
-    TensorCompareConst, TensorInstance, TensorMath, TensorMathConst, TensorRead, TensorReduce,
-    TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
+    Axes, Coord, Range, Shape, SparseView, TensorBoolean, TensorBooleanConst, TensorCast,
+    TensorCompare, TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorMathConst,
+    TensorRead, TensorReduce, TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{dense_from, DenseAccess, DenseCacheFile, DenseTensor, DenseUnaryCast};
@@ -433,6 +433,26 @@ where
             ComplexCompare::ne_const((this.0.into(), this.1.into()), other),
             { this.ne_const(other).map(dense_from).map(Self::Bool) }
         )
+    }
+}
+
+impl<Txn, FE> TensorConvert for DenseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Dense = Self;
+    type Sparse = SparseView<Txn, FE>;
+
+    fn into_dense(self) -> Self::Dense {
+        self
+    }
+
+    fn into_sparse(self) -> Self::Sparse {
+        match self {
+            Self::Bool(this) => SparseView::Bool(sparse_from(this.into_sparse())),
+            _ => todo!(),
+        }
     }
 }
 

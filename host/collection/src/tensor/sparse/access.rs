@@ -8,6 +8,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use b_table::b_tree::Collator;
 use b_table::{TableLock, TableWriteGuard};
+use destream::de;
 use freqfs::DirLock;
 use futures::future::TryFutureExt;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
@@ -24,7 +25,7 @@ use tc_value::{DType, Number, NumberClass, NumberCollator, NumberType};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::block::Block;
-use crate::tensor::dense::{DenseInstance, DenseSlice};
+use crate::tensor::dense::{DenseAccess, DenseCacheFile, DenseInstance, DenseSlice};
 use crate::tensor::transform::{Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
     coord_of, offset_of, strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore,
@@ -160,7 +161,7 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> SparseAccessCast<Txn, FE> {
 impl<Txn, FE> SparseAccessCast<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node>,
 {
     async fn merge_blocks_inner(
         self,
@@ -364,6 +365,7 @@ pub enum SparseAccess<Txn, FE, T: CDatatype> {
     CombineLeft(Box<SparseCombineLeft<Self, Self, T>>),
     CombineConst(Box<SparseCombineConst<Self, T>>),
     Cow(Box<SparseCow<FE, T, Self>>),
+    Dense(Box<SparseDense<DenseAccess<Txn, FE, T>>>),
     Expand(Box<SparseExpand<Self>>),
     Reduce(Box<SparseReduce<Self, T>>),
     Reshape(Box<SparseReshape<Self>>),
@@ -388,6 +390,7 @@ impl<Txn, FE, T: CDatatype> Clone for SparseAccess<Txn, FE, T> {
             Self::CompareConst(compare) => Self::CompareConst(compare.clone()),
             Self::CompareLeft(compare) => Self::CompareLeft(compare.clone()),
             Self::Cow(cow) => Self::Cow(cow.clone()),
+            Self::Dense(dense) => Self::Dense(dense.clone()),
             Self::Expand(expand) => Self::Expand(expand.clone()),
             Self::Reduce(reduce) => Self::Reduce(reduce.clone()),
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
@@ -414,6 +417,7 @@ macro_rules! access_dispatch {
             Self::CompareConst($var) => $call,
             Self::CompareLeft($var) => $call,
             Self::Cow($var) => $call,
+            Self::Dense($var) => $call,
             Self::Expand($var) => $call,
             Self::Reduce($var) => $call,
             Self::Reshape($var) => $call,
@@ -445,8 +449,9 @@ where
 impl<Txn, FE, T> SparseInstance for SparseAccess<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node> + AsType<Buffer<T>>,
     T: CDatatype + DType + fmt::Debug,
+    Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
     type CoordBlock = Array<u64>;
@@ -462,6 +467,7 @@ where
     ) -> Result<Self::Blocks, TCError> {
         access_dispatch!(self, this, {
             let blocks = this.blocks(txn_id, range, order).await?;
+
             let blocks =
                 blocks.map_ok(|(coords, values)| (Array::from(coords), Array::from(values)));
 
@@ -500,6 +506,7 @@ where
             Self::CombineConst(combine) => combine.read_permit(txn_id, range).await,
             Self::Compare(compare) => compare.read_permit(txn_id, range).await,
             Self::CompareLeft(compare) => compare.read_permit(txn_id, range).await,
+            Self::Dense(dense) => dense.read_permit(txn_id, range).await,
             Self::Expand(expand) => expand.read_permit(txn_id, range).await,
             Self::Reduce(reduce) => reduce.read_permit(txn_id, range).await,
             Self::Reshape(reshape) => reshape.read_permit(txn_id, range).await,
@@ -959,8 +966,9 @@ where
 impl<Txn, FE, T> SparseInstance for SparseBroadcast<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node> + AsType<Buffer<T>>,
     T: CDatatype + DType + fmt::Debug,
+    Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
     type CoordBlock = ArrayBase<Vec<u64>>;
@@ -1831,7 +1839,7 @@ where
 impl<Txn, FE, T> SparseInstance for SparseCompare<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node>,
     T: CDatatype + DType,
 {
     type CoordBlock = Array<u64>;
@@ -1987,7 +1995,7 @@ where
 impl<Txn, FE, T> SparseInstance for SparseCompareLeft<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node>,
     T: CDatatype + DType,
 {
     type CoordBlock = Array<u64>;
@@ -2130,7 +2138,7 @@ where
 impl<Txn, FE, T> SparseInstance for SparseCompareConst<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node>,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
@@ -2602,6 +2610,18 @@ where
 impl<S: TensorPermitRead> TensorPermitRead for SparseDense<S> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.source.read_permit(txn_id, range).await
+    }
+}
+
+impl<Txn, FE, S, T> From<SparseDense<S>> for SparseAccess<Txn, FE, T>
+where
+    S: Into<DenseAccess<Txn, FE, T>>,
+    T: CDatatype,
+{
+    fn from(dense: SparseDense<S>) -> Self {
+        Self::Dense(Box::new(SparseDense {
+            source: dense.source.into(),
+        }))
     }
 }
 
@@ -3826,7 +3846,7 @@ where
 impl<Txn, FE, T> SparseInstance for SparseUnaryCast<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node>,
     T: CDatatype + DType,
 {
     type CoordBlock = Array<u64>;

@@ -124,7 +124,7 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for SparseView<Txn, FE> {
 impl<Txn, FE> TensorBoolean<Self> for SparseView<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node>,
 {
     type Combine = Self;
     type LeftCombine = Self;
@@ -205,7 +205,7 @@ where
 impl<Txn, FE> TensorCast for SparseView<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node>,
 {
     type Cast = Self;
 
@@ -325,7 +325,7 @@ where
 impl<Txn, FE> TensorConvert for SparseView<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node>,
 {
     type Dense = DenseView<Txn, FE>;
     type Sparse = Self;
@@ -412,7 +412,7 @@ macro_rules! view_compare {
 impl<Txn, FE> TensorCompare<Self> for SparseView<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node>,
 {
     type Compare = Self;
 
@@ -444,7 +444,7 @@ where
 impl<Txn, FE> TensorCompareConst for SparseView<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node>,
 {
     type Compare = Self;
 
@@ -541,7 +541,7 @@ where
 impl<Txn, FE> TensorMath<Self> for SparseView<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node>,
 {
     type Combine = Self;
     type LeftCombine = Self;
@@ -824,7 +824,11 @@ macro_rules! math_const {
     };
 }
 
-impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> TensorMathConst for SparseView<Txn, FE> {
+impl<Txn, FE> TensorMathConst for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
     type Combine = Self;
 
     fn add_const(self, other: Number) -> TCResult<Self::Combine> {
@@ -873,7 +877,7 @@ impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> TensorMathConst for Sp
 }
 
 #[async_trait]
-impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> TensorRead for SparseView<Txn, FE> {
+impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> TensorRead for SparseView<Txn, FE> {
     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
         view_dispatch!(
             self,
@@ -886,7 +890,7 @@ impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> TensorRead for SparseV
 }
 
 #[async_trait]
-impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> TensorReduce for SparseView<Txn, FE> {
+impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> TensorReduce for SparseView<Txn, FE> {
     type Reduce = Self;
 
     async fn all(self, txn_id: TxnId) -> TCResult<bool> {
@@ -1048,7 +1052,11 @@ impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> TensorReduce for Spars
     }
 }
 
-impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> TensorTransform for SparseView<Txn, FE> {
+impl<Txn, FE> TensorTransform for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
     type Broadcast = Self;
     type Expand = Self;
     type Reshape = Self;
@@ -1230,7 +1238,7 @@ macro_rules! view_trig {
     };
 }
 
-impl<Txn: Transaction<FE>, FE: ThreadSafe + AsType<Node>> TensorTrig for SparseView<Txn, FE> {
+impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> TensorTrig for SparseView<Txn, FE> {
     type Unary = Self;
 
     fn asin(self) -> TCResult<Self::Unary> {
@@ -1276,7 +1284,11 @@ impl<Txn: Transaction<FE>, FE: ThreadSafe + AsType<Node>> TensorTrig for SparseV
     }
 }
 
-impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> TensorUnary for SparseView<Txn, FE> {
+impl<Txn, FE> TensorUnary for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
     type Unary = Self;
 
     fn abs(self) -> TCResult<Self::Unary> {
@@ -1409,7 +1421,7 @@ fn expect_bool<Txn, FE>(
 ) -> TCResult<SparseTensor<Txn, FE, SparseAccess<Txn, FE, u8>>>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node>,
 {
     match TensorCast::cast_into(view, NumberType::Bool)? {
         SparseView::Bool(that) => Ok(that),

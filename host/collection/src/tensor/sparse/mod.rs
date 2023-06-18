@@ -18,7 +18,7 @@ use tcgeneric::ThreadSafe;
 
 use super::block::Block;
 use super::complex::ComplexRead;
-use super::dense::{DenseAccess, DenseAccessCast, DenseSparse, DenseTensor};
+use super::dense::{DenseAccess, DenseAccessCast, DenseCacheFile, DenseSparse, DenseTensor};
 
 use super::{
     Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare,
@@ -1002,7 +1002,7 @@ where
 impl<Txn, FE> TensorRead for SparseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node>,
 {
     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
         base_dispatch!(
@@ -1019,7 +1019,7 @@ where
 impl<Txn, FE> TensorWrite for SparseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node>,
 {
     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
         if !bool::cast_from(value) {
@@ -1094,7 +1094,7 @@ where
 impl<Txn, FE> TensorWriteDual<SparseView<Txn, FE>> for SparseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node> + ThreadSafe,
 {
     async fn write(self, txn_id: TxnId, range: Range, value: SparseView<Txn, FE>) -> TCResult<()> {
         base_view_dispatch!(

@@ -9,7 +9,7 @@ use destream::{de, en};
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
-use tc_transact::TxnId;
+use tc_transact::{Transaction, TxnId};
 use tc_value::{Number, NumberType, ValueType};
 use tcgeneric::{
     label, path_label, Class, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
@@ -487,6 +487,28 @@ pub enum Dense<Txn, FE> {
     View(DenseView<Txn, FE>),
 }
 
+impl<Txn, FE> Dense<Txn, FE> {
+    pub fn into_view(self) -> DenseView<Txn, FE> {
+        self.into()
+    }
+}
+
+impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for Dense<Txn, FE> {
+    fn dtype(&self) -> NumberType {
+        match self {
+            Self::Base(base) => base.dtype(),
+            Self::View(view) => view.dtype(),
+        }
+    }
+
+    fn shape(&self) -> &Shape {
+        match self {
+            Self::Base(base) => base.shape(),
+            Self::View(view) => view.shape(),
+        }
+    }
+}
+
 impl<Txn, FE> From<Dense<Txn, FE>> for DenseView<Txn, FE> {
     fn from(dense: Dense<Txn, FE>) -> Self {
         match dense {
@@ -502,6 +524,28 @@ pub enum Sparse<Txn, FE> {
     View(SparseView<Txn, FE>),
 }
 
+impl<Txn, FE> Sparse<Txn, FE> {
+    pub fn into_view(self) -> SparseView<Txn, FE> {
+        self.into()
+    }
+}
+
+impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for Sparse<Txn, FE> {
+    fn dtype(&self) -> NumberType {
+        match self {
+            Self::Base(base) => base.dtype(),
+            Self::View(view) => view.dtype(),
+        }
+    }
+
+    fn shape(&self) -> &Shape {
+        match self {
+            Self::Base(base) => base.shape(),
+            Self::View(view) => view.shape(),
+        }
+    }
+}
+
 impl<Txn, FE> From<Sparse<Txn, FE>> for SparseView<Txn, FE> {
     fn from(sparse: Sparse<Txn, FE>) -> Self {
         match sparse {
@@ -515,6 +559,22 @@ impl<Txn, FE> From<Sparse<Txn, FE>> for SparseView<Txn, FE> {
 pub enum Tensor<Txn, FE> {
     Dense(Dense<Txn, FE>),
     Sparse(Sparse<Txn, FE>),
+}
+
+impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for Tensor<Txn, FE> {
+    fn dtype(&self) -> NumberType {
+        match self {
+            Self::Dense(dense) => dense.dtype(),
+            Self::Sparse(sparse) => sparse.dtype(),
+        }
+    }
+
+    fn shape(&self) -> &Shape {
+        match self {
+            Self::Dense(dense) => dense.shape(),
+            Self::Sparse(sparse) => sparse.shape(),
+        }
+    }
 }
 
 #[inline]

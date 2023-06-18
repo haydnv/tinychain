@@ -5,7 +5,6 @@ use safecast::{AsType, CastFrom};
 use tc_error::*;
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Float, Number, NumberClass, NumberInstance};
-use tcgeneric::ThreadSafe;
 
 use super::dense::{DenseBase, DenseCacheFile, DenseView};
 use super::sparse::{Node, SparseBase, SparseView};
@@ -37,8 +36,19 @@ where
 {
 }
 
-impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> ComplexRead for SparseBase<Txn, FE> {}
-impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> ComplexRead for SparseView<Txn, FE> {}
+impl<Txn, FE> ComplexRead for SparseBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
+}
+
+impl<Txn, FE> ComplexRead for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
+}
 
 pub(crate) trait ComplexUnary:
     TensorInstance
@@ -93,7 +103,13 @@ where
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
 }
-impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> ComplexUnary for SparseView<Txn, FE> {}
+
+impl<Txn, FE> ComplexUnary for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
+}
 
 pub(crate) trait ComplexCompare:
     ComplexUnary + TensorCompare<Self, Compare = Self> + TensorCompareConst<Compare = Self>
@@ -222,7 +238,13 @@ where
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
 }
-impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> ComplexCompare for SparseView<Txn, FE> {}
+
+impl<Txn, FE> ComplexCompare for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
+}
 
 pub(crate) trait ComplexMath: ComplexUnary + Clone {
     fn add(this: (Self, Self), that: (Self, Self)) -> TCResult<(Self, Self)> {
@@ -389,7 +411,13 @@ where
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
 }
-impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> ComplexMath for SparseView<Txn, FE> {}
+
+impl<Txn, FE> ComplexMath for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
+}
 
 pub(crate) trait ComplexTrig: ComplexMath + Clone {
     fn sin(this: (Self, Self)) -> TCResult<(Self, Self)> {
@@ -455,7 +483,13 @@ where
     FE: DenseCacheFile + AsType<Node> + Clone,
 {
 }
-impl<Txn: Transaction<FE>, FE: AsType<Node> + ThreadSafe> ComplexTrig for SparseView<Txn, FE> {}
+
+impl<Txn, FE> ComplexTrig for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
+}
 
 #[inline]
 fn atan2<F>(_y: F, _x: F) -> TCResult<F>

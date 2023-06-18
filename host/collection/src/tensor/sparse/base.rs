@@ -4,10 +4,11 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use collate::Collator;
+use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::DirLock;
 use futures::TryFutureExt;
-use ha_ndarray::{Array, CDatatype};
+use ha_ndarray::{Array, Buffer, CDatatype};
 use log::debug;
 use safecast::{AsType, CastInto};
 
@@ -18,6 +19,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
+use crate::tensor::dense::DenseCacheFile;
 use crate::tensor::sparse::{Blocks, Elements};
 use crate::tensor::{
     Axes, Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
@@ -241,8 +243,9 @@ where
 impl<Txn, FE, T> SparseInstance for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node> + AsType<Buffer<T>>,
     T: CDatatype + DType + fmt::Debug,
+    Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
     type CoordBlock = Array<u64>;
@@ -280,8 +283,9 @@ where
 impl<'a, Txn, FE, T> SparseWriteLock<'a> for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node> + AsType<Buffer<T>>,
     T: CDatatype + DType + fmt::Debug,
+    Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
     type Guard = SparseBaseWriteGuard<'a, Txn, FE, T>;
@@ -299,8 +303,9 @@ pub struct SparseBaseWriteGuard<'a, Txn, FE, T> {
 impl<'a, Txn, FE, T> SparseWriteGuard<T> for SparseBaseWriteGuard<'a, Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Node> + AsType<Buffer<T>>,
     T: CDatatype + DType + fmt::Debug,
+    Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
     async fn clear(&mut self, txn_id: TxnId, range: Range) -> TCResult<()> {
