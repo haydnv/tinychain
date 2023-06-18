@@ -1298,6 +1298,110 @@ where
     }
 }
 
+impl<Txn, FE> TensorMathConst for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Combine = Self;
+
+    fn add_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .add_const(other)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .add_const(other)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn div_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .div_const(other)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .div_const(other)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn log_const(self, base: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .log_const(base)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .log_const(base)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .mul_const(other)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .mul_const(other)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .pow_const(other)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .pow_const(other)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .sub_const(other)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .sub_const(other)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+}
+
 impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Tensor<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
