@@ -16,7 +16,7 @@ use tcgeneric::{
     label, path_label, Class, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
 };
 
-pub use dense::{DenseCacheFile, DenseBase, DenseView};
+pub use dense::{DenseBase, DenseCacheFile, DenseView};
 pub use shape::{AxisRange, Range, Shape};
 pub use sparse::{Node, SparseBase, SparseView};
 
@@ -678,6 +678,62 @@ where
                     .map(Sparse::View)
                     .map(Self::Sparse),
             },
+        }
+    }
+}
+
+impl<Txn, FE> TensorBooleanConst for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Combine = Self;
+
+    fn and_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .and_const(other)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .and_const(other)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn or_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .or_const(other)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .or_const(other)
+                .map(Sparse::View)
+                .map(Self::Sparse),
+        }
+    }
+
+    fn xor_const(self, other: Number) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(this) => this
+                .into_view()
+                .xor_const(other)
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(this) => this
+                .into_view()
+                .xor_const(other)
+                .map(Sparse::View)
+                .map(Self::Sparse),
         }
     }
 }
