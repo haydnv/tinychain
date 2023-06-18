@@ -26,7 +26,7 @@ impl<S, T> BlockResize<S, T>
 where
     S: Stream,
 {
-    pub fn new(source: S, block_shape: Shape) -> Result<Self, TCError> {
+    pub fn new(source: S, block_shape: Shape) -> TCResult<Self> {
         let size = block_shape.iter().product();
         let context = ha_ndarray::Context::default()?;
         let queue = Queue::new(context, size)?;

@@ -9,7 +9,7 @@ use collate::Collate;
 use destream::de;
 use freqfs::*;
 use futures::future::{Future, FutureExt, TryFutureExt};
-use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 use ha_ndarray::*;
 use safecast::{AsType, CastFrom, CastInto};
@@ -394,8 +394,104 @@ where
     T: CDatatype + DType + NumberInstance,
     Buffer<T>: de::FromStream<Context = ()>,
 {
+    pub async fn constant(dir: DirLock<FE>, shape: Shape, value: T) -> TCResult<Self> {
+        shape.validate()?;
+
+        let size = shape.iter().product::<u64>();
+
+        let (block_size, num_blocks) = ideal_block_size_for(&shape);
+
+        debug_assert!(block_size > 0);
+
+        {
+            let dtype_size = T::dtype().size();
+
+            let mut dir = dir.write().await;
+
+            for block_id in 0..num_blocks {
+                dir.create_file::<Buffer<T>>(
+                    block_id.to_string(),
+                    vec![value; block_size].into(),
+                    block_size * dtype_size,
+                )?;
+            }
+
+            let last_block_id = num_blocks - 1;
+            if size % block_size as u64 == 0 {
+                dir.create_file::<Buffer<T>>(
+                    last_block_id.to_string(),
+                    vec![value; block_size].into(),
+                    block_size * dtype_size,
+                )
+            } else {
+                dir.create_file::<Buffer<T>>(
+                    last_block_id.to_string(),
+                    vec![value; block_size].into(),
+                    block_size * dtype_size,
+                )
+            }?;
+        };
+
+        let block_axis = block_axis_for(&shape, block_size);
+        let map_shape = shape
+            .iter()
+            .take(block_axis)
+            .copied()
+            .map(|dim| dim as usize)
+            .collect();
+
+        let block_map = (0u64..num_blocks as u64).into_iter().collect();
+        let block_map = ArrayBase::<Vec<_>>::new(map_shape, block_map)?;
+
+        Ok(Self {
+            dir,
+            block_map,
+            block_size,
+            shape,
+            dtype: PhantomData,
+        })
+    }
+
+    pub async fn copy_from<O>(dir: DirLock<FE>, txn_id: TxnId, other: O) -> TCResult<Self>
+    where
+        O: DenseInstance<DType = T>,
+    {
+        let shape = other.shape().clone();
+        let (block_size, num_blocks) = ideal_block_size_for(&shape);
+        let block_axis = block_axis_for(&shape, block_size);
+        let block_shape = block_shape_for(block_axis, &shape, block_size);
+        let block_map = block_map_for(num_blocks as u64, shape.as_slice(), &block_shape)?;
+
+        let source_blocks = other.read_blocks(txn_id).await?;
+        let mut source_blocks = BlockResize::new(source_blocks, block_shape)?;
+
+        let mut dir_guard = dir.write().await;
+
+        let mut block_id = 0;
+        while let Some(block) = source_blocks.try_next().await? {
+            let buffer = Buffer::from(block.into_inner());
+            let size_in_bytes = buffer.len() * T::dtype().size();
+            dir_guard.create_file(block_id.to_string(), buffer, size_in_bytes)?;
+            block_id += 1;
+        }
+
+        if block_id != num_blocks - 1 {
+            return Err(bad_request!("cannot create a tensor of shape {shape:?} from {num_blocks} blocks of size {block_size}"));
+        }
+
+        std::mem::drop(dir_guard);
+
+        Ok(Self {
+            dir,
+            block_map,
+            block_size,
+            shape,
+            dtype: PhantomData,
+        })
+    }
+
     pub async fn load(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
-        let contents = dir.read().await;
+        let contents = dir.write().await;
         let num_blocks = contents.len();
 
         if num_blocks == 0 {
@@ -458,78 +554,7 @@ where
             ));
         }
 
-        let mut block_map_shape = BlockShape::with_capacity(block_axis + 1);
-        block_map_shape.extend(
-            shape
-                .iter()
-                .take(block_axis)
-                .copied()
-                .map(|dim| dim as usize),
-        );
-        block_map_shape.push(shape[block_axis] as usize / block_shape[0]);
-
-        let block_map = ArrayBase::<Vec<_>>::new(
-            block_map_shape,
-            (0..num_blocks as u64).into_iter().collect(),
-        )?;
-
-        Ok(Self {
-            dir,
-            block_map,
-            block_size,
-            shape,
-            dtype: PhantomData,
-        })
-    }
-
-    pub async fn constant(dir: DirLock<FE>, shape: Shape, value: T) -> TCResult<Self> {
-        shape.validate()?;
-
-        let size = shape.iter().product::<u64>();
-
-        let (block_size, num_blocks) = ideal_block_size_for(&shape);
-
-        debug_assert!(block_size > 0);
-
-        {
-            let dtype_size = T::dtype().size();
-
-            let mut dir = dir.write().await;
-
-            for block_id in 0..num_blocks {
-                dir.create_file::<Buffer<T>>(
-                    block_id.to_string(),
-                    vec![value; block_size].into(),
-                    block_size * dtype_size,
-                )?;
-            }
-
-            let last_block_id = num_blocks - 1;
-            if size % block_size as u64 == 0 {
-                dir.create_file::<Buffer<T>>(
-                    last_block_id.to_string(),
-                    vec![value; block_size].into(),
-                    block_size * dtype_size,
-                )
-            } else {
-                dir.create_file::<Buffer<T>>(
-                    last_block_id.to_string(),
-                    vec![value; block_size].into(),
-                    block_size * dtype_size,
-                )
-            }?;
-        };
-
-        let block_axis = block_axis_for(&shape, block_size);
-        let map_shape = shape
-            .iter()
-            .take(block_axis)
-            .copied()
-            .map(|dim| dim as usize)
-            .collect();
-
-        let block_map = (0u64..num_blocks as u64).into_iter().collect();
-        let block_map = ArrayBase::<Vec<_>>::new(map_shape, block_map)?;
+        let block_map = block_map_for(num_blocks as u64, shape.as_slice(), &block_shape)?;
 
         Ok(Self {
             dir,
@@ -590,7 +615,7 @@ where
         let block_axis = block_axis_for(&shape, self.block_size);
         let dir = self.dir.into_read().await;
 
-        let blocks = stream::iter(self.block_map.into_inner())
+        let blocks = futures::stream::iter(self.block_map.into_inner())
             .map(move |block_id| {
                 dir.get_file(&block_id).cloned().ok_or_else(|| {
                     io::Error::new(
@@ -657,7 +682,7 @@ where
         let block_axis = block_axis_for(&shape, self.block_size);
         let dir = self.dir.into_read().await;
 
-        let blocks = stream::iter(self.block_map.into_inner())
+        let blocks = futures::stream::iter(self.block_map.into_inner())
             .map(move |block_id| {
                 dir.get_file(&block_id).cloned().ok_or_else(|| {
                     io::Error::new(
@@ -726,7 +751,7 @@ impl<'a, FE> DenseFileWriteGuard<'a, FE> {
         Buffer<T>: de::FromStream<Context = ()>,
     {
         let num_blocks = div_ceil(self.shape.size(), self.block_size as u64);
-        stream::iter(0..num_blocks)
+        futures::stream::iter(0..num_blocks)
             .map(move |block_id| {
                 let that = other.clone();
 
@@ -791,7 +816,7 @@ where
     async fn overwrite_value(&self, _txn_id: TxnId, value: T) -> TCResult<()> {
         let num_blocks = div_ceil(self.shape.size(), self.block_size as u64);
 
-        stream::iter(0..num_blocks)
+        futures::stream::iter(0..num_blocks)
             .map(|block_id| async move {
                 let mut block = self.dir.write_file(&block_id).await?;
                 block.write_value(value).map_err(TCError::from)
@@ -1032,7 +1057,7 @@ where
         let block_axis = block_axis_for(self.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
 
-        let blocks = stream::iter(self.block_map.into_inner())
+        let blocks = futures::stream::iter(self.block_map.into_inner())
             .map(move |block_id| {
                 let source = self.source.clone();
                 async move { source.read_block(txn_id, block_id).await }
@@ -1198,7 +1223,7 @@ where
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         let num_blocks = div_ceil(self.size(), self.block_size() as u64);
 
-        let blocks = stream::iter(0..num_blocks)
+        let blocks = futures::stream::iter(0..num_blocks)
             .map(move |block_id| {
                 let this = self.clone();
                 async move { this.read_block(txn_id, block_id).await }
@@ -1265,7 +1290,7 @@ where
 
     async fn write_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>> {
         let num_blocks = div_ceil(self.size(), self.block_size() as u64);
-        let blocks = stream::iter(0..num_blocks).then(move |block_id| {
+        let blocks = futures::stream::iter(0..num_blocks).then(move |block_id| {
             let this = self.clone();
             async move { this.write_block(txn_id, block_id).await }
         });
@@ -2775,7 +2800,7 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
         }
 
         debug_assert_eq!(block_map.size(), local_bounds.len());
-        let blocks = stream::iter(block_map.into_inner().into_iter().zip(local_bounds))
+        let blocks = futures::stream::iter(block_map.into_inner().into_iter().zip(local_bounds))
             .map(move |(block_id, local_bound)| {
                 let mut block_bounds = block_bounds.to_vec();
                 let source = source.clone();
@@ -3208,7 +3233,7 @@ where
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         let block_axes = self.block_axes;
 
-        let blocks = stream::iter(self.block_map.into_inner())
+        let blocks = futures::stream::iter(self.block_map.into_inner())
             .map(move |block_id| {
                 let source = self.source.clone();
                 async move { source.read_block(txn_id, block_id).await }
@@ -3813,6 +3838,30 @@ fn block_axis_for(shape: &[u64], block_size: usize) -> usize {
     }
 
     shape.len() - block_ndim
+}
+
+#[inline]
+fn block_map_for(
+    num_blocks: u64,
+    shape: &[u64],
+    block_shape: &[usize],
+) -> TCResult<ArrayBase<Vec<u64>>> {
+    let block_axis = shape.len() - block_shape.len();
+    let mut block_map_shape = BlockShape::with_capacity(block_axis + 1);
+    block_map_shape.extend(
+        shape
+            .iter()
+            .take(block_axis)
+            .copied()
+            .map(|dim| dim as usize),
+    );
+    block_map_shape.push(shape[block_axis] as usize / block_shape[0]);
+
+    ArrayBase::<Vec<_>>::new(
+        block_map_shape,
+        (0..num_blocks as u64).into_iter().collect(),
+    )
+    .map_err(TCError::from)
 }
 
 #[inline]

@@ -335,52 +335,6 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE, T> Persist<FE> for DenseBase<Txn, FE, T>
-where
-    Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Buffer<T>> + ThreadSafe + Clone,
-    T: CDatatype + DType + NumberInstance,
-    Buffer<T>: de::FromStream<Context = ()>,
-{
-    type Txn = Txn;
-    type Schema = Shape;
-
-    async fn create(_txn_id: TxnId, shape: Shape, store: Dir<FE>) -> TCResult<Self> {
-        let dir = store.into_inner();
-
-        let (canon, versions) = {
-            let mut dir = dir.write().await;
-            let versions = dir.create_dir(VERSIONS.to_string())?;
-            let canon = dir.create_dir(CANON.to_string())?;
-            (canon, versions)
-        };
-
-        let canon = DenseFile::constant(canon, shape, T::zero()).await?;
-
-        Ok(Self::new(dir, canon, versions))
-    }
-
-    async fn load(_txn_id: TxnId, shape: Shape, store: Dir<FE>) -> TCResult<Self> {
-        let dir = store.into_inner();
-
-        let (canon, versions) = {
-            let mut dir = dir.write().await;
-            let versions = dir.get_or_create_dir(VERSIONS.to_string())?;
-            let canon = dir.get_or_create_dir(CANON.to_string())?;
-            (canon, versions)
-        };
-
-        let canon = DenseFile::load(canon, shape).await?;
-
-        Ok(Self::new(dir, canon, versions))
-    }
-
-    fn dir(&self) -> Inner<FE> {
-        self.dir.clone()
-    }
-}
-
-#[async_trait]
 impl<Txn, FE, T> Transact for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
@@ -471,6 +425,52 @@ where
         }
 
         self.canon.finalize(txn_id);
+    }
+}
+
+#[async_trait]
+impl<Txn, FE, T> Persist<FE> for DenseBase<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + ThreadSafe + Clone,
+    T: CDatatype + DType + NumberInstance,
+    Buffer<T>: de::FromStream<Context = ()>,
+{
+    type Txn = Txn;
+    type Schema = Shape;
+
+    async fn create(_txn_id: TxnId, shape: Shape, store: Dir<FE>) -> TCResult<Self> {
+        let dir = store.into_inner();
+
+        let (canon, versions) = {
+            let mut dir = dir.write().await;
+            let versions = dir.create_dir(VERSIONS.to_string())?;
+            let canon = dir.create_dir(CANON.to_string())?;
+            (canon, versions)
+        };
+
+        let canon = DenseFile::constant(canon, shape, T::zero()).await?;
+
+        Ok(Self::new(dir, canon, versions))
+    }
+
+    async fn load(_txn_id: TxnId, shape: Shape, store: Dir<FE>) -> TCResult<Self> {
+        let dir = store.into_inner();
+
+        let (canon, versions) = {
+            let mut dir = dir.write().await;
+            let versions = dir.get_or_create_dir(VERSIONS.to_string())?;
+            let canon = dir.get_or_create_dir(CANON.to_string())?;
+            (canon, versions)
+        };
+
+        let canon = DenseFile::load(canon, shape).await?;
+
+        Ok(Self::new(dir, canon, versions))
+    }
+
+    fn dir(&self) -> Inner<FE> {
+        self.dir.clone()
     }
 }
 
