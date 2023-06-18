@@ -1455,6 +1455,19 @@ impl<S: TensorInstance + TensorPermitRead + fmt::Debug> TensorPermitRead for Den
     }
 }
 
+impl<Txn, FE, S, T> From<DenseDiagonal<S>> for DenseAccess<Txn, FE, T>
+where
+    S: Into<DenseAccess<Txn, FE, T>>,
+    T: CDatatype,
+{
+    fn from(diag: DenseDiagonal<S>) -> Self {
+        Self::Diagonal(Box::new(DenseDiagonal {
+            source: diag.source.into(),
+            shape: diag.shape,
+        }))
+    }
+}
+
 impl<S: fmt::Debug> fmt::Debug for DenseDiagonal<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "matrix diagonal of {:?}", self.source)

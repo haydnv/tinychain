@@ -13,8 +13,9 @@ use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTr
 use crate::tensor::sparse::{sparse_from, Node};
 use crate::tensor::{
     Axes, Coord, Range, Shape, SparseView, TensorBoolean, TensorBooleanConst, TensorCast,
-    TensorCompare, TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorMathConst,
-    TensorRead, TensorReduce, TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
+    TensorCompare, TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance, TensorMath,
+    TensorMathConst, TensorRead, TensorReduce, TensorTransform, TensorTrig, TensorUnary,
+    TensorUnaryBoolean,
 };
 
 use super::{dense_from, DenseAccess, DenseCacheFile, DenseTensor, DenseUnaryCast};
@@ -567,6 +568,41 @@ where
             NumberType::UInt(UIntType::U16) => view_dispatch_cast!(U16),
             NumberType::UInt(UIntType::U32) => view_dispatch_cast!(U32),
             NumberType::UInt(UIntType::U64) => view_dispatch_cast!(U64),
+        }
+    }
+}
+
+impl<Txn, FE> TensorDiagonal for DenseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
+    type Diagonal = Self;
+
+    fn diagonal(self) -> TCResult<Self::Diagonal> {
+        match self {
+            Self::Bool(this) => this.diagonal().map(dense_from).map(Self::Bool),
+            Self::C32((re, im)) => {
+                let re = re.diagonal().map(dense_from)?;
+                let im = im.diagonal().map(dense_from)?;
+                debug_assert_eq!(re.shape(), im.shape());
+                Ok(Self::C32((re, im)))
+            }
+            Self::C64((re, im)) => {
+                let re = re.diagonal().map(dense_from)?;
+                let im = im.diagonal().map(dense_from)?;
+                debug_assert_eq!(re.shape(), im.shape());
+                Ok(Self::C64((re, im)))
+            }
+            Self::F32(this) => this.diagonal().map(dense_from).map(Self::F32),
+            Self::F64(this) => this.diagonal().map(dense_from).map(Self::F64),
+            Self::I16(this) => this.diagonal().map(dense_from).map(Self::I16),
+            Self::I32(this) => this.diagonal().map(dense_from).map(Self::I32),
+            Self::I64(this) => this.diagonal().map(dense_from).map(Self::I64),
+            Self::U8(this) => this.diagonal().map(dense_from).map(Self::U8),
+            Self::U16(this) => this.diagonal().map(dense_from).map(Self::U16),
+            Self::U32(this) => this.diagonal().map(dense_from).map(Self::U32),
+            Self::U64(this) => this.diagonal().map(dense_from).map(Self::U64),
         }
     }
 }

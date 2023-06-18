@@ -556,6 +556,15 @@ impl<Txn, FE> From<Sparse<Txn, FE>> for SparseView<Txn, FE> {
     }
 }
 
+impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Sparse<Txn, FE> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Base(base) => base.fmt(f),
+            Self::View(view) => view.fmt(f),
+        }
+    }
+}
+
 /// An n-dimensional array of numbers which supports transactional reads and writes
 pub enum Tensor<Txn, FE> {
     Dense(Dense<Txn, FE>),
@@ -1079,6 +1088,26 @@ where
         match self {
             Self::Dense(this) => Sparse::View(this.into_view().into_sparse()),
             Self::Sparse(this) => this,
+        }
+    }
+}
+
+impl<Txn, FE> TensorDiagonal for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Diagonal = Self;
+
+    fn diagonal(self) -> TCResult<Self::Diagonal> {
+        match self {
+            Self::Dense(dense) => dense
+                .into_view()
+                .diagonal()
+                .map(Dense::View)
+                .map(Self::Dense),
+
+            Self::Sparse(sparse) => Err(not_implemented!("diagonal of {:?}", sparse)),
         }
     }
 }
