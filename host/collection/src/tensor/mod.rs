@@ -6,6 +6,7 @@ use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use collate::Collator;
 use destream::{de, en};
+use safecast::AsType;
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
@@ -15,9 +16,9 @@ use tcgeneric::{
     label, path_label, Class, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
 };
 
-pub use dense::{DenseBase, DenseView};
+pub use dense::{DenseCacheFile, DenseBase, DenseView};
 pub use shape::{AxisRange, Range, Shape};
-pub use sparse::{SparseBase, SparseView};
+pub use sparse::{Node, SparseBase, SparseView};
 
 mod block;
 mod complex;
@@ -573,6 +574,110 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for Tensor<Txn, FE> {
         match self {
             Self::Dense(dense) => dense.shape(),
             Self::Sparse(sparse) => sparse.shape(),
+        }
+    }
+}
+
+impl<Txn, FE> TensorBoolean<Self> for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Combine = Self;
+    type LeftCombine = Self;
+
+    fn and(self, other: Self) -> TCResult<Self::LeftCombine> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .and(that.into())
+                    .map(Dense::View)
+                    .map(Tensor::Dense),
+
+                Self::Sparse(that) => that
+                    .into_view()
+                    .and(this.into_view().into_sparse())
+                    .map(Sparse::View)
+                    .map(Tensor::Sparse),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .and(that.into_view().into_sparse())
+                    .map(Sparse::View)
+                    .map(Tensor::Sparse),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .and(that.into())
+                    .map(Sparse::View)
+                    .map(Tensor::Sparse),
+            },
+        }
+    }
+
+    fn or(self, other: Self) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .or(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .or(that.into_view().into_dense())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .into_dense()
+                    .or(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .or(that.into())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            },
+        }
+    }
+
+    fn xor(self, other: Self) -> TCResult<Self::Combine> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .xor(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .xor(that.into_view().into_dense())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .into_dense()
+                    .xor(that.into())
+                    .map(Dense::View)
+                    .map(Self::Dense),
+
+                Self::Sparse(that) => this
+                    .into_view()
+                    .xor(that.into())
+                    .map(Sparse::View)
+                    .map(Self::Sparse),
+            },
         }
     }
 }
