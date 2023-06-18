@@ -524,6 +524,29 @@ where
     }
 }
 
+#[async_trait]
+impl<Txn, FE> TensorWrite for Dense<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
+    async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
+        if let Self::Base(base) = self {
+            base.write_value(txn_id, range, value).await
+        } else {
+            Err(bad_request!("cannot write to {:?}", self))
+        }
+    }
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        if let Self::Base(base) = self {
+            base.write_value_at(txn_id, coord, value).await
+        } else {
+            Err(bad_request!("cannot write to {:?}", self))
+        }
+    }
+}
+
 impl<Txn, FE> From<DenseView<Txn, FE>> for Dense<Txn, FE> {
     fn from(view: DenseView<Txn, FE>) -> Self {
         Self::View(view)
@@ -582,6 +605,25 @@ impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> TensorRead for Spa
         match self {
             Self::Base(base) => base.read_value(txn_id, coord).await,
             Self::View(view) => view.read_value(txn_id, coord).await,
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> TensorWrite for Sparse<Txn, FE> {
+    async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
+        if let Self::Base(base) = self {
+            base.write_value(txn_id, range, value).await
+        } else {
+            Err(bad_request!("cannot write to {:?}", self))
+        }
+    }
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        if let Self::Base(base) = self {
+            base.write_value_at(txn_id, coord, value).await
+        } else {
+            Err(bad_request!("cannot write to {:?}", self))
         }
     }
 }
@@ -1414,6 +1456,27 @@ where
         match self {
             Self::Dense(dense) => dense.into_view().not().map(Self::from),
             Self::Sparse(sparse) => sparse.into_view().not().map(Self::from),
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> TensorWrite for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
+    async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
+        match self {
+            Self::Dense(dense) => dense.write_value(txn_id, range, value).await,
+            Self::Sparse(sparse) => sparse.write_value(txn_id, range, value).await,
+        }
+    }
+
+    async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
+        match self {
+            Self::Dense(dense) => dense.write_value_at(txn_id, coord, value).await,
+            Self::Sparse(sparse) => sparse.write_value_at(txn_id, coord, value).await,
         }
     }
 }
