@@ -547,6 +547,21 @@ where
     }
 }
 
+#[async_trait]
+impl<Txn, FE> TensorWriteDual<Self> for Dense<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    async fn write(self, txn_id: TxnId, range: Range, value: Self) -> TCResult<()> {
+        if let Self::Base(base) = self {
+            base.write(txn_id, range, value.into()).await
+        } else {
+            Err(bad_request!("cannot write to {:?}", self))
+        }
+    }
+}
+
 impl<Txn, FE> From<DenseView<Txn, FE>> for Dense<Txn, FE> {
     fn from(view: DenseView<Txn, FE>) -> Self {
         Self::View(view)
@@ -622,6 +637,21 @@ impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> TensorWrite for Sp
     async fn write_value_at(&self, txn_id: TxnId, coord: Coord, value: Number) -> TCResult<()> {
         if let Self::Base(base) = self {
             base.write_value_at(txn_id, coord, value).await
+        } else {
+            Err(bad_request!("cannot write to {:?}", self))
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> TensorWriteDual<Self> for Sparse<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    async fn write(self, txn_id: TxnId, range: Range, value: Self) -> TCResult<()> {
+        if let Self::Base(base) = self {
+            base.write(txn_id, range, value.into()).await
         } else {
             Err(bad_request!("cannot write to {:?}", self))
         }
@@ -1477,6 +1507,20 @@ where
         match self {
             Self::Dense(dense) => dense.write_value_at(txn_id, coord, value).await,
             Self::Sparse(sparse) => sparse.write_value_at(txn_id, coord, value).await,
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> TensorWriteDual<Self> for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    async fn write(self, txn_id: TxnId, range: Range, value: Self) -> TCResult<()> {
+        match self {
+            Self::Dense(this) => this.write(txn_id, range, value.into_dense()).await,
+            Self::Sparse(this) => this.write(txn_id, range, value.into_sparse()).await,
         }
     }
 }
