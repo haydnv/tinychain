@@ -510,6 +510,20 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for Dense<Txn, FE> {
     }
 }
 
+#[async_trait]
+impl<Txn, FE> TensorRead for Dense<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
+        match self {
+            Self::Base(base) => base.read_value(txn_id, coord).await,
+            Self::View(view) => view.read_value(txn_id, coord).await,
+        }
+    }
+}
+
 impl<Txn, FE> From<Dense<Txn, FE>> for DenseView<Txn, FE> {
     fn from(dense: Dense<Txn, FE>) -> Self {
         match dense {
@@ -552,6 +566,16 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for Sparse<Txn, FE> {
         match self {
             Self::Base(base) => base.shape(),
             Self::View(view) => view.shape(),
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> TensorRead for Sparse<Txn, FE> {
+    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
+        match self {
+            Self::Base(base) => base.read_value(txn_id, coord).await,
+            Self::View(view) => view.read_value(txn_id, coord).await,
         }
     }
 }
@@ -1398,6 +1422,20 @@ where
                 .sub_const(other)
                 .map(Sparse::View)
                 .map(Self::Sparse),
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> TensorRead for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
+        match self {
+            Self::Dense(dense) => dense.read_value(txn_id, coord).await,
+            Self::Sparse(sparse) => sparse.read_value(txn_id, coord).await,
         }
     }
 }
