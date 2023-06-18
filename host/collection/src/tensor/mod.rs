@@ -1367,6 +1367,57 @@ where
     }
 }
 
+impl<Txn, FE> TensorUnary for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Unary = Self;
+
+    fn abs(self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.into_view().abs().map(Self::from),
+            Self::Sparse(sparse) => sparse.into_view().abs().map(Self::from),
+        }
+    }
+
+    fn exp(self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.into_view().exp().map(Self::from),
+            Self::Sparse(sparse) => sparse.into_view().exp().map(Self::from),
+        }
+    }
+
+    fn ln(self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.into_view().ln().map(Self::from),
+            Self::Sparse(sparse) => sparse.into_view().ln().map(Self::from),
+        }
+    }
+
+    fn round(self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.into_view().round().map(Self::from),
+            Self::Sparse(sparse) => sparse.into_view().round().map(Self::from),
+        }
+    }
+}
+
+impl<Txn, FE> TensorUnaryBoolean for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Unary = Self;
+
+    fn not(self) -> TCResult<Self::Unary> {
+        match self {
+            Self::Dense(dense) => dense.into_view().not().map(Self::from),
+            Self::Sparse(sparse) => sparse.into_view().not().map(Self::from),
+        }
+    }
+}
+
 impl<Txn, FE> From<DenseView<Txn, FE>> for Tensor<Txn, FE> {
     fn from(dense: DenseView<Txn, FE>) -> Self {
         Self::Dense(dense.into())
