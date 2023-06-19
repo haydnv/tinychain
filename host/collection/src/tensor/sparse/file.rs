@@ -5,6 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use b_table::b_tree::Collator;
 use b_table::{TableLock, TableWriteGuard};
+use destream::de;
 use freqfs::DirLock;
 use futures::future::TryFutureExt;
 use futures::stream::TryStreamExt;
@@ -14,7 +15,7 @@ use safecast::{AsType, CastInto};
 use tc_error::*;
 use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberCollator, NumberType};
-use tcgeneric::ThreadSafe;
+use tcgeneric::{ThreadSafe, Tuple};
 
 use crate::tensor::{validate_order, Axes, Coord, Range, Shape, TensorInstance};
 
@@ -185,6 +186,25 @@ where
     }
 }
 
+#[async_trait]
+impl<FE, T> de::FromStream for SparseFile<FE, T>
+where
+    FE: AsType<Node> + ThreadSafe,
+    T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
+    Number: From<T> + CastInto<T>,
+{
+    type Context = (DirLock<FE>, Shape);
+
+    async fn from_stream<D: de::Decoder>(
+        cxt: Self::Context,
+        decoder: &mut D,
+    ) -> Result<Self, D::Error> {
+        let (dir, shape) = cxt;
+        let file = Self::create(dir, shape).map_err(de::Error::custom)?;
+        decoder.decode_seq(SparseFileVisitor::new(file)).await
+    }
+}
+
 impl<Txn, FE, T: CDatatype> From<SparseFile<FE, T>> for SparseAccess<Txn, FE, T> {
     fn from(table: SparseFile<FE, T>) -> Self {
         Self::Table(table)
@@ -261,5 +281,53 @@ where
         }
 
         Ok(())
+    }
+}
+
+struct SparseFileVisitor<FE, T> {
+    file: SparseFile<FE, T>,
+}
+
+impl<FE, T> SparseFileVisitor<FE, T> {
+    fn new(file: SparseFile<FE, T>) -> Self {
+        Self { file }
+    }
+}
+
+#[async_trait]
+impl<'a, FE, T> de::Visitor for SparseFileVisitor<FE, T>
+where
+    FE: AsType<Node> + ThreadSafe,
+    T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
+    Number: From<T> + CastInto<T>,
+{
+    type Value = SparseFile<FE, T>;
+
+    fn expecting() -> &'static str {
+        "a sparse tensor"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let mut guard = self.file.table.write().await;
+
+        while let Some((coord, value)) = seq.next_element::<(Coord, T)>(()).await? {
+            if let Err(cause) = self.file.shape().validate_coord(&coord) {
+                return Err(de::Error::invalid_value(
+                    Tuple::from(coord),
+                    format!("a sparse tensor coordinate (note: {cause})"),
+                ));
+            }
+
+            let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
+
+            if value != T::zero() {
+                guard
+                    .upsert(coord, vec![value.into()])
+                    .map_err(de::Error::custom)
+                    .await?;
+            }
+        }
+
+        Ok(self.file)
     }
 }
