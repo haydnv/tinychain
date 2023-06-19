@@ -564,6 +564,31 @@ where
             dtype: PhantomData,
         })
     }
+
+    pub async fn restore(&self, txn_id: TxnId, other: Self) -> TCResult<()> {
+        if self.block_size != other.block_size || self.shape != other.shape {
+            return Err(bad_request!("cannot restore {self:?} from {other:?}"));
+        }
+
+        let source_blocks = other.read_blocks(txn_id).await?;
+
+        source_blocks
+            .enumerate()
+            .map(move |(block_id, result)| {
+                let source = result?;
+
+                Ok(async move {
+                    // there should never be anything writing to this DenseFile during a restore
+                    // so it's safe to use a synchronous read lock here
+                    let contents = self.dir.try_read()?;
+                    let mut dest = contents.write_file(&block_id.to_string()).await?;
+                    Buffer::write(&mut *dest, &*source.into_inner()).map_err(TCError::from)
+                })
+            })
+            .try_buffer_unordered(num_cpus::get())
+            .try_fold((), |(), _| futures::future::ready(Ok(())))
+            .await
+    }
 }
 
 impl<FE, T> TensorInstance for DenseFile<FE, T>
