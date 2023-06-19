@@ -564,40 +564,6 @@ where
             dtype: PhantomData,
         })
     }
-
-    pub async fn restore(&self, other: Self) -> TCResult<()> {
-        if self.block_size != other.block_size || self.shape != other.shape {
-            return Err(bad_request!("cannot restore {self:?} from {other:?}"));
-        }
-
-        let num_blocks = div_ceil(other.size(), other.block_size as u64);
-        let source_blocks = futures::stream::iter(0..num_blocks)
-            .map(move |block_id| {
-                let dir = other.dir.clone();
-
-                async move {
-                    let contents = dir.read().await;
-                    let block = contents
-                        .read_file_owned::<_, Buffer<T>>(&block_id.to_string())
-                        .await?;
-
-                    Ok((block_id, block))
-                }
-            })
-            .buffer_unordered(num_cpus::get());
-
-        source_blocks
-            .map_ok(move |(block_id, source)| async move {
-                // there should never be anything writing to this DenseFile during a restore
-                // so it's safe to use a synchronous read lock here
-                let contents = self.dir.try_read()?;
-                let mut dest = contents.write_file(&block_id.to_string()).await?;
-                Buffer::write(&mut *dest, &*source).map_err(TCError::from)
-            })
-            .try_buffer_unordered(num_cpus::get())
-            .try_fold((), |(), _| futures::future::ready(Ok(())))
-            .await
-    }
 }
 
 impl<FE, T> TensorInstance for DenseFile<FE, T>
@@ -834,11 +800,13 @@ where
                 let queue = queue.clone();
 
                 async move {
+                    let mut block = dir.write_file(&block_id).await?;
+
                     let data = result?;
                     let data = data.read(&queue)?;
-                    let mut block = dir.write_file(&block_id).await?;
                     debug_assert_eq!(block.len(), data.len());
                     block.write(data)?;
+
                     Result::<(), TCError>::Ok(())
                 }
             })

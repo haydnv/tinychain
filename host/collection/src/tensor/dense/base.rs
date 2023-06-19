@@ -12,9 +12,8 @@ use log::debug;
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
-use tc_transact::fs::{Dir, Inner, Persist, VERSIONS};
 use tc_transact::lock::{PermitRead, PermitWrite};
-use tc_transact::{Transact, Transaction, TxnId};
+use tc_transact::{fs, Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberInstance, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
@@ -429,48 +428,66 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE, T> Persist<FE> for DenseBase<Txn, FE, T>
+impl<Txn, FE, T> fs::Persist<FE> for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Buffer<T>> + ThreadSafe + Clone,
+    FE: DenseCacheFile + AsType<Buffer<T>> + Clone,
     T: CDatatype + DType + NumberInstance,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     type Txn = Txn;
     type Schema = Shape;
 
-    async fn create(_txn_id: TxnId, shape: Shape, store: Dir<FE>) -> TCResult<Self> {
-        let dir = store.into_inner();
-
-        let (canon, versions) = {
-            let mut dir = dir.write().await;
-            let versions = dir.create_dir(VERSIONS.to_string())?;
-            let canon = dir.create_dir(CANON.to_string())?;
-            (canon, versions)
-        };
-
+    async fn create(_txn_id: TxnId, shape: Shape, store: fs::Dir<FE>) -> TCResult<Self> {
+        let (dir, canon, versions) = dir_init(store).await?;
         let canon = DenseFile::constant(canon, shape, T::zero()).await?;
-
         Ok(Self::new(dir, canon, versions))
     }
 
-    async fn load(_txn_id: TxnId, shape: Shape, store: Dir<FE>) -> TCResult<Self> {
-        let dir = store.into_inner();
+    async fn load(_txn_id: TxnId, shape: Shape, store: fs::Dir<FE>) -> TCResult<Self> {
+        let (dir, canon, versions) = dir_init(store).await?;
+        let canon = DenseFile::load(canon, shape).await?;
+        Ok(Self::new(dir, canon, versions))
+    }
 
-        let (canon, versions) = {
-            let mut dir = dir.write().await;
-            let versions = dir.get_or_create_dir(VERSIONS.to_string())?;
-            let canon = dir.get_or_create_dir(CANON.to_string())?;
-            (canon, versions)
+    fn dir(&self) -> fs::Inner<FE> {
+        self.dir.clone()
+    }
+}
+
+#[async_trait]
+impl<Txn, FE, T, O> fs::CopyFrom<FE, O> for DenseBase<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + Clone,
+    T: CDatatype + DType + NumberInstance,
+    O: DenseInstance<DType = T>,
+    Buffer<T>: de::FromStream<Context = ()>,
+{
+    async fn copy_from(txn: &Txn, store: fs::Dir<FE>, other: O) -> TCResult<Self> {
+        let (dir, canon, versions) = dir_init(store).await?;
+        let canon = DenseFile::copy_from(canon, *txn.id(), other).await?;
+        Ok(Self::new(dir, canon, versions))
+    }
+}
+
+#[async_trait]
+impl<Txn, FE, T> fs::Restore<FE> for DenseBase<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + Clone,
+    T: CDatatype + DType + NumberInstance,
+    Buffer<T>: de::FromStream<Context = ()>,
+    Number: From<T> + CastInto<T>,
+{
+    async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
+        let version = {
+            let mut state = self.state.write().expect("dense state");
+            state.pending_version(txn_id, self.canon.clone().into())?
         };
 
-        let canon = DenseFile::load(canon, shape).await?;
-
-        Ok(Self::new(dir, canon, versions))
-    }
-
-    fn dir(&self) -> Inner<FE> {
-        self.dir.clone()
+        let guard = version.write().await;
+        guard.overwrite(txn_id, backup.clone()).await
     }
 }
 
@@ -484,4 +501,21 @@ impl<Txn, FE, T> fmt::Debug for DenseBase<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "transactional dense tensor")
     }
+}
+
+#[inline]
+async fn dir_init<FE>(store: fs::Dir<FE>) -> TCResult<(DirLock<FE>, DirLock<FE>, DirLock<FE>)>
+where
+    FE: ThreadSafe + Clone,
+{
+    let dir = store.into_inner();
+
+    let (canon, versions) = {
+        let mut guard = dir.write().await;
+        let versions = guard.create_dir(fs::VERSIONS.to_string())?;
+        let canon = guard.create_dir(CANON.to_string())?;
+        (canon, versions)
+    };
+
+    Ok((dir, canon, versions))
 }

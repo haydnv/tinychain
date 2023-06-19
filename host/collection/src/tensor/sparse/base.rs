@@ -13,9 +13,9 @@ use log::debug;
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
-use tc_transact::fs::{Dir, Inner, Persist, VERSIONS};
+use tc_transact::fs::{Dir, Persist};
 use tc_transact::lock::{PermitRead, PermitWrite};
-use tc_transact::{Transact, Transaction, TxnId};
+use tc_transact::{fs, Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
@@ -312,7 +312,7 @@ where
         let _write_permit = self.base.write_permit(txn_id, range.clone()).await?;
 
         let version = {
-            let mut state = self.base.state.write().expect("dense state");
+            let mut state = self.base.state.write().expect("sparse state");
             state.pending_version(txn_id, self.base.canon.clone().into())?
         };
 
@@ -329,7 +329,7 @@ where
         let _read_permit = other.read_permit(txn_id, Range::default()).await?;
 
         let version = {
-            let mut state = self.base.state.write().expect("dense state");
+            let mut state = self.base.state.write().expect("sparse state");
             state.pending_version(txn_id, self.base.canon.clone().into())?
         };
 
@@ -354,48 +354,6 @@ where
             .write_value(txn_id, coord, value.cast_into())
             .map_err(TCError::from)
             .await
-    }
-}
-
-#[async_trait]
-impl<Txn, FE, T> Persist<FE> for SparseBase<Txn, FE, T>
-where
-    Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe + Clone,
-{
-    type Txn = Txn;
-    type Schema = Schema;
-
-    async fn create(_txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
-        let dir = store.into_inner();
-
-        let (canon, versions) = {
-            let mut dir = dir.write().await;
-            let versions = dir.create_dir(VERSIONS.to_string())?;
-            let canon = dir.create_dir(CANON.to_string())?;
-            let canon = SparseFile::create(canon, schema.shape().clone())?;
-            (canon, versions)
-        };
-
-        Ok(Self::new(dir, canon, versions))
-    }
-
-    async fn load(_txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
-        let dir = store.into_inner();
-
-        let (canon, versions) = {
-            let mut dir = dir.write().await;
-            let versions = dir.get_or_create_dir(VERSIONS.to_string())?;
-            let canon = dir.get_or_create_dir(CANON.to_string())?;
-            let canon = SparseFile::load(canon, schema.shape().clone())?;
-            (canon, versions)
-        };
-
-        Ok(Self::new(dir, canon, versions))
-    }
-
-    fn dir(&self) -> Inner<FE> {
-        self.dir.clone()
     }
 }
 
@@ -496,6 +454,76 @@ where
     }
 }
 
+#[async_trait]
+impl<Txn, FE, T> fs::Persist<FE> for SparseBase<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe + Clone,
+{
+    type Txn = Txn;
+    type Schema = Schema;
+
+    async fn create(_txn_id: TxnId, schema: Schema, store: fs::Dir<FE>) -> TCResult<Self> {
+        let (dir, canon, versions) = dir_init(store).await?;
+        let canon = SparseFile::create(canon, schema.shape().clone())?;
+        Ok(Self::new(dir, canon, versions))
+    }
+
+    async fn load(_txn_id: TxnId, schema: Schema, store: fs::Dir<FE>) -> TCResult<Self> {
+        let (dir, canon, versions) = dir_init(store).await?;
+        let canon = SparseFile::load(canon, schema.shape().clone())?;
+        Ok(Self::new(dir, canon, versions))
+    }
+
+    fn dir(&self) -> fs::Inner<FE> {
+        self.dir.clone()
+    }
+}
+
+#[async_trait]
+impl<Txn, FE, T, O> fs::CopyFrom<FE, O> for SparseBase<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe + Clone,
+    T: CDatatype + DType,
+    O: SparseInstance<DType = T>,
+    Number: From<T> + CastInto<T>,
+{
+    async fn copy_from(
+        txn: &<Self as Persist<FE>>::Txn,
+        store: Dir<FE>,
+        other: O,
+    ) -> TCResult<Self> {
+        let (dir, canon, versions) = dir_init(store).await?;
+        let canon = SparseFile::copy_from(canon, *txn.id(), other).await?;
+        Ok(Self::new(dir, canon, versions))
+    }
+}
+
+#[async_trait]
+impl<Txn, FE, T> fs::Restore<FE> for SparseBase<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + AsType<Buffer<T>> + Clone,
+    T: CDatatype + DType + fmt::Debug,
+    Buffer<T>: de::FromStream<Context = ()>,
+    Number: From<T> + CastInto<T>,
+{
+    async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
+        // always acquire these permits in-order to avoid the risk of a deadlock
+        let _write_permit = self.write_permit(txn_id, Range::default()).await?;
+        let _read_permit = backup.read_permit(txn_id, Range::default()).await?;
+
+        let version = {
+            let mut state = self.state.write().expect("sparse state");
+            state.pending_version(txn_id, self.canon.clone().into())?
+        };
+
+        let mut guard = version.write().await;
+        guard.overwrite(txn_id, backup.clone()).await
+    }
+}
+
 impl<Txn, FE, T: CDatatype> From<SparseBase<Txn, FE, T>> for SparseAccess<Txn, FE, T> {
     fn from(base: SparseBase<Txn, FE, T>) -> Self {
         Self::Base(base)
@@ -504,6 +532,23 @@ impl<Txn, FE, T: CDatatype> From<SparseBase<Txn, FE, T>> for SparseAccess<Txn, F
 
 impl<Txn, FE, T> fmt::Debug for SparseBase<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "transactional sparse tensor",)
+        write!(f, "transactional sparse tensor")
     }
+}
+
+#[inline]
+async fn dir_init<FE>(store: fs::Dir<FE>) -> TCResult<(DirLock<FE>, DirLock<FE>, DirLock<FE>)>
+where
+    FE: ThreadSafe + Clone,
+{
+    let dir = store.into_inner();
+
+    let (canon, versions) = {
+        let mut dir = dir.write().await;
+        let versions = dir.create_dir(fs::VERSIONS.to_string())?;
+        let canon = dir.create_dir(CANON.to_string())?;
+        (canon, versions)
+    };
+
+    Ok((dir, canon, versions))
 }

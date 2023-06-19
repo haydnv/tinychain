@@ -615,14 +615,6 @@ impl<FE: AsType<Node> + ThreadSafe, T> SparseFile<FE, T> {
             dtype: PhantomData,
         })
     }
-
-    pub async fn restore(&self, other: Self) -> TCResult<()> {
-        let mut this = self.table.write().await;
-        let that = other.table.read().await;
-
-        this.truncate().await?;
-        this.merge(that).await
-    }
 }
 
 impl<FE, T> TensorInstance for SparseFile<FE, T>
