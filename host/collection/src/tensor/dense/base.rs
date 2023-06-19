@@ -481,6 +481,10 @@ where
     Number: From<T> + CastInto<T>,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
+        // always acquire these permits in-order to avoid the risk of a deadlock
+        let _write_permit = self.write_permit(txn_id, Range::default()).await?;
+        let _read_permit = backup.read_permit(txn_id, Range::default()).await?;
+
         let version = {
             let mut state = self.state.write().expect("dense state");
             state.pending_version(txn_id, self.canon.clone().into())?

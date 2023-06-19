@@ -5,6 +5,7 @@ use ha_ndarray::CDatatype;
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
+use tc_transact::lock::PermitRead;
 use tc_transact::{Transaction, TxnId};
 use tc_value::{ComplexType, FloatType, IntType, Number, NumberClass, NumberType, UIntType};
 use tcgeneric::ThreadSafe;
@@ -14,8 +15,8 @@ use crate::tensor::sparse::{sparse_from, Node};
 use crate::tensor::{
     Axes, Coord, Range, Shape, SparseView, TensorBoolean, TensorBooleanConst, TensorCast,
     TensorCompare, TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance, TensorMath,
-    TensorMathConst, TensorRead, TensorReduce, TensorTransform, TensorTrig, TensorUnary,
-    TensorUnaryBoolean,
+    TensorMathConst, TensorPermitRead, TensorRead, TensorReduce, TensorTransform, TensorTrig,
+    TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{dense_from, DenseAccess, DenseCacheFile, DenseTensor, DenseUnaryCast};
@@ -68,30 +69,6 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> DenseView<Txn, FE> {
                 "cannot construct a complex tensor from {real:?} and {imag:?}"
             )),
         }
-    }
-}
-
-impl<Txn, FE> From<DenseTensor<Txn, FE, DenseAccess<Txn, FE, f32>>> for DenseView<Txn, FE> {
-    fn from(tensor: DenseTensor<Txn, FE, DenseAccess<Txn, FE, f32>>) -> Self {
-        Self::F32(tensor)
-    }
-}
-
-impl<Txn, FE> From<DenseTensor<Txn, FE, DenseAccess<Txn, FE, f64>>> for DenseView<Txn, FE> {
-    fn from(tensor: DenseTensor<Txn, FE, DenseAccess<Txn, FE, f64>>) -> Self {
-        Self::F64(tensor)
-    }
-}
-
-impl<Txn, FE> From<DenseComplex<Txn, FE, f32>> for DenseView<Txn, FE> {
-    fn from(tensors: DenseComplex<Txn, FE, f32>) -> Self {
-        Self::C32(tensors)
-    }
-}
-
-impl<Txn, FE> From<DenseComplex<Txn, FE, f64>> for DenseView<Txn, FE> {
-    fn from(tensors: DenseComplex<Txn, FE, f64>) -> Self {
-        Self::C64(tensors)
     }
 }
 
@@ -1475,6 +1452,49 @@ where
             ComplexUnary::not((this.0.into(), this.1.into())),
             this.not().map(dense_from).map(Self::Bool)
         )
+    }
+}
+
+#[async_trait]
+impl<Txn: ThreadSafe, FE: ThreadSafe> TensorPermitRead for DenseView<Txn, FE> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        view_dispatch!(
+            self,
+            this,
+            this.accessor.read_permit(txn_id, range).await,
+            {
+                // always acquire these permits in-order to avoid the risk of a deadlock
+                let mut re = this.0.accessor.read_permit(txn_id, range.clone()).await?;
+                let im = this.1.accessor.read_permit(txn_id, range).await?;
+                re.extend(im);
+                Ok(re)
+            },
+            this.accessor.read_permit(txn_id, range).await
+        )
+    }
+}
+
+impl<Txn, FE> From<DenseTensor<Txn, FE, DenseAccess<Txn, FE, f32>>> for DenseView<Txn, FE> {
+    fn from(tensor: DenseTensor<Txn, FE, DenseAccess<Txn, FE, f32>>) -> Self {
+        Self::F32(tensor)
+    }
+}
+
+impl<Txn, FE> From<DenseTensor<Txn, FE, DenseAccess<Txn, FE, f64>>> for DenseView<Txn, FE> {
+    fn from(tensor: DenseTensor<Txn, FE, DenseAccess<Txn, FE, f64>>) -> Self {
+        Self::F64(tensor)
+    }
+}
+
+impl<Txn, FE> From<DenseComplex<Txn, FE, f32>> for DenseView<Txn, FE> {
+    fn from(tensors: DenseComplex<Txn, FE, f32>) -> Self {
+        Self::C32(tensors)
+    }
+}
+
+impl<Txn, FE> From<DenseComplex<Txn, FE, f64>> for DenseView<Txn, FE> {
+    fn from(tensors: DenseComplex<Txn, FE, f64>) -> Self {
+        Self::C64(tensors)
     }
 }
 

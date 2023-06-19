@@ -28,8 +28,8 @@ use crate::tensor::block::Block;
 use crate::tensor::dense::{DenseAccess, DenseCacheFile, DenseInstance, DenseSlice};
 use crate::tensor::transform::{Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
-    coord_of, offset_of, strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore,
-    Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
+    coord_of, offset_of, size_hint, strides_for, validate_order, Axes, AxisRange, Coord, Range,
+    Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
 };
 
 use super::base::SparseBase;
@@ -4107,7 +4107,7 @@ where
     Ok(coord_blocks)
 }
 
-async fn merge_blocks_outer<L, R, T>(
+pub(super) async fn merge_blocks_outer<L, R, T>(
     left: L,
     right: R,
     txn_id: TxnId,
@@ -4149,11 +4149,6 @@ where
     });
 
     Ok(coord_blocks)
-}
-
-#[inline]
-fn size_hint(size: u64) -> usize {
-    size.try_into().ok().unwrap_or_else(|| usize::MAX)
 }
 
 #[inline]

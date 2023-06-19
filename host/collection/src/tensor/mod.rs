@@ -10,7 +10,7 @@ use safecast::AsType;
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
-use tc_transact::{Transaction, TxnId};
+use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{Number, NumberType, ValueType};
 use tcgeneric::{
     label, path_label, Class, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
@@ -26,6 +26,7 @@ pub mod dense;
 pub mod shape;
 pub mod sparse;
 mod transform;
+mod view;
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
@@ -562,6 +563,20 @@ where
     }
 }
 
+#[async_trait]
+impl<'en, Txn, FE> IntoView<'en, FE> for Dense<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Txn = Txn;
+    type View = view::DenseView;
+
+    async fn into_view(self, txn: Self::Txn) -> TCResult<view::DenseView> {
+        view::DenseView::read_from(self, *txn.id()).await
+    }
+}
+
 impl<Txn, FE> From<DenseView<Txn, FE>> for Dense<Txn, FE> {
     fn from(view: DenseView<Txn, FE>) -> Self {
         Self::View(view)
@@ -655,6 +670,20 @@ where
         } else {
             Err(bad_request!("cannot write to {:?}", self))
         }
+    }
+}
+
+#[async_trait]
+impl<'en, Txn, FE> IntoView<'en, FE> for Sparse<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Txn = Txn;
+    type View = view::SparseView;
+
+    async fn into_view(self, txn: Self::Txn) -> TCResult<view::SparseView> {
+        view::SparseView::read_from(self, *txn.id()).await
     }
 }
 
@@ -1525,6 +1554,20 @@ where
     }
 }
 
+#[async_trait]
+impl<'en, Txn, FE> IntoView<'en, FE> for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Txn = Txn;
+    type View = view::TensorView;
+
+    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
+        view::TensorView::read_from(self, *txn.id()).await
+    }
+}
+
 impl<Txn, FE> From<DenseView<Txn, FE>> for Tensor<Txn, FE> {
     fn from(dense: DenseView<Txn, FE>) -> Self {
         Self::Dense(dense.into())
@@ -1572,6 +1615,11 @@ fn offset_of(coord: Coord, shape: &[u64]) -> u64 {
     });
 
     coord.into_iter().zip(strides).map(|(i, dim)| i * dim).sum()
+}
+
+#[inline]
+fn size_hint(size: u64) -> usize {
+    size.try_into().ok().unwrap_or_else(|| usize::MAX)
 }
 
 #[inline]

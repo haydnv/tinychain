@@ -8,8 +8,9 @@ use ha_ndarray::{ArrayBase, CDatatype};
 use pin_project::pin_project;
 
 use tc_error::*;
+use tc_transact::lock::PermitRead;
 
-use crate::tensor::{Coord, IDEAL_BLOCK_SIZE};
+use crate::tensor::{Coord, Range, IDEAL_BLOCK_SIZE};
 
 #[pin_project]
 pub struct BlockCoords<S, T> {
@@ -266,6 +267,43 @@ where
                 None => break None,
                 Some(Err(cause)) => break Some(Err(cause)),
             }
+        })
+    }
+}
+
+#[pin_project]
+pub struct Elements<S> {
+    permit: Vec<PermitRead<Range>>,
+
+    #[pin]
+    elements: Fuse<S>,
+}
+
+impl<S> Elements<S>
+where
+    S: Stream,
+{
+    pub fn new(permit: Vec<PermitRead<Range>>, elements: S) -> Self {
+        Self {
+            permit,
+            elements: elements.fuse(),
+        }
+    }
+}
+
+impl<S, T> Stream for Elements<S>
+where
+    S: Stream<Item = TCResult<(Coord, T)>>,
+{
+    type Item = TCResult<(Coord, T)>;
+
+    fn poll_next(self: Pin<&mut Self>, cxt: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut this = self.project();
+
+        Poll::Ready(match ready!(this.elements.as_mut().try_poll_next(cxt)) {
+            Some(Ok((coord, n))) => Some(Ok((coord, n))),
+            Some(Err(cause)) => Some(Err(cause)),
+            None => None,
         })
     }
 }

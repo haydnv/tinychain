@@ -94,6 +94,15 @@ pub struct SparseTensor<Txn, FE, A> {
     phantom: PhantomData<(Txn, FE)>,
 }
 
+impl<Txn, FE, A: Clone> Clone for SparseTensor<Txn, FE, A> {
+    fn clone(&self) -> Self {
+        Self {
+            accessor: self.accessor.clone(),
+            phantom: PhantomData,
+        }
+    }
+}
+
 impl<Txn, FE, A> SparseTensor<Txn, FE, A> {
     pub fn into_inner(self) -> A {
         self.accessor
@@ -109,12 +118,23 @@ impl<Txn, FE, T: CDatatype> SparseTensor<Txn, FE, SparseAccess<Txn, FE, T>> {
     }
 }
 
-impl<Txn, FE, A: Clone> Clone for SparseTensor<Txn, FE, A> {
-    fn clone(&self) -> Self {
-        Self {
-            accessor: self.accessor.clone(),
-            phantom: PhantomData,
-        }
+impl<Txn, FE, A> SparseTensor<Txn, FE, A>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    A: SparseInstance + TensorPermitRead,
+{
+    pub async fn into_elements(
+        self,
+        txn_id: TxnId,
+    ) -> TCResult<stream::Elements<Elements<A::DType>>> {
+        let permit = self.accessor.read_permit(txn_id, Range::default()).await?;
+        let elements = self
+            .accessor
+            .elements(txn_id, Range::default(), Axes::default())
+            .await?;
+
+        Ok(stream::Elements::new(permit, elements))
     }
 }
 

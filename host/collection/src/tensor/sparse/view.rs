@@ -1,20 +1,29 @@
 use std::fmt;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use ha_ndarray::{Array, NDArrayBoolean};
-use safecast::{AsType, CastFrom};
+use destream::de;
+use futures::{Stream, TryStreamExt};
+use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype, NDArrayBoolean, NDArrayMath, NDArrayRead};
+use rayon::prelude::*;
+use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
+use tc_transact::lock::PermitRead;
 use tc_transact::{Transaction, TxnId};
-use tc_value::{ComplexType, FloatType, IntType, Number, NumberClass, NumberType, UIntType};
+use tc_value::{
+    Complex, ComplexType, DType, FloatType, IntType, Number, NumberClass, NumberType, UIntType,
+};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTrig, ComplexUnary};
 use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
-    Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare,
-    TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorMathConst, TensorRead,
-    TensorReduce, TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
+    size_hint, strides_for, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst,
+    TensorCast, TensorCompare, TensorCompareConst, TensorConvert, TensorInstance, TensorMath,
+    TensorMathConst, TensorPermitRead, TensorRead, TensorReduce, TensorTransform, TensorTrig,
+    TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
@@ -87,6 +96,116 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> SparseView<Txn, FE> {
             )),
         }
     }
+}
+
+impl<Txn, FE> SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    pub async fn into_elements(
+        self,
+        txn_id: TxnId,
+    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<(Coord, Number)>> + Send>>> {
+        view_dispatch!(
+            self,
+            this,
+            {
+                let elements = this.into_elements(txn_id).await?;
+                let elements = elements.map_ok(|(coord, n)| (coord, (n != 0).into()));
+                Ok(Box::pin(elements))
+            },
+            into_complex_elements(this, txn_id).await,
+            {
+                let elements = this.into_elements(txn_id).await?;
+                let elements = elements.map_ok(|(coord, n)| (coord, n.into()));
+                Ok(Box::pin(elements))
+            }
+        )
+    }
+}
+
+async fn into_complex_elements<Txn, FE, T>(
+    tensors: SparseComplex<Txn, FE, T>,
+    txn_id: TxnId,
+) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<(Coord, Number)>> + Send>>>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + Clone,
+    T: CDatatype + DType + fmt::Debug,
+    Buffer<T>: de::FromStream<Context = ()>,
+    Complex: From<(T, T)>,
+    Number: From<T> + CastInto<T>,
+{
+    let (re, im) = tensors;
+
+    debug_assert_eq!(re.shape(), im.shape());
+
+    let ndim = re.ndim();
+    let shape = re.shape().clone();
+    let size_hint = size_hint(re.size());
+
+    let strides = strides_for(shape.as_slice(), shape.len());
+    let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
+    let dims = ArrayBase::<Arc<Vec<u64>>>::new(vec![shape.len()], Arc::new(shape.to_vec()))?;
+
+    let blocks = super::access::merge_blocks_outer(
+        re.into_inner(),
+        im.into_inner(),
+        txn_id,
+        shape,
+        Range::default(),
+        Axes::default(),
+    )
+    .await?;
+
+    let context = ha_ndarray::Context::default()?;
+
+    let elements = blocks
+        .map_ok(move |(offsets, (re, im))| {
+            let context = context.clone();
+            let strides = strides.clone();
+            let dims = dims.clone();
+
+            async move {
+                let coords = offsets.mul(strides)?.rem(dims)?;
+
+                let queue = ha_ndarray::Queue::new(context, size_hint)?;
+
+                let coords = coords
+                    .read(&queue)
+                    .and_then(|buffer| buffer.to_slice())
+                    .map(|slice| slice.into_vec())?;
+
+                let re = re
+                    .read(&queue)
+                    .and_then(|buffer| buffer.to_slice())
+                    .map(|slice| slice.into_vec())?;
+
+                let im = im
+                    .read(&queue)
+                    .and_then(|buffer| buffer.to_slice())
+                    .map(|slice| slice.into_vec())?;
+
+                let values = re
+                    .into_par_iter()
+                    .zip(im)
+                    .map(|(r, i)| Number::Complex((r, i).into()));
+
+                let elements = coords
+                    .into_par_iter()
+                    .chunks(ndim)
+                    .zip(values)
+                    .map(Ok)
+                    .collect::<Vec<TCResult<_>>>();
+
+                TCResult::Ok(futures::stream::iter(elements))
+            }
+        })
+        .try_buffered(num_cpus::get())
+        .try_flatten();
+
+    Ok(Box::pin(elements))
 }
 
 impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for SparseView<Txn, FE> {
@@ -607,7 +726,7 @@ where
                 Ok(Self::C32((sparse_from(real), sparse_from(imag))))
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C32(this).div(that)
             }
             (Self::C64((a, b)), Self::C64((c, d))) => {
@@ -620,7 +739,7 @@ where
                 Ok(Self::C64((sparse_from(real), sparse_from(imag))))
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C64(this).div(that)
             }
             (Self::F32(this), Self::F32(that)) => this.div(that).map(sparse_from).map(Self::F32),
@@ -634,8 +753,8 @@ where
             (Self::U64(this), Self::U64(that)) => this.div(that).map(sparse_from).map(Self::U64),
             (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
-                let this = this.cast_into(dtype)?;
-                let that = that.cast_into(dtype)?;
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
                 this.div(that)
             }
         }
@@ -657,8 +776,8 @@ where
             (Self::U64(this), Self::U64(that)) => this.log(that).map(sparse_from).map(Self::U64),
             (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
-                let this = this.cast_into(dtype)?;
-                let that = that.cast_into(dtype)?;
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
                 this.log(that)
             }
         }
@@ -677,7 +796,7 @@ where
                 Ok(Self::C32((sparse_from(real), sparse_from(imag))))
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C32(this).mul(that)
             }
             (Self::C64((a, b)), Self::C64((c, d))) => {
@@ -690,7 +809,7 @@ where
                 Ok(Self::C64((sparse_from(real), sparse_from(imag))))
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C64(this).mul(that)
             }
             (Self::F32(this), Self::F32(that)) => this.mul(that).map(sparse_from).map(Self::F32),
@@ -705,8 +824,8 @@ where
             (this, that) if this.dtype().is_real() && that.dtype().is_complex() => that.mul(this),
             (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
-                let this = this.cast_into(dtype)?;
-                let that = that.cast_into(dtype)?;
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
                 this.mul(that)
             }
         }
@@ -719,14 +838,14 @@ where
                 ComplexMath::pow((x.into(), y.into()), that.into()).and_then(Self::complex_from)
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C32(this).pow(that)
             }
             (Self::C64((x, y)), Self::F64(that)) => {
                 ComplexMath::pow((x.into(), y.into()), that.into()).and_then(Self::complex_from)
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C64(this).pow(that)
             }
             (Self::F32(this), Self::F32(that)) => this.pow(that).map(sparse_from).map(Self::F32),
@@ -745,8 +864,8 @@ where
             )),
             (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
-                let this = this.cast_into(dtype)?;
-                let that = that.cast_into(dtype)?;
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
                 this.pow(that)
             }
         }
@@ -765,7 +884,7 @@ where
                 Ok(Self::C32((real, imag)))
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C32(this).sub(that)
             }
             (Self::C64((a, b)), Self::C64((c, d))) => {
@@ -778,7 +897,7 @@ where
                 Ok(Self::C64((real, imag)))
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
-                let that = that.cast_into(this.0.dtype())?;
+                let that = TensorCast::cast_into(that, this.0.dtype())?;
                 Self::C64(this).sub(that)
             }
             (Self::F32(this), Self::F32(that)) => this.sub(that).map(sparse_from).map(Self::F32),
@@ -793,8 +912,8 @@ where
             (this, that) if this.dtype().is_real() && that.dtype().is_complex() => that.sub(this),
             (this, that) => {
                 let dtype = Ord::max(this.dtype(), that.dtype());
-                let this = this.cast_into(dtype)?;
-                let that = that.cast_into(dtype)?;
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
                 this.sub(that)
             }
         }
@@ -897,11 +1016,11 @@ impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> TensorReduce for S
         match self {
             Self::Bool(this) => this.all(txn_id).await,
             Self::C32(this) => {
-                let this = Self::C32(this).cast_into(NumberType::Bool)?;
+                let this = TensorCast::cast_into(Self::C32(this), NumberType::Bool)?;
                 this.all(txn_id).await
             }
             Self::C64(this) => {
-                let this = Self::C64(this).cast_into(NumberType::Bool)?;
+                let this = TensorCast::cast_into(Self::C64(this), NumberType::Bool)?;
                 this.all(txn_id).await
             }
             Self::F32(this) => this.all(txn_id).await,
@@ -920,11 +1039,11 @@ impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> TensorReduce for S
         match self {
             Self::Bool(this) => this.any(txn_id).await,
             Self::C32(this) => {
-                let this = Self::C32(this).cast_into(NumberType::Bool)?;
+                let this = TensorCast::cast_into(Self::C32(this), NumberType::Bool)?;
                 this.any(txn_id).await
             }
             Self::C64(this) => {
-                let this = Self::C64(this).cast_into(NumberType::Bool)?;
+                let this = TensorCast::cast_into(Self::C64(this), NumberType::Bool)?;
                 this.any(txn_id).await
             }
             Self::F32(this) => this.any(txn_id).await,
@@ -1377,6 +1496,25 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> TensorUnaryBoolean for SparseView<Txn, FE>
 
     fn not(self) -> TCResult<Self::Unary> {
         Err(bad_request!("a sparse tensor does not support the logical not operation because the result would be dense (consider converting to a dense tensor first)"))
+    }
+}
+
+#[async_trait]
+impl<Txn: ThreadSafe, FE: ThreadSafe> TensorPermitRead for SparseView<Txn, FE> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        view_dispatch!(
+            self,
+            this,
+            this.accessor.read_permit(txn_id, range).await,
+            {
+                // always acquire these permits in-order to avoid the risk of a deadlock
+                let mut re = this.0.accessor.read_permit(txn_id, range.clone()).await?;
+                let im = this.1.accessor.read_permit(txn_id, range).await?;
+                re.extend(im);
+                Ok(re)
+            },
+            this.accessor.read_permit(txn_id, range).await
+        )
     }
 }
 
