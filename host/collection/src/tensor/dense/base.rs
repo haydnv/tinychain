@@ -22,7 +22,8 @@ use crate::tensor::{
     Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite, TensorType,
 };
 
-use super::access::{DenseAccess, DenseCow, DenseFile, DenseVersion};
+use super::access::{DenseAccess, DenseCow, DenseVersion};
+use super::file::DenseFile;
 use super::{
     BlockStream, DenseCacheFile, DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock,
 };

@@ -1,8 +1,7 @@
 use std::cmp::Ordering;
-use std::marker::PhantomData;
+use std::fmt;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::{fmt, io};
 
 use async_trait::async_trait;
 use collate::Collate;
@@ -23,8 +22,10 @@ use tc_value::{
 use tcgeneric::ThreadSafe;
 
 use super::base::DenseBase;
+use super::file::DenseFile;
 use super::{
-    div_ceil, ideal_block_size_for, DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock,
+    block_axis_for, block_shape_for, div_ceil, ideal_block_size_for, DenseInstance, DenseWrite,
+    DenseWriteGuard, DenseWriteLock,
 };
 
 use crate::tensor::block::Block;
@@ -365,607 +366,6 @@ where
 impl<Txn, FE, T: CDatatype + DType> fmt::Debug for DenseAccess<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         access_dispatch!(self, this, this.fmt(f))
-    }
-}
-
-pub struct DenseFile<FE, T> {
-    dir: DirLock<FE>,
-    block_map: ArrayBase<Vec<u64>>,
-    block_size: usize,
-    shape: Shape,
-    dtype: PhantomData<T>,
-}
-
-impl<FE, T> Clone for DenseFile<FE, T> {
-    fn clone(&self) -> Self {
-        Self {
-            dir: self.dir.clone(),
-            block_map: self.block_map.clone(),
-            block_size: self.block_size,
-            shape: self.shape.clone(),
-            dtype: PhantomData,
-        }
-    }
-}
-
-impl<FE, T> DenseFile<FE, T>
-where
-    FE: DenseCacheFile + AsType<Buffer<T>>,
-    T: CDatatype + DType + NumberInstance,
-    Buffer<T>: de::FromStream<Context = ()>,
-{
-    pub async fn constant(dir: DirLock<FE>, shape: Shape, value: T) -> TCResult<Self> {
-        shape.validate()?;
-
-        let size = shape.iter().product::<u64>();
-
-        let (block_size, num_blocks) = ideal_block_size_for(&shape);
-
-        debug_assert!(block_size > 0);
-
-        {
-            let dtype_size = T::dtype().size();
-
-            let mut dir = dir.write().await;
-
-            for block_id in 0..num_blocks {
-                dir.create_file::<Buffer<T>>(
-                    block_id.to_string(),
-                    vec![value; block_size].into(),
-                    block_size * dtype_size,
-                )?;
-            }
-
-            let last_block_id = num_blocks - 1;
-            if size % block_size as u64 == 0 {
-                dir.create_file::<Buffer<T>>(
-                    last_block_id.to_string(),
-                    vec![value; block_size].into(),
-                    block_size * dtype_size,
-                )
-            } else {
-                dir.create_file::<Buffer<T>>(
-                    last_block_id.to_string(),
-                    vec![value; block_size].into(),
-                    block_size * dtype_size,
-                )
-            }?;
-        };
-
-        let block_axis = block_axis_for(&shape, block_size);
-        let map_shape = shape
-            .iter()
-            .take(block_axis)
-            .copied()
-            .map(|dim| dim as usize)
-            .collect();
-
-        let block_map = (0u64..num_blocks as u64).into_iter().collect();
-        let block_map = ArrayBase::<Vec<_>>::new(map_shape, block_map)?;
-
-        Ok(Self {
-            dir,
-            block_map,
-            block_size,
-            shape,
-            dtype: PhantomData,
-        })
-    }
-
-    pub async fn copy_from<O>(dir: DirLock<FE>, txn_id: TxnId, other: O) -> TCResult<Self>
-    where
-        O: DenseInstance<DType = T>,
-    {
-        let shape = other.shape().clone();
-        let (block_size, num_blocks) = ideal_block_size_for(&shape);
-        let block_axis = block_axis_for(&shape, block_size);
-        let block_shape = block_shape_for(block_axis, &shape, block_size);
-        let block_map = block_map_for(num_blocks as u64, shape.as_slice(), &block_shape)?;
-
-        let source_blocks = other.read_blocks(txn_id).await?;
-        let mut source_blocks = BlockResize::new(source_blocks, block_shape)?;
-
-        let mut dir_guard = dir.write().await;
-
-        let mut block_id = 0;
-        while let Some(block) = source_blocks.try_next().await? {
-            let buffer = Buffer::from(block.into_inner());
-            let size_in_bytes = buffer.len() * T::dtype().size();
-            dir_guard.create_file(block_id.to_string(), buffer, size_in_bytes)?;
-            block_id += 1;
-        }
-
-        if block_id != num_blocks - 1 {
-            return Err(bad_request!("cannot create a tensor of shape {shape:?} from {num_blocks} blocks of size {block_size}"));
-        }
-
-        std::mem::drop(dir_guard);
-
-        Ok(Self {
-            dir,
-            block_map,
-            block_size,
-            shape,
-            dtype: PhantomData,
-        })
-    }
-
-    pub async fn load(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
-        let contents = dir.write().await;
-        let num_blocks = contents.len();
-
-        if num_blocks == 0 {
-            return Err(bad_request!(
-                "cannot load a dense tensor from an empty directory"
-            ));
-        }
-
-        let mut size = 0u64;
-
-        let block_size = {
-            let block = contents
-                .get_file(&0)
-                .ok_or_else(|| TCError::not_found("block 0"))?;
-
-            let block: FileReadGuard<Buffer<T>> = block.read().await?;
-            size += block.len() as u64;
-            block.len()
-        };
-
-        let block_axis = block_axis_for(&shape, block_size);
-        let block_shape = block_shape_for(block_axis, &shape, block_size);
-
-        for block_id in 1..(num_blocks - 1) {
-            let block = contents
-                .get_file(&block_id)
-                .ok_or_else(|| TCError::not_found(format!("block {block_id}")))?;
-
-            let block: FileReadGuard<Buffer<T>> = block.read().await?;
-            if block.len() == block_size {
-                size += block.len() as u64;
-            } else {
-                return Err(bad_request!(
-                    "block {} has incorrect size {} (expected {})",
-                    block_id,
-                    block.len(),
-                    block_size
-                ));
-            }
-        }
-
-        {
-            let block_id = num_blocks - 1;
-            let block = contents
-                .get_file(&block_id)
-                .ok_or_else(|| bad_request!("block {block_id}"))?;
-
-            let block: FileReadGuard<Buffer<T>> = block.read().await?;
-            size += block.len() as u64;
-        }
-
-        std::mem::drop(contents);
-
-        if size != shape.size() {
-            return Err(bad_request!(
-                "tensor blocks have incorrect total length {} (expected {} for shape {:?})",
-                size,
-                shape.size(),
-                shape
-            ));
-        }
-
-        let block_map = block_map_for(num_blocks as u64, shape.as_slice(), &block_shape)?;
-
-        Ok(Self {
-            dir,
-            block_map,
-            block_size,
-            shape,
-            dtype: PhantomData,
-        })
-    }
-}
-
-impl<FE, T> TensorInstance for DenseFile<FE, T>
-where
-    FE: ThreadSafe,
-    T: DType + ThreadSafe,
-{
-    fn dtype(&self) -> NumberType {
-        T::dtype()
-    }
-
-    fn shape(&self) -> &Shape {
-        &self.shape
-    }
-}
-
-#[async_trait]
-impl<FE, T> DenseInstance for DenseFile<FE, T>
-where
-    FE: FileLoad + AsType<Buffer<T>>,
-    T: CDatatype + DType + 'static,
-    Buffer<T>: de::FromStream<Context = ()>,
-{
-    type Block = ArrayBase<FileReadGuardOwned<FE, Buffer<T>>>;
-    type DType = T;
-
-    fn block_size(&self) -> usize {
-        self.block_size
-    }
-
-    async fn read_block(&self, _txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
-        let dir = self.dir.read().await;
-        let file = dir.get_file(&block_id).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("dense tensor block {}", block_id),
-            )
-        })?;
-
-        let buffer = file.read_owned().await?;
-        let block_axis = block_axis_for(self.shape(), self.block_size);
-        let block_shape = block_shape_for(block_axis, &self.shape, buffer.len());
-        ArrayBase::<FileReadGuardOwned<FE, Buffer<T>>>::new(block_shape, buffer)
-            .map_err(TCError::from)
-    }
-
-    async fn read_blocks(self, _txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
-        let shape = self.shape;
-        let block_axis = block_axis_for(&shape, self.block_size);
-        let dir = self.dir.into_read().await;
-
-        let blocks = futures::stream::iter(self.block_map.into_inner())
-            .map(move |block_id| {
-                dir.get_file(&block_id).cloned().ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!("dense tensor block {}", block_id),
-                    )
-                    .into()
-                })
-            })
-            .map_ok(|block| block.into_read())
-            .try_buffered(num_cpus::get())
-            .map(move |result| {
-                let buffer = result?;
-                let block_shape = block_shape_for(block_axis, &shape, buffer.len());
-                ArrayBase::<FileReadGuardOwned<FE, Buffer<T>>>::new(block_shape, buffer)
-                    .map_err(TCError::from)
-            });
-
-        Ok(Box::pin(blocks))
-    }
-
-    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
-        self.shape().validate_coord(&coord)?;
-
-        let offset = offset_of(coord, self.shape());
-        let block_id = offset / self.block_size() as u64;
-        let block_offset = (offset % self.block_size() as u64) as usize;
-
-        let block = self.read_block(txn_id, block_id).await?;
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, self.block_size())?;
-        let buffer = block.read(&queue)?;
-        Ok(buffer.to_slice()?.as_ref()[block_offset])
-    }
-}
-
-#[async_trait]
-impl<'a, FE, T> DenseWrite for DenseFile<FE, T>
-where
-    FE: FileLoad + AsType<Buffer<T>>,
-    T: CDatatype + DType + 'static,
-    Buffer<T>: de::FromStream<Context = ()>,
-{
-    type BlockWrite = ArrayBase<FileWriteGuardOwned<FE, Buffer<T>>>;
-
-    async fn write_block(&self, _txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
-        let dir = self.dir.read().await;
-        let file = dir.get_file(&block_id).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("dense tensor block {}", block_id),
-            )
-        })?;
-
-        let buffer = file.write_owned().await?;
-        let block_axis = block_axis_for(self.shape(), self.block_size);
-        let block_shape = block_shape_for(block_axis, &self.shape, buffer.len());
-        ArrayBase::<FileWriteGuardOwned<FE, Buffer<T>>>::new(block_shape, buffer)
-            .map_err(TCError::from)
-    }
-
-    async fn write_blocks(self, _txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>> {
-        let shape = self.shape;
-        let block_axis = block_axis_for(&shape, self.block_size);
-        let dir = self.dir.into_read().await;
-
-        let blocks = futures::stream::iter(self.block_map.into_inner())
-            .map(move |block_id| {
-                dir.get_file(&block_id).cloned().ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!("dense tensor block {}", block_id),
-                    )
-                    .into()
-                })
-            })
-            .map_ok(|block| block.into_write())
-            .try_buffered(num_cpus::get())
-            .map(move |result| {
-                let buffer = result?;
-                let block_shape = block_shape_for(block_axis, &shape, buffer.len());
-                ArrayBase::<FileWriteGuardOwned<FE, Buffer<T>>>::new(block_shape, buffer)
-                    .map_err(TCError::from)
-            });
-
-        Ok(Box::pin(blocks))
-    }
-}
-
-#[async_trait]
-impl<'a, FE, T> DenseWriteLock<'a> for DenseFile<FE, T>
-where
-    FE: FileLoad + AsType<Buffer<T>>,
-    T: CDatatype + DType,
-    Buffer<T>: de::FromStream<Context = ()>,
-{
-    type WriteGuard = DenseFileWriteGuard<'a, FE>;
-
-    async fn write(&'a self) -> Self::WriteGuard {
-        let dir = self.dir.read().await;
-
-        DenseFileWriteGuard {
-            dir: Arc::new(dir),
-            block_size: self.block_size,
-            shape: &self.shape,
-        }
-    }
-}
-
-impl<Txn, FE, T: CDatatype> From<DenseFile<FE, T>> for DenseAccess<Txn, FE, T> {
-    fn from(file: DenseFile<FE, T>) -> Self {
-        Self::File(file)
-    }
-}
-
-impl<FE, T> fmt::Debug for DenseFile<FE, T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "dense tensor with shape {:?}", self.shape)
-    }
-}
-
-pub struct DenseFileWriteGuard<'a, FE> {
-    dir: Arc<DirReadGuard<'a, FE>>,
-    block_size: usize,
-    shape: &'a Shape,
-}
-
-impl<'a, FE> DenseFileWriteGuard<'a, FE> {
-    pub async fn merge<T>(&self, other: DirLock<FE>) -> TCResult<()>
-    where
-        FE: FileLoad + AsType<Buffer<T>>,
-        T: CDatatype + DType + 'static,
-        Buffer<T>: de::FromStream<Context = ()>,
-    {
-        let num_blocks = div_ceil(self.shape.size(), self.block_size as u64);
-        futures::stream::iter(0..num_blocks)
-            .map(move |block_id| {
-                let that = other.clone();
-
-                async move {
-                    let that = that.read().await;
-                    if that.contains(&block_id) {
-                        let mut this = self.dir.write_file(&block_id).await?;
-                        let that = that.read_file(&block_id).await?;
-                        this.write(&*that).map_err(TCError::from)
-                    } else {
-                        Ok(())
-                    }
-                }
-            })
-            .buffer_unordered(num_cpus::get())
-            .try_fold((), |(), _| futures::future::ready(Ok(())))
-            .await
-    }
-}
-
-#[async_trait]
-impl<'a, FE, T> DenseWriteGuard<T> for DenseFileWriteGuard<'a, FE>
-where
-    FE: FileLoad + AsType<Buffer<T>>,
-    T: CDatatype + DType + 'static,
-    Buffer<T>: de::FromStream<Context = ()>,
-{
-    async fn overwrite<O: DenseInstance<DType = T>>(
-        &self,
-        txn_id: TxnId,
-        other: O,
-    ) -> TCResult<()> {
-        let block_axis = block_axis_for(&self.shape, self.block_size);
-        let block_shape = block_shape_for(block_axis, &self.shape, self.block_size);
-
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, block_shape.iter().product())?;
-
-        let blocks = other.read_blocks(txn_id).await?;
-        let blocks = BlockResize::new(blocks, block_shape)?;
-
-        blocks
-            .enumerate()
-            .map(|(block_id, result)| {
-                let dir = self.dir.clone();
-                let queue = queue.clone();
-
-                async move {
-                    let mut block = dir.write_file(&block_id).await?;
-
-                    let data = result?;
-                    let data = data.read(&queue)?;
-                    debug_assert_eq!(block.len(), data.len());
-                    block.write(data)?;
-
-                    Result::<(), TCError>::Ok(())
-                }
-            })
-            .buffered(num_cpus::get())
-            .try_fold((), |(), ()| futures::future::ready(Ok(())))
-            .await
-    }
-
-    async fn overwrite_value(&self, _txn_id: TxnId, value: T) -> TCResult<()> {
-        let num_blocks = div_ceil(self.shape.size(), self.block_size as u64);
-
-        futures::stream::iter(0..num_blocks)
-            .map(|block_id| async move {
-                let mut block = self.dir.write_file(&block_id).await?;
-                block.write_value(value).map_err(TCError::from)
-            })
-            .buffered(num_cpus::get())
-            .try_fold((), |(), _| futures::future::ready(Ok(())))
-            .await
-    }
-
-    async fn write_value(&self, _txn_id: TxnId, coord: Coord, value: T) -> TCResult<()> {
-        self.shape.validate_coord(&coord)?;
-
-        let offset = offset_of(coord, &self.shape);
-        let block_id = offset / self.block_size as u64;
-
-        let mut block = self.dir.write_file(&block_id).await?;
-        block.write_value_at((offset % self.block_size as u64) as usize, value)?;
-
-        Ok(())
-    }
-}
-
-pub struct DenseVersion<FE, T> {
-    file: DenseFile<FE, T>,
-    semaphore: Semaphore,
-}
-
-impl<FE, T> Clone for DenseVersion<FE, T> {
-    fn clone(&self) -> Self {
-        Self {
-            file: self.file.clone(),
-            semaphore: self.semaphore.clone(),
-        }
-    }
-}
-
-impl<FE, T> DenseVersion<FE, T> {
-    pub fn new(file: DenseFile<FE, T>, semaphore: Semaphore) -> Self {
-        Self { file, semaphore }
-    }
-
-    pub fn commit(&self, txn_id: &TxnId) {
-        self.semaphore.finalize(txn_id, false)
-    }
-
-    pub fn rollback(&self, txn_id: &TxnId) {
-        self.semaphore.finalize(txn_id, false)
-    }
-
-    pub fn finalize(&self, txn_id: &TxnId) {
-        self.semaphore.finalize(txn_id, true)
-    }
-}
-
-impl<FE, T> TensorInstance for DenseVersion<FE, T>
-where
-    FE: ThreadSafe,
-    T: DType + ThreadSafe,
-{
-    fn dtype(&self) -> NumberType {
-        self.file.dtype()
-    }
-
-    fn shape(&self) -> &Shape {
-        self.file.shape()
-    }
-}
-
-#[async_trait]
-impl<FE, T> DenseInstance for DenseVersion<FE, T>
-where
-    FE: FileLoad + AsType<Buffer<T>>,
-    T: CDatatype + DType + 'static,
-    Buffer<T>: de::FromStream<Context = ()>,
-{
-    type Block = <DenseFile<FE, T> as DenseInstance>::Block;
-    type DType = <DenseFile<FE, T> as DenseInstance>::DType;
-
-    fn block_size(&self) -> usize {
-        self.file.block_size()
-    }
-
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
-        self.file.read_block(txn_id, block_id).await
-    }
-
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
-        self.file.read_blocks(txn_id).await
-    }
-
-    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
-        self.file.read_value(txn_id, coord).await
-    }
-}
-
-#[async_trait]
-impl<FE, T> TensorPermitRead for DenseVersion<FE, T>
-where
-    FE: Send + Sync,
-    T: CDatatype + DType,
-{
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
-        self.semaphore
-            .read(txn_id, range)
-            .map_ok(|permit| vec![permit])
-            .map_err(TCError::from)
-            .await
-    }
-}
-
-#[async_trait]
-impl<FE, T> TensorPermitWrite for DenseVersion<FE, T>
-where
-    FE: Send + Sync,
-    T: CDatatype + DType,
-{
-    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
-        self.semaphore
-            .write(txn_id, range)
-            .map_err(TCError::from)
-            .await
-    }
-}
-
-#[async_trait]
-impl<'a, FE, T> DenseWriteLock<'a> for DenseVersion<FE, T>
-where
-    FE: FileLoad + AsType<Buffer<T>>,
-    T: CDatatype + DType,
-    Buffer<T>: de::FromStream<Context = ()>,
-{
-    type WriteGuard = <DenseFile<FE, T> as DenseWriteLock<'a>>::WriteGuard;
-
-    async fn write(&'a self) -> Self::WriteGuard {
-        self.file.write().await
-    }
-}
-
-impl<Txn, FE, T: CDatatype> From<DenseVersion<FE, T>> for DenseAccess<Txn, FE, T> {
-    fn from(version: DenseVersion<FE, T>) -> Self {
-        Self::Version(version)
-    }
-}
-
-impl<FE, T> fmt::Debug for DenseVersion<FE, T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "transactional version of {:?}", self.file)
     }
 }
 
@@ -3821,66 +3221,131 @@ impl<Txn, FE, T: CDatatype> fmt::Debug for DenseUnaryCast<Txn, FE, T> {
     }
 }
 
-#[inline]
-fn block_axis_for(shape: &[u64], block_size: usize) -> usize {
-    debug_assert!(!shape.is_empty());
-    debug_assert!(shape.iter().copied().all(|dim| dim > 0));
-    debug_assert!(shape.iter().product::<u64>() >= block_size as u64);
+pub struct DenseVersion<FE, T> {
+    file: DenseFile<FE, T>,
+    semaphore: Semaphore,
+}
 
-    let mut block_ndim = 1;
-    let mut size = 1;
-    for dim in shape.iter().rev() {
-        size *= dim;
-
-        if size > block_size as u64 {
-            break;
-        } else {
-            block_ndim += 1;
+impl<FE, T> Clone for DenseVersion<FE, T> {
+    fn clone(&self) -> Self {
+        Self {
+            file: self.file.clone(),
+            semaphore: self.semaphore.clone(),
         }
     }
-
-    shape.len() - block_ndim
 }
 
-#[inline]
-fn block_map_for(
-    num_blocks: u64,
-    shape: &[u64],
-    block_shape: &[usize],
-) -> TCResult<ArrayBase<Vec<u64>>> {
-    let block_axis = shape.len() - block_shape.len();
-    let mut block_map_shape = BlockShape::with_capacity(block_axis + 1);
-    block_map_shape.extend(
-        shape
-            .iter()
-            .take(block_axis)
-            .copied()
-            .map(|dim| dim as usize),
-    );
-    block_map_shape.push(shape[block_axis] as usize / block_shape[0]);
+impl<FE, T> DenseVersion<FE, T> {
+    pub fn new(file: DenseFile<FE, T>, semaphore: Semaphore) -> Self {
+        Self { file, semaphore }
+    }
 
-    ArrayBase::<Vec<_>>::new(
-        block_map_shape,
-        (0..num_blocks as u64).into_iter().collect(),
-    )
-    .map_err(TCError::from)
+    pub fn commit(&self, txn_id: &TxnId) {
+        self.semaphore.finalize(txn_id, false)
+    }
+
+    pub fn rollback(&self, txn_id: &TxnId) {
+        self.semaphore.finalize(txn_id, false)
+    }
+
+    pub fn finalize(&self, txn_id: &TxnId) {
+        self.semaphore.finalize(txn_id, true)
+    }
 }
 
-#[inline]
-fn block_shape_for(axis: usize, shape: &[u64], block_size: usize) -> BlockShape {
-    if axis == shape.len() - 1 {
-        vec![block_size]
-    } else {
-        let axis_dim = (shape.iter().skip(axis).product::<u64>() / block_size as u64) as usize;
-        debug_assert_eq!(block_size % axis_dim, 0);
+impl<FE, T> TensorInstance for DenseVersion<FE, T>
+where
+    FE: ThreadSafe,
+    T: DType + ThreadSafe,
+{
+    fn dtype(&self) -> NumberType {
+        self.file.dtype()
+    }
 
-        let mut block_shape = BlockShape::with_capacity(shape.len() - axis + 1);
-        block_shape.push(axis_dim);
-        block_shape.extend(shape.iter().skip(axis).copied().map(|dim| dim as usize));
+    fn shape(&self) -> &Shape {
+        self.file.shape()
+    }
+}
 
-        debug_assert!(!block_shape.is_empty());
+#[async_trait]
+impl<FE, T> DenseInstance for DenseVersion<FE, T>
+where
+    FE: FileLoad + AsType<Buffer<T>>,
+    T: CDatatype + DType + 'static,
+    Buffer<T>: de::FromStream<Context = ()>,
+{
+    type Block = <DenseFile<FE, T> as DenseInstance>::Block;
+    type DType = <DenseFile<FE, T> as DenseInstance>::DType;
 
-        block_shape
+    fn block_size(&self) -> usize {
+        self.file.block_size()
+    }
+
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        self.file.read_block(txn_id, block_id).await
+    }
+
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        self.file.read_blocks(txn_id).await
+    }
+
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        self.file.read_value(txn_id, coord).await
+    }
+}
+
+#[async_trait]
+impl<FE, T> TensorPermitRead for DenseVersion<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        self.semaphore
+            .read(txn_id, range)
+            .map_ok(|permit| vec![permit])
+            .map_err(TCError::from)
+            .await
+    }
+}
+
+#[async_trait]
+impl<FE, T> TensorPermitWrite for DenseVersion<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+{
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
+        self.semaphore
+            .write(txn_id, range)
+            .map_err(TCError::from)
+            .await
+    }
+}
+
+#[async_trait]
+impl<'a, FE, T> DenseWriteLock<'a> for DenseVersion<FE, T>
+where
+    FE: FileLoad + AsType<Buffer<T>>,
+    T: CDatatype + DType,
+    Buffer<T>: de::FromStream<Context = ()>,
+{
+    type WriteGuard = <DenseFile<FE, T> as DenseWriteLock<'a>>::WriteGuard;
+
+    async fn write(&'a self) -> Self::WriteGuard {
+        self.file.write().await
+    }
+}
+
+impl<Txn, FE, T: CDatatype> From<DenseVersion<FE, T>> for DenseAccess<Txn, FE, T> {
+    fn from(version: DenseVersion<FE, T>) -> Self {
+        Self::Version(version)
+    }
+}
+
+impl<FE, T> fmt::Debug for DenseVersion<FE, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "transactional version of {:?}", self.file)
     }
 }
 

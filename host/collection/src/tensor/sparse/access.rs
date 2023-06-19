@@ -28,8 +28,8 @@ use crate::tensor::block::Block;
 use crate::tensor::dense::{DenseAccess, DenseCacheFile, DenseInstance, DenseSlice};
 use crate::tensor::transform::{Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
-    size_hint, strides_for, validate_order, Axes, AxisRange, Coord, Range,
-    Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
+    size_hint, strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore, Shape,
+    TensorInstance, TensorPermitRead, TensorPermitWrite,
 };
 
 use super::base::SparseBase;

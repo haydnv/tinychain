@@ -33,6 +33,7 @@ pub use view::*;
 
 mod access;
 mod base;
+mod file;
 mod stream;
 mod view;
 
@@ -1118,14 +1119,42 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for DenseBase<Txn, FE> {
 }
 
 #[inline]
-pub fn dense_from<Txn, FE, A, T>(
-    tensor: DenseTensor<Txn, FE, A>,
-) -> DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>
-where
-    A: Into<DenseAccess<Txn, FE, T>>,
-    T: CDatatype,
-{
-    DenseTensor::from_access(tensor.into_inner())
+fn block_axis_for(shape: &[u64], block_size: usize) -> usize {
+    debug_assert!(!shape.is_empty());
+    debug_assert!(shape.iter().copied().all(|dim| dim > 0));
+    debug_assert!(shape.iter().product::<u64>() >= block_size as u64);
+
+    let mut block_ndim = 1;
+    let mut size = 1;
+    for dim in shape.iter().rev() {
+        size *= dim;
+
+        if size > block_size as u64 {
+            break;
+        } else {
+            block_ndim += 1;
+        }
+    }
+
+    shape.len() - block_ndim
+}
+
+#[inline]
+fn block_shape_for(axis: usize, shape: &[u64], block_size: usize) -> BlockShape {
+    if axis == shape.len() - 1 {
+        vec![block_size]
+    } else {
+        let axis_dim = (shape.iter().skip(axis).product::<u64>() / block_size as u64) as usize;
+        debug_assert_eq!(block_size % axis_dim, 0);
+
+        let mut block_shape = BlockShape::with_capacity(shape.len() - axis + 1);
+        block_shape.push(axis_dim);
+        block_shape.extend(shape.iter().skip(axis).copied().map(|dim| dim as usize));
+
+        debug_assert!(!block_shape.is_empty());
+
+        block_shape
+    }
 }
 
 #[inline]
@@ -1138,6 +1167,17 @@ where
     } else {
         0
     }
+}
+
+#[inline]
+pub fn dense_from<Txn, FE, A, T>(
+    tensor: DenseTensor<Txn, FE, A>,
+) -> DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>
+where
+    A: Into<DenseAccess<Txn, FE, T>>,
+    T: CDatatype,
+{
+    DenseTensor::from_access(tensor.into_inner())
 }
 
 #[inline]
