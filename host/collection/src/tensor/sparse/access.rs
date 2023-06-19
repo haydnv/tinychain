@@ -573,8 +573,28 @@ impl<FE, T> SparseFile<FE, T> {
     }
 }
 
-impl<FE: AsType<Node> + Send + Sync, T> SparseFile<FE, T> {
-    pub fn create(dir: DirLock<FE>, shape: Shape) -> Result<Self, TCError> {
+impl<FE: AsType<Node> + ThreadSafe, T> SparseFile<FE, T> {
+    pub async fn copy_from<O>(dir: DirLock<FE>, txn_id: TxnId, other: O) -> TCResult<Self>
+    where
+        O: SparseInstance<DType = T>,
+        T: Into<Number>,
+    {
+        let this = Self::create(dir, other.shape().clone())?;
+        let mut table = this.table.write().await;
+        let mut elements = other
+            .elements(txn_id, Range::default(), Axes::default())
+            .await?;
+
+        while let Some((coord, value)) = elements.try_next().await? {
+            let key = coord.into_iter().map(Number::from).collect();
+            let value = vec![value.into()];
+            table.upsert(key, value).await?;
+        }
+
+        Ok(this)
+    }
+
+    pub fn create(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
         let schema = Schema::new(shape);
         let collator = NumberCollator::default();
         let table = TableLock::create(schema, collator, dir)?;
@@ -585,7 +605,7 @@ impl<FE: AsType<Node> + Send + Sync, T> SparseFile<FE, T> {
         })
     }
 
-    pub fn load(dir: DirLock<FE>, shape: Shape) -> Result<Self, TCError> {
+    pub fn load(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
         let schema = Schema::new(shape);
         let collator = NumberCollator::default();
         let table = TableLock::load(schema, collator, dir)?;
@@ -594,6 +614,14 @@ impl<FE: AsType<Node> + Send + Sync, T> SparseFile<FE, T> {
             table,
             dtype: PhantomData,
         })
+    }
+
+    pub async fn restore(&self, other: Self) -> TCResult<()> {
+        let mut this = self.table.write().await;
+        let that = other.table.read().await;
+
+        this.truncate().await?;
+        this.merge(that).await
     }
 }
 
@@ -670,10 +698,10 @@ where
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
-    type Guard = SparseTableWriteGuard<'a, FE, T>;
+    type Guard = SparseFileWriteGuard<'a, FE, T>;
 
-    async fn write(&'a self) -> SparseTableWriteGuard<'a, FE, T> {
-        SparseTableWriteGuard {
+    async fn write(&'a self) -> SparseFileWriteGuard<'a, FE, T> {
+        SparseFileWriteGuard {
             shape: self.table.schema().shape(),
             table: self.table.write().await,
             dtype: self.dtype,
@@ -697,14 +725,14 @@ impl<FE, T> fmt::Debug for SparseFile<FE, T> {
     }
 }
 
-pub struct SparseTableWriteGuard<'a, FE, T> {
+pub struct SparseFileWriteGuard<'a, FE, T> {
     shape: &'a Shape,
     table: TableWriteGuard<Schema, IndexSchema, NumberCollator, FE>,
     dtype: PhantomData<T>,
 }
 
 #[async_trait]
-impl<'a, FE, T> SparseWriteGuard<T> for SparseTableWriteGuard<'a, FE, T>
+impl<'a, FE, T> SparseWriteGuard<T> for SparseFileWriteGuard<'a, FE, T>
 where
     FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + fmt::Debug,
@@ -733,7 +761,9 @@ where
 
         self.clear(txn_id, Range::default()).await?;
 
-        let mut elements = other.elements(txn_id, Range::default(), vec![]).await?;
+        let mut elements = other
+            .elements(txn_id, Range::default(), Axes::default())
+            .await?;
 
         while let Some((coord, value)) = elements.try_next().await? {
             let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
@@ -914,7 +944,7 @@ where
     FE: ThreadSafe,
     T: CDatatype + DType,
 {
-    pub fn new<S>(source: S, shape: Shape) -> Result<Self, TCError>
+    pub fn new<S>(source: S, shape: Shape) -> TCResult<Self>
     where
         S: TensorInstance + Into<SparseAccess<Txn, FE, T>>,
     {
@@ -1102,7 +1132,7 @@ pub struct SparseBroadcastAxis<S> {
 }
 
 impl<S: TensorInstance + fmt::Debug> SparseBroadcastAxis<S> {
-    fn new(source: S, axis: usize, dim: u64) -> Result<Self, TCError> {
+    fn new(source: S, axis: usize, dim: u64) -> TCResult<Self> {
         let shape = if axis < source.ndim() {
             let mut shape = source.shape().to_vec();
             if shape[axis] == 1 {
@@ -2443,8 +2473,8 @@ impl<FE, T, S: fmt::Debug> fmt::Debug for SparseCow<FE, T, S> {
 
 pub struct SparseCowWriteGuard<'a, FE, S, T> {
     source: &'a S,
-    filled: SparseTableWriteGuard<'a, FE, T>,
-    zeros: SparseTableWriteGuard<'a, FE, T>,
+    filled: SparseFileWriteGuard<'a, FE, T>,
+    zeros: SparseFileWriteGuard<'a, FE, T>,
 }
 
 #[async_trait]
@@ -2459,7 +2489,11 @@ where
         self.filled.clear(txn_id, range.clone()).await?;
         self.zeros.clear(txn_id, range.clone()).await?;
 
-        let mut elements = self.source.clone().elements(txn_id, range, vec![]).await?;
+        let mut elements = self
+            .source
+            .clone()
+            .elements(txn_id, range, Axes::default())
+            .await?;
 
         while let Some((coord, value)) = elements.try_next().await? {
             self.zeros.write_value(txn_id, coord, value).await?;
@@ -2483,7 +2517,9 @@ where
 
         self.clear(txn_id, Range::default()).await?;
 
-        let mut elements = other.elements(txn_id, Range::default(), vec![]).await?;
+        let mut elements = other
+            .elements(txn_id, Range::default(), Axes::default())
+            .await?;
 
         while let Some((coord, value)) = elements.try_next().await? {
             self.write_value(txn_id, coord, value).await?;
@@ -2638,7 +2674,7 @@ pub struct SparseExpand<S> {
 }
 
 impl<S: TensorInstance + fmt::Debug> SparseExpand<S> {
-    pub fn new(source: S, axes: Axes) -> Result<Self, TCError> {
+    pub fn new(source: S, axes: Axes) -> TCResult<Self> {
         Expand::new(source.shape().clone(), axes).map(|transform| Self { source, transform })
     }
 }
@@ -2791,7 +2827,9 @@ where
     async fn reduce_element(&self, txn_id: TxnId, coord: Coord) -> TCResult<(Coord, T)> {
         let source_range = self.transform.invert_coord(&coord);
         let slice = SparseSlice::new(self.source.clone(), source_range.into())?;
-        let blocks = slice.blocks(txn_id, Range::default(), vec![]).await?;
+        let blocks = slice
+            .blocks(txn_id, Range::default(), Axes::default())
+            .await?;
 
         let reduced = blocks
             .try_fold(self.id, |reduced, (_coords, values)| async move {
@@ -2922,7 +2960,7 @@ pub struct SparseReshape<S> {
 }
 
 impl<S: SparseInstance> SparseReshape<S> {
-    pub fn new(source: S, shape: Shape) -> Result<Self, TCError> {
+    pub fn new(source: S, shape: Shape) -> TCResult<Self> {
         Reshape::new(source.shape().clone(), shape).map(|transform| Self { source, transform })
     }
 }
@@ -3106,7 +3144,7 @@ impl<S> SparseSlice<S>
 where
     S: TensorInstance + fmt::Debug,
 {
-    pub fn new(source: S, range: Range) -> Result<Self, TCError> {
+    pub fn new(source: S, range: Range) -> TCResult<Self> {
         Slice::new(source.shape().clone(), range).map(|transform| Self { source, transform })
     }
 
@@ -3276,7 +3314,9 @@ where
 
         self.clear(txn_id, Range::default()).await?;
 
-        let mut elements = other.elements(txn_id, Range::default(), vec![]).await?;
+        let mut elements = other
+            .elements(txn_id, Range::default(), Axes::default())
+            .await?;
 
         while let Some((coord, value)) = elements.try_next().await? {
             self.write_value(txn_id, coord, value).await?;
@@ -3299,7 +3339,7 @@ pub struct SparseTranspose<S> {
 }
 
 impl<S: SparseInstance> SparseTranspose<S> {
-    pub fn new(source: S, permutation: Option<Axes>) -> Result<Self, TCError> {
+    pub fn new(source: S, permutation: Option<Axes>) -> TCResult<Self> {
         Transpose::new(source.shape().clone(), permutation)
             .map(|transform| Self { source, transform })
     }
