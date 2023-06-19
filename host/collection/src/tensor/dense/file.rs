@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::{fmt, io};
 
 use async_trait::async_trait;
-use destream::de;
+use destream::{de, Decoder};
 use freqfs::*;
 use futures::stream::{StreamExt, TryStreamExt};
 use ha_ndarray::{ArrayBase, Buffer, BufferWrite, CDatatype, NDArrayRead};
@@ -380,6 +380,36 @@ where
     }
 }
 
+macro_rules! impl_from_stream {
+    ($t:ty, $decode:ident) => {
+        #[async_trait]
+        impl<FE> de::FromStream for DenseFile<FE, $t>
+        where
+            FE: AsType<Buffer<$t>> + ThreadSafe,
+        {
+            type Context = (DirLock<FE>, Shape);
+
+            async fn from_stream<D: de::Decoder>(
+                cxt: Self::Context,
+                decoder: &mut D,
+            ) -> Result<Self, D::Error> {
+                let (dir, shape) = cxt;
+                decoder.$decode(DenseVisitor::new(dir, shape)).await
+            }
+        }
+    };
+}
+
+impl_from_stream!(f32, decode_array_f32);
+impl_from_stream!(f64, decode_array_f64);
+impl_from_stream!(i16, decode_array_i16);
+impl_from_stream!(i32, decode_array_i32);
+impl_from_stream!(i64, decode_array_i64);
+impl_from_stream!(u8, decode_array_u8);
+impl_from_stream!(u16, decode_array_u16);
+impl_from_stream!(u32, decode_array_u32);
+impl_from_stream!(u64, decode_array_u64);
+
 impl<Txn, FE, T: CDatatype> From<DenseFile<FE, T>> for DenseAccess<Txn, FE, T> {
     fn from(file: DenseFile<FE, T>) -> Self {
         Self::File(file)
@@ -495,6 +525,83 @@ where
         Ok(())
     }
 }
+
+struct DenseVisitor<FE, T> {
+    dir: DirLock<FE>,
+    shape: Shape,
+    dtype: PhantomData<T>,
+}
+
+impl<FE, T> DenseVisitor<FE, T> {
+    fn new(dir: DirLock<FE>, shape: Shape) -> Self {
+        Self {
+            dir,
+            shape,
+            dtype: PhantomData,
+        }
+    }
+}
+
+macro_rules! impl_visitor {
+    ($t:ty, $visit:ident) => {
+        #[async_trait]
+        impl<FE> de::Visitor for DenseVisitor<FE, $t>
+        where
+            FE: AsType<Buffer<$t>> + ThreadSafe,
+        {
+            type Value = DenseFile<FE, $t>;
+
+            fn expecting() -> &'static str {
+                "a dense tensor"
+            }
+
+            async fn $visit<A: de::ArrayAccess<$t>>(
+                self,
+                mut array: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut contents = self.dir.write().await;
+
+                let (block_size, num_blocks) = ideal_block_size_for(&self.shape);
+
+                let type_size = <$t>::dtype().size();
+                let mut buffer = Vec::<$t>::with_capacity(block_size);
+                for block_id in 0..num_blocks {
+                    let size = array.buffer(&mut buffer).await?;
+                    let block = Buffer::from(buffer.drain(..).collect::<Vec<$t>>());
+
+                    contents
+                        .create_file(block_id.to_string(), block, size * type_size)
+                        .map_err(de::Error::custom)?;
+                }
+
+                std::mem::drop(contents);
+
+                let block_axis = block_axis_for(&self.shape, block_size);
+                let block_shape = block_shape_for(block_axis, &self.shape, block_size);
+                let block_map = block_map_for(num_blocks as u64, &self.shape, &block_shape)
+                    .map_err(de::Error::custom)?;
+
+                Ok(DenseFile {
+                    dir: self.dir,
+                    block_map,
+                    block_size,
+                    shape: self.shape,
+                    dtype: PhantomData,
+                })
+            }
+        }
+    };
+}
+
+impl_visitor!(f32, visit_array_f32);
+impl_visitor!(f64, visit_array_f64);
+impl_visitor!(i16, visit_array_i16);
+impl_visitor!(i32, visit_array_i32);
+impl_visitor!(i64, visit_array_i64);
+impl_visitor!(u8, visit_array_u8);
+impl_visitor!(u16, visit_array_u16);
+impl_visitor!(u32, visit_array_u32);
+impl_visitor!(u64, visit_array_u64);
 
 #[inline]
 fn block_map_for(
