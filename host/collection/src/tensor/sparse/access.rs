@@ -1,15 +1,10 @@
-use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
-use std::ops::Bound;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use b_table::b_tree::Collator;
-use b_table::{TableLock, TableWriteGuard};
 use destream::de;
-use freqfs::DirLock;
 use futures::future::TryFutureExt;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::try_join;
@@ -21,7 +16,7 @@ use safecast::{AsType, CastFrom, CastInto};
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::{Transaction, TxnId};
-use tc_value::{DType, Number, NumberClass, NumberCollator, NumberType};
+use tc_value::{DType, Number, NumberClass, NumberType};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::block::Block;
@@ -33,8 +28,8 @@ use crate::tensor::{
 };
 
 use super::base::SparseBase;
-use super::schema::{IndexSchema, Schema};
-use super::{stream, Blocks, Elements, Node, SparseInstance};
+use super::file::{SparseFile, SparseFileWriteGuard};
+use super::{stream, unwrap_row, Blocks, Elements, Node, SparseInstance};
 
 #[async_trait]
 pub trait SparseWriteLock<'a>: SparseInstance {
@@ -58,7 +53,7 @@ pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
         Number: CastInto<T>,
     {
         let mut zeros = zeros
-            .table
+            .into_table()
             .rows(b_table::Range::default(), &[], false)
             .await?;
 
@@ -68,7 +63,7 @@ pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
         }
 
         let mut filled = filled
-            .table
+            .into_table()
             .rows(b_table::Range::default(), &[], false)
             .await?;
 
@@ -486,373 +481,6 @@ where
 impl<Txn, FE, T: CDatatype + DType> fmt::Debug for SparseAccess<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         access_dispatch!(self, this, this.fmt(f))
-    }
-}
-
-pub struct SparseFile<FE, T> {
-    table: TableLock<Schema, IndexSchema, NumberCollator, FE>,
-    dtype: PhantomData<T>,
-}
-
-impl<FE, T> Clone for SparseFile<FE, T> {
-    fn clone(&self) -> Self {
-        Self {
-            table: self.table.clone(),
-            dtype: PhantomData,
-        }
-    }
-}
-
-impl<FE, T> SparseFile<FE, T> {
-    pub fn collator(&self) -> &Arc<Collator<NumberCollator>> {
-        self.table.collator()
-    }
-
-    pub fn schema(&self) -> &Schema {
-        self.table.schema()
-    }
-}
-
-impl<FE: AsType<Node> + ThreadSafe, T> SparseFile<FE, T> {
-    pub async fn copy_from<O>(dir: DirLock<FE>, txn_id: TxnId, other: O) -> TCResult<Self>
-    where
-        O: SparseInstance<DType = T>,
-        T: Into<Number>,
-    {
-        let this = Self::create(dir, other.shape().clone())?;
-        let mut table = this.table.write().await;
-        let mut elements = other
-            .elements(txn_id, Range::default(), Axes::default())
-            .await?;
-
-        while let Some((coord, value)) = elements.try_next().await? {
-            let key = coord.into_iter().map(Number::from).collect();
-            let value = vec![value.into()];
-            table.upsert(key, value).await?;
-        }
-
-        Ok(this)
-    }
-
-    pub fn create(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
-        let schema = Schema::new(shape);
-        let collator = NumberCollator::default();
-        let table = TableLock::create(schema, collator, dir)?;
-
-        Ok(Self {
-            table,
-            dtype: PhantomData,
-        })
-    }
-
-    pub fn load(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
-        let schema = Schema::new(shape);
-        let collator = NumberCollator::default();
-        let table = TableLock::load(schema, collator, dir)?;
-
-        Ok(Self {
-            table,
-            dtype: PhantomData,
-        })
-    }
-}
-
-impl<FE, T> TensorInstance for SparseFile<FE, T>
-where
-    FE: ThreadSafe,
-    T: DType + ThreadSafe,
-{
-    fn dtype(&self) -> NumberType {
-        T::dtype()
-    }
-
-    fn shape(&self) -> &Shape {
-        self.table.schema().shape()
-    }
-}
-
-#[async_trait]
-impl<FE, T> SparseInstance for SparseFile<FE, T>
-where
-    FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType,
-    Number: CastInto<T>,
-{
-    type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<Self::DType>>;
-    type Blocks = stream::BlockCoords<Elements<T>, T>;
-    type DType = T;
-
-    async fn blocks(
-        self,
-        txn_id: TxnId,
-        range: Range,
-        order: Axes,
-    ) -> Result<Self::Blocks, TCError> {
-        let ndim = self.ndim();
-        let elements = self.elements(txn_id, range, order).await?;
-        Ok(stream::BlockCoords::new(elements, ndim))
-    }
-
-    async fn elements(
-        self,
-        _txn_id: TxnId,
-        range: Range,
-        order: Axes,
-    ) -> Result<Elements<Self::DType>, TCError> {
-        self.shape().validate_range(&range)?;
-        debug_assert!(validate_order(&order, self.ndim()));
-
-        let range = table_range(&range)?;
-        let rows = self.table.rows(range, &order, false).await?;
-        let elements = rows.map_ok(|row| unwrap_row(row)).map_err(TCError::from);
-        Ok(Box::pin(elements))
-    }
-
-    async fn read_value(&self, _txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
-        self.shape().validate_coord(&coord)?;
-
-        let key = coord.into_iter().map(Number::from).collect();
-        let table = self.table.read().await;
-        if let Some(mut row) = table.get(&key).await? {
-            let value = row.pop().expect("value");
-            Ok(value.cast_into())
-        } else {
-            Ok(T::zero())
-        }
-    }
-}
-
-#[async_trait]
-impl<'a, FE, T> SparseWriteLock<'a> for SparseFile<FE, T>
-where
-    FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType + fmt::Debug,
-    Number: From<T> + CastInto<T>,
-{
-    type Guard = SparseFileWriteGuard<'a, FE, T>;
-
-    async fn write(&'a self) -> SparseFileWriteGuard<'a, FE, T> {
-        SparseFileWriteGuard {
-            shape: self.table.schema().shape(),
-            table: self.table.write().await,
-            dtype: self.dtype,
-        }
-    }
-}
-
-impl<Txn, FE, T: CDatatype> From<SparseFile<FE, T>> for SparseAccess<Txn, FE, T> {
-    fn from(table: SparseFile<FE, T>) -> Self {
-        Self::Table(table)
-    }
-}
-
-impl<FE, T> fmt::Debug for SparseFile<FE, T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "sparse table with shape {:?}",
-            self.table.schema().shape()
-        )
-    }
-}
-
-pub struct SparseFileWriteGuard<'a, FE, T> {
-    shape: &'a Shape,
-    table: TableWriteGuard<Schema, IndexSchema, NumberCollator, FE>,
-    dtype: PhantomData<T>,
-}
-
-#[async_trait]
-impl<'a, FE, T> SparseWriteGuard<T> for SparseFileWriteGuard<'a, FE, T>
-where
-    FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType + fmt::Debug,
-    Number: From<T>,
-{
-    async fn clear(&mut self, _txn_id: TxnId, range: Range) -> TCResult<()> {
-        if range == Range::default() || range == Range::all(&self.shape) {
-            self.table.truncate().map_err(TCError::from).await
-        } else {
-            Err(not_implemented!("delete {range:?}"))
-        }
-    }
-
-    async fn overwrite<O: SparseInstance<DType = T>>(
-        &mut self,
-        txn_id: TxnId,
-        other: O,
-    ) -> TCResult<()> {
-        if self.shape != other.shape() {
-            return Err(bad_request!(
-                "cannot overwrite a tensor of shape {:?} with {:?}",
-                self.shape,
-                other.shape()
-            ));
-        }
-
-        self.clear(txn_id, Range::default()).await?;
-
-        let mut elements = other
-            .elements(txn_id, Range::default(), Axes::default())
-            .await?;
-
-        while let Some((coord, value)) = elements.try_next().await? {
-            let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
-            self.table.upsert(coord, vec![value.into()]).await?;
-        }
-
-        Ok(())
-    }
-
-    async fn write_value(&mut self, _txn_id: TxnId, coord: Coord, value: T) -> Result<(), TCError> {
-        self.shape.validate_coord(&coord)?;
-
-        let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
-
-        if value == T::zero() {
-            self.table.delete(&coord).await?;
-        } else {
-            self.table.upsert(coord, vec![value.into()]).await?;
-        }
-
-        Ok(())
-    }
-}
-
-pub struct SparseVersion<FE, T> {
-    file: SparseFile<FE, T>,
-    semaphore: Semaphore,
-}
-
-impl<FE, T> Clone for SparseVersion<FE, T> {
-    fn clone(&self) -> Self {
-        Self {
-            file: self.file.clone(),
-            semaphore: self.semaphore.clone(),
-        }
-    }
-}
-
-impl<FE, T> SparseVersion<FE, T> {
-    pub fn new(file: SparseFile<FE, T>, semaphore: Semaphore) -> Self {
-        Self { file, semaphore }
-    }
-
-    pub fn commit(&self, txn_id: &TxnId) {
-        self.semaphore.finalize(txn_id, false);
-    }
-
-    pub fn rollback(&self, txn_id: &TxnId) {
-        self.semaphore.finalize(txn_id, false);
-    }
-
-    pub fn finalize(&self, txn_id: &TxnId) {
-        self.semaphore.finalize(txn_id, true);
-    }
-}
-
-impl<FE, T> TensorInstance for SparseVersion<FE, T>
-where
-    FE: ThreadSafe,
-    T: CDatatype + DType,
-{
-    fn dtype(&self) -> NumberType {
-        self.file.dtype()
-    }
-
-    fn shape(&self) -> &Shape {
-        self.file.shape()
-    }
-}
-
-#[async_trait]
-impl<FE, T> SparseInstance for SparseVersion<FE, T>
-where
-    FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType,
-    Number: From<T> + CastInto<T>,
-{
-    type CoordBlock = <SparseFile<FE, T> as SparseInstance>::CoordBlock;
-    type ValueBlock = <SparseFile<FE, T> as SparseInstance>::ValueBlock;
-    type Blocks = <SparseFile<FE, T> as SparseInstance>::Blocks;
-    type DType = <SparseFile<FE, T> as SparseInstance>::DType;
-
-    async fn blocks(
-        self,
-        txn_id: TxnId,
-        range: Range,
-        order: Axes,
-    ) -> Result<Self::Blocks, TCError> {
-        self.file.blocks(txn_id, range, order).await
-    }
-
-    async fn elements(
-        self,
-        txn_id: TxnId,
-        range: Range,
-        order: Axes,
-    ) -> Result<Elements<Self::DType>, TCError> {
-        self.file.elements(txn_id, range, order).await
-    }
-
-    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
-        self.file.read_value(txn_id, coord).await
-    }
-}
-
-#[async_trait]
-impl<FE, T> TensorPermitRead for SparseVersion<FE, T>
-where
-    FE: Send + Sync,
-    T: CDatatype + DType,
-{
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
-        self.semaphore
-            .read(txn_id, range)
-            .map_ok(|permit| vec![permit])
-            .map_err(TCError::from)
-            .await
-    }
-}
-
-#[async_trait]
-impl<FE, T> TensorPermitWrite for SparseVersion<FE, T>
-where
-    FE: Send + Sync,
-    T: CDatatype + DType,
-{
-    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
-        self.semaphore
-            .write(txn_id, range)
-            .map_err(TCError::from)
-            .await
-    }
-}
-
-#[async_trait]
-impl<'a, FE, T> SparseWriteLock<'a> for SparseVersion<FE, T>
-where
-    FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType + fmt::Debug,
-    Number: From<T> + CastInto<T>,
-{
-    type Guard = <SparseFile<FE, T> as SparseWriteLock<'a>>::Guard;
-
-    async fn write(&'a self) -> Self::Guard {
-        self.file.write().await
-    }
-}
-
-impl<Txn, FE, T: CDatatype> From<SparseVersion<FE, T>> for SparseAccess<Txn, FE, T> {
-    fn from(version: SparseVersion<FE, T>) -> Self {
-        Self::Version(version)
-    }
-}
-
-impl<FE, T> fmt::Debug for SparseVersion<FE, T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "transactional version of {:?}", self.file)
     }
 }
 
@@ -2322,14 +1950,14 @@ where
         let key = coord.iter().copied().map(Number::from).collect();
 
         {
-            let zeros = self.zeros.table.read().await;
+            let zeros = self.zeros.table().read().await;
             if zeros.contains(&key).await? {
                 return Ok(Self::DType::zero());
             }
         }
 
         {
-            let filled = self.filled.table.read().await;
+            let filled = self.filled.table().read().await;
             if let Some(mut row) = filled.get(&key).await? {
                 let value = row.pop().expect("value");
                 return Ok(value.cast_into());
@@ -3889,6 +3517,142 @@ impl<Txn, FE, T: CDatatype> fmt::Debug for SparseUnaryCast<Txn, FE, T> {
     }
 }
 
+pub struct SparseVersion<FE, T> {
+    file: SparseFile<FE, T>,
+    semaphore: Semaphore,
+}
+
+impl<FE, T> Clone for SparseVersion<FE, T> {
+    fn clone(&self) -> Self {
+        Self {
+            file: self.file.clone(),
+            semaphore: self.semaphore.clone(),
+        }
+    }
+}
+
+impl<FE, T> SparseVersion<FE, T> {
+    pub fn new(file: SparseFile<FE, T>, semaphore: Semaphore) -> Self {
+        Self { file, semaphore }
+    }
+
+    pub fn commit(&self, txn_id: &TxnId) {
+        self.semaphore.finalize(txn_id, false);
+    }
+
+    pub fn rollback(&self, txn_id: &TxnId) {
+        self.semaphore.finalize(txn_id, false);
+    }
+
+    pub fn finalize(&self, txn_id: &TxnId) {
+        self.semaphore.finalize(txn_id, true);
+    }
+}
+
+impl<FE, T> TensorInstance for SparseVersion<FE, T>
+where
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
+    fn dtype(&self) -> NumberType {
+        self.file.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.file.shape()
+    }
+}
+
+#[async_trait]
+impl<FE, T> SparseInstance for SparseVersion<FE, T>
+where
+    FE: AsType<Node> + ThreadSafe,
+    T: CDatatype + DType,
+    Number: From<T> + CastInto<T>,
+{
+    type CoordBlock = <SparseFile<FE, T> as SparseInstance>::CoordBlock;
+    type ValueBlock = <SparseFile<FE, T> as SparseInstance>::ValueBlock;
+    type Blocks = <SparseFile<FE, T> as SparseInstance>::Blocks;
+    type DType = <SparseFile<FE, T> as SparseInstance>::DType;
+
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
+        self.file.blocks(txn_id, range, order).await
+    }
+
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
+        self.file.elements(txn_id, range, order).await
+    }
+
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
+        self.file.read_value(txn_id, coord).await
+    }
+}
+
+#[async_trait]
+impl<FE, T> TensorPermitRead for SparseVersion<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        self.semaphore
+            .read(txn_id, range)
+            .map_ok(|permit| vec![permit])
+            .map_err(TCError::from)
+            .await
+    }
+}
+
+#[async_trait]
+impl<FE, T> TensorPermitWrite for SparseVersion<FE, T>
+where
+    FE: Send + Sync,
+    T: CDatatype + DType,
+{
+    async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
+        self.semaphore
+            .write(txn_id, range)
+            .map_err(TCError::from)
+            .await
+    }
+}
+
+#[async_trait]
+impl<'a, FE, T> SparseWriteLock<'a> for SparseVersion<FE, T>
+where
+    FE: AsType<Node> + ThreadSafe,
+    T: CDatatype + DType + fmt::Debug,
+    Number: From<T> + CastInto<T>,
+{
+    type Guard = <SparseFile<FE, T> as SparseWriteLock<'a>>::Guard;
+
+    async fn write(&'a self) -> Self::Guard {
+        self.file.write().await
+    }
+}
+
+impl<Txn, FE, T: CDatatype> From<SparseVersion<FE, T>> for SparseAccess<Txn, FE, T> {
+    fn from(version: SparseVersion<FE, T>) -> Self {
+        Self::Version(version)
+    }
+}
+
+impl<FE, T> fmt::Debug for SparseVersion<FE, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "transactional version of {:?}", self.file)
+    }
+}
+
 #[inline]
 fn block_elements<T: CDatatype, C: NDArrayRead<DType = u64>, V: NDArrayRead<DType = T>>(
     blocks: impl Stream<Item = TCResult<(C, V)>> + Send + 'static,
@@ -4089,44 +3853,4 @@ where
     });
 
     Ok(coord_blocks)
-}
-
-#[inline]
-fn unwrap_row<T>(mut row: Vec<Number>) -> (Coord, T)
-where
-    Number: CastInto<T> + CastInto<u64>,
-{
-    let n = row.pop().expect("n").cast_into();
-    let coord = row.into_iter().map(|i| i.cast_into()).collect();
-    (coord, n)
-}
-
-#[inline]
-fn table_range(range: &Range) -> Result<b_table::Range<usize, Number>, TCError> {
-    if range == &Range::default() {
-        return Ok(b_table::Range::default());
-    }
-
-    let mut table_range = HashMap::new();
-
-    for (x, bound) in range.iter().enumerate() {
-        match bound {
-            AxisRange::At(i) => {
-                table_range.insert(x, b_table::ColumnRange::Eq(Number::from(*i)));
-            }
-            AxisRange::In(axis_range, 1) => {
-                let start = Bound::Included(Number::from(axis_range.start));
-                let stop = Bound::Excluded(Number::from(axis_range.end));
-                table_range.insert(x, b_table::ColumnRange::In((start, stop)));
-            }
-            bound => {
-                return Err(bad_request!(
-                    "sparse tensor does not support axis bound {:?}",
-                    bound
-                ));
-            }
-        }
-    }
-
-    Ok(table_range.into())
 }

@@ -26,9 +26,8 @@ use crate::tensor::{
     TensorType,
 };
 
-use super::access::{
-    SparseAccess, SparseCow, SparseFile, SparseVersion, SparseWriteGuard, SparseWriteLock,
-};
+use super::access::{SparseAccess, SparseCow, SparseVersion, SparseWriteGuard, SparseWriteLock};
+use super::file::SparseFile;
 use super::{Node, Schema, SparseInstance};
 
 const CANON: Label = label("canon");

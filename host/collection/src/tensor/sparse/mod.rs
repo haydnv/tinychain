@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
+use std::ops::Bound;
 use std::pin::Pin;
 
 use async_trait::async_trait;
@@ -21,8 +23,8 @@ use super::complex::ComplexRead;
 use super::dense::{DenseAccess, DenseAccessCast, DenseCacheFile, DenseSparse, DenseTensor};
 
 use super::{
-    Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare,
-    TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorMathConst,
+    Axes, AxisRange, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast,
+    TensorCompare, TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorMathConst,
     TensorPermitRead, TensorPermitWrite, TensorRead, TensorReduce, TensorTransform, TensorUnary,
     TensorUnaryBoolean, TensorWrite, TensorWriteDual,
 };
@@ -33,6 +35,7 @@ pub use view::*;
 
 mod access;
 mod base;
+mod file;
 mod schema;
 mod stream;
 mod view;
@@ -1263,4 +1266,44 @@ where
     T: CDatatype,
 {
     SparseTensor::from_access(tensor.into_inner())
+}
+
+#[inline]
+fn unwrap_row<T>(mut row: Vec<Number>) -> (Coord, T)
+where
+    Number: CastInto<T> + CastInto<u64>,
+{
+    let n = row.pop().expect("n").cast_into();
+    let coord = row.into_iter().map(|i| i.cast_into()).collect();
+    (coord, n)
+}
+
+#[inline]
+fn table_range(range: &Range) -> Result<b_table::Range<usize, Number>, TCError> {
+    if range == &Range::default() {
+        return Ok(b_table::Range::default());
+    }
+
+    let mut table_range = HashMap::new();
+
+    for (x, bound) in range.iter().enumerate() {
+        match bound {
+            AxisRange::At(i) => {
+                table_range.insert(x, b_table::ColumnRange::Eq(Number::from(*i)));
+            }
+            AxisRange::In(axis_range, 1) => {
+                let start = Bound::Included(Number::from(axis_range.start));
+                let stop = Bound::Excluded(Number::from(axis_range.end));
+                table_range.insert(x, b_table::ColumnRange::In((start, stop)));
+            }
+            bound => {
+                return Err(bad_request!(
+                    "sparse tensor does not support axis bound {:?}",
+                    bound
+                ));
+            }
+        }
+    }
+
+    Ok(table_range.into())
 }
