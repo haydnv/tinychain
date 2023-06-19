@@ -28,7 +28,7 @@ use crate::tensor::block::Block;
 use crate::tensor::dense::{DenseAccess, DenseCacheFile, DenseInstance, DenseSlice};
 use crate::tensor::transform::{Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
-    coord_of, offset_of, size_hint, strides_for, validate_order, Axes, AxisRange, Coord, Range,
+    size_hint, strides_for, validate_order, Axes, AxisRange, Coord, Range,
     Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
 };
 
@@ -249,66 +249,6 @@ where
                 elements.map_ok(|(coord, value)| (coord, Number::from(value))),
             ))
         })
-    }
-
-    pub async fn inner_join(
-        self,
-        other: Self,
-        txn_id: TxnId,
-        range: Range,
-        order: Axes,
-    ) -> TCResult<Elements<(Number, Number)>> {
-        let shape = self.shape().to_vec();
-        let strides = strides_for(&shape, shape.len());
-
-        let this_shape = self.shape().to_vec();
-        let that_shape = other.shape().to_vec();
-
-        let (this, that) = try_join!(
-            self.elements(txn_id, range.clone(), order.to_vec()),
-            other.elements(txn_id, range, order)
-        )?;
-
-        let this = this.map_ok(move |(coord, value)| (offset_of(coord, &this_shape), value));
-        let that = that.map_ok(move |(coord, value)| (offset_of(coord, &that_shape), value));
-
-        let elements = stream::InnerJoin::new(this, that).map_ok(move |(offset, (left, right))| {
-            let coord = coord_of(offset, &strides, &shape);
-            (coord, (left, right))
-        });
-
-        Ok(Box::pin(elements))
-    }
-
-    pub async fn outer_join(
-        self,
-        other: Self,
-        txn_id: TxnId,
-        range: Range,
-        order: Axes,
-    ) -> TCResult<Elements<(Number, Number)>> {
-        let zero = self.dtype().zero();
-        let shape = self.shape().to_vec();
-        let strides = strides_for(&shape, shape.len());
-
-        let this_shape = self.shape().to_vec();
-        let that_shape = other.shape().to_vec();
-
-        let (this, that) = try_join!(
-            self.elements(txn_id, range.clone(), order.to_vec()),
-            other.elements(txn_id, range, order)
-        )?;
-
-        let this = this.map_ok(move |(coord, value)| (offset_of(coord, &this_shape), value));
-        let that = that.map_ok(move |(coord, value)| (offset_of(coord, &that_shape), value));
-
-        let elements =
-            stream::OuterJoin::new(this, that, zero).map_ok(move |(offset, (left, right))| {
-                let coord = coord_of(offset, &strides, &shape);
-                (coord, (left, right))
-            });
-
-        Ok(Box::pin(elements))
     }
 
     pub async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
