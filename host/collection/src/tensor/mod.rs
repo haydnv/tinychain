@@ -1,11 +1,13 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
 use std::fmt;
+use std::marker::PhantomData;
 use std::ops::{Div, Rem};
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use collate::Collator;
 use destream::{de, en};
+use futures::TryFutureExt;
 use safecast::AsType;
 
 use tc_error::*;
@@ -1588,6 +1590,73 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Tensor<Txn, FE> {
         match self {
             Self::Dense(this) => this.fmt(f),
             Self::Sparse(this) => this.fmt(f),
+        }
+    }
+}
+
+pub enum TensorBase<Txn, FE> {
+    Dense(DenseBase<Txn, FE>),
+    Sparse(SparseBase<Txn, FE>),
+}
+
+#[async_trait]
+impl<Txn, FE> de::FromStream for TensorBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Context = Txn;
+
+    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+        let visitor = TensorVisitor::new(txn);
+        decoder.decode_map(visitor).await
+    }
+}
+
+impl<Txn, FE> From<TensorBase<Txn, FE>> for Tensor<Txn, FE> {
+    fn from(base: TensorBase<Txn, FE>) -> Tensor<Txn, FE> {
+        match base {
+            TensorBase::Dense(base) => Tensor::Dense(Dense::Base(base)),
+            TensorBase::Sparse(base) => Tensor::Sparse(Sparse::Base(base)),
+        }
+    }
+}
+
+struct TensorVisitor<Txn, FE> {
+    txn: Txn,
+    phantom: PhantomData<FE>,
+}
+
+impl<Txn, FE> TensorVisitor<Txn, FE> {
+    fn new(txn: Txn) -> Self {
+        Self {
+            txn,
+            phantom: PhantomData,
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> de::Visitor for TensorVisitor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Value = TensorBase<Txn, FE>;
+
+    fn expecting() -> &'static str {
+        "a tensor"
+    }
+
+    async fn visit_map<A: de::MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let class = map.next_key::<TCPathBuf>(()).await?;
+        let class = class.ok_or_else(|| de::Error::invalid_length(0, Self::expecting()))?;
+        let class = TensorType::from_path(&class)
+            .ok_or_else(|| de::Error::invalid_type(class, "a tensor type (dense or sparse)"))?;
+
+        match class {
+            TensorType::Dense => map.next_value(self.txn).map_ok(TensorBase::Dense).await,
+            TensorType::Sparse => map.next_value(self.txn).map_ok(TensorBase::Sparse).await,
         }
     }
 }

@@ -562,7 +562,7 @@ where
     FE: AsType<Node> + ThreadSafe + Clone,
     T: CDatatype,
 {
-    pub async fn new(txn: Txn, shape: Shape) -> TCResult<Self> {
+    async fn new(txn: Txn, shape: Shape) -> TCResult<Self> {
         let (re, im) = {
             let dir = {
                 let mut cxt = txn.context().write().await;
@@ -590,6 +590,32 @@ where
             txn,
         })
     }
+
+    pub async fn end(self) -> TCResult<(SparseBase<Txn, FE, T>, SparseBase<Txn, FE, T>)> {
+        let re = SparseBase::new(self.re.0, self.re.1, self.re.2);
+        let im = SparseBase::new(self.im.0, self.im.1, self.im.2);
+        Ok((re, im))
+    }
+}
+
+#[async_trait]
+impl<Txn, FE, T> de::FromStream for SparseComplexBaseVisitor<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: FileLoad + AsType<Node> + Clone,
+    T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
+    Number: From<T> + CastInto<T>,
+{
+    type Context = (Txn, Shape);
+
+    async fn from_stream<D: de::Decoder>(
+        cxt: (Txn, Shape),
+        decoder: &mut D,
+    ) -> Result<Self, D::Error> {
+        let (txn, shape) = cxt;
+        let visitor = Self::new(txn, shape).map_err(de::Error::custom).await?;
+        decoder.decode_seq(visitor).await
+    }
 }
 
 #[async_trait]
@@ -600,7 +626,7 @@ where
     T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
-    type Value = (SparseBase<Txn, FE, T>, SparseBase<Txn, FE, T>);
+    type Value = Self;
 
     fn expecting() -> &'static str {
         "a complex sparse tensor"
@@ -618,13 +644,7 @@ where
             .map_err(de::Error::custom)?;
         }
 
-        std::mem::drop(guard_re);
-        std::mem::drop(guard_im);
-
-        let re = SparseBase::new(self.re.0, self.re.1, self.re.2);
-        let im = SparseBase::new(self.im.0, self.im.1, self.im.2);
-
-        Ok((re, im))
+        Ok(self)
     }
 }
 

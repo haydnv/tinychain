@@ -552,7 +552,7 @@ macro_rules! impl_visitor {
             type Value = DenseFile<FE, $t>;
 
             fn expecting() -> &'static str {
-                "a dense tensor"
+                "dense tensor data"
             }
 
             async fn $visit<A: de::ArrayAccess<$t>>(

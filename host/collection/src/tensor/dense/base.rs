@@ -549,48 +549,82 @@ pub(super) struct DenseComplexBaseVisitor<Txn, FE, T> {
 impl<Txn, FE, T> DenseComplexBaseVisitor<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Buffer<T>> + ThreadSafe + Clone,
-    T: CDatatype,
+    FE: DenseCacheFile + AsType<Buffer<T>> + Clone,
+    T: CDatatype + DType + de::FromStream<Context = ()>,
+    Buffer<T>: de::FromStream<Context = ()>,
 {
-    pub async fn new(txn: Txn, shape: Shape) -> TCResult<Self> {
-        let (re, im) = {
-            let dir = {
-                let mut cxt = txn.context().write().await;
-                let (_dir_name, dir) = cxt.create_dir_unique()?;
-                dir
-            };
+    pub async fn end(self) -> TCResult<(DenseBase<Txn, FE, T>, DenseBase<Txn, FE, T>)> {
+        let re = DenseFile::load(self.re.1, self.shape.clone());
+        let im = DenseFile::load(self.im.1, self.shape);
+        let (re, im) = try_join!(re, im)?;
 
-            let mut dir = dir.write().await;
+        let re = DenseBase::new(self.re.0, re, self.re.2);
+        let im = DenseBase::new(self.im.0, im, self.im.2);
 
-            let re = dir.create_dir(REAL.to_string())?;
-            let im = dir.create_dir(IMAG.to_string())?;
-
-            (re, im)
-        };
-
-        let (re, im) = try_join!(dir_init(re), dir_init(im))?;
-
-        Ok(Self {
-            re,
-            im,
-            shape,
-            phantom: PhantomData,
-        })
+        Ok((re, im))
     }
 }
 
 macro_rules! impl_from_stream_complex {
-    ($t:ty, $visit:ident) => {
+    ($t:ty, $decode:ident, $visit:ident) => {
+        #[async_trait]
+        impl<Txn, FE> de::FromStream for DenseComplexBaseVisitor<Txn, FE, $t>
+        where
+            Txn: Transaction<FE>,
+            FE: DenseCacheFile + Clone,
+        {
+            type Context = (Txn, Shape);
+
+            async fn from_stream<D: de::Decoder>(
+                cxt: (Txn, Shape),
+                decoder: &mut D,
+            ) -> Result<Self, D::Error> {
+                let (txn, shape) = cxt;
+
+                let (re, im) = {
+                    let dir = {
+                        let mut cxt = txn.context().write().await;
+                        let (_dir_name, dir) =
+                            cxt.create_dir_unique().map_err(de::Error::custom)?;
+                        dir
+                    };
+
+                    let mut dir = dir.write().await;
+
+                    let re = dir
+                        .create_dir(REAL.to_string())
+                        .map_err(de::Error::custom)?;
+
+                    let im = dir
+                        .create_dir(IMAG.to_string())
+                        .map_err(de::Error::custom)?;
+
+                    (re, im)
+                };
+
+                let (re, im) = try_join!(dir_init(re), dir_init(im)).map_err(de::Error::custom)?;
+
+                let visitor = Self {
+                    re,
+                    im,
+                    shape,
+                    phantom: PhantomData,
+                };
+
+                decoder.$decode(visitor).await
+            }
+        }
+
         #[async_trait]
         impl<Txn, FE> de::Visitor for DenseComplexBaseVisitor<Txn, FE, $t>
         where
             Txn: Transaction<FE>,
             FE: DenseCacheFile,
         {
-            type Value = (DenseBase<Txn, FE, $t>, DenseBase<Txn, FE, $t>);
+            type Value = Self;
 
             fn expecting() -> &'static str {
-                "a complex dense tensor"
+                "complex dense tensor data"
             }
 
             async fn $visit<A: de::ArrayAccess<$t>>(
@@ -641,21 +675,14 @@ macro_rules! impl_from_stream_complex {
                 std::mem::drop(contents_r);
                 std::mem::drop(contents_i);
 
-                let re = DenseFile::load(self.re.1, self.shape.clone());
-                let im = DenseFile::load(self.im.1, self.shape);
-                let (re, im) = try_join!(re, im).map_err(de::Error::custom)?;
-
-                let re = DenseBase::new(self.re.0, re, self.re.2);
-                let im = DenseBase::new(self.im.0, im, self.im.2);
-
-                Ok((re, im))
+                Ok(self)
             }
         }
     };
 }
 
-impl_from_stream_complex!(f32, visit_array_f32);
-impl_from_stream_complex!(f64, visit_array_f64);
+impl_from_stream_complex!(f32, decode_array_f32, visit_array_f32);
+impl_from_stream_complex!(f64, decode_array_f64, visit_array_f64);
 
 #[inline]
 async fn fs_init<FE>(store: fs::Dir<FE>) -> TCResult<(DirLock<FE>, DirLock<FE>, DirLock<FE>)>

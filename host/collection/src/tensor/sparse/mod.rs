@@ -17,9 +17,9 @@ use tc_error::*;
 use tc_transact::{Transaction, TxnId};
 use tc_value::{
     Complex, ComplexType, DType, FloatType, IntType, Number, NumberClass, NumberCollator,
-    NumberInstance, NumberType, UIntType,
+    NumberInstance, NumberType, UIntType, ValueType,
 };
-use tcgeneric::ThreadSafe;
+use tcgeneric::{NativeClass, TCPathBuf, ThreadSafe};
 
 use super::block::Block;
 use super::complex::ComplexRead;
@@ -1215,81 +1215,10 @@ where
     Txn: Transaction<FE>,
     FE: FileLoad + AsType<Node> + ThreadSafe + Clone,
 {
-    type Context = (Txn, NumberType, Shape);
+    type Context = Txn;
 
-    async fn from_stream<D: de::Decoder>(
-        cxt: (Txn, NumberType, Shape),
-        decoder: &mut D,
-    ) -> Result<Self, D::Error> {
-        let (txn, dtype, shape) = cxt;
-
-        match dtype {
-            NumberType::Bool => {
-                de::FromStream::from_stream((txn, shape), decoder)
-                    .map_ok(Self::Bool)
-                    .await
-            }
-            NumberType::Complex(ComplexType::C32) => {
-                let visitor = base::SparseComplexBaseVisitor::new(txn, shape)
-                    .map_err(de::Error::custom)
-                    .await?;
-
-                decoder.decode_seq(visitor).map_ok(Self::C32).await
-            }
-            NumberType::Complex(ComplexType::C64) => {
-                let visitor = base::SparseComplexBaseVisitor::new(txn, shape)
-                    .map_err(de::Error::custom)
-                    .await?;
-
-                decoder.decode_seq(visitor).map_ok(Self::C64).await
-            }
-            NumberType::Float(FloatType::F32) => {
-                de::FromStream::from_stream((txn, shape), decoder)
-                    .map_ok(Self::F32)
-                    .await
-            }
-            NumberType::Float(FloatType::F64) => {
-                de::FromStream::from_stream((txn, shape), decoder)
-                    .map_ok(Self::F64)
-                    .await
-            }
-            NumberType::Int(IntType::I16) => {
-                de::FromStream::from_stream((txn, shape), decoder)
-                    .map_ok(Self::I16)
-                    .await
-            }
-            NumberType::Int(IntType::I32) => {
-                de::FromStream::from_stream((txn, shape), decoder)
-                    .map_ok(Self::I32)
-                    .await
-            }
-            NumberType::Int(IntType::I64) => {
-                de::FromStream::from_stream((txn, shape), decoder)
-                    .map_ok(Self::I64)
-                    .await
-            }
-            NumberType::UInt(UIntType::U8) => {
-                de::FromStream::from_stream((txn, shape), decoder)
-                    .map_ok(Self::U8)
-                    .await
-            }
-            NumberType::UInt(UIntType::U16) => {
-                de::FromStream::from_stream((txn, shape), decoder)
-                    .map_ok(Self::U16)
-                    .await
-            }
-            NumberType::UInt(UIntType::U32) => {
-                de::FromStream::from_stream((txn, shape), decoder)
-                    .map_ok(Self::U32)
-                    .await
-            }
-            NumberType::UInt(UIntType::U64) => {
-                de::FromStream::from_stream((txn, shape), decoder)
-                    .map_ok(Self::U64)
-                    .await
-            }
-            other => Err(de::Error::invalid_type(other, "a specific type of number")),
-        }
+    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_seq(SparseVisitor::new(txn)).await
     }
 }
 
@@ -1341,6 +1270,118 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for SparseBase<Txn, FE> {
             ),
             this.fmt(f)
         )
+    }
+}
+
+struct SparseVisitor<Txn, FE> {
+    txn: Txn,
+    phantom: PhantomData<FE>,
+}
+
+impl<Txn, FE> SparseVisitor<Txn, FE> {
+    fn new(txn: Txn) -> Self {
+        Self {
+            txn,
+            phantom: PhantomData,
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> de::Visitor for SparseVisitor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: FileLoad + AsType<Node> + Clone,
+{
+    type Value = SparseBase<Txn, FE>;
+
+    fn expecting() -> &'static str {
+        "a sparse tensor"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let (dtype, shape) = seq.expect_next::<(TCPathBuf, Shape)>(()).await?;
+        let dtype = if let Some(ValueType::Number(dtype)) = ValueType::from_path(&dtype) {
+            Ok(dtype)
+        } else {
+            Err(de::Error::invalid_type(dtype, "a type of number"))
+        }?;
+
+        match dtype {
+            NumberType::Bool => {
+                seq.expect_next((self.txn, shape))
+                    .map_ok(SparseBase::Bool)
+                    .await
+            }
+            NumberType::Complex(ComplexType::C32) => {
+                let visitor = seq
+                    .expect_next::<base::SparseComplexBaseVisitor<Txn, FE, f32>>((self.txn, shape))
+                    .await?;
+
+                visitor
+                    .end()
+                    .map_ok(SparseBase::C32)
+                    .map_err(de::Error::custom)
+                    .await
+            }
+            NumberType::Complex(ComplexType::C64) => {
+                let visitor = seq
+                    .expect_next::<base::SparseComplexBaseVisitor<Txn, FE, f64>>((self.txn, shape))
+                    .await?;
+
+                visitor
+                    .end()
+                    .map_ok(SparseBase::C64)
+                    .map_err(de::Error::custom)
+                    .await
+            }
+            NumberType::Float(FloatType::F32) => {
+                seq.expect_next((self.txn, shape))
+                    .map_ok(SparseBase::F32)
+                    .await
+            }
+            NumberType::Float(FloatType::F64) => {
+                seq.expect_next((self.txn, shape))
+                    .map_ok(SparseBase::F64)
+                    .await
+            }
+            NumberType::Int(IntType::I16) => {
+                seq.expect_next((self.txn, shape))
+                    .map_ok(SparseBase::I16)
+                    .await
+            }
+            NumberType::Int(IntType::I32) => {
+                seq.expect_next((self.txn, shape))
+                    .map_ok(SparseBase::I32)
+                    .await
+            }
+            NumberType::Int(IntType::I64) => {
+                seq.expect_next((self.txn, shape))
+                    .map_ok(SparseBase::I64)
+                    .await
+            }
+            NumberType::UInt(UIntType::U8) => {
+                seq.expect_next((self.txn, shape))
+                    .map_ok(SparseBase::U8)
+                    .await
+            }
+            NumberType::UInt(UIntType::U16) => {
+                seq.expect_next((self.txn, shape))
+                    .map_ok(SparseBase::U16)
+                    .await
+            }
+            NumberType::UInt(UIntType::U32) => {
+                seq.expect_next((self.txn, shape))
+                    .map_ok(SparseBase::U32)
+                    .await
+            }
+            NumberType::UInt(UIntType::U64) => {
+                seq.expect_next((self.txn, shape))
+                    .map_ok(SparseBase::U64)
+                    .await
+            }
+            other => Err(de::Error::invalid_type(other, "a specific type of number")),
+        }
     }
 }
 

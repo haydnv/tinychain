@@ -304,7 +304,7 @@ where
     type Value = SparseFile<FE, T>;
 
     fn expecting() -> &'static str {
-        "a sparse tensor"
+        "sparse tensor data"
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
