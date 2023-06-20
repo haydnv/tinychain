@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use collate::Collator;
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
-use freqfs::DirLock;
-use futures::TryFutureExt;
+use freqfs::{DirLock, FileLoad};
+use futures::{join, try_join, TryFutureExt};
 use ha_ndarray::{Array, Buffer, CDatatype};
 use log::debug;
 use safecast::{AsType, CastInto};
@@ -23,7 +23,7 @@ use crate::tensor::dense::DenseCacheFile;
 use crate::tensor::sparse::{Blocks, Elements};
 use crate::tensor::{
     Axes, Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
-    TensorType,
+    TensorType, IMAG, REAL,
 };
 
 use super::access::{SparseAccess, SparseCow, SparseVersion, SparseWriteGuard, SparseWriteLock};
@@ -547,6 +547,84 @@ where
         let (dir, canon, versions) = dir_init(dir).map_err(de::Error::custom).await?;
         let canon = SparseFile::from_stream((canon, shape), decoder).await?;
         Ok(Self::new(dir, canon, versions))
+    }
+}
+
+pub(super) struct SparseComplexBaseVisitor<Txn, FE, T> {
+    re: (DirLock<FE>, SparseFile<FE, T>, DirLock<FE>),
+    im: (DirLock<FE>, SparseFile<FE, T>, DirLock<FE>),
+    txn: Txn,
+}
+
+impl<Txn, FE, T> SparseComplexBaseVisitor<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe + Clone,
+    T: CDatatype,
+{
+    pub async fn new(txn: Txn, shape: Shape) -> TCResult<Self> {
+        let (re, im) = {
+            let dir = {
+                let mut cxt = txn.context().write().await;
+                let (_dir_name, dir) = cxt.create_dir_unique()?;
+                dir
+            };
+
+            let mut dir = dir.write().await;
+
+            let re = dir.create_dir(REAL.to_string())?;
+            let im = dir.create_dir(IMAG.to_string())?;
+
+            (re, im)
+        };
+
+        let ((re_dir, re_canon, re_versions), (im_dir, im_canon, im_versions)) =
+            try_join!(dir_init(re), dir_init(im))?;
+
+        let re_canon = SparseFile::create(re_canon, shape.clone())?;
+        let im_canon = SparseFile::create(im_canon, shape.clone())?;
+
+        Ok(Self {
+            re: (re_dir, re_canon, re_versions),
+            im: (im_dir, im_canon, im_versions),
+            txn,
+        })
+    }
+}
+
+#[async_trait]
+impl<Txn, FE, T> de::Visitor for SparseComplexBaseVisitor<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: FileLoad + AsType<Node>,
+    T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
+    Number: From<T> + CastInto<T>,
+{
+    type Value = (SparseBase<Txn, FE, T>, SparseBase<Txn, FE, T>);
+
+    fn expecting() -> &'static str {
+        "a complex sparse tensor"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let (mut guard_re, mut guard_im) = join!(self.re.1.write(), self.im.1.write());
+
+        let txn_id = *self.txn.id();
+        while let Some((coord, (r, i))) = seq.next_element::<(Coord, (T, T))>(()).await? {
+            try_join!(
+                guard_re.write_value(txn_id, coord.to_vec(), r),
+                guard_im.write_value(txn_id, coord, i)
+            )
+            .map_err(de::Error::custom)?;
+        }
+
+        std::mem::drop(guard_re);
+        std::mem::drop(guard_im);
+
+        let re = SparseBase::new(self.re.0, self.re.1, self.re.2);
+        let im = SparseBase::new(self.im.0, self.im.1, self.im.2);
+
+        Ok((re, im))
     }
 }
 

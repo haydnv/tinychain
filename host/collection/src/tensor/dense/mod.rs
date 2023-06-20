@@ -19,7 +19,7 @@ use tc_value::{
     Complex, ComplexType, DType, FloatType, IntType, Number, NumberCollator, NumberInstance,
     NumberType, UIntType,
 };
-use tcgeneric::{label, Label, ThreadSafe};
+use tcgeneric::ThreadSafe;
 
 use super::block::Block;
 use super::complex::ComplexRead;
@@ -39,9 +39,6 @@ mod base;
 mod file;
 mod stream;
 mod view;
-
-const REAL: Label = label("re");
-const IMAG: Label = label("im");
 
 type BlockShape = ha_ndarray::Shape;
 type BlockStream<Block> = Pin<Box<dyn Stream<Item = TCResult<Block>> + Send>>;
@@ -1098,16 +1095,14 @@ where
                     .map_err(de::Error::custom)
                     .await?;
 
-                let (re, im) = decoder.decode_array_f32(visitor).await?;
-                Ok(Self::C32((re, im)))
+                decoder.decode_array_f32(visitor).map_ok(Self::C32).await
             }
             NumberType::Complex(ComplexType::C64) => {
                 let visitor = base::DenseComplexBaseVisitor::<Txn, FE, f64>::new(txn, shape)
                     .map_err(de::Error::custom)
                     .await?;
 
-                let (re, im) = decoder.decode_array_f32(visitor).await?;
-                Ok(Self::C64((re, im)))
+                decoder.decode_array_f32(visitor).map_ok(Self::C64).await
             }
             NumberType::Float(FloatType::F32) => {
                 de::FromStream::from_stream((txn, shape), decoder)

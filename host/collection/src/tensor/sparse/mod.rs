@@ -7,6 +7,8 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use collate::Collate;
+use destream::de;
+use freqfs::FileLoad;
 use futures::{join, try_join, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ha_ndarray::*;
 use safecast::{AsType, CastFrom, CastInto};
@@ -14,7 +16,8 @@ use safecast::{AsType, CastFrom, CastInto};
 use tc_error::*;
 use tc_transact::{Transaction, TxnId};
 use tc_value::{
-    Complex, ComplexType, DType, Number, NumberClass, NumberCollator, NumberInstance, NumberType,
+    Complex, ComplexType, DType, FloatType, IntType, Number, NumberClass, NumberCollator,
+    NumberInstance, NumberType, UIntType,
 };
 use tcgeneric::ThreadSafe;
 
@@ -930,6 +933,31 @@ impl<Txn, FE, A: fmt::Debug> fmt::Debug for SparseTensor<Txn, FE, A> {
     }
 }
 
+pub enum SparseBase<Txn, FE> {
+    Bool(base::SparseBase<Txn, FE, u8>),
+    C32(
+        (
+            base::SparseBase<Txn, FE, f32>,
+            base::SparseBase<Txn, FE, f32>,
+        ),
+    ),
+    C64(
+        (
+            base::SparseBase<Txn, FE, f64>,
+            base::SparseBase<Txn, FE, f64>,
+        ),
+    ),
+    F32(base::SparseBase<Txn, FE, f32>),
+    F64(base::SparseBase<Txn, FE, f64>),
+    I16(base::SparseBase<Txn, FE, i16>),
+    I32(base::SparseBase<Txn, FE, i32>),
+    I64(base::SparseBase<Txn, FE, i64>),
+    U8(base::SparseBase<Txn, FE, u8>),
+    U16(base::SparseBase<Txn, FE, u16>),
+    U32(base::SparseBase<Txn, FE, u32>),
+    U64(base::SparseBase<Txn, FE, u64>),
+}
+
 macro_rules! base_dispatch {
     ($this:ident, $var:ident, $bool:expr, $complex:expr, $general:expr) => {
         match $this {
@@ -967,31 +995,6 @@ macro_rules! base_view_dispatch {
             ($this, $that) => $mismatch,
         }
     };
-}
-
-pub enum SparseBase<Txn, FE> {
-    Bool(base::SparseBase<Txn, FE, u8>),
-    C32(
-        (
-            base::SparseBase<Txn, FE, f32>,
-            base::SparseBase<Txn, FE, f32>,
-        ),
-    ),
-    C64(
-        (
-            base::SparseBase<Txn, FE, f64>,
-            base::SparseBase<Txn, FE, f64>,
-        ),
-    ),
-    F32(base::SparseBase<Txn, FE, f32>),
-    F64(base::SparseBase<Txn, FE, f64>),
-    I16(base::SparseBase<Txn, FE, i16>),
-    I32(base::SparseBase<Txn, FE, i32>),
-    I64(base::SparseBase<Txn, FE, i64>),
-    U8(base::SparseBase<Txn, FE, u8>),
-    U16(base::SparseBase<Txn, FE, u16>),
-    U32(base::SparseBase<Txn, FE, u32>),
-    U64(base::SparseBase<Txn, FE, u64>),
 }
 
 impl<Txn, FE> TensorInstance for SparseBase<Txn, FE>
@@ -1203,6 +1206,90 @@ where
                 this.write(txn_id, range, value).await
             }
         )
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> de::FromStream for SparseBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: FileLoad + AsType<Node> + ThreadSafe + Clone,
+{
+    type Context = (Txn, NumberType, Shape);
+
+    async fn from_stream<D: de::Decoder>(
+        cxt: (Txn, NumberType, Shape),
+        decoder: &mut D,
+    ) -> Result<Self, D::Error> {
+        let (txn, dtype, shape) = cxt;
+
+        match dtype {
+            NumberType::Bool => {
+                de::FromStream::from_stream((txn, shape), decoder)
+                    .map_ok(Self::Bool)
+                    .await
+            }
+            NumberType::Complex(ComplexType::C32) => {
+                let visitor = base::SparseComplexBaseVisitor::new(txn, shape)
+                    .map_err(de::Error::custom)
+                    .await?;
+
+                decoder.decode_seq(visitor).map_ok(Self::C32).await
+            }
+            NumberType::Complex(ComplexType::C64) => {
+                let visitor = base::SparseComplexBaseVisitor::new(txn, shape)
+                    .map_err(de::Error::custom)
+                    .await?;
+
+                decoder.decode_seq(visitor).map_ok(Self::C64).await
+            }
+            NumberType::Float(FloatType::F32) => {
+                de::FromStream::from_stream((txn, shape), decoder)
+                    .map_ok(Self::F32)
+                    .await
+            }
+            NumberType::Float(FloatType::F64) => {
+                de::FromStream::from_stream((txn, shape), decoder)
+                    .map_ok(Self::F64)
+                    .await
+            }
+            NumberType::Int(IntType::I16) => {
+                de::FromStream::from_stream((txn, shape), decoder)
+                    .map_ok(Self::I16)
+                    .await
+            }
+            NumberType::Int(IntType::I32) => {
+                de::FromStream::from_stream((txn, shape), decoder)
+                    .map_ok(Self::I32)
+                    .await
+            }
+            NumberType::Int(IntType::I64) => {
+                de::FromStream::from_stream((txn, shape), decoder)
+                    .map_ok(Self::I64)
+                    .await
+            }
+            NumberType::UInt(UIntType::U8) => {
+                de::FromStream::from_stream((txn, shape), decoder)
+                    .map_ok(Self::U8)
+                    .await
+            }
+            NumberType::UInt(UIntType::U16) => {
+                de::FromStream::from_stream((txn, shape), decoder)
+                    .map_ok(Self::U16)
+                    .await
+            }
+            NumberType::UInt(UIntType::U32) => {
+                de::FromStream::from_stream((txn, shape), decoder)
+                    .map_ok(Self::U32)
+                    .await
+            }
+            NumberType::UInt(UIntType::U64) => {
+                de::FromStream::from_stream((txn, shape), decoder)
+                    .map_ok(Self::U64)
+                    .await
+            }
+            other => Err(de::Error::invalid_type(other, "a specific type of number")),
+        }
     }
 }
 

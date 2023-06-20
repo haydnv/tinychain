@@ -21,14 +21,15 @@ use tcgeneric::{label, Instance, Label, ThreadSafe};
 
 use crate::tensor::sparse::Node;
 use crate::tensor::{
-    Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite, TensorType,
+    Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
+    TensorType, IMAG, REAL,
 };
 
 use super::access::{DenseAccess, DenseCow, DenseVersion};
 use super::file::DenseFile;
 use super::{
     ideal_block_size_for, BlockStream, DenseCacheFile, DenseInstance, DenseWrite, DenseWriteGuard,
-    DenseWriteLock, IMAG, REAL,
+    DenseWriteLock,
 };
 
 const CANON: Label = label("canon");

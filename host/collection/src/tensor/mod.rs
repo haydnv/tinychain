@@ -13,7 +13,7 @@ use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{Number, NumberType, ValueType};
 use tcgeneric::{
-    label, path_label, Class, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
+    label, path_label, Class, Label, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
 };
 
 pub use dense::{DenseBase, DenseCacheFile, DenseView};
@@ -27,6 +27,9 @@ pub mod shape;
 pub mod sparse;
 mod transform;
 mod view;
+
+const REAL: Label = label("re");
+const IMAG: Label = label("im");
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
