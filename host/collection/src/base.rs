@@ -13,27 +13,34 @@ use tc_transact::fs::{CopyFrom, Dir, Persist, Restore};
 use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
 
-use super::btree::{BTree, BTreeFile, BTreeInstance, Node};
+use super::btree::{self, BTree, BTreeFile, BTreeInstance};
 use super::table::{Table, TableFile, TableInstance};
-use super::tensor::TensorType;
+use super::tensor::{
+    self, Dense, DenseCacheFile, Sparse, Tensor, TensorBase, TensorInstance, TensorType,
+};
 use super::{Collection, CollectionType, CollectionView, Schema};
 
 #[derive(Clone)]
 pub enum CollectionBase<Txn, FE> {
     BTree(BTreeFile<Txn, FE>),
     Table(TableFile<Txn, FE>),
+    Tensor(TensorBase<Txn, FE>),
 }
 
 impl<Txn, FE> CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<btree::Node> + ThreadSafe,
 {
     /// Get the [`Schema`] of this [`Collection`]
     pub fn schema(&self) -> Schema {
         match self {
             Self::BTree(btree) => btree.schema().clone().into(),
             Self::Table(table) => table.schema().clone().into(),
+            Self::Tensor(tensor) => match tensor {
+                TensorBase::Dense(dense) => Schema::Dense(dense.schema()),
+                TensorBase::Sparse(sparse) => Schema::Sparse(sparse.schema()),
+            },
         }
     }
 }
@@ -41,7 +48,7 @@ where
 impl<Txn, FE> Instance for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: Send + Sync,
+    FE: ThreadSafe,
 {
     type Class = CollectionType;
 
@@ -49,6 +56,7 @@ where
         match self {
             Self::BTree(btree) => btree.class().into(),
             Self::Table(table) => table.class().into(),
+            Self::Tensor(tensor) => tensor.class().into(),
         }
     }
 }
@@ -57,7 +65,7 @@ where
 impl<Txn, FE> Transact for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + ThreadSafe,
 {
     type Commit = ();
 
@@ -65,6 +73,7 @@ where
         match self {
             Self::BTree(btree) => btree.commit(txn_id).await,
             Self::Table(table) => table.commit(txn_id).await,
+            Self::Tensor(tensor) => tensor.commit(txn_id).await,
         }
     }
 
@@ -72,6 +81,7 @@ where
         match self {
             Self::BTree(btree) => btree.rollback(txn_id).await,
             Self::Table(table) => table.rollback(txn_id).await,
+            Self::Tensor(tensor) => tensor.rollback(txn_id).await,
         }
     }
 
@@ -79,6 +89,7 @@ where
         match self {
             Self::BTree(btree) => btree.finalize(txn_id).await,
             Self::Table(table) => table.finalize(txn_id).await,
+            Self::Tensor(tensor) => tensor.finalize(txn_id).await,
         }
     }
 }
@@ -87,7 +98,7 @@ where
 impl<T, FE> AsyncHash<FE> for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
 {
     type Txn = T;
 
@@ -100,8 +111,8 @@ where
 impl<Txn, FE> Persist<FE> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
-    Node: freqfs::FileLoad,
+    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
+    btree::Node: freqfs::FileLoad,
 {
     type Txn = Txn;
     type Schema = Schema;
@@ -142,6 +153,7 @@ where
         match self {
             Self::BTree(btree) => btree.dir(),
             Self::Table(table) => table.dir(),
+            Self::Tensor(tensor) => tensor.dir(),
         }
     }
 }
@@ -150,8 +162,8 @@ where
 impl<Txn, FE> CopyFrom<FE, Collection<Txn, FE>> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
-    Node: freqfs::FileLoad,
+    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
+    btree::Node: freqfs::FileLoad,
 {
     async fn copy_from(txn: &Txn, store: Dir<FE>, instance: Collection<Txn, FE>) -> TCResult<Self> {
         match instance {
@@ -165,6 +177,11 @@ where
                     .map_ok(Self::Table)
                     .await
             }
+            Collection::Tensor(instance) => {
+                TensorBase::copy_from(txn, store, instance.into())
+                    .map_ok(Self::Tensor)
+                    .await
+            }
         }
     }
 }
@@ -173,13 +190,14 @@ where
 impl<Txn, FE> Restore<FE> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
-    Node: freqfs::FileLoad,
+    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
+    btree::Node: freqfs::FileLoad,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         match (self, backup) {
             (Self::BTree(this), Self::BTree(backup)) => this.restore(txn_id, backup).await,
             (Self::Table(this), Self::Table(backup)) => this.restore(txn_id, backup).await,
+            (Self::Tensor(this), Self::Tensor(backup)) => this.restore(txn_id, backup).await,
             (this, that) => Err(bad_request!("cannot restore {:?} from {:?}", this, that)),
         }
     }
@@ -190,6 +208,8 @@ impl<T, FE> TryCastFrom<Collection<T, FE>> for CollectionBase<T, FE> {
         match collection {
             Collection::BTree(BTree::File(_)) => true,
             Collection::Table(Table::Table(_)) => true,
+            Collection::Tensor(Tensor::Dense(Dense::Base(_))) => true,
+            Collection::Tensor(Tensor::Sparse(Sparse::Base(_))) => true,
             _ => false,
         }
     }
@@ -198,6 +218,12 @@ impl<T, FE> TryCastFrom<Collection<T, FE>> for CollectionBase<T, FE> {
         match collection {
             Collection::BTree(BTree::File(btree)) => Some(Self::BTree(btree)),
             Collection::Table(Table::Table(table)) => Some(Self::Table(table)),
+            Collection::Tensor(Tensor::Dense(Dense::Base(dense))) => {
+                Some(Self::Tensor(TensorBase::Dense(dense)))
+            }
+            Collection::Tensor(Tensor::Sparse(Sparse::Base(sparse))) => {
+                Some(Self::Tensor(TensorBase::Sparse(sparse)))
+            }
             _ => None,
         }
     }
@@ -207,7 +233,7 @@ impl<T, FE> TryCastFrom<Collection<T, FE>> for CollectionBase<T, FE> {
 impl<'en, T, FE> IntoView<'en, FE> for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
     Self: 'en,
 {
     type Txn = T;
@@ -233,7 +259,7 @@ pub struct CollectionVisitor<Txn, FE> {
 impl<Txn, FE> CollectionVisitor<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
 {
     pub fn new(txn: Txn) -> Self {
         Self {
@@ -266,10 +292,18 @@ where
 
             CollectionType::Tensor(tt) => match tt {
                 TensorType::Dense => {
-                    todo!()
+                    access
+                        .next_value(self.txn)
+                        .map_ok(TensorBase::Dense)
+                        .map_ok(CollectionBase::Tensor)
+                        .await
                 }
                 TensorType::Sparse => {
-                    todo!()
+                    access
+                        .next_value(self.txn)
+                        .map_ok(TensorBase::Sparse)
+                        .map_ok(CollectionBase::Tensor)
+                        .await
                 }
             },
         }
@@ -280,7 +314,7 @@ where
 impl<T, FE> de::Visitor for CollectionVisitor<T, FE>
 where
     T: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
 {
     type Value = CollectionBase<T, FE>;
 
@@ -305,7 +339,7 @@ where
 impl<T, FE> de::FromStream for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
 {
     type Context = T;
 

@@ -12,7 +12,7 @@ use tcgeneric::{
     path_label, Class, Id, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
 };
 
-use super::Node;
+use super::btree::Node;
 
 pub use b_table::{IndexSchema, Schema};
 

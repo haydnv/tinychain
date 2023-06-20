@@ -43,7 +43,7 @@ impl<FE> Clone for Dir<FE> {
     }
 }
 
-impl<FE: ThreadSafe> Dir<FE> {
+impl<FE: ThreadSafe + Clone> Dir<FE> {
     /// Load a transactional [`Dir`] from the filesystem cache
     pub async fn load(txn_id: TxnId, canon: freqfs::DirLock<FE>) -> TCResult<Self> {
         txfs::Dir::load(txn_id, canon)
@@ -196,7 +196,7 @@ impl<FE: ThreadSafe> Dir<FE> {
     }
 }
 
-impl<FE: ThreadSafe + for<'a> FileSave<'a>> Dir<FE> {
+impl<FE: ThreadSafe + Clone + for<'a> FileSave<'a>> Dir<FE> {
     /// Commit this [`Dir`] at `txn_id`.
     pub async fn commit(&self, txn_id: TxnId, recursive: bool) {
         self.inner.commit(txn_id, recursive).await
@@ -338,7 +338,7 @@ impl<FE, B> fmt::Debug for File<FE, B> {
 
 /// Defines how to load a persistent data structure from the filesystem.
 #[async_trait]
-pub trait Persist<FE: ThreadSafe>: Sized {
+pub trait Persist<FE: ThreadSafe + Clone>: Sized {
     type Txn: Transaction<FE>;
     type Schema: Clone + Send + Sync;
 
@@ -364,7 +364,7 @@ pub trait Persist<FE: ThreadSafe>: Sized {
 
 /// Copy a base state from another instance, possibly a view.
 #[async_trait]
-pub trait CopyFrom<FE: ThreadSafe, I>: Persist<FE> {
+pub trait CopyFrom<FE: ThreadSafe + Clone, I>: Persist<FE> {
     /// Copy a new instance of `Self` from an existing instance.
     async fn copy_from(
         txn: &<Self as Persist<FE>>::Txn,
@@ -375,7 +375,7 @@ pub trait CopyFrom<FE: ThreadSafe, I>: Persist<FE> {
 
 /// Restore a persistent state from a backup.
 #[async_trait]
-pub trait Restore<FE: ThreadSafe>: Persist<FE> {
+pub trait Restore<FE: ThreadSafe + Clone>: Persist<FE> {
     /// Restore this persistent state from a backup.
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()>;
 }

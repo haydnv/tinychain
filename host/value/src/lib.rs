@@ -21,7 +21,7 @@ mod link {
 
 mod number {
     pub use number_general::{
-        Boolean, BooleanType, Complex, ComplexType, Float, FloatInstance, FloatType, Int, IntType,
+        Boolean, BooleanType, Complex, ComplexType, DType, Float, FloatInstance, FloatType, Int, IntType,
         Number, NumberClass, NumberCollator, NumberInstance, NumberType, Trigonometry, UInt,
         UIntType,
     };

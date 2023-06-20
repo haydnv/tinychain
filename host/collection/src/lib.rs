@@ -19,14 +19,17 @@ use tensor::TensorType;
 mod base;
 mod schema;
 
-pub use btree::{BTree, Node};
+pub use btree::{BTree, BTreeFile};
 pub use table::Table;
+pub use tensor::{
+    Dense, DenseBase, DenseCacheFile, DenseView, Sparse, SparseBase, SparseView, Tensor,
+    TensorBase, TensorInstance, TensorView,
+};
 
 pub mod btree;
 pub mod table;
 pub mod tensor;
 
-use crate::btree::BTreeFile;
 pub use base::{CollectionBase, CollectionVisitor};
 pub use schema::Schema;
 
@@ -84,20 +87,26 @@ impl fmt::Debug for CollectionType {
 pub enum Collection<Txn, FE> {
     BTree(BTree<Txn, FE>),
     Table(Table<Txn, FE>),
+    Tensor(Tensor<Txn, FE>),
 }
 
 as_type!(Collection<Txn, FE>, BTree, BTree<Txn, FE>);
 as_type!(Collection<Txn, FE>, Table, Table<Txn, FE>);
+as_type!(Collection<Txn, FE>, Tensor, Tensor<Txn, FE>);
 
 impl<Txn, FE> Collection<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<btree::Node> + ThreadSafe,
 {
     fn schema(&self) -> Schema {
         match self {
             Self::BTree(btree) => btree.schema().clone().into(),
             Self::Table(table) => table.schema().clone().into(),
+            Self::Tensor(tensor) => match tensor {
+                Tensor::Dense(dense) => Schema::Dense(dense.schema()),
+                Tensor::Sparse(sparse) => Schema::Sparse(sparse.schema()),
+            },
         }
     }
 }
@@ -105,7 +114,7 @@ where
 impl<T, FE> Instance for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: Send + Sync,
+    FE: ThreadSafe,
 {
     type Class = CollectionType;
 
@@ -113,6 +122,7 @@ where
         match self {
             Self::BTree(btree) => btree.class().into(),
             Self::Table(table) => table.class().into(),
+            Self::Tensor(tensor) => tensor.class().into(),
         }
     }
 }
@@ -121,7 +131,7 @@ where
 impl<T, FE> AsyncHash<FE> for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
 {
     type Txn = T;
 
@@ -137,6 +147,16 @@ where
                 let rows = table.rows(*txn.id()).await?;
                 async_hash::hash_try_stream::<Sha256, _, _, _>(rows).await?
             }
+            Self::Tensor(tensor) => match tensor {
+                Tensor::Dense(dense) => {
+                    let elements = DenseView::from(dense).into_elements(*txn.id()).await?;
+                    async_hash::hash_try_stream::<Sha256, _, _, _>(elements).await?
+                }
+                Tensor::Sparse(sparse) => {
+                    let elements = SparseView::from(sparse).into_elements(*txn.id()).await?;
+                    async_hash::hash_try_stream::<Sha256, _, _, _>(elements).await?
+                }
+            },
         };
 
         let mut hasher = Sha256::new();
@@ -151,6 +171,7 @@ impl<Txn, FE> From<CollectionBase<Txn, FE>> for Collection<Txn, FE> {
         match base {
             CollectionBase::BTree(btree) => Self::BTree(btree.into()),
             CollectionBase::Table(table) => Self::Table(table.into()),
+            CollectionBase::Tensor(tensor) => Self::Tensor(tensor.into()),
         }
     }
 }
@@ -165,7 +186,7 @@ impl<Txn, FE> From<BTreeFile<Txn, FE>> for Collection<Txn, FE> {
 impl<'en, T, FE> IntoView<'en, FE> for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
     Self: 'en,
 {
     type Txn = T;
@@ -175,6 +196,7 @@ where
         match self {
             Self::BTree(btree) => btree.into_view(txn).map_ok(CollectionView::BTree).await,
             Self::Table(table) => table.into_view(txn).map_ok(CollectionView::Table).await,
+            Self::Tensor(tensor) => tensor.into_view(txn).map_ok(CollectionView::Tensor).await,
         }
     }
 }
@@ -183,7 +205,7 @@ where
 impl<T, FE> de::FromStream for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: tensor::dense::DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
 {
     type Context = T;
 
@@ -208,6 +230,7 @@ impl<T, FE> fmt::Debug for Collection<T, FE> {
 pub enum CollectionView<'en> {
     BTree(btree::BTreeView<'en>),
     Table(table::TableView<'en>),
+    Tensor(tensor::view::TensorView),
 }
 
 impl<'en> en::IntoStream<'en> for CollectionView<'en> {
@@ -224,6 +247,15 @@ impl<'en> en::IntoStream<'en> for CollectionView<'en> {
             Self::Table(table) => {
                 let classpath = TableType::default().path();
                 map.encode_entry(classpath.to_string(), table)?;
+            }
+            Self::Tensor(tensor) => {
+                let classpath = match tensor {
+                    tensor::view::TensorView::Dense(_) => TensorType::Dense,
+                    tensor::view::TensorView::Sparse(_) => TensorType::Sparse,
+                }
+                .path();
+
+                map.encode_entry(classpath.to_string(), tensor)?;
             }
         }
 

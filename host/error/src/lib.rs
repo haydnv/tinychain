@@ -159,13 +159,6 @@ impl TCError {
         Self::new(ErrorKind::Conflict, locator)
     }
 
-    pub fn unexpected<V: fmt::Debug>(value: V, expected: &str) -> Self {
-        Self::new(
-            ErrorKind::BadRequest,
-            format!("invalid value {value:?}: expected {expected}"),
-        )
-    }
-
     /// Error to indicate that the requested resource exists but does not support the request method
     pub fn method_not_allowed<M: fmt::Debug, S: fmt::Debug, P: fmt::Display>(
         method: M,
@@ -187,6 +180,17 @@ impl TCError {
     /// Error to indicate that the requested resource does not exist at the specified location
     pub fn not_found<I: fmt::Display>(locator: I) -> Self {
         Self::new(ErrorKind::NotFound, locator)
+    }
+
+    pub fn unexpected<V: fmt::Debug>(value: V, expected: &str) -> Self {
+        Self::new(
+            ErrorKind::BadRequest,
+            format!("invalid value {value:?}: expected {expected}"),
+        )
+    }
+
+    pub fn unsupported<I: fmt::Display>(info: I) -> Self {
+        Self::new(ErrorKind::BadRequest, info.to_string())
     }
 
     /// The [`ErrorKind`] of this error
@@ -213,6 +217,16 @@ impl From<ParseError> for TCError {
         Self {
             kind: ErrorKind::BadRequest,
             data: err.into(),
+        }
+    }
+}
+
+#[cfg(feature = "ha-ndarray")]
+impl From<ha_ndarray::Error> for TCError {
+    fn from(err: ha_ndarray::Error) -> Self {
+        Self {
+            kind: ErrorKind::Internal,
+            data: err.to_string().into(),
         }
     }
 }

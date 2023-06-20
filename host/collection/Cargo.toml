@@ -11,6 +11,9 @@ repository = "https://github.com/haydnv/tinychain.git"
 keywords = ["tinychain", "btree", "table", "tensor", "collection"]
 categories = ["database", "database-implementations", "data-structures"]
 
+[features]
+opencl = ["ha-ndarray/opencl"]
+
 [dependencies]
 async-hash = { path = "../../../async-hash" }
 async-trait = "0.1"
@@ -18,13 +21,16 @@ b-table = { path = "../../../b-table", features = ["all"] }
 collate = { path = "../../../collate", features = ["stream"] }
 destream = { path = "../../../destream" }
 ds-ext = { path = "../../../ds-ext" }
-fensor = { path= "../../../fensor" }
 futures = "0.3"
 freqfs = { path = "../../../freqfs" }
+ha-ndarray = { path = "../../../ha-ndarray", features = ["freqfs", "stream"] }
+itertools = "0.10"
 log = { version = "0.4", features = ["release_max_level_info"] }
 num_cpus = "1.15"
+pin-project = "1.1"
+rayon = "1.7"
 safecast = { path = "../../../safecast" }
-tc-error = { path = "../error" }
+tc-error = { path = "../error", features = ["ha-ndarray"] }
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }
 tcgeneric = { path = "../generic" }
