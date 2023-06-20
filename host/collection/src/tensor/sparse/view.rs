@@ -48,6 +48,31 @@ pub enum SparseView<Txn, FE> {
     U64(SparseTensor<Txn, FE, SparseAccess<Txn, FE, u64>>),
 }
 
+impl<Txn: ThreadSafe, FE: ThreadSafe> SparseView<Txn, FE> {
+    fn complex_from(complex: (Self, Self)) -> TCResult<Self> {
+        match complex {
+            (Self::F32(real), Self::F32(imag)) => Ok(Self::C32((real, imag))),
+            (Self::F64(real), Self::F64(imag)) => Ok(Self::C64((real, imag))),
+            (real, imag) => Err(bad_request!(
+                "cannot construct a complex tensor from {real:?} and {imag:?}"
+            )),
+        }
+    }
+}
+
+impl<Txn, FE> SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    pub async fn elements(
+        self,
+        txn_id: TxnId,
+    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<(Coord, Number)>> + Send>>> {
+        todo!()
+    }
+}
+
 impl<Txn, FE> Clone for SparseView<Txn, FE> {
     fn clone(&self) -> Self {
         match self {
@@ -84,18 +109,6 @@ macro_rules! view_dispatch {
             SparseView::U64($var) => $general,
         }
     };
-}
-
-impl<Txn: ThreadSafe, FE: ThreadSafe> SparseView<Txn, FE> {
-    fn complex_from(complex: (Self, Self)) -> TCResult<Self> {
-        match complex {
-            (Self::F32(real), Self::F32(imag)) => Ok(Self::C32((real, imag))),
-            (Self::F64(real), Self::F64(imag)) => Ok(Self::C64((real, imag))),
-            (real, imag) => Err(bad_request!(
-                "cannot construct a complex tensor from {real:?} and {imag:?}"
-            )),
-        }
-    }
 }
 
 impl<Txn, FE> SparseView<Txn, FE>

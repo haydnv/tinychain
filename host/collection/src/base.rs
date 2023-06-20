@@ -96,7 +96,7 @@ where
 impl<T, FE> AsyncHash<FE> for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
-    FE: AsType<btree::Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
 {
     type Txn = T;
 
@@ -175,6 +175,11 @@ where
                     .map_ok(Self::Table)
                     .await
             }
+            Collection::Tensor(instance) => {
+                TensorBase::copy_from(txn, store, instance.into())
+                    .map_ok(Self::Tensor)
+                    .await
+            }
         }
     }
 }
@@ -222,7 +227,7 @@ impl<T, FE> TryCastFrom<Collection<T, FE>> for CollectionBase<T, FE> {
 impl<'en, T, FE> IntoView<'en, FE> for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
-    FE: AsType<btree::Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
     Self: 'en,
 {
     type Txn = T;

@@ -29,7 +29,7 @@ pub mod dense;
 pub mod shape;
 pub mod sparse;
 mod transform;
-mod view;
+pub(crate) mod view;
 
 const REAL: Label = label("re");
 const IMAG: Label = label("im");
@@ -506,9 +506,26 @@ pub enum Dense<Txn, FE> {
     View(DenseView<Txn, FE>),
 }
 
+impl<Txn, FE> Clone for Dense<Txn, FE> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Base(base) => Self::Base(base.clone()),
+            Self::View(view) => Self::View(view.clone()),
+        }
+    }
+}
+
 impl<Txn, FE> Dense<Txn, FE> {
     pub fn into_view(self) -> DenseView<Txn, FE> {
         self.into()
+    }
+}
+
+impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for Dense<Txn, FE> {
+    type Class = TensorType;
+
+    fn class(&self) -> Self::Class {
+        TensorType::Dense
     }
 }
 
@@ -624,9 +641,26 @@ pub enum Sparse<Txn, FE> {
     View(SparseView<Txn, FE>),
 }
 
+impl<Txn, FE> Clone for Sparse<Txn, FE> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Base(base) => Self::Base(base.clone()),
+            Self::View(view) => Self::View(view.clone()),
+        }
+    }
+}
+
 impl<Txn, FE> Sparse<Txn, FE> {
     pub fn into_view(self) -> SparseView<Txn, FE> {
         self.into()
+    }
+}
+
+impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for Sparse<Txn, FE> {
+    type Class = TensorType;
+
+    fn class(&self) -> Self::Class {
+        TensorType::Sparse
     }
 }
 
@@ -734,9 +768,23 @@ pub enum Tensor<Txn, FE> {
     Sparse(Sparse<Txn, FE>),
 }
 
-impl<Txn, FE> Tensor<Txn, FE> {
-    pub fn into_view(self) -> TensorView<Txn, FE> {
-        self.into()
+impl<Txn, FE> Clone for Tensor<Txn, FE> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Dense(dense) => Self::Dense(dense.clone()),
+            Self::Sparse(sparse) => Self::Sparse(sparse.clone()),
+        }
+    }
+}
+
+impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for Tensor<Txn, FE> {
+    type Class = TensorType;
+
+    fn class(&self) -> Self::Class {
+        match self {
+            Self::Dense(dense) => dense.class(),
+            Self::Sparse(sparse) => sparse.class(),
+        }
     }
 }
 

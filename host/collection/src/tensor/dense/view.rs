@@ -1,6 +1,8 @@
 use std::fmt;
+use std::pin::Pin;
 
 use async_trait::async_trait;
+use futures::Stream;
 use ha_ndarray::CDatatype;
 use safecast::{AsType, CastInto};
 
@@ -69,6 +71,15 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> DenseView<Txn, FE> {
                 "cannot construct a complex tensor from {real:?} and {imag:?}"
             )),
         }
+    }
+}
+
+impl<Txn: ThreadSafe, FE: ThreadSafe> DenseView<Txn, FE> {
+    pub async fn elements(
+        self,
+        txn_id: TxnId,
+    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<Number>> + Send>>> {
+        todo!()
     }
 }
 
