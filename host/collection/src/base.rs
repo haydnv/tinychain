@@ -15,7 +15,9 @@ use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
 
 use super::btree::{self, BTree, BTreeFile, BTreeInstance};
 use super::table::{Table, TableFile, TableInstance};
-use super::tensor::{self, DenseCacheFile, TensorBase, TensorInstance, TensorType};
+use super::tensor::{
+    self, Dense, DenseCacheFile, Sparse, Tensor, TensorBase, TensorInstance, TensorType,
+};
 use super::{Collection, CollectionType, CollectionView, Schema};
 
 #[derive(Clone)]
@@ -206,8 +208,8 @@ impl<T, FE> TryCastFrom<Collection<T, FE>> for CollectionBase<T, FE> {
         match collection {
             Collection::BTree(BTree::File(_)) => true,
             Collection::Table(Table::Table(_)) => true,
-            // Collection::Tensor(Tensor::Dense(Dense::Base(_))) => true,
-            // Collection::Tensor(Tensor::Sparse(Sparse::Base(_))) => true,
+            Collection::Tensor(Tensor::Dense(Dense::Base(_))) => true,
+            Collection::Tensor(Tensor::Sparse(Sparse::Base(_))) => true,
             _ => false,
         }
     }
@@ -216,8 +218,12 @@ impl<T, FE> TryCastFrom<Collection<T, FE>> for CollectionBase<T, FE> {
         match collection {
             Collection::BTree(BTree::File(btree)) => Some(Self::BTree(btree)),
             Collection::Table(Table::Table(table)) => Some(Self::Table(table)),
-            // Collection::Tensor(Tensor::Dense(Dense::Base(dense))) => Some(Self::Tensor(dense.into())),
-            // Collection::Tensor(Tensor::Sparse(Sparse::Base(sparse))) => Some(Self::Tensor(sparse.into())),
+            Collection::Tensor(Tensor::Dense(Dense::Base(dense))) => {
+                Some(Self::Tensor(TensorBase::Dense(dense)))
+            }
+            Collection::Tensor(Tensor::Sparse(Sparse::Base(sparse))) => {
+                Some(Self::Tensor(TensorBase::Sparse(sparse)))
+            }
             _ => None,
         }
     }
