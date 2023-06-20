@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::{fmt, io};
 
 use async_trait::async_trait;
-use destream::{de, Decoder};
+use destream::de;
 use freqfs::*;
 use futures::stream::{StreamExt, TryStreamExt};
 use ha_ndarray::{ArrayBase, Buffer, BufferWrite, CDatatype, NDArrayRead};
@@ -11,7 +11,7 @@ use safecast::AsType;
 
 use tc_error::*;
 use tc_transact::TxnId;
-use tc_value::{DType, NumberClass, NumberInstance, NumberType};
+use tc_value::{DType, NumberClass, NumberType};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::{offset_of, Coord, Shape, TensorInstance};
@@ -46,7 +46,7 @@ impl<FE, T> Clone for DenseFile<FE, T> {
 impl<FE, T> DenseFile<FE, T>
 where
     FE: DenseCacheFile + AsType<Buffer<T>>,
-    T: CDatatype + DType + NumberInstance,
+    T: CDatatype + DType + de::FromStream<Context = ()>,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     pub async fn constant(dir: DirLock<FE>, shape: Shape, value: T) -> TCResult<Self> {

@@ -463,13 +463,13 @@ where
     type Schema = Schema;
 
     async fn create(_txn_id: TxnId, schema: Schema, store: fs::Dir<FE>) -> TCResult<Self> {
-        let (dir, canon, versions) = dir_init(store).await?;
+        let (dir, canon, versions) = fs_init(store).await?;
         let canon = SparseFile::create(canon, schema.shape().clone())?;
         Ok(Self::new(dir, canon, versions))
     }
 
     async fn load(_txn_id: TxnId, schema: Schema, store: fs::Dir<FE>) -> TCResult<Self> {
-        let (dir, canon, versions) = dir_init(store).await?;
+        let (dir, canon, versions) = fs_init(store).await?;
         let canon = SparseFile::load(canon, schema.shape().clone())?;
         Ok(Self::new(dir, canon, versions))
     }
@@ -493,7 +493,7 @@ where
         store: Dir<FE>,
         other: O,
     ) -> TCResult<Self> {
-        let (dir, canon, versions) = dir_init(store).await?;
+        let (dir, canon, versions) = fs_init(store).await?;
         let canon = SparseFile::copy_from(canon, *txn.id(), other).await?;
         Ok(Self::new(dir, canon, versions))
     }
@@ -523,6 +523,33 @@ where
     }
 }
 
+#[async_trait]
+impl<Txn, FE, T> de::FromStream for SparseBase<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe + Clone,
+    T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
+    Number: From<T> + CastInto<T>,
+{
+    type Context = (Txn, Shape);
+
+    async fn from_stream<D: de::Decoder>(
+        cxt: (Txn, Shape),
+        decoder: &mut D,
+    ) -> Result<Self, D::Error> {
+        let (txn, shape) = cxt;
+
+        let (_dir_name, dir) = {
+            let mut cxt = txn.context().write().await;
+            cxt.create_dir_unique().map_err(de::Error::custom)?
+        };
+
+        let (dir, canon, versions) = dir_init(dir).map_err(de::Error::custom).await?;
+        let canon = SparseFile::from_stream((canon, shape), decoder).await?;
+        Ok(Self::new(dir, canon, versions))
+    }
+}
+
 impl<Txn, FE, T: CDatatype> From<SparseBase<Txn, FE, T>> for SparseAccess<Txn, FE, T> {
     fn from(base: SparseBase<Txn, FE, T>) -> Self {
         Self::Base(base)
@@ -536,12 +563,19 @@ impl<Txn, FE, T> fmt::Debug for SparseBase<Txn, FE, T> {
 }
 
 #[inline]
-async fn dir_init<FE>(store: fs::Dir<FE>) -> TCResult<(DirLock<FE>, DirLock<FE>, DirLock<FE>)>
+async fn fs_init<FE>(store: fs::Dir<FE>) -> TCResult<(DirLock<FE>, DirLock<FE>, DirLock<FE>)>
 where
     FE: ThreadSafe + Clone,
 {
     let dir = store.into_inner();
+    dir_init(dir).await
+}
 
+#[inline]
+async fn dir_init<FE>(dir: DirLock<FE>) -> TCResult<(DirLock<FE>, DirLock<FE>, DirLock<FE>)>
+where
+    FE: ThreadSafe + Clone,
+{
     let (canon, versions) = {
         let mut dir = dir.write().await;
         let versions = dir.create_dir(fs::VERSIONS.to_string())?;
