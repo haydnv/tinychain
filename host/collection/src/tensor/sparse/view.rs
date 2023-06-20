@@ -60,19 +60,6 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> SparseView<Txn, FE> {
     }
 }
 
-impl<Txn, FE> SparseView<Txn, FE>
-where
-    Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node> + Clone,
-{
-    pub async fn elements(
-        self,
-        txn_id: TxnId,
-    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<(Coord, Number)>> + Send>>> {
-        todo!()
-    }
-}
-
 impl<Txn, FE> Clone for SparseView<Txn, FE> {
     fn clone(&self) -> Self {
         match self {

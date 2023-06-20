@@ -149,11 +149,11 @@ where
             }
             Self::Tensor(tensor) => match tensor {
                 Tensor::Dense(dense) => {
-                    let elements = DenseView::from(dense).elements(*txn.id()).await?;
+                    let elements = DenseView::from(dense).into_elements(*txn.id()).await?;
                     async_hash::hash_try_stream::<Sha256, _, _, _>(elements).await?
                 }
                 Tensor::Sparse(sparse) => {
-                    let elements = SparseView::from(sparse).elements(*txn.id()).await?;
+                    let elements = SparseView::from(sparse).into_elements(*txn.id()).await?;
                     async_hash::hash_try_stream::<Sha256, _, _, _>(elements).await?
                 }
             },

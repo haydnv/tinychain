@@ -2,8 +2,9 @@ use std::fmt;
 use std::pin::Pin;
 
 use async_trait::async_trait;
-use futures::Stream;
-use ha_ndarray::CDatatype;
+use futures::{try_join, Stream, StreamExt, TryStreamExt};
+use ha_ndarray::{CDatatype, NDArrayRead};
+use rayon::prelude::*;
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
@@ -21,7 +22,7 @@ use crate::tensor::{
     TensorUnary, TensorUnaryBoolean,
 };
 
-use super::{dense_from, DenseAccess, DenseCacheFile, DenseTensor, DenseUnaryCast};
+use super::{dense_from, DenseAccess, DenseCacheFile, DenseInstance, DenseTensor, DenseUnaryCast};
 
 type DenseComplex<Txn, FE, T> = (
     DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>,
@@ -74,15 +75,6 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> DenseView<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> DenseView<Txn, FE> {
-    pub async fn elements(
-        self,
-        txn_id: TxnId,
-    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<Number>> + Send>>> {
-        todo!()
-    }
-}
-
 macro_rules! view_dispatch {
     ($this:ident, $var:ident, $bool:expr, $complex:expr, $general:expr) => {
         match $this {
@@ -120,6 +112,124 @@ macro_rules! view_dispatch_compare {
             ($left, $right) => $mismatch,
         }
     };
+}
+
+impl<Txn: ThreadSafe, FE: ThreadSafe> DenseView<Txn, FE>
+    where
+        Txn: Transaction<FE>,
+        FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    pub async fn into_elements(
+        self,
+        txn_id: TxnId,
+    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<Number>> + Send>>> {
+        view_dispatch!(
+            self,
+            this,
+            {
+                let context = ha_ndarray::Context::default()?;
+                let queue = ha_ndarray::Queue::new(context, this.accessor.block_size())?;
+
+                let permit = this.accessor.read_permit(txn_id, Range::default()).await?;
+                let blocks = this.accessor.read_blocks(txn_id).await?;
+
+                let elements = blocks
+                    .map(move |result| {
+                        let _permit = &permit; // force this closure to capture (move/own) the permit
+
+                        let block = result?;
+                        let buffer = block.read(&queue)?.to_slice()?.into_vec();
+                        let buffer = buffer
+                            .into_par_iter()
+                            .map(|n| Number::Bool((n != 0).into()))
+                            .map(TCResult::Ok)
+                            .collect::<Vec<_>>();
+
+                        TCResult::Ok(futures::stream::iter(buffer))
+                    })
+                    .try_flatten();
+
+                Ok(Box::pin(elements))
+            },
+            {
+                let (re, im) = (this.0.into_inner(), this.1.into_inner());
+
+                let context = ha_ndarray::Context::default()?;
+                let r_queue = ha_ndarray::Queue::new(context.clone(), re.block_size())?;
+                let i_queue = ha_ndarray::Queue::new(context, im.block_size())?;
+
+                // always acquire these permits in-order to avoid the risk of a deadlock
+                let mut permit = re.read_permit(txn_id, Range::default()).await?;
+                let i_permit = im.read_permit(txn_id, Range::default()).await?;
+                permit.extend(i_permit);
+
+                let (r_blocks, i_blocks) =
+                    try_join!(re.read_blocks(txn_id), im.read_blocks(txn_id))?;
+
+                let r_blocks = r_blocks.map(move |result| {
+                    let block = result?;
+                    block
+                        .read(&r_queue)
+                        .and_then(|buffer| buffer.to_slice())
+                        .map(|slice| slice.into_vec())
+                        .map_err(TCError::from)
+                });
+
+                let i_blocks = i_blocks.map(move |result| {
+                    let block = result?;
+                    block
+                        .read(&i_queue)
+                        .and_then(|buffer| buffer.to_slice())
+                        .map(|slice| slice.into_vec())
+                        .map_err(TCError::from)
+                });
+
+                let elements = r_blocks
+                    .zip(i_blocks)
+                    .map(|(r, i)| TCResult::Ok((r?, i?)))
+                    .map_ok(move |(r, i)| {
+                        let _permit = &permit; // force this closure to capture the permit
+
+                        let buffer = r
+                            .into_par_iter()
+                            .zip(i)
+                            .map(|(r, i)| Number::Complex((r, i).into()))
+                            .map(TCResult::Ok)
+                            .collect::<Vec<_>>();
+
+                        futures::stream::iter(buffer)
+                    })
+                    .try_flatten();
+
+                Ok(Box::pin(elements))
+            },
+            {
+                let context = ha_ndarray::Context::default()?;
+                let queue = ha_ndarray::Queue::new(context, this.accessor.block_size())?;
+
+                let permit = this.accessor.read_permit(txn_id, Range::default()).await?;
+                let blocks = this.accessor.read_blocks(txn_id).await?;
+
+                let elements = blocks
+                    .map(move |result| {
+                        let _permit = &permit; // force this closure to capture (move/own) the permit
+
+                        let block = result?;
+                        let buffer = block.read(&queue)?.to_slice()?.into_vec();
+                        let buffer = buffer
+                            .into_par_iter()
+                            .map(|n| Number::from(n))
+                            .map(TCResult::Ok)
+                            .collect::<Vec<_>>();
+
+                        TCResult::Ok(futures::stream::iter(buffer))
+                    })
+                    .try_flatten();
+
+                Ok(Box::pin(elements))
+            }
+        )
+    }
 }
 
 impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for DenseView<Txn, FE> {
