@@ -329,8 +329,6 @@ where
     type Cast = Self;
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
-        const ERR_COMPLEX: &str = "cannot cast a real tensor into a complex tensor";
-
         macro_rules! view_dispatch_cast {
             ($var:ident) => {
                 view_dispatch!(
@@ -386,7 +384,7 @@ where
                 view_dispatch!(
                     self,
                     this,
-                    Err(TCError::unsupported(ERR_COMPLEX)),
+                    Err(bad_request!("cannot cast {this:?} into a complex tensor")),
                     {
                         let ftype = NumberType::Float(FloatType::F32);
                         let real = TensorCast::cast_into(Self::from(this.0), ftype)?;
@@ -399,14 +397,14 @@ where
                             }
                         }
                     },
-                    Err(TCError::unsupported(ERR_COMPLEX))
+                    Err(bad_request!("cannot cast {this:?} into a complex tensor"))
                 )
             }
             NumberType::Complex(ComplexType::C64) => {
                 view_dispatch!(
                     self,
                     this,
-                    Err(TCError::unsupported(ERR_COMPLEX)),
+                    Err(bad_request!("cannot cast {this:?} into a complex tensor")),
                     {
                         let ftype = NumberType::Float(FloatType::F64);
                         let real = TensorCast::cast_into(Self::from(this.0), ftype)?;
@@ -419,7 +417,7 @@ where
                             }
                         }
                     },
-                    Err(TCError::unsupported(ERR_COMPLEX))
+                    Err(bad_request!("cannot cast {this:?} into a complex tensor"))
                 )
             }
             NumberType::Float(FloatType::Float) => {
@@ -1081,7 +1079,9 @@ impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> TensorReduce for S
             self,
             this,
             this.max_all(txn_id).await,
-            Err(not_implemented!("maximum value of a complex tensor")),
+            Err(not_implemented!(
+                "maximum value of a complex tensor {this:?}"
+            )),
             this.max_all(txn_id).await
         )
     }
@@ -1109,7 +1109,9 @@ impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> TensorReduce for S
             self,
             this,
             this.min_all(txn_id).await,
-            Err(not_implemented!("minimum value of a complex tensor")),
+            Err(not_implemented!(
+                "minimum value of a complex tensor {this:?}"
+            )),
             this.min_all(txn_id).await
         )
     }
@@ -1139,7 +1141,7 @@ impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> TensorReduce for S
             self,
             this,
             this.product_all(txn_id).await,
-            Err(not_implemented!("product of a complex tensor")),
+            Err(not_implemented!("product of a complex tensor {this:?}")),
             this.product_all(txn_id).await
         )
     }
@@ -1165,7 +1167,7 @@ impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node>> TensorReduce for S
             self,
             this,
             this.sum_all(txn_id).await,
-            Err(not_implemented!("sum of a complex tensor")),
+            Err(not_implemented!("sum of a complex tensor {this:?}")),
             this.sum_all(txn_id).await
         )
     }

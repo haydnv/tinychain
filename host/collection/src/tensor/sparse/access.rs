@@ -16,7 +16,7 @@ use safecast::{AsType, CastFrom, CastInto};
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::{Transaction, TxnId};
-use tc_value::{DType, Number, NumberClass, NumberType};
+use tc_value::{DType, Number, NumberType};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::block::Block;
@@ -172,7 +172,6 @@ where
         }?;
 
         access_cast_dispatch_dual!(self, other, this, that, {
-            let zero = this.dtype().zero();
             let blocks = merge_blocks_inner(this, that, txn_id, shape, range, order).await?;
             let blocks = blocks.map_ok(|(coords, (left, right))| {
                 (
@@ -202,7 +201,6 @@ where
         }?;
 
         access_cast_dispatch_dual!(self, other, this, that, {
-            let zero = this.dtype().zero();
             let blocks = merge_blocks_outer(this, that, txn_id, shape, range, order).await?;
             let blocks = blocks.map_ok(|(coords, (left, right))| {
                 (

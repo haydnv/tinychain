@@ -1466,7 +1466,7 @@ where
             self,
             this,
             this.dir(),
-            unimplemented!("directory of a complex tensor"),
+            this.0.dir(), // FIXME: this should return the parent dir!
             this.dir()
         )
     }

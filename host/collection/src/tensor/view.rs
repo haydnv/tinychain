@@ -225,7 +225,7 @@ impl<'en> en::IntoStream<'en> for DenseViewBlocks {
 }
 
 pub struct DenseView {
-    permit: Vec<PermitRead<Range>>,
+    _permit: Vec<PermitRead<Range>>,
     schema: (TCPathBuf, Vec<u64>),
     elements: DenseViewBlocks,
 }
@@ -249,7 +249,7 @@ impl DenseView {
         Ok(Self {
             schema,
             elements,
-            permit,
+            _permit: permit,
         })
     }
 }
@@ -266,7 +266,7 @@ impl<'en> en::IntoStream<'en> for DenseView {
 }
 
 pub struct SparseView {
-    permit: Vec<PermitRead<Range>>,
+    _permit: Vec<PermitRead<Range>>,
     schema: (TCPathBuf, Vec<u64>),
     elements: Pin<Box<dyn Stream<Item = TCResult<(Coord, Number)>> + Send>>,
 }
@@ -290,7 +290,7 @@ impl SparseView {
         Ok(Self {
             schema,
             elements,
-            permit,
+            _permit: permit,
         })
     }
 }

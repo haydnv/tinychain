@@ -3,7 +3,7 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures::{try_join, Stream, StreamExt, TryStreamExt};
-use ha_ndarray::{CDatatype, NDArrayRead};
+use ha_ndarray::NDArrayRead;
 use rayon::prelude::*;
 use safecast::{AsType, CastInto};
 
@@ -115,9 +115,9 @@ macro_rules! view_dispatch_compare {
 }
 
 impl<Txn: ThreadSafe, FE: ThreadSafe> DenseView<Txn, FE>
-    where
-        Txn: Transaction<FE>,
-        FE: DenseCacheFile + AsType<Node> + Clone,
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
 {
     pub async fn into_elements(
         self,
@@ -563,8 +563,6 @@ where
     type Cast = Self;
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
-        const ERR_COMPLEX: &str = "cannot cast a real tensor into a complex tensor";
-
         macro_rules! view_dispatch_cast {
             ($var:ident) => {
                 view_dispatch!(
@@ -615,7 +613,7 @@ where
                 view_dispatch!(
                     self,
                     this,
-                    Err(TCError::unsupported(ERR_COMPLEX)),
+                    Err(bad_request!("cannot cast {this:?} into a complex tensor")),
                     {
                         let ftype = NumberType::Float(FloatType::F32);
                         let real = TensorCast::cast_into(Self::from(this.0), ftype)?;
@@ -628,14 +626,14 @@ where
                             }
                         }
                     },
-                    Err(TCError::unsupported(ERR_COMPLEX))
+                    Err(bad_request!("cannot cast {this:?} into a complex tensor"))
                 )
             }
             NumberType::Complex(ComplexType::C64) => {
                 view_dispatch!(
                     self,
                     this,
-                    Err(TCError::unsupported(ERR_COMPLEX)),
+                    Err(bad_request!("cannot cast {this:?} into a complex tensor")),
                     {
                         let ftype = NumberType::Float(FloatType::F64);
                         let real = TensorCast::cast_into(Self::from(this.0), ftype)?;
@@ -648,7 +646,7 @@ where
                             }
                         }
                     },
-                    Err(TCError::unsupported(ERR_COMPLEX))
+                    Err(bad_request!("cannot cast {this:?} into a complex tensor"))
                 )
             }
             NumberType::Float(FloatType::Float) => {
@@ -1147,7 +1145,9 @@ where
             self,
             this,
             this.max_all(txn_id).await,
-            Err(not_implemented!("maximum value of a complex tensor")),
+            Err(not_implemented!(
+                "maximum value of a complex tensor {this:?}"
+            )),
             this.max_all(txn_id).await
         )
     }
@@ -1175,7 +1175,9 @@ where
             self,
             this,
             this.min_all(txn_id).await,
-            Err(not_implemented!("minimum value of a complex tensor")),
+            Err(not_implemented!(
+                "minimum value of a complex tensor {this:?}"
+            )),
             this.min_all(txn_id).await
         )
     }
@@ -1202,7 +1204,7 @@ where
             self,
             this,
             this.product_all(txn_id).await,
-            Err(not_implemented!("product of a complex tensor")),
+            Err(not_implemented!("product of a complex tensor {this:?}")),
             this.product_all(txn_id).await
         )
     }
@@ -1228,7 +1230,7 @@ where
             self,
             this,
             this.sum_all(txn_id).await,
-            Err(not_implemented!("sum of a complex tensor")),
+            Err(not_implemented!("sum of a complex tensor {this:?}")),
             this.sum_all(txn_id).await
         )
     }
@@ -1628,12 +1630,4 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for DenseView<Txn, FE> {
             self.shape()
         )
     }
-}
-
-#[inline]
-fn atan2<Txn, FE, T: CDatatype>(
-    _y: DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>,
-    _x: DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>,
-) -> TCResult<DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>> {
-    Err(not_implemented!("atan2"))
 }

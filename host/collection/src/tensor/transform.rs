@@ -122,7 +122,6 @@ impl Broadcast {
 
 #[derive(Clone)]
 pub struct Expand {
-    source_shape: Shape,
     shape: Shape,
     expand: Axes,
 }
@@ -138,7 +137,6 @@ impl Expand {
         }
 
         Ok(Expand {
-            source_shape,
             shape: shape.into(),
             expand,
         })
@@ -343,7 +341,6 @@ impl Reshape {
 
 #[derive(Clone)]
 pub struct Slice {
-    source_shape: Shape,
     shape: Shape,
     range: Range,
 }
@@ -370,7 +367,6 @@ impl Slice {
         shape.extend_from_slice(&source_shape[range.len()..]);
 
         Ok(Slice {
-            source_shape,
             shape: shape.into(),
             range,
         })
@@ -380,16 +376,8 @@ impl Slice {
         &self.range
     }
 
-    pub fn ndim(&self) -> usize {
-        self.shape.len()
-    }
-
     pub fn shape(&'_ self) -> &'_ Shape {
         &self.shape
-    }
-
-    pub fn size(&self) -> u64 {
-        self.shape.size()
     }
 
     pub fn invert_range(&self, range: Range) -> Range {
