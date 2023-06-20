@@ -21,7 +21,6 @@ b-table = { path = "../../../b-table", features = ["all"] }
 collate = { path = "../../../collate", features = ["stream"] }
 destream = { path = "../../../destream" }
 ds-ext = { path = "../../../ds-ext" }
-#fensor = { path = "../../../fensor" }
 futures = "0.3"
 freqfs = { path = "../../../freqfs" }
 ha-ndarray = { path = "../../../ha-ndarray", features = ["freqfs", "stream"] }
