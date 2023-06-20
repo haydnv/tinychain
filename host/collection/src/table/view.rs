@@ -9,8 +9,7 @@ use tc_error::*;
 use tc_transact::{Transaction, TxnId};
 use tcgeneric::{Id, Instance, ThreadSafe};
 
-use crate::btree::BTreeSchema;
-use crate::Node;
+use crate::btree::{BTreeSchema, Node};
 
 use super::file::TableFile;
 use super::schema::TableSchema;

@@ -342,7 +342,7 @@ where
 impl<Txn, FE, T> Transact for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Buffer<T>> + FileLoad,
+    FE: FileLoad + AsType<Buffer<T>>,
     T: CDatatype + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {

@@ -19,8 +19,11 @@ use tensor::TensorType;
 mod base;
 mod schema;
 
-pub use btree::{BTree, BTreeFile, Node};
+pub use btree::{BTree, BTreeFile};
 pub use table::Table;
+pub use tensor::{
+    Dense, DenseBase, DenseView, Sparse, SparseBase, SparseView, Tensor, TensorBase, TensorView,
+};
 
 pub mod btree;
 pub mod table;
@@ -91,7 +94,7 @@ as_type!(Collection<Txn, FE>, Table, Table<Txn, FE>);
 impl<Txn, FE> Collection<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<btree::Node> + ThreadSafe,
 {
     fn schema(&self) -> Schema {
         match self {
@@ -120,7 +123,7 @@ where
 impl<T, FE> AsyncHash<FE> for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<btree::Node> + ThreadSafe,
 {
     type Txn = T;
 
@@ -150,6 +153,7 @@ impl<Txn, FE> From<CollectionBase<Txn, FE>> for Collection<Txn, FE> {
         match base {
             CollectionBase::BTree(btree) => Self::BTree(btree.into()),
             CollectionBase::Table(table) => Self::Table(table.into()),
+            CollectionBase::Tensor(tensor) => todo!(),
         }
     }
 }
@@ -164,7 +168,7 @@ impl<Txn, FE> From<BTreeFile<Txn, FE>> for Collection<Txn, FE> {
 impl<'en, T, FE> IntoView<'en, FE> for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<btree::Node> + ThreadSafe,
     Self: 'en,
 {
     type Txn = T;
@@ -182,7 +186,7 @@ where
 impl<T, FE> de::FromStream for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: tensor::dense::DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
 {
     type Context = T;
 

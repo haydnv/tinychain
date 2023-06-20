@@ -12,10 +12,11 @@ use safecast::AsType;
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
-use tc_transact::{IntoView, Transaction, TxnId};
+use tc_transact::{fs, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Number, NumberType, ValueType};
 use tcgeneric::{
-    label, path_label, Class, Label, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
+    label, path_label, Class, Instance, Label, NativeClass, PathLabel, PathSegment, TCPathBuf,
+    ThreadSafe,
 };
 
 pub use dense::{DenseBase, DenseCacheFile, DenseView};
@@ -54,6 +55,13 @@ type Semaphore = tc_transact::lock::Semaphore<Collator<u64>, Range>;
 pub struct Schema {
     dtype: NumberType,
     shape: Shape,
+}
+
+impl From<(NumberType, Shape)> for Schema {
+    fn from(schema: (NumberType, Shape)) -> Self {
+        let (dtype, shape) = schema;
+        Self { dtype, shape }
+    }
 }
 
 impl<'a, D: Digest> Hash<D> for &'a Schema {
@@ -158,6 +166,10 @@ pub trait TensorInstance: ThreadSafe + Sized {
 
     fn size(&self) -> u64 {
         self.shape().iter().product()
+    }
+
+    fn schema(&self) -> Schema {
+        Schema::from((self.dtype(), self.shape().clone()))
     }
 }
 
@@ -720,6 +732,12 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Sparse<Txn, FE> {
 pub enum Tensor<Txn, FE> {
     Dense(Dense<Txn, FE>),
     Sparse(Sparse<Txn, FE>),
+}
+
+impl<Txn, FE> Tensor<Txn, FE> {
+    pub fn into_view(self) -> TensorView<Txn, FE> {
+        self.into()
+    }
 }
 
 impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for Tensor<Txn, FE> {
@@ -1585,6 +1603,15 @@ impl<Txn, FE> From<SparseView<Txn, FE>> for Tensor<Txn, FE> {
     }
 }
 
+impl<Txn, FE> From<Tensor<Txn, FE>> for TensorView<Txn, FE> {
+    fn from(tensor: Tensor<Txn, FE>) -> Self {
+        match tensor {
+            Tensor::Dense(dense) => Self::Dense(dense.into_view()),
+            Tensor::Sparse(sparse) => Self::Sparse(sparse.into_view()),
+        }
+    }
+}
+
 impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Tensor<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -1597,6 +1624,166 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Tensor<Txn, FE> {
 pub enum TensorBase<Txn, FE> {
     Dense(DenseBase<Txn, FE>),
     Sparse(SparseBase<Txn, FE>),
+}
+
+impl<Txn, FE> Clone for TensorBase<Txn, FE> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Dense(dense) => Self::Dense(dense.clone()),
+            Self::Sparse(sparse) => Self::Sparse(sparse.clone()),
+        }
+    }
+}
+
+impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for TensorBase<Txn, FE> {
+    type Class = TensorType;
+
+    fn class(&self) -> Self::Class {
+        match self {
+            Self::Dense(dense) => dense.class(),
+            Self::Sparse(sparse) => sparse.class(),
+        }
+    }
+}
+
+impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for TensorBase<Txn, FE> {
+    fn dtype(&self) -> NumberType {
+        match self {
+            Self::Dense(dense) => dense.dtype(),
+            Self::Sparse(sparse) => sparse.dtype(),
+        }
+    }
+
+    fn shape(&self) -> &Shape {
+        match self {
+            Self::Dense(dense) => dense.shape(),
+            Self::Sparse(sparse) => sparse.shape(),
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> Transact for TensorBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
+    type Commit = ();
+
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
+        match self {
+            Self::Dense(dense) => dense.commit(txn_id).await,
+            Self::Sparse(sparse) => sparse.commit(txn_id).await,
+        }
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        match self {
+            Self::Dense(dense) => dense.rollback(txn_id).await,
+            Self::Sparse(sparse) => sparse.rollback(txn_id).await,
+        }
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        match self {
+            Self::Dense(dense) => dense.finalize(txn_id).await,
+            Self::Sparse(sparse) => sparse.finalize(txn_id).await,
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> fs::Persist<FE> for TensorBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Txn = Txn;
+    type Schema = (TensorType, Schema);
+
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
+        let (class, schema) = schema;
+        match class {
+            TensorType::Dense => {
+                DenseBase::create(txn_id, schema, store)
+                    .map_ok(Self::Dense)
+                    .await
+            }
+            TensorType::Sparse => {
+                let dtype = schema.dtype;
+                let schema = sparse::Schema::new(schema.shape);
+                SparseBase::create(txn_id, (dtype, schema), store)
+                    .map_ok(Self::Sparse)
+                    .await
+            }
+        }
+    }
+
+    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
+        let (class, schema) = schema;
+        match class {
+            TensorType::Dense => {
+                DenseBase::load(txn_id, schema, store)
+                    .map_ok(Self::Dense)
+                    .await
+            }
+            TensorType::Sparse => {
+                let dtype = schema.dtype;
+                let schema = sparse::Schema::new(schema.shape);
+                SparseBase::load(txn_id, (dtype, schema), store)
+                    .map_ok(Self::Sparse)
+                    .await
+            }
+        }
+    }
+
+    fn dir(&self) -> fs::Inner<FE> {
+        match self {
+            Self::Dense(dense) => dense.dir(),
+            Self::Sparse(sparse) => sparse.dir(),
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> fs::CopyFrom<FE, TensorView<Txn, FE>> for TensorBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    async fn copy_from(
+        txn: &Txn,
+        store: fs::Dir<FE>,
+        instance: TensorView<Txn, FE>,
+    ) -> TCResult<Self> {
+        match instance {
+            TensorView::Dense(dense) => {
+                DenseBase::copy_from(txn, store, dense)
+                    .map_ok(Self::Dense)
+                    .await
+            }
+            TensorView::Sparse(sparse) => {
+                SparseBase::copy_from(txn, store, sparse)
+                    .map_ok(Self::Sparse)
+                    .await
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> fs::Restore<FE> for TensorBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
+        match (self, backup) {
+            (Self::Dense(this), Self::Dense(that)) => this.restore(txn_id, that).await,
+            (Self::Sparse(this), Self::Sparse(that)) => this.restore(txn_id, that).await,
+            (this, that) => Err(bad_request!("cannot restore {this:?} from {that:?}")),
+        }
+    }
 }
 
 #[async_trait]
@@ -1618,6 +1805,29 @@ impl<Txn, FE> From<TensorBase<Txn, FE>> for Tensor<Txn, FE> {
         match base {
             TensorBase::Dense(base) => Tensor::Dense(Dense::Base(base)),
             TensorBase::Sparse(base) => Tensor::Sparse(Sparse::Base(base)),
+        }
+    }
+}
+
+impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for TensorBase<Txn, FE> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Dense(dense) => dense.fmt(f),
+            Self::Sparse(sparse) => sparse.fmt(f),
+        }
+    }
+}
+
+pub enum TensorView<Txn, FE> {
+    Dense(DenseView<Txn, FE>),
+    Sparse(SparseView<Txn, FE>),
+}
+
+impl<Txn, FE> Clone for TensorView<Txn, FE> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Dense(dense) => Self::Dense(dense.clone()),
+            Self::Sparse(sparse) => Self::Sparse(sparse.clone()),
         }
     }
 }

@@ -14,21 +14,22 @@ use ha_ndarray::*;
 use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
-use tc_transact::{Transaction, TxnId};
+use tc_transact::{fs, Transact, Transaction, TxnId};
 use tc_value::{
     Complex, ComplexType, DType, FloatType, IntType, Number, NumberCollator, NumberInstance,
     NumberType, UIntType, ValueType,
 };
-use tcgeneric::{NativeClass, TCPathBuf, ThreadSafe};
+use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
 
 use super::block::Block;
 use super::complex::ComplexRead;
 use super::sparse::{Node, SparseDense, SparseTensor};
 use super::{
-    Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare,
-    TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance, TensorMath, TensorMathConst,
-    TensorPermitRead, TensorPermitWrite, TensorRead, TensorReduce, TensorTransform, TensorUnary,
-    TensorUnaryBoolean, TensorWrite, TensorWriteDual, IDEAL_BLOCK_SIZE,
+    Axes, Coord, Range, Schema, Shape, TensorBoolean, TensorBooleanConst, TensorCast,
+    TensorCompare, TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance, TensorMath,
+    TensorMathConst, TensorPermitRead, TensorPermitWrite, TensorRead, TensorReduce,
+    TensorTransform, TensorType, TensorUnary, TensorUnaryBoolean, TensorWrite, TensorWriteDual,
+    IDEAL_BLOCK_SIZE, IMAG, REAL,
 };
 
 pub use access::*;
@@ -831,6 +832,33 @@ pub enum DenseBase<Txn, FE> {
     U64(base::DenseBase<Txn, FE, u64>),
 }
 
+impl<Txn, FE> Clone for DenseBase<Txn, FE> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Bool(this) => Self::Bool(this.clone()),
+            Self::C32(this) => Self::C32(this.clone()),
+            Self::C64(this) => Self::C64(this.clone()),
+            Self::F32(this) => Self::F32(this.clone()),
+            Self::F64(this) => Self::F64(this.clone()),
+            Self::I16(this) => Self::I16(this.clone()),
+            Self::I32(this) => Self::I32(this.clone()),
+            Self::I64(this) => Self::I64(this.clone()),
+            Self::U8(this) => Self::U8(this.clone()),
+            Self::U16(this) => Self::U16(this.clone()),
+            Self::U32(this) => Self::U32(this.clone()),
+            Self::U64(this) => Self::U64(this.clone()),
+        }
+    }
+}
+
+impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for DenseBase<Txn, FE> {
+    type Class = TensorType;
+
+    fn class(&self) -> Self::Class {
+        TensorType::Dense
+    }
+}
+
 macro_rules! base_dispatch {
     ($this:ident, $var:ident, $bool:expr, $complex:expr, $general:expr) => {
         match $this {
@@ -1067,6 +1095,362 @@ where
                 this.write(txn_id, range, value).await
             }
         )
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> Transact for DenseBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile,
+{
+    type Commit = ();
+
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
+        base_dispatch!(
+            self,
+            this,
+            this.commit(txn_id).await,
+            {
+                join!(this.0.commit(txn_id), this.1.commit(txn_id));
+            },
+            this.commit(txn_id).await
+        )
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        base_dispatch!(
+            self,
+            this,
+            this.rollback(txn_id).await,
+            {
+                join!(this.0.rollback(txn_id), this.1.rollback(txn_id));
+            },
+            this.rollback(txn_id).await
+        )
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        base_dispatch!(
+            self,
+            this,
+            this.finalize(txn_id).await,
+            {
+                join!(this.0.finalize(txn_id), this.1.finalize(txn_id));
+            },
+            this.finalize(txn_id).await
+        )
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> fs::Persist<FE> for DenseBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + Clone,
+{
+    type Txn = Txn;
+    type Schema = Schema;
+
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
+        match schema.dtype {
+            NumberType::Bool => {
+                base::DenseBase::create(txn_id, schema.shape, store)
+                    .map_ok(Self::Bool)
+                    .await
+            }
+            NumberType::Complex(ComplexType::C32) => {
+                let (re, im) = try_join!(
+                    store.create_dir(txn_id, REAL.into()),
+                    store.create_dir(txn_id, IMAG.into())
+                )?;
+
+                let (re, im) = try_join!(
+                    base::DenseBase::create(txn_id, schema.shape.clone(), re),
+                    base::DenseBase::create(txn_id, schema.shape, im)
+                )?;
+
+                Ok(Self::C32((re, im)))
+            }
+            NumberType::Complex(ComplexType::C64) => {
+                let (re, im) = try_join!(
+                    store.create_dir(txn_id, REAL.into()),
+                    store.create_dir(txn_id, IMAG.into())
+                )?;
+
+                let (re, im) = try_join!(
+                    base::DenseBase::create(txn_id, schema.shape.clone(), re),
+                    base::DenseBase::create(txn_id, schema.shape, im)
+                )?;
+
+                Ok(Self::C64((re, im)))
+            }
+            NumberType::Float(FloatType::F32) => {
+                base::DenseBase::create(txn_id, schema.shape, store)
+                    .map_ok(Self::F32)
+                    .await
+            }
+            NumberType::Float(FloatType::F64) => {
+                base::DenseBase::create(txn_id, schema.shape, store)
+                    .map_ok(Self::F64)
+                    .await
+            }
+            NumberType::Int(IntType::I16) => {
+                base::DenseBase::create(txn_id, schema.shape, store)
+                    .map_ok(Self::I16)
+                    .await
+            }
+            NumberType::Int(IntType::I32) => {
+                base::DenseBase::create(txn_id, schema.shape, store)
+                    .map_ok(Self::I32)
+                    .await
+            }
+            NumberType::Int(IntType::I64) => {
+                base::DenseBase::create(txn_id, schema.shape, store)
+                    .map_ok(Self::I64)
+                    .await
+            }
+            NumberType::UInt(UIntType::U8) => {
+                base::DenseBase::create(txn_id, schema.shape, store)
+                    .map_ok(Self::U8)
+                    .await
+            }
+            NumberType::UInt(UIntType::U16) => {
+                base::DenseBase::create(txn_id, schema.shape, store)
+                    .map_ok(Self::U16)
+                    .await
+            }
+            NumberType::UInt(UIntType::U32) => {
+                base::DenseBase::create(txn_id, schema.shape, store)
+                    .map_ok(Self::U32)
+                    .await
+            }
+            NumberType::UInt(UIntType::U64) => {
+                base::DenseBase::create(txn_id, schema.shape, store)
+                    .map_ok(Self::U64)
+                    .await
+            }
+            other => Err(bad_request!(
+                "cannot create a dense tensor of type {other:?}"
+            )),
+        }
+    }
+
+    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
+        match schema.dtype {
+            NumberType::Bool => {
+                base::DenseBase::load(txn_id, schema.shape, store)
+                    .map_ok(Self::Bool)
+                    .await
+            }
+            NumberType::Complex(ComplexType::C32) => {
+                let (re, im) = try_join!(
+                    store.create_dir(txn_id, REAL.into()),
+                    store.create_dir(txn_id, IMAG.into())
+                )?;
+
+                let (re, im) = try_join!(
+                    base::DenseBase::load(txn_id, schema.shape.clone(), re),
+                    base::DenseBase::load(txn_id, schema.shape, im)
+                )?;
+
+                Ok(Self::C32((re, im)))
+            }
+            NumberType::Complex(ComplexType::C64) => {
+                let (re, im) = try_join!(
+                    store.create_dir(txn_id, REAL.into()),
+                    store.create_dir(txn_id, IMAG.into())
+                )?;
+
+                let (re, im) = try_join!(
+                    base::DenseBase::load(txn_id, schema.shape.clone(), re),
+                    base::DenseBase::load(txn_id, schema.shape, im)
+                )?;
+
+                Ok(Self::C64((re, im)))
+            }
+            NumberType::Float(FloatType::F32) => {
+                base::DenseBase::load(txn_id, schema.shape, store)
+                    .map_ok(Self::F32)
+                    .await
+            }
+            NumberType::Float(FloatType::F64) => {
+                base::DenseBase::load(txn_id, schema.shape, store)
+                    .map_ok(Self::F64)
+                    .await
+            }
+            NumberType::Int(IntType::I16) => {
+                base::DenseBase::load(txn_id, schema.shape, store)
+                    .map_ok(Self::I16)
+                    .await
+            }
+            NumberType::Int(IntType::I32) => {
+                base::DenseBase::load(txn_id, schema.shape, store)
+                    .map_ok(Self::I32)
+                    .await
+            }
+            NumberType::Int(IntType::I64) => {
+                base::DenseBase::load(txn_id, schema.shape, store)
+                    .map_ok(Self::I64)
+                    .await
+            }
+            NumberType::UInt(UIntType::U8) => {
+                base::DenseBase::load(txn_id, schema.shape, store)
+                    .map_ok(Self::U8)
+                    .await
+            }
+            NumberType::UInt(UIntType::U16) => {
+                base::DenseBase::load(txn_id, schema.shape, store)
+                    .map_ok(Self::U16)
+                    .await
+            }
+            NumberType::UInt(UIntType::U32) => {
+                base::DenseBase::load(txn_id, schema.shape, store)
+                    .map_ok(Self::U32)
+                    .await
+            }
+            NumberType::UInt(UIntType::U64) => {
+                base::DenseBase::load(txn_id, schema.shape, store)
+                    .map_ok(Self::U64)
+                    .await
+            }
+            other => Err(bad_request!("cannot load a dense tensor of type {other:?}")),
+        }
+    }
+
+    fn dir(&self) -> fs::Inner<FE> {
+        base_dispatch!(
+            self,
+            this,
+            this.dir(),
+            unimplemented!("directory of a complex tensor"),
+            this.dir()
+        )
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> fs::CopyFrom<FE, DenseView<Txn, FE>> for DenseBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    async fn copy_from(
+        txn: &Txn,
+        store: fs::Dir<FE>,
+        instance: DenseView<Txn, FE>,
+    ) -> TCResult<Self> {
+        match instance {
+            DenseView::Bool(that) => {
+                base::DenseBase::copy_from(txn, store, that.into_inner())
+                    .map_ok(Self::Bool)
+                    .await
+            }
+            DenseView::C32((re, im)) => {
+                let txn_id = *txn.id();
+                let (r_dir, i_dir) = try_join!(
+                    store.create_dir(txn_id, REAL.into()),
+                    store.create_dir(txn_id, IMAG.into())
+                )?;
+
+                let (re, im) = try_join!(
+                    base::DenseBase::copy_from(txn, r_dir, re.into_inner()),
+                    base::DenseBase::copy_from(txn, i_dir, im.into_inner())
+                )?;
+
+                Ok(Self::C32((re, im)))
+            }
+            DenseView::C64((re, im)) => {
+                let txn_id = *txn.id();
+                let (r_dir, i_dir) = try_join!(
+                    store.create_dir(txn_id, REAL.into()),
+                    store.create_dir(txn_id, IMAG.into())
+                )?;
+
+                let (re, im) = try_join!(
+                    base::DenseBase::copy_from(txn, r_dir, re.into_inner()),
+                    base::DenseBase::copy_from(txn, i_dir, im.into_inner())
+                )?;
+
+                Ok(Self::C64((re, im)))
+            }
+            DenseView::F32(that) => {
+                base::DenseBase::copy_from(txn, store, that.into_inner())
+                    .map_ok(Self::F32)
+                    .await
+            }
+            DenseView::F64(that) => {
+                base::DenseBase::copy_from(txn, store, that.into_inner())
+                    .map_ok(Self::F64)
+                    .await
+            }
+            DenseView::I16(that) => {
+                base::DenseBase::copy_from(txn, store, that.into_inner())
+                    .map_ok(Self::I16)
+                    .await
+            }
+            DenseView::I32(that) => {
+                base::DenseBase::copy_from(txn, store, that.into_inner())
+                    .map_ok(Self::I32)
+                    .await
+            }
+            DenseView::I64(that) => {
+                base::DenseBase::copy_from(txn, store, that.into_inner())
+                    .map_ok(Self::I64)
+                    .await
+            }
+            DenseView::U8(that) => {
+                base::DenseBase::copy_from(txn, store, that.into_inner())
+                    .map_ok(Self::U8)
+                    .await
+            }
+            DenseView::U16(that) => {
+                base::DenseBase::copy_from(txn, store, that.into_inner())
+                    .map_ok(Self::U16)
+                    .await
+            }
+            DenseView::U32(that) => {
+                base::DenseBase::copy_from(txn, store, that.into_inner())
+                    .map_ok(Self::U32)
+                    .await
+            }
+            DenseView::U64(that) => {
+                base::DenseBase::copy_from(txn, store, that.into_inner())
+                    .map_ok(Self::U64)
+                    .await
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> fs::Restore<FE> for DenseBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
+        match (self, backup) {
+            (Self::Bool(this), Self::Bool(that)) => this.restore(txn_id, that).await,
+            (Self::C32((lr, li)), Self::C32((rr, ri))) => {
+                try_join!(lr.restore(txn_id, rr), li.restore(txn_id, ri))?;
+                Ok(())
+            }
+            (Self::C64((lr, li)), Self::C64((rr, ri))) => {
+                try_join!(lr.restore(txn_id, rr), li.restore(txn_id, ri))?;
+                Ok(())
+            }
+            (Self::F32(this), Self::F32(that)) => this.restore(txn_id, that).await,
+            (Self::F64(this), Self::F64(that)) => this.restore(txn_id, that).await,
+            (Self::I16(this), Self::I16(that)) => this.restore(txn_id, that).await,
+            (Self::I32(this), Self::I32(that)) => this.restore(txn_id, that).await,
+            (Self::I64(this), Self::I64(that)) => this.restore(txn_id, that).await,
+            (Self::U8(this), Self::U8(that)) => this.restore(txn_id, that).await,
+            (Self::U16(this), Self::U16(that)) => this.restore(txn_id, that).await,
+            (Self::U32(this), Self::U32(that)) => this.restore(txn_id, that).await,
+            (Self::U64(this), Self::U64(that)) => this.restore(txn_id, that).await,
+            (this, that) => Err(bad_request!("cannot restore {this:?} from {that:?}")),
+        }
     }
 }
 
