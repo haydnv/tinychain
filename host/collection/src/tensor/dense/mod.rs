@@ -47,8 +47,7 @@ type BlockStream<Block> = Pin<Box<dyn Stream<Item = TCResult<Block>> + Send>>;
 pub type Buffer<T> = ha_ndarray::Buffer<T>;
 
 pub trait DenseCacheFile:
-    FileLoad
-    + AsType<Buffer<f32>>
+    AsType<Buffer<f32>>
     + AsType<Buffer<f64>>
     + AsType<Buffer<i16>>
     + AsType<Buffer<i32>>
@@ -77,7 +76,7 @@ impl<FE> DenseCacheFile for FE where
 }
 
 #[async_trait]
-pub trait DenseInstance: TensorInstance + ThreadSafe + fmt::Debug {
+pub trait DenseInstance: TensorInstance + fmt::Debug {
     type Block: NDArrayRead<DType = Self::DType> + NDArrayTransform + Into<Array<Self::DType>>;
     type DType: CDatatype + DType;
 

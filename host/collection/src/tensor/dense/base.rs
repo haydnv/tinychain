@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use collate::Collator;
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
-use freqfs::{DirLock, FileLoad, FileWriteGuardOwned};
+use freqfs::{DirLock, FileWriteGuardOwned};
 use futures::{join, try_join, TryFutureExt};
 use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype};
 use log::debug;
@@ -342,7 +342,7 @@ where
 impl<Txn, FE, T> Transact for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: FileLoad + AsType<Buffer<T>>,
+    FE: AsType<Buffer<T>> + ThreadSafe,
     T: CDatatype + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {

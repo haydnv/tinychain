@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use collate::Collator;
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
-use freqfs::{DirLock, FileLoad};
+use freqfs::DirLock;
 use futures::{join, try_join, TryFutureExt};
 use ha_ndarray::{Array, Buffer, CDatatype};
 use log::debug;
@@ -602,7 +602,7 @@ where
 impl<Txn, FE, T> de::FromStream for SparseComplexBaseVisitor<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: FileLoad + AsType<Node> + Clone,
+    FE: AsType<Node> + ThreadSafe + Clone,
     T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
@@ -622,7 +622,7 @@ where
 impl<Txn, FE, T> de::Visitor for SparseComplexBaseVisitor<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: FileLoad + AsType<Node>,
+    FE: AsType<Node> + ThreadSafe,
     T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
