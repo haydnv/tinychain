@@ -12,6 +12,7 @@ use tcgeneric::Id;
 
 pub mod fs;
 mod id;
+pub mod public;
 
 pub mod lock {
     use super::TxnId;
