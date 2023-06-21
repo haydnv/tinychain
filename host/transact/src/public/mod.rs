@@ -37,13 +37,24 @@ pub enum HandlerType {
     Delete,
 }
 
+#[async_trait]
+pub trait ClosureInstance<FE>: Send + Sync {
+    type Txn: Transaction<FE>;
+    type State: StateInstance;
+
+    /// Execute this `ClosureInstance` with the given `args`
+    async fn call(self: Box<Self>, txn: Self::Txn, args: Self::State) -> TCResult<Self::State>;
+}
+
 pub trait StateInstance:
-    From<bool>
+    Default
+    + From<bool>
     + From<Number>
     + From<Value>
     + From<Map<Self>>
     + From<Tuple<Self>>
     + ThreadSafe
+    + Clone
     + fmt::Debug
 {
 }

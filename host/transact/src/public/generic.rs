@@ -7,6 +7,7 @@ use std::str::FromStr;
 
 use futures::future::TryFutureExt;
 use futures::stream::{FuturesOrdered, TryStreamExt};
+use futures::{future, stream, StreamExt};
 use safecast::*;
 
 use tc_error::*;
@@ -18,7 +19,9 @@ use tcgeneric::{
 use crate::Transaction;
 
 use super::helpers::AttributeHandler;
-use super::{GetHandler, Handler, PostHandler, Public, Route, StateInstance};
+use super::{ClosureInstance, GetHandler, Handler, PostHandler, Public, Route, StateInstance};
+
+type Closure<FE, Txn, State> = Box<dyn ClosureInstance<FE, Txn = Txn, State = State>>;
 
 const COPY: PathLabel = path_label(&["copy"]);
 
@@ -97,16 +100,20 @@ impl<'a, State, T> From<&'a Tuple<T>> for ContainsHandler<'a, State, T> {
     }
 }
 
-struct ForEachHandler<I> {
+struct ForEachHandler<FE, I> {
     source: I,
+    phantom: PhantomData<FE>,
 }
 
-impl<'a, Txn, State, I, T> Handler<'a, Txn, State> for ForEachHandler<I>
+impl<'a, FE, Txn, State, I, T> Handler<'a, Txn, State> for ForEachHandler<FE, I>
 where
+    FE: ThreadSafe,
+    Txn: Transaction<FE>,
+    State: StateInstance + From<T>,
     I: IntoIterator<Item = T> + Send + 'a,
     I::IntoIter: Send + 'a,
     T: 'a,
-    State: From<T>,
+    Closure<FE, Txn, State>: TryCastFrom<State>,
 {
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
@@ -114,19 +121,32 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                // let op: Closure = params.require(&label("op").into())?;
-                // params.expect_empty()?;
-                //
-                // stream::iter(self.source)
-                //     .map(|args| op.clone().call(txn, State::from(args)))
-                //     .buffer_unordered(num_cpus::get())
-                //     .try_fold((), |(), _| future::ready(Ok(())))
-                //     .await?;
-                //
-                // Ok(State::default())
-                Err(not_implemented!("generic for each"))
+                let op: State = params.require(&label("op").into())?;
+                params.expect_empty()?;
+
+                stream::iter(self.source)
+                    .map(|args| {
+                        Closure::<FE, Txn, State>::try_cast_from(op.clone(), |state| {
+                            bad_request!("not a closure: {state:?}")
+                        })
+                        .map(|op| op.call(txn.clone(), State::from(args)))
+                    })
+                    .try_buffer_unordered(num_cpus::get())
+                    .try_fold((), |(), _| future::ready(Ok(())))
+                    .await?;
+
+                Ok(State::default())
             })
         }))
+    }
+}
+
+impl<FE, I> From<I> for ForEachHandler<FE, I> {
+    fn from(source: I) -> Self {
+        Self {
+            source,
+            phantom: PhantomData,
+        }
     }
 }
 
@@ -419,14 +439,20 @@ impl<'a, FE, T> From<&'a Tuple<T>> for TupleCopyHandler<'a, FE, T> {
     }
 }
 
-struct TupleFoldHandler<'a, T> {
+struct TupleFoldHandler<'a, FE, T> {
     tuple: &'a Tuple<T>,
+    phantom: PhantomData<FE>,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for TupleFoldHandler<'a, T>
+impl<'a, FE, Txn, State, T> Handler<'a, Txn, State> for TupleFoldHandler<'a, FE, T>
 where
+    FE: ThreadSafe,
+    Txn: Transaction<FE>,
+    State: StateInstance + From<T>,
     T: Clone + Send + Sync + 'a,
-    State: From<T>,
+    Closure<FE, Txn, State>: TryCastFrom<State>,
+    Id: TryCastFrom<State>,
+    Map<State>: TryFrom<State, Error = TCError>,
 {
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
@@ -434,40 +460,51 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                // let item_name: Id = params.require(&label("item_name").into())?;
-                // let op: Closure = params.require(&label("op").into())?;
-                // let mut state: State = params.require(&label("value").into())?;
-                // params.expect_empty()?;
-                //
-                // for item in self.tuple.iter().cloned() {
-                //     let mut params: Map<State> = state.try_into()?;
-                //     params.insert(item_name.clone(), item.into());
-                //     state = op.clone().call(txn, params.into()).await?;
-                // }
-                //
-                // Ok(state.into())
-                Err(not_implemented!("tuple fold"))
+                let item_name: Id = params.require(&label("item_name").into())?;
+                let op: State = params.require(&label("op").into())?;
+                let mut state: State = params.require(&label("value").into())?;
+                params.expect_empty()?;
+
+                for item in self.tuple.iter().cloned() {
+                    let mut params: Map<State> = state.try_into()?;
+                    params.insert(item_name.clone(), item.into());
+
+                    let op: Closure<FE, Txn, State> = op
+                        .clone()
+                        .try_cast_into(|state| bad_request!("not a closure: {state:?}"))?;
+
+                    state = op.call(txn.clone(), params.into()).await?;
+                }
+
+                Ok(state.into())
             })
         }))
     }
 }
 
-impl<'a, T: Clone + 'a> From<&'a Tuple<T>> for TupleFoldHandler<'a, T> {
+impl<'a, FE, T: Clone + 'a> From<&'a Tuple<T>> for TupleFoldHandler<'a, FE, T> {
     fn from(tuple: &'a Tuple<T>) -> Self {
-        Self { tuple }
+        Self {
+            tuple,
+            phantom: PhantomData,
+        }
     }
 }
 
-struct MapOpHandler<I> {
+struct MapOpHandler<FE, I> {
     len: usize,
     items: I,
+    phantom: PhantomData<FE>,
 }
 
-impl<'a, Txn, State, I> Handler<'a, Txn, State> for MapOpHandler<I>
+impl<'a, FE, Txn, State, I> Handler<'a, Txn, State> for MapOpHandler<FE, I>
 where
+    FE: ThreadSafe,
+    Txn: Transaction<FE>,
+    State: StateInstance + From<I::Item>,
     I: IntoIterator + Send + 'a,
     I::IntoIter: Send + 'a,
-    State: From<I::Item>,
+    Closure<FE, Txn, State>: TryCastFrom<State>,
 {
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
@@ -475,30 +512,40 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                // let op: Closure = params.require(&label("op").into())?;
-                //
-                // let mut tuple = Vec::with_capacity(self.len);
-                // let mut mapped = stream::iter(self.items)
-                //     .map(State::from)
-                //     .map(|state| op.clone().call(txn, state))
-                //     .buffered(num_cpus::get());
-                //
-                // while let Some(item) = mapped.try_next().await? {
-                //     tuple.push(item);
-                // }
-                //
-                // Ok(State::Tuple(tuple.into()))
-                Err(not_implemented!("generic map op"))
+                let op: State = params.require(&label("op").into())?;
+
+                let mut tuple = Vec::with_capacity(self.len);
+                let mut mapped = stream::iter(self.items)
+                    .map(State::from)
+                    .map(|state| {
+                        Closure::try_cast_from(op.clone(), |state| {
+                            bad_request!("not a closure: {state:?}")
+                        })
+                        .map(|op| op.call(txn.clone(), state))
+                    })
+                    .try_buffered(num_cpus::get());
+
+                while let Some(item) = mapped.try_next().await? {
+                    tuple.push(item);
+                }
+
+                Ok(State::from(Tuple::from(tuple)))
             })
         }))
     }
 }
 
-impl<'a, T: Clone + 'a> From<&'a Tuple<T>> for MapOpHandler<Cloned<std::slice::Iter<'a, T>>> {
+impl<'a, FE, T: Clone + 'a> From<&'a Tuple<T>>
+    for MapOpHandler<FE, Cloned<std::slice::Iter<'a, T>>>
+{
     fn from(tuple: &'a Tuple<T>) -> Self {
         let len = tuple.len();
         let items = tuple.iter().cloned();
-        Self { len, items }
+        Self {
+            len,
+            items,
+            phantom: PhantomData,
+        }
     }
 }
 
@@ -605,6 +652,9 @@ where
     FE: ThreadSafe,
     T: Instance + Route<FE> + Clone + fmt::Debug + 'static,
     T::State: From<T> + From<Tuple<T>> + From<Number>,
+    Closure<FE, T::Txn, T::State>: TryCastFrom<T::State>,
+    Id: TryCastFrom<T::State>,
+    Map<T::State>: TryFrom<T::State, Error = TCError>,
     Tuple<T::State>: TryCastFrom<T::State>,
     Value: From<T::State>,
 {
@@ -629,9 +679,7 @@ where
                 "contains" => Some(Box::new(ContainsHandler::from(self))),
                 "copy" => Some(Box::new(TupleCopyHandler::from(self))),
                 "fold" => Some(Box::new(TupleFoldHandler::from(self))),
-                "for_each" => Some(Box::new(ForEachHandler {
-                    source: self.clone(),
-                })),
+                "for_each" => Some(Box::new(ForEachHandler::from(self.clone()))),
                 "len" => Some(Box::new(AttributeHandler::from(Number::UInt(UInt::U64(
                     self.len() as u64,
                 ))))),
