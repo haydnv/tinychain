@@ -8,13 +8,11 @@ use destream::en;
 use futures::{TryFutureExt, TryStreamExt};
 use get_size::GetSize;
 use get_size_derive::*;
-use safecast::as_type;
+use safecast::{as_type, AsType};
 use tokio::fs;
 use tokio_util::io::StreamReader;
 
-use tc_collection::Node;
-#[cfg(feature = "collection")]
-use tc_tensor::Array;
+use tc_collection::{btree, tensor};
 
 use crate::chain::ChainBlock;
 use crate::cluster::library;
@@ -29,15 +27,39 @@ pub type DirEntry<B> = tc_transact::fs::DirEntry<CacheBlock, B>;
 /// A transactional file
 pub type File<B> = tc_transact::fs::File<CacheBlock, B>;
 
+/// A block of a [`tensor::Dense`] tensor
+#[derive(Clone, GetSize)]
+pub enum DenseBuffer {
+    F32(tensor::Buffer<f32>),
+    F64(tensor::Buffer<f64>),
+    I16(tensor::Buffer<i16>),
+    I32(tensor::Buffer<i32>),
+    I64(tensor::Buffer<i64>),
+    U8(tensor::Buffer<u8>),
+    U16(tensor::Buffer<u16>),
+    U32(tensor::Buffer<u32>),
+    U64(tensor::Buffer<u64>),
+}
+
+as_type!(DenseBuffer, F32, tensor::Buffer<f32>);
+as_type!(DenseBuffer, F64, tensor::Buffer<f64>);
+as_type!(DenseBuffer, I16, tensor::Buffer<i16>);
+as_type!(DenseBuffer, I32, tensor::Buffer<i32>);
+as_type!(DenseBuffer, I64, tensor::Buffer<i64>);
+as_type!(DenseBuffer, U8, tensor::Buffer<u8>);
+as_type!(DenseBuffer, U16, tensor::Buffer<u16>);
+as_type!(DenseBuffer, U32, tensor::Buffer<u32>);
+as_type!(DenseBuffer, U64, tensor::Buffer<u64>);
+
 /// A cached filesystem block.
 #[derive(Clone, GetSize)]
 pub enum CacheBlock {
-    BTree(Node),
+    BTree(btree::Node),
     Chain(ChainBlock),
     Class(InstanceClass),
     Library(library::Version),
-    #[cfg(feature = "collection")]
-    Tensor(Array),
+    Sparse(tensor::Node),
+    Dense(DenseBuffer),
 }
 
 #[async_trait]
@@ -54,12 +76,57 @@ impl<'en> freqfs::FileSave<'en> for CacheBlock {
     }
 }
 
-as_type!(CacheBlock, BTree, Node);
+as_type!(CacheBlock, BTree, btree::Node);
 as_type!(CacheBlock, Chain, ChainBlock);
 as_type!(CacheBlock, Class, InstanceClass);
 as_type!(CacheBlock, Library, library::Version);
-#[cfg(feature = "collection")]
-as_type!(CacheBlock, Tensor, Array);
+as_type!(CacheBlock, Sparse, tensor::Node);
+
+macro_rules! as_dense_type {
+    ($t:ty) => {
+        impl AsType<tensor::Buffer<$t>> for CacheBlock {
+            fn as_type(&self) -> Option<&tensor::Buffer<$t>> {
+                if let Self::Dense(block) = self {
+                    block.as_type()
+                } else {
+                    None
+                }
+            }
+
+            fn as_type_mut(&mut self) -> Option<&mut tensor::Buffer<$t>> {
+                if let Self::Dense(block) = self {
+                    block.as_type_mut()
+                } else {
+                    None
+                }
+            }
+
+            fn into_type(self) -> Option<tensor::Buffer<$t>> {
+                if let Self::Dense(block) = self {
+                    block.into_type()
+                } else {
+                    None
+                }
+            }
+        }
+
+        impl From<tensor::Buffer<$t>> for CacheBlock {
+            fn from(buffer: tensor::Buffer<$t>) -> Self {
+                Self::Dense(buffer.into())
+            }
+        }
+    };
+}
+
+as_dense_type!(f32);
+as_dense_type!(f64);
+as_dense_type!(i16);
+as_dense_type!(i32);
+as_dense_type!(i64);
+as_dense_type!(u8);
+as_dense_type!(u16);
+as_dense_type!(u32);
+as_dense_type!(u64);
 
 async fn persist<'en, T: en::ToStream<'en>>(
     data: &'en T,

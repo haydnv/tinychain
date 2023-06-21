@@ -44,6 +44,8 @@ mod view;
 type BlockShape = ha_ndarray::Shape;
 type BlockStream<Block> = Pin<Box<dyn Stream<Item = TCResult<Block>> + Send>>;
 
+pub type Buffer<T> = ha_ndarray::Buffer<T>;
+
 pub trait DenseCacheFile:
     FileLoad
     + AsType<Buffer<f32>>

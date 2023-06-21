@@ -19,7 +19,7 @@ use tcgeneric::{
     ThreadSafe,
 };
 
-pub use dense::{DenseBase, DenseCacheFile, DenseView};
+pub use dense::{Buffer, DenseBase, DenseCacheFile, DenseView};
 pub use shape::{AxisRange, Range, Shape};
 pub use sparse::{Node, SparseBase, SparseView};
 
