@@ -7,7 +7,7 @@ use std::ops::Deref;
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
-use destream::de::{self, Decoder, Error, FromStream};
+use destream::de::{self, Decoder, FromStream};
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use futures::TryFutureExt;
 use get_size::GetSize;
@@ -29,14 +29,14 @@ pub use case::Case;
 pub use id::*;
 pub use op::*;
 pub use r#if::IfRef;
-pub use r#while::While;
-pub use with::With;
+// pub use r#while::While;
+// pub use with::With;
 
 mod after;
 mod case;
 mod r#if;
-mod r#while;
-mod with;
+// mod r#while;
+// mod with;
 
 pub mod id;
 pub mod op;
@@ -81,8 +81,8 @@ pub enum RefType {
     Id,
     If,
     Op(OpRefType),
-    While,
-    With,
+    // While,
+    // With,
 }
 
 impl Class for RefType {}
@@ -95,8 +95,8 @@ impl NativeClass for RefType {
                 "case" => Some(Self::Case),
                 "id" => Some(Self::Id),
                 "if" => Some(Self::If),
-                "while" => Some(Self::While),
-                "with" => Some(Self::With),
+                // "while" => Some(Self::While),
+                // "with" => Some(Self::With),
                 _ => None,
             }
         } else if let Some(ort) = OpRefType::from_path(path) {
@@ -113,8 +113,8 @@ impl NativeClass for RefType {
             Self::Id => "id",
             Self::If => "if",
             Self::Op(ort) => return ort.path(),
-            Self::While => "while",
-            Self::With => "with",
+            // Self::While => "while",
+            // Self::With => "with",
         };
 
         TCPathBuf::from(PREFIX).append(label(suffix))
@@ -129,8 +129,8 @@ impl fmt::Debug for RefType {
             Self::Id => f.write_str("Id"),
             Self::If => f.write_str("If"),
             Self::Op(ort) => fmt::Debug::fmt(ort, f),
-            Self::While => f.write_str("While"),
-            Self::With => f.write_str("With"),
+            // Self::While => f.write_str("While"),
+            // Self::With => f.write_str("With"),
         }
     }
 }
@@ -143,8 +143,8 @@ pub enum TCRef {
     Id(IdRef),
     If(Box<IfRef>),
     Op(OpRef),
-    While(Box<While>),
-    With(Box<With>),
+    // While(Box<While>),
+    // With(Box<With>),
 }
 
 impl Instance for TCRef {
@@ -157,8 +157,8 @@ impl Instance for TCRef {
             Self::Id(_) => RefType::Id,
             Self::If(_) => RefType::If,
             Self::Op(op_ref) => RefType::Op(op_ref.class()),
-            Self::While(_) => RefType::While,
-            Self::With(_) => RefType::With,
+            // Self::While(_) => RefType::While,
+            // Self::With(_) => RefType::With,
         }
     }
 }
@@ -181,14 +181,14 @@ impl Refer for TCRef {
                 Self::If(Box::new(if_ref))
             }
             Self::Op(op_ref) => Self::Op(op_ref.dereference_self(path)),
-            Self::While(while_ref) => {
-                let while_ref = while_ref.dereference_self(path);
-                Self::While(Box::new(while_ref))
-            }
-            Self::With(with) => {
-                let with = with.dereference_self(path);
-                Self::With(Box::new(with))
-            }
+            // Self::While(while_ref) => {
+            //     let while_ref = while_ref.dereference_self(path);
+            //     Self::While(Box::new(while_ref))
+            // }
+            // Self::With(with) => {
+            //     let with = with.dereference_self(path);
+            //     Self::With(Box::new(with))
+            // }
         }
     }
 
@@ -199,8 +199,8 @@ impl Refer for TCRef {
             Self::Id(id_ref) => id_ref.is_conditional(),
             Self::If(if_ref) => if_ref.is_conditional(),
             Self::Op(op_ref) => op_ref.is_conditional(),
-            Self::While(while_ref) => while_ref.is_conditional(),
-            Self::With(with) => with.is_conditional(),
+            // Self::While(while_ref) => while_ref.is_conditional(),
+            // Self::With(with) => with.is_conditional(),
         }
     }
 
@@ -211,8 +211,8 @@ impl Refer for TCRef {
             Self::Id(id_ref) => id_ref.is_inter_service_write(cluster_path),
             Self::If(if_ref) => if_ref.is_inter_service_write(cluster_path),
             Self::Op(op_ref) => op_ref.is_inter_service_write(cluster_path),
-            Self::While(while_ref) => while_ref.is_inter_service_write(cluster_path),
-            Self::With(with) => with.is_inter_service_write(cluster_path),
+            // Self::While(while_ref) => while_ref.is_inter_service_write(cluster_path),
+            // Self::With(with) => with.is_inter_service_write(cluster_path),
         }
     }
 
@@ -232,14 +232,14 @@ impl Refer for TCRef {
                 Self::If(Box::new(if_ref))
             }
             Self::Op(op_ref) => Self::Op(op_ref.reference_self(path)),
-            Self::While(while_ref) => {
-                let while_ref = while_ref.reference_self(path);
-                Self::While(Box::new(while_ref))
-            }
-            Self::With(with) => {
-                let with = with.reference_self(path);
-                Self::With(Box::new(with))
-            }
+            // Self::While(while_ref) => {
+            //     let while_ref = while_ref.reference_self(path);
+            //     Self::While(Box::new(while_ref))
+            // }
+            // Self::With(with) => {
+            //     let with = with.reference_self(path);
+            //     Self::With(Box::new(with))
+            // }
         }
     }
 
@@ -250,8 +250,8 @@ impl Refer for TCRef {
             Self::Id(id_ref) => id_ref.requires(deps),
             Self::If(if_ref) => if_ref.requires(deps),
             Self::Op(op_ref) => op_ref.requires(deps),
-            Self::While(while_ref) => while_ref.requires(deps),
-            Self::With(with) => with.requires(deps),
+            // Self::While(while_ref) => while_ref.requires(deps),
+            // Self::With(with) => with.requires(deps),
         }
     }
 
@@ -268,8 +268,8 @@ impl Refer for TCRef {
             Self::Id(id_ref) => id_ref.resolve(context, txn).await,
             Self::If(if_ref) => if_ref.resolve(context, txn).await,
             Self::Op(op_ref) => op_ref.resolve(context, txn).await,
-            Self::While(while_ref) => while_ref.resolve(context, txn).await,
-            Self::With(with) => with.resolve(context, txn).await,
+            // Self::While(while_ref) => while_ref.resolve(context, txn).await,
+            // Self::With(with) => with.resolve(context, txn).await,
         }
     }
 }
@@ -282,8 +282,8 @@ impl<'a, D: Digest> Hash<D> for &'a TCRef {
             TCRef::Id(id) => Hash::<D>::hash(id),
             TCRef::If(if_ref) => Hash::<D>::hash(if_ref.deref()),
             TCRef::Op(op) => Hash::<D>::hash(op),
-            TCRef::While(while_ref) => Hash::<D>::hash(while_ref.deref()),
-            TCRef::With(with) => Hash::<D>::hash(with.deref()),
+            // TCRef::While(while_ref) => Hash::<D>::hash(while_ref.deref()),
+            // TCRef::With(with) => Hash::<D>::hash(with.deref()),
         }
     }
 }
@@ -367,21 +367,20 @@ impl RefVisitor {
                 OpRefVisitor::visit_map_value(ort, access)
                     .map_ok(TCRef::Op)
                     .await
-            }
-            RefType::While => {
-                access
-                    .next_value(())
-                    .map_ok(Box::new)
-                    .map_ok(TCRef::While)
-                    .await
-            }
-            RefType::With => {
-                access
-                    .next_value(())
-                    .map_ok(Box::new)
-                    .map_ok(TCRef::With)
-                    .await
-            }
+            } // RefType::While => {
+              //     access
+              //         .next_value(())
+              //         .map_ok(Box::new)
+              //         .map_ok(TCRef::While)
+              //         .await
+              // }
+              // RefType::With => {
+              //     access
+              //         .next_value(())
+              //         .map_ok(Box::new)
+              //         .map_ok(TCRef::With)
+              //         .await
+              // }
         }
     }
 
@@ -457,8 +456,8 @@ impl<'en> ToStream<'en> for TCRef {
             Self::After(after) => map.encode_value(after),
             Self::Case(case) => map.encode_value(case),
             Self::If(if_ref) => map.encode_value(if_ref),
-            Self::While(while_ref) => map.encode_value(while_ref),
-            Self::With(with) => map.encode_value(with),
+            // Self::While(while_ref) => map.encode_value(while_ref),
+            // Self::With(with) => map.encode_value(with),
         }?;
 
         map.end()
@@ -483,8 +482,8 @@ impl<'en> IntoStream<'en> for TCRef {
             Self::After(after) => map.encode_value(after),
             Self::Case(case) => map.encode_value(case),
             Self::If(if_ref) => map.encode_value(if_ref),
-            Self::While(while_ref) => map.encode_value(while_ref),
-            Self::With(with) => map.encode_value(with),
+            // Self::While(while_ref) => map.encode_value(while_ref),
+            // Self::With(with) => map.encode_value(with),
         }?;
 
         map.end()
@@ -499,8 +498,8 @@ impl fmt::Debug for TCRef {
             Self::Id(id_ref) => fmt::Debug::fmt(id_ref, f),
             Self::If(if_ref) => fmt::Debug::fmt(if_ref, f),
             Self::Op(op_ref) => fmt::Debug::fmt(op_ref, f),
-            Self::While(while_ref) => fmt::Debug::fmt(while_ref, f),
-            Self::With(with) => fmt::Debug::fmt(with, f),
+            // Self::While(while_ref) => fmt::Debug::fmt(while_ref, f),
+            // Self::With(with) => fmt::Debug::fmt(with, f),
         }
     }
 }

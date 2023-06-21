@@ -6,7 +6,6 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use collate::Collate;
 use destream::de;
-use freqfs::FileLoad;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::{join, try_join};
@@ -61,8 +60,7 @@ pub trait DenseCacheFile:
 }
 
 impl<FE> DenseCacheFile for FE where
-    FE: FileLoad
-        + AsType<Buffer<f32>>
+    FE: AsType<Buffer<f32>>
         + AsType<Buffer<f64>>
         + AsType<Buffer<i16>>
         + AsType<Buffer<i32>>

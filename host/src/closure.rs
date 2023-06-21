@@ -6,7 +6,7 @@ use std::fmt;
 
 use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
-use destream::de::{self, Error};
+use destream::de;
 use futures::future::TryFutureExt;
 use futures::stream::{FuturesUnordered, TryStreamExt};
 use log::debug;
@@ -14,7 +14,7 @@ use safecast::{CastInto, TryCastInto};
 
 use tc_error::*;
 use tc_transact::{AsyncHash, IntoView};
-use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf, Tuple};
+use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf};
 
 use crate::fs;
 use crate::fs::CacheBlock;

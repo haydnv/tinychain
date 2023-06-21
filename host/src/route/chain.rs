@@ -9,7 +9,6 @@ use tcgeneric::{PathSegment, TCPath};
 
 use crate::chain::{BlockChain, Chain, ChainInstance, ChainType};
 use crate::cluster::Replica;
-use crate::fs;
 use crate::fs::CacheBlock;
 use crate::txn::Txn;
 

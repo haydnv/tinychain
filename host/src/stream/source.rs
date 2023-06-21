@@ -2,14 +2,15 @@ use async_trait::async_trait;
 use destream::de::Error;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{StreamExt, TryStreamExt};
-use safecast::TryCastFrom;
+use safecast::{CastFrom, TryCastFrom};
 
 use tc_collection::btree::BTreeInstance;
 use tc_collection::table::TableStream;
+use tc_collection::Tensor;
 use tc_error::*;
 use tc_transact::Transaction;
-use tc_value::Value;
-use tcgeneric::TCBoxTryStream;
+use tc_value::{Number, Value};
+use tcgeneric::{TCBoxTryStream, Tuple};
 
 use crate::closure::Closure;
 use crate::state::State;
@@ -53,31 +54,25 @@ impl Source for Collection {
                 Ok(rows)
             }
 
-            #[cfg(feature = "collection")]
             Collection::Tensor(tensor) => match tensor {
-                tc_tensor::Tensor::Dense(dense) => {
-                    use tc_tensor::DenseAccess;
-                    let elements = dense.into_inner().value_stream(txn).await?;
+                Tensor::Dense(dense) => {
+                    let elements = dense.into_view().into_elements(*txn.id()).await?;
                     Ok(Box::pin(elements.map_ok(State::from)))
                 }
-                tc_tensor::Tensor::Sparse(sparse) => {
-                    use safecast::CastInto;
-                    use tc_tensor::SparseAccess;
-                    use tcgeneric::Tuple;
-
-                    let filled = sparse.into_inner().filled(txn).await?;
-                    let filled = filled
+                Tensor::Sparse(sparse) => {
+                    let elements = sparse.into_view().into_elements(*txn.id()).await?;
+                    let elements = elements
                         .map_ok(|(coord, value)| {
                             let coord = coord
                                 .into_iter()
-                                .map(tc_value::Number::from)
-                                .collect::<Tuple<Value>>();
+                                .map(Number::from)
+                                .collect::<Tuple<State>>();
 
-                            Tuple::<Value>::from(vec![Value::Tuple(coord), value.cast_into()])
+                            (coord, State::from(value))
                         })
-                        .map_ok(State::from);
+                        .map_ok(State::cast_from);
 
-                    Ok(Box::pin(filled))
+                    Ok(Box::pin(elements))
                 }
             },
         }

@@ -5,7 +5,6 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
@@ -16,13 +15,12 @@ use safecast::CastInto;
 
 use tc_error::*;
 use tc_transact::fs::Persist;
-use tc_transact::lock::{TxnLock, TxnMapLock};
+use tc_transact::lock::TxnMapLock;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{label, Id, Label, Map, PathSegment, ThreadSafe};
 
 use crate::chain::{BlockChain, Recover};
-use crate::cluster::class;
 use crate::fs;
 use crate::fs::CacheBlock;
 use crate::object::InstanceClass;

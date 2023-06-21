@@ -6,12 +6,10 @@ use std::sync::Arc;
 
 use freqfs::DirLock;
 use futures::future::TryFutureExt;
-use futures::join;
 use log::{debug, trace};
 use tokio::sync::RwLock;
 
 use tc_error::*;
-use tc_transact::fs::Dir;
 use tcgeneric::NetworkTime;
 
 use crate::fs;

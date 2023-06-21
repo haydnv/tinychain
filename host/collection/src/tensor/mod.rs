@@ -8,12 +8,12 @@ use async_trait::async_trait;
 use collate::Collator;
 use destream::{de, en};
 use futures::TryFutureExt;
-use safecast::AsType;
+use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::{fs, IntoView, Transact, Transaction, TxnId};
-use tc_value::{Number, NumberType, ValueType};
+use tc_value::{Number, NumberType, Value, ValueType};
 use tcgeneric::{
     label, path_label, Class, Instance, Label, NativeClass, PathLabel, PathSegment, TCPathBuf,
     ThreadSafe,
@@ -61,6 +61,18 @@ impl From<(NumberType, Shape)> for Schema {
     fn from(schema: (NumberType, Shape)) -> Self {
         let (dtype, shape) = schema;
         Self { dtype, shape }
+    }
+}
+
+impl CastFrom<Schema> for Value {
+    fn cast_from(schema: Schema) -> Self {
+        Value::Tuple(
+            vec![
+                ValueType::Number(schema.dtype).path().cast_into(),
+                schema.shape.cast_into(),
+            ]
+            .into(),
+        )
     }
 }
 

@@ -14,10 +14,10 @@ use log::{debug, trace};
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::fs::{CopyFrom, Dir, File, Persist, Restore};
+use tc_transact::fs::{CopyFrom, Persist, Restore};
 use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
-use tcgeneric::{label, Id, Label};
+use tcgeneric::{label, Label};
 
 use crate::cluster::Replica;
 use crate::fs;
@@ -189,94 +189,94 @@ where
     }
 }
 
-#[async_trait]
-impl<T> Persist<CacheBlock> for SyncChain<T>
-where
-    T: Persist<CacheBlock, Txn = Txn> + Send + Sync,
-{
-    type Txn = Txn;
-    type Schema = T::Schema;
-
-    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-        debug!("SyncChain::create");
-
-        let subject = T::create(txn_id, schema, store).await?;
-
-        let mut dir = subject.dir().try_write_owned()?;
-
-        let store = {
-            let dir = dir.create_dir(STORE.to_string())?;
-            fs::Dir::load(txn_id, dir)
-                .map_ok(super::data::Store::new)
-                .await?
-        };
-
-        let mut blocks_dir = dir
-            .create_dir(BLOCKS.to_string())
-            .and_then(|dir| dir.try_write_owned())?;
-
-        let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
-        let size_hint = block.get_size();
-        let pending = blocks_dir.create_file(PENDING.to_string(), block, size_hint)?;
-
-        let block = ChainBlock::new(null_hash().to_vec());
-        let size_hint = block.get_size();
-        let committed = blocks_dir.create_file(COMMITTED.to_string(), block, size_hint)?;
-
-        Ok(Self {
-            subject,
-            pending,
-            committed,
-            store,
-        })
-    }
-
-    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-        debug!("SyncChain::load");
-
-        let subject = T::load_or_create(txn_id, schema, store).await?;
-
-        let mut dir = subject.dir().write_owned().await;
-
-        let store = {
-            let dir = dir.get_or_create_dir(STORE.to_string())?;
-            fs::Dir::load(txn_id, dir)
-                .map_ok(super::data::Store::new)
-                .await?
-        };
-
-        let mut blocks_dir = dir
-            .get_or_create_dir(BLOCKS.to_string())
-            .and_then(|dir| dir.try_write_owned())?;
-
-        let pending = if let Some(file) = blocks_dir.get_file(&PENDING.to_string()) {
-            file.clone()
-        } else {
-            let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
-            let size_hint = block.get_size();
-            blocks_dir.create_file(PENDING.to_string(), block, size_hint)?
-        };
-
-        let committed = if let Some(file) = blocks_dir.get_file(&COMMITTED.to_string()) {
-            file.clone()
-        } else {
-            let block = ChainBlock::new(null_hash().to_vec());
-            let size_hint = block.get_size();
-            blocks_dir.create_file(COMMITTED.to_string(), block, size_hint)?
-        };
-
-        Ok(Self {
-            subject,
-            pending,
-            committed,
-            store,
-        })
-    }
-
-    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
-        self.subject.dir()
-    }
-}
+// #[async_trait]
+// impl<T> Persist<CacheBlock> for SyncChain<T>
+// where
+//     T: Persist<CacheBlock, Txn = Txn> + Send + Sync,
+// {
+//     type Txn = Txn;
+//     type Schema = T::Schema;
+//
+//     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+//         debug!("SyncChain::create");
+//
+//         let subject = T::create(txn_id, schema, store).await?;
+//
+//         let mut dir = subject.dir().try_write_owned()?;
+//
+//         let store = {
+//             let dir = dir.create_dir(STORE.to_string())?;
+//             fs::Dir::load(txn_id, dir)
+//                 .map_ok(super::data::Store::new)
+//                 .await?
+//         };
+//
+//         let mut blocks_dir = dir
+//             .create_dir(BLOCKS.to_string())
+//             .and_then(|dir| dir.try_write_owned())?;
+//
+//         let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
+//         let size_hint = block.get_size();
+//         let pending = blocks_dir.create_file(PENDING.to_string(), block, size_hint)?;
+//
+//         let block = ChainBlock::new(null_hash().to_vec());
+//         let size_hint = block.get_size();
+//         let committed = blocks_dir.create_file(COMMITTED.to_string(), block, size_hint)?;
+//
+//         Ok(Self {
+//             subject,
+//             pending,
+//             committed,
+//             store,
+//         })
+//     }
+//
+//     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+//         debug!("SyncChain::load");
+//
+//         let subject = T::load_or_create(txn_id, schema, store).await?;
+//
+//         let mut dir = subject.dir().write_owned().await;
+//
+//         let store = {
+//             let dir = dir.get_or_create_dir(STORE.to_string())?;
+//             fs::Dir::load(txn_id, dir)
+//                 .map_ok(super::data::Store::new)
+//                 .await?
+//         };
+//
+//         let mut blocks_dir = dir
+//             .get_or_create_dir(BLOCKS.to_string())
+//             .and_then(|dir| dir.try_write_owned())?;
+//
+//         let pending = if let Some(file) = blocks_dir.get_file(&PENDING.to_string()) {
+//             file.clone()
+//         } else {
+//             let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
+//             let size_hint = block.get_size();
+//             blocks_dir.create_file(PENDING.to_string(), block, size_hint)?
+//         };
+//
+//         let committed = if let Some(file) = blocks_dir.get_file(&COMMITTED.to_string()) {
+//             file.clone()
+//         } else {
+//             let block = ChainBlock::new(null_hash().to_vec());
+//             let size_hint = block.get_size();
+//             blocks_dir.create_file(COMMITTED.to_string(), block, size_hint)?
+//         };
+//
+//         Ok(Self {
+//             subject,
+//             pending,
+//             committed,
+//             store,
+//         })
+//     }
+//
+//     fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
+//         self.subject.dir()
+//     }
+// }
 
 #[async_trait]
 impl<T: Route + fmt::Debug + Send + Sync> Recover for SyncChain<T> {
@@ -295,72 +295,72 @@ impl<T: Route + fmt::Debug + Send + Sync> Recover for SyncChain<T> {
     }
 }
 
-#[async_trait]
-impl<T> CopyFrom<CacheBlock, SyncChain<T>> for SyncChain<T>
-where
-    T: Persist<CacheBlock, Txn = Txn> + Route,
-{
-    async fn copy_from(
-        _txn: &<Self as Persist<CacheBlock>>::Txn,
-        _store: fs::Dir,
-        _instance: SyncChain<T>,
-    ) -> TCResult<Self> {
-        Err(not_implemented!("SyncChain::copy_from"))
-    }
-}
+// #[async_trait]
+// impl<T> CopyFrom<CacheBlock, SyncChain<T>> for SyncChain<T>
+// where
+//     T: Persist<CacheBlock, Txn = Txn> + Route,
+// {
+//     async fn copy_from(
+//         _txn: &<Self as Persist<CacheBlock>>::Txn,
+//         _store: fs::Dir,
+//         _instance: SyncChain<T>,
+//     ) -> TCResult<Self> {
+//         Err(not_implemented!("SyncChain::copy_from"))
+//     }
+// }
 
-#[async_trait]
-impl<T> de::FromStream for SyncChain<T>
-where
-    T: FromStream<Context = Txn>,
-{
-    type Context = Txn;
-
-    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        let subject = T::from_stream(txn.clone(), decoder).await?;
-
-        let mut context = txn.context().write().await;
-
-        let store = {
-            let dir = context
-                .create_dir(STORE.to_string())
-                .map_err(de::Error::custom)?;
-
-            fs::Dir::load(*txn.id(), dir)
-                .map_ok(super::data::Store::new)
-                .map_err(de::Error::custom)
-                .await?
-        };
-
-        let mut blocks_dir = {
-            let file = context
-                .create_dir(BLOCKS.to_string())
-                .map_err(de::Error::custom)?;
-
-            file.write_owned().await
-        };
-
-        let null_hash = null_hash();
-        let block = ChainBlock::new(null_hash.to_vec());
-        let size_hint = block.get_size();
-        let committed = blocks_dir
-            .create_file(COMMITTED.to_string(), block, size_hint)
-            .map_err(de::Error::custom)?;
-
-        let block = ChainBlock::with_txn(null_hash.to_vec(), *txn.id());
-        let size_hint = block.get_size();
-        let pending = blocks_dir
-            .create_file(PENDING.to_string(), block, size_hint)
-            .map_err(de::Error::custom)?;
-
-        Ok(Self {
-            subject,
-            pending,
-            committed,
-            store,
-        })
-    }
-}
+// #[async_trait]
+// impl<T> de::FromStream for SyncChain<T>
+// where
+//     T: FromStream<Context = Txn>,
+// {
+//     type Context = Txn;
+//
+//     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+//         let subject = T::from_stream(txn.clone(), decoder).await?;
+//
+//         let mut context = txn.context().write().await;
+//
+//         let store = {
+//             let dir = context
+//                 .create_dir(STORE.to_string())
+//                 .map_err(de::Error::custom)?;
+//
+//             fs::Dir::load(*txn.id(), dir)
+//                 .map_ok(super::data::Store::new)
+//                 .map_err(de::Error::custom)
+//                 .await?
+//         };
+//
+//         let mut blocks_dir = {
+//             let file = context
+//                 .create_dir(BLOCKS.to_string())
+//                 .map_err(de::Error::custom)?;
+//
+//             file.write_owned().await
+//         };
+//
+//         let null_hash = null_hash();
+//         let block = ChainBlock::new(null_hash.to_vec());
+//         let size_hint = block.get_size();
+//         let committed = blocks_dir
+//             .create_file(COMMITTED.to_string(), block, size_hint)
+//             .map_err(de::Error::custom)?;
+//
+//         let block = ChainBlock::with_txn(null_hash.to_vec(), *txn.id());
+//         let size_hint = block.get_size();
+//         let pending = blocks_dir
+//             .create_file(PENDING.to_string(), block, size_hint)
+//             .map_err(de::Error::custom)?;
+//
+//         Ok(Self {
+//             subject,
+//             pending,
+//             committed,
+//             store,
+//         })
+//     }
+// }
 
 #[async_trait]
 impl<'en, T> IntoView<'en, CacheBlock> for SyncChain<T>

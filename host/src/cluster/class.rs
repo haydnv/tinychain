@@ -1,11 +1,9 @@
 /// A replicated, versioned set of [`InstanceClass`]es
-use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
 use futures::{TryFutureExt, TryStreamExt};
-use log::trace;
 
 use tc_error::*;
 use tc_transact::fs::*;

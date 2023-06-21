@@ -1,4 +1,3 @@
-use destream::de::Error;
 use safecast::{CastFrom, TryCastInto};
 
 use tc_error::*;

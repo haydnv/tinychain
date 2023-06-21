@@ -1,6 +1,5 @@
 //! A replicated, versioned, stateless [`Library`]
 
-use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::Deref;
 
@@ -11,11 +10,10 @@ use futures::join;
 use futures::TryStreamExt;
 use get_size::GetSize;
 use get_size_derive::*;
-use log::{error, info};
 use safecast::{AsType, TryCastFrom};
 
 use tc_error::*;
-use tc_transact::fs::{Dir, File, Persist};
+use tc_transact::fs::Persist;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
 use tcgeneric::{label, Instance, Label, Map, PathSegment};

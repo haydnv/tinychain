@@ -1,7 +1,6 @@
 use std::fmt;
 
 use bytes::Bytes;
-use destream::de::Error;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::*;

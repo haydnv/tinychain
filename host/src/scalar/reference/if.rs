@@ -5,7 +5,6 @@ use std::fmt;
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
-use destream::de::Error;
 use destream::{de, en};
 use get_size::GetSize;
 use get_size_derive::*;

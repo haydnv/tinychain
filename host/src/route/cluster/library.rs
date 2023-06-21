@@ -1,4 +1,3 @@
-use destream::de::Error;
 use log::debug;
 use safecast::TryCastFrom;
 

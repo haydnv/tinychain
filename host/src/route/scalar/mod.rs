@@ -50,7 +50,8 @@ impl Route for Scalar {
 
         match self {
             Self::Cluster(cluster) => cluster.route(path),
-            Self::Map(map) => map.route(path),
+            // Self::Map(map) => map.route(path),
+            Self::Map(map) => None,
             Self::Op(op_def) if path.is_empty() => Some(Box::new(op_def.clone())),
             Self::Range((start, end)) => {
                 if path.is_empty() {

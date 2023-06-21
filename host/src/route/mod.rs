@@ -2,7 +2,6 @@ use std::fmt;
 use std::pin::Pin;
 
 use async_trait::async_trait;
-use destream::de::Error;
 use futures::future::{self, Future};
 use safecast::TryCastFrom;
 
@@ -14,14 +13,14 @@ use crate::scalar::OpRefType as ORT;
 use crate::state::State;
 use crate::txn::Txn;
 
-mod chain;
-mod cluster;
+// mod chain;
+// mod cluster;
 mod collection;
 mod generic;
-mod object;
+// mod object;
 mod scalar;
 mod state;
-mod stream;
+// mod stream;
 
 const COPY: PathLabel = path_label(&["copy"]);
 

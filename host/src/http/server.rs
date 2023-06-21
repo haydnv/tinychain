@@ -1,11 +1,9 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use destream::de::Error;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};

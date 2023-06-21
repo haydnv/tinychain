@@ -32,14 +32,14 @@ impl<'a> Handler<'a> for ClusterHandler {
         }))
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|txn, params| {
-            Box::pin(txn.post(self.path, params))
-        }))
-    }
+    // fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    // where
+    //     'b: 'a,
+    // {
+    //     Some(Box::new(|txn, params| {
+    //         Box::pin(txn.post(self.path, params))
+    //     }))
+    // }
 
     fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
     where

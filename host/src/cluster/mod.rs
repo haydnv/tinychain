@@ -7,7 +7,6 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use destream::de::Error;
 use futures::future::{join_all, Future, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, info, trace, warn};
@@ -543,55 +542,55 @@ where
     }
 }
 
-#[async_trait]
-impl<T: Persist<fs::CacheBlock, Txn = Txn>> Persist<fs::CacheBlock> for Cluster<BlockChain<T>>
-where
-    BlockChain<T>: Persist<fs::CacheBlock, Schema = (), Txn = Txn>,
-{
-    type Txn = Txn;
-    type Schema = Schema;
+// #[async_trait]
+// impl<T: Persist<fs::CacheBlock, Txn = Txn>> Persist<fs::CacheBlock> for Cluster<BlockChain<T>>
+// where
+//     BlockChain<T>: Persist<fs::CacheBlock, Schema = (), Txn = Txn>,
+// {
+//     type Txn = Txn;
+//     type Schema = Schema;
+//
+//     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+//         BlockChain::create(txn_id, (), store)
+//             .map_ok(|state| Self::with_state(schema, txn_id, state))
+//             .await
+//     }
+//
+//     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+//         BlockChain::load(txn_id, (), store)
+//             .map_ok(|state| Self::with_state(schema, txn_id, state))
+//             .await
+//     }
+//
+//     fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
+//         Persist::dir(&self.state)
+//     }
+// }
 
-    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-        BlockChain::create(txn_id, (), store)
-            .map_ok(|state| Self::with_state(schema, txn_id, state))
-            .await
-    }
-
-    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-        BlockChain::load(txn_id, (), store)
-            .map_ok(|state| Self::with_state(schema, txn_id, state))
-            .await
-    }
-
-    fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
-        Persist::dir(&self.state)
-    }
-}
-
-#[async_trait]
-impl<T: Persist<fs::CacheBlock, Txn = Txn>> Persist<fs::CacheBlock> for Cluster<Dir<T>>
-where
-    Dir<T>: Persist<fs::CacheBlock, Schema = Schema, Txn = Txn>,
-{
-    type Txn = Txn;
-    type Schema = Schema;
-
-    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-        Dir::create(txn_id, schema.clone(), store)
-            .map_ok(|state| Self::with_state(schema, txn_id, state))
-            .await
-    }
-
-    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-        Dir::load(txn_id, schema.clone(), store)
-            .map_ok(|state| Self::with_state(schema, txn_id, state))
-            .await
-    }
-
-    fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
-        Persist::dir(&self.state)
-    }
-}
+// #[async_trait]
+// impl<T: Persist<fs::CacheBlock, Txn = Txn>> Persist<fs::CacheBlock> for Cluster<Dir<T>>
+// where
+//     Dir<T>: Persist<fs::CacheBlock, Schema = Schema, Txn = Txn>,
+// {
+//     type Txn = Txn;
+//     type Schema = Schema;
+//
+//     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+//         Dir::create(txn_id, schema.clone(), store)
+//             .map_ok(|state| Self::with_state(schema, txn_id, state))
+//             .await
+//     }
+//
+//     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+//         Dir::load(txn_id, schema.clone(), store)
+//             .map_ok(|state| Self::with_state(schema, txn_id, state))
+//             .await
+//     }
+//
+//     fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
+//         Persist::dir(&self.state)
+//     }
+// }
 
 impl<T> Cluster<Dir<T>>
 where

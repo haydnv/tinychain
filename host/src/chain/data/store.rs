@@ -1,6 +1,3 @@
-use std::fmt;
-use std::iter::FromIterator;
-
 use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use log::debug;
@@ -9,11 +6,9 @@ use safecast::*;
 use tc_collection::CollectionType;
 use tc_error::*;
 use tc_transact::fs::*;
-use tc_transact::{AsyncHash, Transact, Transaction};
-use tc_value::Value;
+use tc_transact::{AsyncHash, Transact};
 use tcgeneric::{Id, NativeClass};
 
-use crate::collection::Collection;
 use crate::fs;
 use crate::scalar::{OpRef, Scalar, TCRef};
 use crate::state::State;
@@ -51,7 +46,7 @@ impl Store {
                 let class = CollectionType::from_path(&classpath)
                     .ok_or_else(|| unexpected!("invalid Collection type: {}", classpath))?;
 
-                Err(unimplemented!("resolve saved collection"))
+                Err(not_implemented!("resolve saved collection"))
             } else {
                 Err(unexpected!(
                     "invalid subject for historical Chain state {:?}",

@@ -6,8 +6,11 @@ use b_table::collate::{Collate, Collator, Overlap, OverlapsRange, OverlapsValue}
 use destream::{de, en};
 use futures::TryFutureExt;
 use itertools::{Itertools, MultiProduct};
+use safecast::{CastFrom, CastInto};
 
 use tc_error::*;
+use tc_value::Value;
+use tcgeneric::Tuple;
 
 use super::Coord;
 
@@ -612,6 +615,18 @@ impl FromIterator<u64> for Shape {
 impl From<Shape> for Vec<u64> {
     fn from(shape: Shape) -> Self {
         shape.0
+    }
+}
+
+impl CastFrom<Shape> for Tuple<Value> {
+    fn cast_from(shape: Shape) -> Self {
+        shape.0.into_iter().collect()
+    }
+}
+
+impl CastFrom<Shape> for Value {
+    fn cast_from(shape: Shape) -> Self {
+        Value::Tuple(shape.cast_into())
     }
 }
 

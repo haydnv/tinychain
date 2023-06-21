@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
-use destream::de::{self, Error};
+use destream::de;
 use destream::en::{EncodeMap, Encoder, IntoStream, ToStream};
 use get_size::GetSize;
 use get_size_derive::*;

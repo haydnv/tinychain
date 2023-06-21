@@ -10,7 +10,7 @@ use destream::{de, en};
 use futures::future::TryFutureExt;
 
 use tc_error::*;
-use tc_transact::fs::{CopyFrom, Dir, Persist};
+use tc_transact::fs::{CopyFrom, Persist};
 use tc_transact::{AsyncHash, IntoView, Transact, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
@@ -226,79 +226,79 @@ impl<T: Route + fmt::Debug> Recover for Chain<T> {
     }
 }
 
-#[async_trait]
-impl<T> Persist<CacheBlock> for Chain<T>
-where
-    T: Persist<CacheBlock, Txn = Txn> + Route + fmt::Debug,
-{
-    type Txn = Txn;
-    type Schema = (ChainType, T::Schema);
+// #[async_trait]
+// impl<T> Persist<CacheBlock> for Chain<T>
+// where
+//     T: Persist<CacheBlock, Txn = Txn> + Route + fmt::Debug,
+// {
+//     type Txn = Txn;
+//     type Schema = (ChainType, T::Schema);
+//
+//     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+//         let (class, schema) = schema;
+//
+//         match class {
+//             ChainType::Block => {
+//                 BlockChain::create(txn_id, schema, store)
+//                     .map_ok(Self::Block)
+//                     .await
+//             }
+//             ChainType::Sync => {
+//                 SyncChain::create(txn_id, schema, store)
+//                     .map_ok(Self::Sync)
+//                     .await
+//             }
+//         }
+//     }
+//
+//     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+//         let (class, schema) = schema;
+//         match class {
+//             ChainType::Block => {
+//                 BlockChain::load(txn_id, schema, store)
+//                     .map_ok(Self::Block)
+//                     .await
+//             }
+//             ChainType::Sync => {
+//                 SyncChain::load(txn_id, schema, store)
+//                     .map_ok(Self::Sync)
+//                     .await
+//             }
+//         }
+//     }
+//
+//     fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
+//         match self {
+//             Self::Block(chain) => chain.dir(),
+//             Self::Sync(chain) => chain.dir(),
+//         }
+//     }
+// }
 
-    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-        let (class, schema) = schema;
-
-        match class {
-            ChainType::Block => {
-                BlockChain::create(txn_id, schema, store)
-                    .map_ok(Self::Block)
-                    .await
-            }
-            ChainType::Sync => {
-                SyncChain::create(txn_id, schema, store)
-                    .map_ok(Self::Sync)
-                    .await
-            }
-        }
-    }
-
-    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-        let (class, schema) = schema;
-        match class {
-            ChainType::Block => {
-                BlockChain::load(txn_id, schema, store)
-                    .map_ok(Self::Block)
-                    .await
-            }
-            ChainType::Sync => {
-                SyncChain::load(txn_id, schema, store)
-                    .map_ok(Self::Sync)
-                    .await
-            }
-        }
-    }
-
-    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
-        match self {
-            Self::Block(chain) => chain.dir(),
-            Self::Sync(chain) => chain.dir(),
-        }
-    }
-}
-
-#[async_trait]
-impl<T> CopyFrom<CacheBlock, Chain<T>> for Chain<T>
-where
-    T: Persist<CacheBlock, Txn = Txn> + Route + fmt::Debug,
-{
-    async fn copy_from(
-        txn: &<Self as Persist<CacheBlock>>::Txn,
-        store: fs::Dir,
-        instance: Chain<T>,
-    ) -> TCResult<Self> {
-        match instance {
-            Chain::Block(chain) => {
-                BlockChain::copy_from(txn, store, chain)
-                    .map_ok(Chain::Block)
-                    .await
-            }
-            Chain::Sync(chain) => {
-                SyncChain::copy_from(txn, store, chain)
-                    .map_ok(Chain::Sync)
-                    .await
-            }
-        }
-    }
-}
+// #[async_trait]
+// impl<T> CopyFrom<CacheBlock, Chain<T>> for Chain<T>
+// where
+//     T: Persist<CacheBlock, Txn = Txn> + Route + fmt::Debug,
+// {
+//     async fn copy_from(
+//         txn: &<Self as Persist<CacheBlock>>::Txn,
+//         store: fs::Dir,
+//         instance: Chain<T>,
+//     ) -> TCResult<Self> {
+//         match instance {
+//             Chain::Block(chain) => {
+//                 BlockChain::copy_from(txn, store, chain)
+//                     .map_ok(Chain::Block)
+//                     .await
+//             }
+//             Chain::Sync(chain) => {
+//                 SyncChain::copy_from(txn, store, chain)
+//                     .map_ok(Chain::Sync)
+//                     .await
+//             }
+//         }
+//     }
+// }
 
 impl<T> fmt::Debug for Chain<T>
 where
@@ -375,77 +375,77 @@ where
     }
 }
 
-/// A [`de::Visitor`] for deserializing a [`Chain`].
-pub struct ChainVisitor<T> {
-    txn: Txn,
-    phantom: PhantomData<T>,
-}
+// /// A [`de::Visitor`] for deserializing a [`Chain`].
+// pub struct ChainVisitor<T> {
+//     txn: Txn,
+//     phantom: PhantomData<T>,
+// }
+//
+// impl<T> ChainVisitor<T> {
+//     pub(crate) fn new(txn: Txn) -> Self {
+//         Self {
+//             txn,
+//             phantom: PhantomData,
+//         }
+//     }
+// }
 
-impl<T> ChainVisitor<T> {
-    pub(crate) fn new(txn: Txn) -> Self {
-        Self {
-            txn,
-            phantom: PhantomData,
-        }
-    }
-}
+// impl<T> ChainVisitor<T>
+// where
+//     T: Route + de::FromStream<Context = Txn> + fmt::Debug,
+// {
+//     pub(crate) async fn visit_map_value<A: de::MapAccess>(
+//         self,
+//         class: ChainType,
+//         access: &mut A,
+//     ) -> Result<Chain<T>, A::Error> {
+//         match class {
+//             ChainType::Block => {
+//                 access
+//                     .next_value(self.txn)
+//                     .map_ok(Chain::Block)
+//                     .map_err(|e| de::Error::custom(format!("invalid BlockChain stream: {}", e)))
+//                     .await
+//             }
+//             ChainType::Sync => access.next_value(self.txn).map_ok(Chain::Sync).await,
+//         }
+//     }
+// }
 
-impl<T> ChainVisitor<T>
-where
-    T: Route + de::FromStream<Context = Txn> + fmt::Debug,
-{
-    pub(crate) async fn visit_map_value<A: de::MapAccess>(
-        self,
-        class: ChainType,
-        access: &mut A,
-    ) -> Result<Chain<T>, A::Error> {
-        match class {
-            ChainType::Block => {
-                access
-                    .next_value(self.txn)
-                    .map_ok(Chain::Block)
-                    .map_err(|e| de::Error::custom(format!("invalid BlockChain stream: {}", e)))
-                    .await
-            }
-            ChainType::Sync => access.next_value(self.txn).map_ok(Chain::Sync).await,
-        }
-    }
-}
+// #[async_trait]
+// impl<T> de::Visitor for ChainVisitor<T>
+// where
+//     T: Route + de::FromStream<Context = Txn> + fmt::Debug,
+// {
+//     type Value = Chain<T>;
+//
+//     fn expecting() -> &'static str {
+//         "a Chain"
+//     }
+//
+//     async fn visit_map<A: de::MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
+//         let class = if let Some(path) = map.next_key::<TCPathBuf>(()).await? {
+//             ChainType::from_path(&path)
+//                 .ok_or_else(|| de::Error::invalid_value(path, "a Chain class"))?
+//         } else {
+//             return Err(de::Error::custom("expected a Chain class"));
+//         };
+//
+//         self.visit_map_value(class, &mut map).await
+//     }
+// }
 
-#[async_trait]
-impl<T> de::Visitor for ChainVisitor<T>
-where
-    T: Route + de::FromStream<Context = Txn> + fmt::Debug,
-{
-    type Value = Chain<T>;
-
-    fn expecting() -> &'static str {
-        "a Chain"
-    }
-
-    async fn visit_map<A: de::MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let class = if let Some(path) = map.next_key::<TCPathBuf>(()).await? {
-            ChainType::from_path(&path)
-                .ok_or_else(|| de::Error::invalid_value(path, "a Chain class"))?
-        } else {
-            return Err(de::Error::custom("expected a Chain class"));
-        };
-
-        self.visit_map_value(class, &mut map).await
-    }
-}
-
-#[async_trait]
-impl<T> de::FromStream for Chain<T>
-where
-    T: Route + de::FromStream<Context = Txn> + fmt::Debug,
-{
-    type Context = Txn;
-
-    async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
-        decoder.decode_map(ChainVisitor::new(txn)).await
-    }
-}
+// #[async_trait]
+// impl<T> de::FromStream for Chain<T>
+// where
+//     T: Route + de::FromStream<Context = Txn> + fmt::Debug,
+// {
+//     type Context = Txn;
+//
+//     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
+//         decoder.decode_map(ChainVisitor::new(txn)).await
+//     }
+// }
 
 #[inline]
 fn null_hash() -> Output<Sha256> {

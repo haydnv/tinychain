@@ -1,12 +1,12 @@
-use destream::de::Error;
-use futures::{future, StreamExt, TryFutureExt, TryStreamExt};
+use std::ops::Bound;
+
+use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::*;
-use std::ops::Bound;
 
 use tc_collection::table::*;
 use tc_error::*;
-use tc_transact::fs::{CopyFrom, Persist};
+use tc_transact::fs::Persist;
 use tc_transact::Transaction;
 use tc_value::Value;
 use tcgeneric::{label, Id, Map, PathSegment};
@@ -16,7 +16,7 @@ use crate::fs::Dir;
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
-use crate::stream::{Source, TCStream};
+// use crate::stream::{Source, TCStream};
 
 impl Route for TableType {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -40,14 +40,14 @@ impl<'a> Handler<'a> for CopyHandler {
                 let schema: Value = params.require(&label("schema").into())?;
                 let _schema = TableSchema::try_cast_from_value(schema)?;
 
-                let _source: TCStream = params.require(&label("source").into())?;
-                params.expect_empty()?;
-
-                let _store = {
-                    let mut context = txn.context().write().await;
-                    let (_, dir) = context.create_dir_unique()?;
-                    Dir::load(*txn.id(), dir).await?
-                };
+                // let _source: TCStream = params.require(&label("source").into())?;
+                // params.expect_empty()?;
+                //
+                // let _store = {
+                //     let mut context = txn.context().write().await;
+                //     let (_, dir) = context.create_dir_unique()?;
+                //     Dir::load(*txn.id(), dir).await?
+                // };
 
                 Err(not_implemented!("copy a Table from a Stream"))
             })
@@ -360,56 +360,56 @@ impl<T> From<T> for SelectHandler<T> {
     }
 }
 
-struct StreamHandler<T> {
-    table: T,
-}
-
-impl<'a, T: TableSlice + 'a> Handler<'a> for StreamHandler<T>
-where
-    Table: From<T>,
-    Table: From<T::Slice>,
-{
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, key| {
-            Box::pin(async move {
-                if key.is_none() {
-                    Ok(TCStream::from(Table::from(self.table)).into())
-                } else {
-                    let bounds = cast_into_bounds(Scalar::Value(key))?;
-                    let slice = self.table.slice(bounds)?;
-                    Ok(TCStream::from(Table::from(slice)).into())
-                }
-            })
-        }))
-    }
-
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, params| {
-            Box::pin(async move {
-                let bounds = Scalar::try_cast_from(State::Map(params), |s| {
-                    TCError::unexpected(s, "a Scalar Map of Table bounds")
-                })?;
-
-                let bounds = cast_into_bounds(bounds)?;
-
-                let slice = self.table.slice(bounds)?;
-                Ok(TCStream::from(Table::from(slice)).into())
-            })
-        }))
-    }
-}
-
-impl<T> From<T> for StreamHandler<T> {
-    fn from(table: T) -> Self {
-        Self { table }
-    }
-}
+// struct StreamHandler<T> {
+//     table: T,
+// }
+//
+// impl<'a, T: TableSlice + 'a> Handler<'a> for StreamHandler<T>
+// where
+//     Table: From<T>,
+//     Table: From<T::Slice>,
+// {
+//     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+//     where
+//         'b: 'a,
+//     {
+//         Some(Box::new(|_txn, key| {
+//             Box::pin(async move {
+//                 if key.is_none() {
+//                     Ok(TCStream::from(Table::from(self.table)).into())
+//                 } else {
+//                     let bounds = cast_into_bounds(Scalar::Value(key))?;
+//                     let slice = self.table.slice(bounds)?;
+//                     Ok(TCStream::from(Table::from(slice)).into())
+//                 }
+//             })
+//         }))
+//     }
+//
+//     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+//     where
+//         'b: 'a,
+//     {
+//         Some(Box::new(|_txn, params| {
+//             Box::pin(async move {
+//                 let bounds = Scalar::try_cast_from(State::Map(params), |s| {
+//                     TCError::unexpected(s, "a Scalar Map of Table bounds")
+//                 })?;
+//
+//                 let bounds = cast_into_bounds(bounds)?;
+//
+//                 let slice = self.table.slice(bounds)?;
+//                 Ok(TCStream::from(Table::from(slice)).into())
+//             })
+//         }))
+//     }
+// }
+//
+// impl<T> From<T> for StreamHandler<T> {
+//     fn from(table: T) -> Self {
+//         Self { table }
+//     }
+// }
 
 impl<'a, T> From<&'a T> for TableHandler<'a, T> {
     fn from(table: &'a T) -> Self {
@@ -452,7 +452,7 @@ where
             "limit" => Some(Box::new(LimitHandler::from(table.clone()))),
             "order" => Some(Box::new(OrderHandler::from(table.clone()))),
             "select" => Some(Box::new(SelectHandler::from(table.clone()))),
-            "rows" => Some(Box::new(StreamHandler::from(table.clone()))),
+            // "rows" => Some(Box::new(StreamHandler::from(table.clone()))),
             _ => None,
         }
     } else {

@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::convert::TryFrom;
 use std::fmt;
 use std::iter;
 
@@ -10,13 +9,13 @@ use bytes::Bytes;
 use destream::{de, en};
 use freqfs::{DirLock, DirWriteGuard, FileLock, FileReadGuard, FileReadGuardOwned, FileWriteGuard};
 use futures::stream::{self, StreamExt};
-use futures::{join, try_join, TryFutureExt, TryStreamExt};
+use futures::{try_join, TryFutureExt, TryStreamExt};
 use get_size::GetSize;
 use log::{debug, error, trace};
 use safecast::*;
 
 use tc_error::*;
-use tc_transact::fs::{Dir, Persist};
+use tc_transact::fs::Persist;
 use tc_transact::lock::TxnLock;
 use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
@@ -617,17 +616,17 @@ impl de::Visitor for HistoryVisitor {
                 .map_err(de::Error::custom)?
         };
 
-        let mut file_lock = file.write().await;
+        let mut guard = file.write().await;
 
         let block = ChainBlock::new(null_hash.to_vec());
         let size_hint = block.get_size();
-        file_lock
+        guard
             .create_file(PENDING.into(), block, size_hint)
             .map_err(de::Error::custom)?;
 
         let block = ChainBlock::new(null_hash.to_vec());
         let size_hint = block.get_size();
-        file_lock
+        guard
             .create_file(WRITE_AHEAD.into(), block, size_hint)
             .map_err(de::Error::custom)?;
 
@@ -655,14 +654,14 @@ impl de::Visitor for HistoryVisitor {
             last_hash = block.current_hash();
 
             let size_hint = block.get_size();
-            file_lock
+            guard
                 .create_file(i.to_string(), block, size_hint)
                 .map_err(de::Error::custom)?;
 
             i += 1;
         }
 
-        std::mem::drop(file_lock);
+        std::mem::drop(guard);
 
         let latest = if i == 0 { 0 } else { i - 1 };
         Ok(History::new(file, store, latest, txn_id))

@@ -1,10 +1,11 @@
-use safecast::{CastFrom, CastInto};
+use safecast::CastInto;
 
-use tc_collection::btree::{BTreeInstance, BTreeWrite};
+use tc_collection::btree::BTreeInstance;
 use tc_collection::table::TableInstance;
-use tc_collection::CollectionType;
+use tc_collection::tensor::TensorInstance;
+use tc_collection::{CollectionType, TensorBase};
 use tc_value::Value;
-use tcgeneric::{PathSegment, TCPath, Tuple};
+use tcgeneric::{PathSegment, TCPath};
 
 use crate::collection::{Collection, CollectionBase};
 use crate::route::GetHandler;
@@ -13,19 +14,14 @@ use super::{Handler, Route};
 
 mod btree;
 mod table;
-
-#[cfg(feature = "collection")]
-mod tensor;
+// mod tensor;
 
 impl Route for CollectionType {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
         match self {
             Self::BTree(btt) => btt.route(path),
             Self::Table(tt) => tt.route(path),
-            #[cfg(feature = "collection")]
-            Self::Tensor(tt) => tt.route(path),
-            #[cfg(not(feature = "collection"))]
-            Self::Tensor(tt) => None,
+            Self::Tensor(tt) => todo!("route {tt:?}"),
         }
     }
 }
@@ -48,7 +44,6 @@ impl<'a> Handler<'a> for SchemaHandler<'a> {
 
                     Collection::Table(table) => table.schema().clone().cast_into(),
 
-                    #[cfg(feature = "collection")]
                     Collection::Tensor(tensor) => tensor.schema().clone().cast_into(),
                 };
 
@@ -71,8 +66,7 @@ impl Route for Collection {
         let child_handler: Option<Box<dyn Handler<'a> + 'a>> = match self {
             Self::BTree(btree) => btree.route(path),
             Self::Table(table) => table.route(path),
-            #[cfg(feature = "collection")]
-            Self::Tensor(tensor) => tensor.route(path),
+            Self::Tensor(tensor) => todo!("route {tensor:?}"),
         };
 
         if child_handler.is_some() {
@@ -95,10 +89,10 @@ impl Route for CollectionBase {
         match self {
             Self::BTree(btree) => btree.route(path),
             Self::Table(table) => table.route(path),
-            #[cfg(feature = "collection")]
-            Self::Dense(dense) => dense.route(path),
-            #[cfg(feature = "collection")]
-            Self::Sparse(sparse) => sparse.route(path),
+            Self::Tensor(tensor) => match tensor {
+                TensorBase::Dense(dense) => todo!("route {dense:?}"),
+                TensorBase::Sparse(sparse) => todo!("route {sparse:?}"),
+            },
         }
     }
 }
@@ -114,8 +108,7 @@ impl Route for Static {
         match path[0].as_str() {
             "btree" => btree::Static.route(&path[1..]),
             "table" => table::Static.route(&path[1..]),
-            #[cfg(feature = "collection")]
-            "tensor" => tensor::Static.route(&path[1..]),
+            "tensor" => todo!("route tensor static"),
             _ => None,
         }
     }

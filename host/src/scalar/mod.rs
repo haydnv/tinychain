@@ -6,15 +6,13 @@ use std::fmt;
 use std::ops::{Bound, Deref, DerefMut};
 use std::str::FromStr;
 
-use async_hash::{Digest, Hash, Output, Sha256};
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use bytes::Bytes;
-use destream::de::Error;
 use destream::{de, en};
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use get_size::GetSize;
-use get_size_derive::*;
 use log::{debug, warn};
 use safecast::{as_type, Match, TryCastFrom, TryCastInto};
 
@@ -22,7 +20,7 @@ use tc_error::*;
 use tc_value::{Float, Host, Link, Number, TCString, Value, ValueType};
 use tcgeneric::*;
 
-use crate::closure::Closure;
+// use crate::closure::Closure;
 use crate::route::Public;
 use crate::state::{State, ToState};
 use crate::txn::Txn;
@@ -332,19 +330,19 @@ impl Scalar {
                     }
                 }
 
-                RT::While => self
-                    .opt_cast_into()
-                    .map(Box::new)
-                    .map(TCRef::While)
-                    .map(Box::new)
-                    .map(Scalar::Ref),
+                // RT::While => self
+                //     .opt_cast_into()
+                //     .map(Box::new)
+                //     .map(TCRef::While)
+                //     .map(Box::new)
+                //     .map(Scalar::Ref),
 
-                RT::With => self
-                    .opt_cast_into()
-                    .map(Box::new)
-                    .map(TCRef::With)
-                    .map(Box::new)
-                    .map(Scalar::Ref),
+                // RT::With => self
+                //     .opt_cast_into()
+                //     .map(Box::new)
+                //     .map(TCRef::With)
+                //     .map(Box::new)
+                //     .map(Scalar::Ref),
             },
 
             ST::Value(vt) => Value::opt_cast_from(self)
@@ -469,10 +467,11 @@ impl Refer for Scalar {
                 if before == after {
                     Self::Op(after)
                 } else {
-                    Self::Ref(Box::new(TCRef::With(Box::new(With::new(
-                        vec![SELF.into()].into(),
-                        after,
-                    )))))
+                    // Self::Ref(Box::new(TCRef::With(Box::new(With::new(
+                    //     vec![SELF.into()].into(),
+                    //     after,
+                    // )))))
+                    unimplemented!("closure")
                 }
             }
             Self::Ref(tc_ref) => {
@@ -515,35 +514,36 @@ impl Refer for Scalar {
     ) -> TCResult<State> {
         debug!("Scalar::resolve {:?}", self);
 
-        match self {
-            Self::Map(map) => {
-                let mut resolved = stream::iter(map)
-                    .map(|(id, scalar)| scalar.resolve(context, txn).map_ok(|state| (id, state)))
-                    .buffer_unordered(num_cpus::get());
-
-                let mut map = Map::new();
-                while let Some((id, state)) = resolved.try_next().await? {
-                    map.insert(id, state);
-                }
-
-                Ok(State::Map(map))
-            }
-            Self::Ref(tc_ref) => tc_ref.resolve(context, txn).await,
-            Self::Tuple(tuple) => {
-                let len = tuple.len();
-                let mut resolved = stream::iter(tuple)
-                    .map(|scalar| scalar.resolve(context, txn))
-                    .buffered(num_cpus::get());
-
-                let mut tuple = Vec::with_capacity(len);
-                while let Some(state) = resolved.try_next().await? {
-                    tuple.push(state);
-                }
-
-                Ok(State::Tuple(tuple.into()))
-            }
-            other => Ok(State::Scalar(other)),
-        }
+        // match self {
+        //     Self::Map(map) => {
+        //         let mut resolved = stream::iter(map)
+        //             .map(|(id, scalar)| scalar.resolve(context, txn).map_ok(|state| (id, state)))
+        //             .buffer_unordered(num_cpus::get());
+        //
+        //         let mut map = Map::new();
+        //         while let Some((id, state)) = resolved.try_next().await? {
+        //             map.insert(id, state);
+        //         }
+        //
+        //         Ok(State::Map(map))
+        //     }
+        //     Self::Ref(tc_ref) => tc_ref.resolve(context, txn).await,
+        //     Self::Tuple(tuple) => {
+        //         let len = tuple.len();
+        //         let mut resolved = stream::iter(tuple)
+        //             .map(|scalar| scalar.resolve(context, txn))
+        //             .buffered(num_cpus::get());
+        //
+        //         let mut tuple = Vec::with_capacity(len);
+        //         while let Some(state) = resolved.try_next().await? {
+        //             tuple.push(state);
+        //         }
+        //
+        //         Ok(State::Tuple(tuple.into()))
+        //     }
+        //     other => Ok(State::Scalar(other)),
+        // }
+        Err(not_implemented!("Scalar::resolve"))
     }
 }
 
@@ -724,15 +724,15 @@ impl TryCastFrom<Scalar> for (Bound<Value>, Bound<Value>) {
     }
 }
 
-impl TryCastFrom<Scalar> for Closure {
-    fn can_cast_from(scalar: &Scalar) -> bool {
-        OpDef::can_cast_from(scalar)
-    }
-
-    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-        OpDef::opt_cast_from(scalar).map(Self::from)
-    }
-}
+// impl TryCastFrom<Scalar> for Closure {
+//     fn can_cast_from(scalar: &Scalar) -> bool {
+//         OpDef::can_cast_from(scalar)
+//     }
+//
+//     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+//         OpDef::opt_cast_from(scalar).map(Self::from)
+//     }
+// }
 
 impl TryCastFrom<Scalar> for OpDef {
     fn can_cast_from(scalar: &Scalar) -> bool {

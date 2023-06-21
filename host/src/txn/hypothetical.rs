@@ -4,7 +4,6 @@ use std::fmt;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use destream::de::Error;
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::error;
 use safecast::{TryCastFrom, TryCastInto};

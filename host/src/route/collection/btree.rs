@@ -1,8 +1,7 @@
 use std::iter::FromIterator;
 use std::ops::Bound;
 
-use destream::de::Error;
-use futures::{future, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::{Match, TryCastFrom, TryCastInto};
 
@@ -17,7 +16,7 @@ use crate::collection::{BTree, BTreeFile, Collection};
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
 use crate::scalar::Scalar;
 use crate::state::State;
-use crate::stream::{Source, TCStream};
+// use crate::stream::{Source, TCStream};
 
 impl Route for BTreeType {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -41,7 +40,7 @@ impl<'a> Handler<'a> for CopyHandler {
                 let schema: Value = params.require(&label("schema").into())?;
                 let schema = cast_into_schema(schema)?;
 
-                let source: TCStream = params.require(&label("source").into())?;
+                // let source: TCStream = params.require(&label("source").into())?;
                 params.expect_empty()?;
 
                 let txn_id = *txn.id();
@@ -52,23 +51,24 @@ impl<'a> Handler<'a> for CopyHandler {
                     Dir::load(*txn.id(), cache).await?
                 };
 
-                let keys = source.into_stream(txn.clone()).await?;
-                let keys = keys
-                    .map(|r| {
-                        r.and_then(|state| {
-                            Value::try_cast_from(state, |s| TCError::unexpected(s, "a BTree key"))
-                        })
-                    })
-                    .map(|r| {
-                        r.and_then(|value| {
-                            value.try_cast_into(|v| TCError::unexpected(v, "a BTree key"))
-                        })
-                    });
+                // let keys = source.into_stream(txn.clone()).await?;
+                // let keys = keys
+                //     .map(|r| {
+                //         r.and_then(|state| {
+                //             Value::try_cast_from(state, |s| TCError::unexpected(s, "a BTree key"))
+                //         })
+                //     })
+                //     .map(|r| {
+                //         r.and_then(|value| {
+                //             value.try_cast_into(|v| TCError::unexpected(v, "a BTree key"))
+                //         })
+                //     });
 
-                let btree = BTreeFile::create(txn_id, schema, store).await?;
-                btree.try_insert_from(*txn.id(), keys).await?;
-
-                Ok(State::Collection(btree.into()))
+                // let btree = BTreeFile::create(txn_id, schema, store).await?;
+                // btree.try_insert_from(*txn.id(), keys).await?;
+                //
+                // Ok(State::Collection(btree.into()))
+                Err(not_implemented!("BTree from stream"))
             })
         }))
     }
@@ -231,10 +231,11 @@ impl<'a, T: BTreeInstance> Handler<'a> for FirstHandler<'a, T> {
                 let mut keys = self.btree.clone().keys(*txn.id()).await?;
                 if let Some(values) = keys.try_next().await? {
                     let names = self.btree.schema().iter().map(|col| col.name()).cloned();
-                    Ok(
-                        Map::<State>::from_iter(names.zip(values.into_iter().map(State::from)))
-                            .into(),
-                    )
+                    // Ok(
+                    //     Map::<State>::from_iter(names.zip(values.into_iter().map(State::from)))
+                    //         .into(),
+                    // )
+                    Err(not_implemented!("$BTree/first"))
                 } else {
                     Err(TCError::not_found("this BTree is empty"))
                 }
@@ -281,39 +282,39 @@ impl<T> From<T> for ReverseHandler<T> {
     }
 }
 
-struct StreamHandler<T> {
-    btree: T,
-}
-
-impl<'a, T> Handler<'a> for StreamHandler<T>
-where
-    T: BTreeInstance + 'a,
-    BTree: From<T>,
-    BTree: From<T::Slice>,
-{
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, key| {
-            Box::pin(async move {
-                if key.is_none() {
-                    Ok(TCStream::from(BTree::from(self.btree)).into())
-                } else {
-                    let range = cast_into_range(Scalar::Value(key))?;
-                    let slice = self.btree.slice(range, false)?;
-                    Ok(TCStream::from(BTree::from(slice)).into())
-                }
-            })
-        }))
-    }
-}
-
-impl<T> From<T> for StreamHandler<T> {
-    fn from(btree: T) -> Self {
-        Self { btree }
-    }
-}
+// struct StreamHandler<T> {
+//     btree: T,
+// }
+//
+// impl<'a, T> Handler<'a> for StreamHandler<T>
+// where
+//     T: BTreeInstance + 'a,
+//     BTree: From<T>,
+//     BTree: From<T::Slice>,
+// {
+//     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+//     where
+//         'b: 'a,
+//     {
+//         Some(Box::new(|_txn, key| {
+//             Box::pin(async move {
+//                 if key.is_none() {
+//                     Ok(TCStream::from(BTree::from(self.btree)).into())
+//                 } else {
+//                     let range = cast_into_range(Scalar::Value(key))?;
+//                     let slice = self.btree.slice(range, false)?;
+//                     Ok(TCStream::from(BTree::from(slice)).into())
+//                 }
+//             })
+//         }))
+//     }
+// }
+//
+// impl<T> From<T> for StreamHandler<T> {
+//     fn from(btree: T) -> Self {
+//         Self { btree }
+//     }
+// }
 
 impl Route for BTree {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
@@ -342,7 +343,7 @@ where
         match path[0].as_str() {
             "count" => Some(Box::new(CountHandler::from(btree))),
             "first" => Some(Box::new(FirstHandler::from(btree))),
-            "keys" => Some(Box::new(StreamHandler::from(btree.clone()))),
+            // "keys" => Some(Box::new(StreamHandler::from(btree.clone()))),
             "reverse" => Some(Box::new(ReverseHandler::from(btree.clone()))),
             _ => None,
         }

@@ -12,7 +12,6 @@ use log::debug;
 use safecast::{CastFrom, CastInto};
 
 use tc_error::*;
-use tc_transact::fs::Dir;
 use tc_transact::Transaction;
 use tc_value::{Host, Link, Value};
 use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf, Tuple};

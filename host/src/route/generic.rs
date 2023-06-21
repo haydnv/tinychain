@@ -1,11 +1,9 @@
-use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::fmt;
 use std::iter::Cloned;
-use std::ops::{Bound, Deref, RangeBounds};
+use std::ops::{Bound, Deref};
 use std::str::FromStr;
 
-use destream::de::Error;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, FuturesOrdered, StreamExt, TryStreamExt};
 use log::debug;
@@ -15,7 +13,7 @@ use tc_error::*;
 use tc_value::{Number, Value};
 use tcgeneric::{label, Id, Instance, Map, PathSegment, TCPath, TCPathBuf, Tuple};
 
-use crate::closure::Closure;
+// use crate::closure::Closure;
 use crate::scalar::Scalar;
 use crate::state::State;
 
@@ -36,20 +34,21 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                if self.tuple.is_empty() {
-                    let key =
-                        Tuple::<Value>::try_cast_from(key, |v| TCError::unexpected(v, "a Tuple"))?;
-
-                    return Ok(Value::Tuple(key).into());
-                }
-
-                let suffix =
-                    Tuple::<Value>::try_cast_from(key, |v| TCError::unexpected(v, "a Tuple"))?;
-
-                let items = self.tuple.iter().cloned().map(State::from);
-                let items = items.chain(suffix.into_iter().map(Scalar::Value).map(State::Scalar));
-
-                Ok(State::Tuple(items.collect()))
+                // if self.tuple.is_empty() {
+                //     let key =
+                //         Tuple::<Value>::try_cast_from(key, |v| TCError::unexpected(v, "a Tuple"))?;
+                //
+                //     return Ok(Value::Tuple(key).into());
+                // }
+                //
+                // let suffix =
+                //     Tuple::<Value>::try_cast_from(key, |v| TCError::unexpected(v, "a Tuple"))?;
+                //
+                // let items = self.tuple.iter().cloned().map(State::from);
+                // let items = items.chain(suffix.into_iter().map(Scalar::Value).map(State::Scalar));
+                //
+                // Ok(State::Tuple(items.collect()))
+                Err(not_implemented!("tuple append"))
             })
         }))
     }
@@ -70,15 +69,16 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                let present = self
-                    .tuple
-                    .iter()
-                    .cloned()
-                    .map(State::from)
-                    .filter_map(Value::opt_cast_from)
-                    .any(|item| item == key);
-
-                Ok(present.into())
+                // let present = self
+                //     .tuple
+                //     .iter()
+                //     .cloned()
+                //     .map(State::from)
+                //     .filter_map(Value::opt_cast_from)
+                //     .any(|item| item == key);
+                //
+                // Ok(present.into())
+                Err(not_implemented!("tuple contains"))
             })
         }))
     }
@@ -107,16 +107,17 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let op: Closure = params.require(&label("op").into())?;
-                params.expect_empty()?;
-
-                stream::iter(self.source)
-                    .map(|args| op.clone().call(txn, State::from(args)))
-                    .buffer_unordered(num_cpus::get())
-                    .try_fold((), |(), _| future::ready(Ok(())))
-                    .await?;
-
-                Ok(State::default())
+                // let op: Closure = params.require(&label("op").into())?;
+                // params.expect_empty()?;
+                //
+                // stream::iter(self.source)
+                //     .map(|args| op.clone().call(txn, State::from(args)))
+                //     .buffer_unordered(num_cpus::get())
+                //     .try_fold((), |(), _| future::ready(Ok(())))
+                //     .await?;
+                //
+                // Ok(State::default())
+                Err(not_implemented!("generic for each"))
             })
         }))
     }
@@ -136,24 +137,25 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                key.expect_none()?;
-
-                let path = TCPathBuf::from(COPY);
-                let mut copies: FuturesOrdered<_> = self
-                    .map
-                    .iter()
-                    .map(|(key, item)| {
-                        let result = Public::get(item, txn, &path, Value::default());
-                        result.map_ok(move |state| (key, state))
-                    })
-                    .collect();
-
-                let mut copy = Map::new();
-                while let Some((key, item)) = copies.try_next().await? {
-                    copy.insert(key.clone(), item);
-                }
-
-                Ok(State::Map(copy.into()))
+                // key.expect_none()?;
+                //
+                // let path = TCPathBuf::from(COPY);
+                // let mut copies: FuturesOrdered<_> = self
+                //     .map
+                //     .iter()
+                //     .map(|(key, item)| {
+                //         let result = Public::get(item, txn, &path, Value::default());
+                //         result.map_ok(move |state| (key, state))
+                //     })
+                //     .collect();
+                //
+                // let mut copy = Map::new();
+                // while let Some((key, item)) = copies.try_next().await? {
+                //     copy.insert(key.clone(), item);
+                // }
+                //
+                // Ok(State::Map(copy.into()))
+                Err(not_implemented!("copy map"))
             })
         }))
     }
@@ -179,33 +181,34 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let other: Map<State> = params.require(&label("eq").into())?;
-                params.expect_empty()?;
-
-                if self.map.len() != other.len() {
-                    return Ok(false.into());
-                }
-
-                let eq = self
-                    .map
-                    .into_iter()
-                    .zip(other)
-                    .map(|((this_id, this), (that_id, that))| {
-                        if this_id != that_id {
-                            return Ok(false);
-                        }
-
-                        let this = State::from(this);
-                        let this =
-                            Value::try_cast_from(this, |s| TCError::unexpected(s, "a Value"))?;
-                        let that =
-                            Value::try_cast_from(that, |s| TCError::unexpected(s, "a Value"))?;
-
-                        Ok(this == that)
-                    })
-                    .collect::<TCResult<Vec<bool>>>()?;
-
-                Ok(eq.into_iter().all(|eq| eq).into())
+                // let other: Map<State> = params.require(&label("eq").into())?;
+                // params.expect_empty()?;
+                //
+                // if self.map.len() != other.len() {
+                //     return Ok(false.into());
+                // }
+                //
+                // let eq = self
+                //     .map
+                //     .into_iter()
+                //     .zip(other)
+                //     .map(|((this_id, this), (that_id, that))| {
+                //         if this_id != that_id {
+                //             return Ok(false);
+                //         }
+                //
+                //         let this = State::from(this);
+                //         let this =
+                //             Value::try_cast_from(this, |s| TCError::unexpected(s, "a Value"))?;
+                //         let that =
+                //             Value::try_cast_from(that, |s| TCError::unexpected(s, "a Value"))?;
+                //
+                //         Ok(this == that)
+                //     })
+                //     .collect::<TCResult<Vec<bool>>>()?;
+                //
+                // Ok(eq.into_iter().all(|eq| eq).into())
+                Err(not_implemented!("Map eq"))
             })
         }))
     }
@@ -231,28 +234,29 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let other: Tuple<State> = params.require(&label("eq").into())?;
-                params.expect_empty()?;
-
-                if self.tuple.len() != other.len() {
-                    return Ok(false.into());
-                }
-
-                let eq = self
-                    .tuple
-                    .into_iter()
-                    .zip(other)
-                    .map(|(this, that)| {
-                        let this = State::from(this);
-                        let this =
-                            Value::try_cast_from(this, |s| TCError::unexpected(s, "a Value"))?;
-                        let that =
-                            Value::try_cast_from(that, |s| TCError::unexpected(s, "a Value"))?;
-                        Ok(this == that)
-                    })
-                    .collect::<TCResult<Vec<bool>>>()?;
-
-                Ok(eq.into_iter().all(|eq| eq).into())
+                // let other: Tuple<State> = params.require(&label("eq").into())?;
+                // params.expect_empty()?;
+                //
+                // if self.tuple.len() != other.len() {
+                //     return Ok(false.into());
+                // }
+                //
+                // let eq = self
+                //     .tuple
+                //     .into_iter()
+                //     .zip(other)
+                //     .map(|(this, that)| {
+                //         let this = State::from(this);
+                //         let this =
+                //             Value::try_cast_from(this, |s| TCError::unexpected(s, "a Value"))?;
+                //         let that =
+                //             Value::try_cast_from(that, |s| TCError::unexpected(s, "a Value"))?;
+                //         Ok(this == that)
+                //     })
+                //     .collect::<TCResult<Vec<bool>>>()?;
+                //
+                // Ok(eq.into_iter().all(|eq| eq).into())
+                Err(not_implemented!("tuple eq"))
             })
         }))
     }
@@ -285,20 +289,21 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                if key.is_none() {
-                    Ok(State::from(self.map.clone()))
-                } else {
-                    let key = Id::try_cast_from(key, |v| TCError::unexpected(v, "an Id"))?;
-                    self.map.get(&key).cloned().map(State::from).ok_or_else(|| {
-                        let msg = format!(
-                            "{} in Map with keys {}",
-                            key,
-                            self.map.keys().collect::<Tuple<&Id>>()
-                        );
-
-                        TCError::not_found(msg)
-                    })
-                }
+                // if key.is_none() {
+                //     Ok(State::from(self.map.clone()))
+                // } else {
+                //     let key = Id::try_cast_from(key, |v| TCError::unexpected(v, "an Id"))?;
+                //     self.map.get(&key).cloned().map(State::from).ok_or_else(|| {
+                //         let msg = format!(
+                //             "{} in Map with keys {}",
+                //             key,
+                //             self.map.keys().collect::<Tuple<&Id>>()
+                //         );
+                //
+                //         TCError::not_found(msg)
+                //     })
+                // }
+                Err(not_implemented!("map op"))
             })
         }))
     }
@@ -355,21 +360,22 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                key.expect_none()?;
-
-                let path = TCPathBuf::from(COPY);
-                let mut copies: FuturesOrdered<_> = self
-                    .tuple
-                    .iter()
-                    .map(|item| Public::get(item, txn, &path, Value::default()))
-                    .collect();
-
-                let mut copy = Vec::with_capacity(self.tuple.len());
-                while let Some(item) = copies.try_next().await? {
-                    copy.push(item);
-                }
-
-                Ok(State::Tuple(copy.into()))
+                // key.expect_none()?;
+                //
+                // let path = TCPathBuf::from(COPY);
+                // let mut copies: FuturesOrdered<_> = self
+                //     .tuple
+                //     .iter()
+                //     .map(|item| Public::get(item, txn, &path, Value::default()))
+                //     .collect();
+                //
+                // let mut copy = Vec::with_capacity(self.tuple.len());
+                // while let Some(item) = copies.try_next().await? {
+                //     copy.push(item);
+                // }
+                //
+                // Ok(State::Tuple(copy.into()))
+                Err(not_implemented!("Tuple copy"))
             })
         }))
     }
@@ -396,18 +402,19 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let item_name: Id = params.require(&label("item_name").into())?;
-                let op: Closure = params.require(&label("op").into())?;
-                let mut state: State = params.require(&label("value").into())?;
-                params.expect_empty()?;
-
-                for item in self.tuple.iter().cloned() {
-                    let mut params: Map<State> = state.try_into()?;
-                    params.insert(item_name.clone(), item.into());
-                    state = op.clone().call(txn, params.into()).await?;
-                }
-
-                Ok(state.into())
+                // let item_name: Id = params.require(&label("item_name").into())?;
+                // let op: Closure = params.require(&label("op").into())?;
+                // let mut state: State = params.require(&label("value").into())?;
+                // params.expect_empty()?;
+                //
+                // for item in self.tuple.iter().cloned() {
+                //     let mut params: Map<State> = state.try_into()?;
+                //     params.insert(item_name.clone(), item.into());
+                //     state = op.clone().call(txn, params.into()).await?;
+                // }
+                //
+                // Ok(state.into())
+                Err(not_implemented!("tuple fold"))
             })
         }))
     }
@@ -436,19 +443,20 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let op: Closure = params.require(&label("op").into())?;
-
-                let mut tuple = Vec::with_capacity(self.len);
-                let mut mapped = stream::iter(self.items)
-                    .map(State::from)
-                    .map(|state| op.clone().call(txn, state))
-                    .buffered(num_cpus::get());
-
-                while let Some(item) = mapped.try_next().await? {
-                    tuple.push(item);
-                }
-
-                Ok(State::Tuple(tuple.into()))
+                // let op: Closure = params.require(&label("op").into())?;
+                //
+                // let mut tuple = Vec::with_capacity(self.len);
+                // let mut mapped = stream::iter(self.items)
+                //     .map(State::from)
+                //     .map(|state| op.clone().call(txn, state))
+                //     .buffered(num_cpus::get());
+                //
+                // while let Some(item) = mapped.try_next().await? {
+                //     tuple.push(item);
+                // }
+                //
+                // Ok(State::Tuple(tuple.into()))
+                Err(not_implemented!("generic map op"))
             })
         }))
     }
@@ -477,35 +485,36 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                let len = self.tuple.len() as i64;
-
-                match key {
-                    Value::None => Ok(State::from(self.tuple.clone())),
-                    Value::Tuple(range) if range.matches::<(Bound<Value>, Bound<Value>)>() => {
-                        let range: (Bound<Value>, Bound<Value>) =
-                            range.opt_cast_into().expect("range");
-                        let (start, end) = cast_range(range, len)?;
-                        let slice = self.tuple[start..end]
-                            .iter()
-                            .cloned()
-                            .map(State::from)
-                            .collect();
-
-                        Ok(State::Tuple(slice))
-                    }
-                    i if i.matches::<Number>() => {
-                        let i = Number::opt_cast_from(i).expect("tuple index");
-                        let i = i64::cast_from(i);
-                        let i = if i < 0 { len + i } else { i };
-
-                        self.tuple
-                            .get(i as usize)
-                            .cloned()
-                            .map(State::from)
-                            .ok_or_else(|| TCError::not_found(format!("no such index: {}", i)))
-                    }
-                    other => Err(TCError::unexpected(other, "a tuple index")),
-                }
+                // let len = self.tuple.len() as i64;
+                //
+                // match key {
+                //     Value::None => Ok(State::from(self.tuple.clone())),
+                //     Value::Tuple(range) if range.matches::<(Bound<Value>, Bound<Value>)>() => {
+                //         let range: (Bound<Value>, Bound<Value>) =
+                //             range.opt_cast_into().expect("range");
+                //         let (start, end) = cast_range(range, len)?;
+                //         let slice = self.tuple[start..end]
+                //             .iter()
+                //             .cloned()
+                //             .map(State::from)
+                //             .collect();
+                //
+                //         Ok(State::Tuple(slice))
+                //     }
+                //     i if i.matches::<Number>() => {
+                //         let i = Number::opt_cast_from(i).expect("tuple index");
+                //         let i = i64::cast_from(i);
+                //         let i = if i < 0 { len + i } else { i };
+                //
+                //         self.tuple
+                //             .get(i as usize)
+                //             .cloned()
+                //             .map(State::from)
+                //             .ok_or_else(|| TCError::not_found(format!("no such index: {}", i)))
+                //     }
+                //     other => Err(TCError::unexpected(other, "a tuple index")),
+                // }
+                Err(not_implemented!("tuple handler"))
             })
         }))
     }
@@ -526,29 +535,30 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                let values: Tuple<Value> =
-                    key.try_cast_into(|v| bad_request!("invalid values for Tuple/zip: {}", v))?;
-
-                if self.keys.len() != values.len() {
-                    return Err(bad_request!(
-                        "cannot zip {} keys with {} values",
-                        self.keys.len(),
-                        values.len()
-                    ));
-                }
-
-                let zipped =
-                    self.keys
-                        .iter()
-                        .cloned()
-                        .zip(values.into_iter())
-                        .map(|(key, value)| {
-                            let key = State::from(key);
-                            let value = State::Scalar(Scalar::Value(value));
-                            State::Tuple(vec![key, value].into())
-                        });
-
-                Ok(State::Tuple(zipped.collect()))
+                // let values: Tuple<Value> =
+                //     key.try_cast_into(|v| bad_request!("invalid values for Tuple/zip: {}", v))?;
+                //
+                // if self.keys.len() != values.len() {
+                //     return Err(bad_request!(
+                //         "cannot zip {} keys with {} values",
+                //         self.keys.len(),
+                //         values.len()
+                //     ));
+                // }
+                //
+                // let zipped =
+                //     self.keys
+                //         .iter()
+                //         .cloned()
+                //         .zip(values.into_iter())
+                //         .map(|(key, value)| {
+                //             let key = State::from(key);
+                //             let value = State::Scalar(Scalar::Value(value));
+                //             State::Tuple(vec![key, value].into())
+                //         });
+                //
+                // Ok(State::Tuple(zipped.collect()))
+                Err(not_implemented!("zip tuples"))
             })
         }))
     }
@@ -673,15 +683,16 @@ impl<'a> Handler<'a> for CreateMapHandler {
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                let value =
-                    Tuple::<(Id, Value)>::try_cast_from(key, |v| TCError::unexpected(v, "a Map"))?;
-
-                let map = value
-                    .into_iter()
-                    .map(|(id, value)| (id, State::from(value)))
-                    .collect();
-
-                Ok(State::Map(map))
+                // let value =
+                //     Tuple::<(Id, Value)>::try_cast_from(key, |v| TCError::unexpected(v, "a Map"))?;
+                //
+                // let map = value
+                //     .into_iter()
+                //     .map(|(id, value)| (id, State::from(value)))
+                //     .collect();
+                //
+                // Ok(State::Map(map))
+                Err(not_implemented!("create map"))
             })
         }))
     }
@@ -708,8 +719,9 @@ impl<'a> Handler<'a> for CreateTupleHandler {
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                let value: Tuple<Value> = key.try_into()?;
-                Ok(State::Tuple(value.into_iter().map(State::from).collect()))
+                // let value: Tuple<Value> = key.try_into()?;
+                // Ok(State::Tuple(value.into_iter().map(State::from).collect()))
+                Err(not_implemented!("create tuple"))
             })
         }))
     }
@@ -724,22 +736,23 @@ impl<'a> Handler<'a> for CreateRangeHandler {
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                if key.matches::<(i64, i64, usize)>() {
-                    let (start, stop, step): (i64, i64, usize) =
-                        key.opt_cast_into().expect("range");
-
-                    Ok(State::Tuple(
-                        (start..stop).step_by(step).into_iter().collect(),
-                    ))
-                } else if key.matches::<(i64, i64)>() {
-                    let (start, stop): (i64, i64) = key.opt_cast_into().expect("range");
-                    Ok(State::Tuple((start..stop).into_iter().collect()))
-                } else if key.matches::<usize>() {
-                    let stop: usize = key.opt_cast_into().expect("range stop");
-                    Ok(State::Tuple((0..stop).into_iter().collect()))
-                } else {
-                    Err(TCError::unexpected(key, "a range"))
-                }
+                // if key.matches::<(i64, i64, usize)>() {
+                //     let (start, stop, step): (i64, i64, usize) =
+                //         key.opt_cast_into().expect("range");
+                //
+                //     Ok(State::Tuple(
+                //         (start..stop).step_by(step).into_iter().collect(),
+                //     ))
+                // } else if key.matches::<(i64, i64)>() {
+                //     let (start, stop): (i64, i64) = key.opt_cast_into().expect("range");
+                //     Ok(State::Tuple((start..stop).into_iter().collect()))
+                // } else if key.matches::<usize>() {
+                //     let stop: usize = key.opt_cast_into().expect("range stop");
+                //     Ok(State::Tuple((0..stop).into_iter().collect()))
+                // } else {
+                //     Err(TCError::unexpected(key, "a range"))
+                // }
+                Err(not_implemented!("create range"))
             })
         }))
     }
@@ -754,13 +767,14 @@ impl<'a> Handler<'a> for ConcatenateHandler {
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let l: Tuple<State> = params.require(&label("l").into())?;
-                let r: Tuple<State> = params.require(&label("r").into())?;
-                params.expect_empty()?;
-
-                let mut concat = l.into_inner();
-                concat.extend(r.into_inner());
-                Ok(State::Tuple(concat.into()))
+                // let l: Tuple<State> = params.require(&label("l").into())?;
+                // let r: Tuple<State> = params.require(&label("r").into())?;
+                // params.expect_empty()?;
+                //
+                // let mut concat = l.into_inner();
+                // concat.extend(r.into_inner());
+                // Ok(State::Tuple(concat.into()))
+                Err(not_implemented!("concatenate tuples"))
             })
         }))
     }

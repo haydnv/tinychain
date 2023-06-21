@@ -579,12 +579,13 @@ impl OpRefVisitor {
 
                     const HINT: &str = "(consider using a closure)";
 
-                    if let StateType::Chain(ct) = class {
-                        return Err(E::custom(format!(
-                            "{} {:?}: {:?} {}",
-                            ERR_IMMUTABLE, ct, tuple, HINT
-                        )));
-                    } else if let StateType::Collection(ct) = class {
+                    // if let StateType::Chain(ct) = class {
+                    //     return Err(E::custom(format!(
+                    //         "{} {:?}: {:?} {}",
+                    //         ERR_IMMUTABLE, ct, tuple, HINT
+                    //     )));
+                    // } else
+                    if let StateType::Collection(ct) = class {
                         return Err(E::custom(format!(
                             "{} {:?}: {:?} {}",
                             ERR_IMMUTABLE, ct, tuple, HINT
