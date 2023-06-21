@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use futures::Future;
 
 use tc_error::*;
-use tc_value::Value;
-use tcgeneric::{Map, PathSegment, TCPath, ThreadSafe};
+use tc_value::{Number, Value};
+use tcgeneric::{Map, PathSegment, TCPath, ThreadSafe, Tuple};
 
 use super::Transaction;
 
@@ -37,7 +37,16 @@ pub enum HandlerType {
     Delete,
 }
 
-pub trait StateInstance: From<Value> + ThreadSafe + fmt::Debug {}
+pub trait StateInstance:
+    From<bool>
+    + From<Number>
+    + From<Value>
+    + From<Map<Self>>
+    + From<Tuple<Self>>
+    + ThreadSafe
+    + fmt::Debug
+{
+}
 
 #[async_trait]
 pub trait Handler<'a, Txn, State>: Send {

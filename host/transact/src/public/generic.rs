@@ -5,27 +5,32 @@ use std::marker::PhantomData;
 use std::ops::{Bound, Deref};
 use std::str::FromStr;
 
-use futures::future::{self, TryFutureExt};
-use futures::stream::{self, FuturesOrdered, StreamExt, TryStreamExt};
+use futures::future::TryFutureExt;
+use futures::stream::{FuturesOrdered, TryStreamExt};
 use safecast::*;
 
-use crate::public::StateInstance;
-use crate::Transaction;
 use tc_error::*;
 use tc_value::{Number, UInt, Value};
-use tcgeneric::{label, Id, Instance, Map, PathSegment, TCPath, TCPathBuf, ThreadSafe, Tuple};
+use tcgeneric::{
+    label, path_label, Id, Instance, Map, PathLabel, PathSegment, TCPathBuf, ThreadSafe, Tuple,
+};
+
+use crate::Transaction;
 
 use super::helpers::AttributeHandler;
-use super::{GetHandler, Handler, PostHandler, Public, Route};
+use super::{GetHandler, Handler, PostHandler, Public, Route, StateInstance};
 
-struct AppendHandler<'a, T: Clone> {
+const COPY: PathLabel = path_label(&["copy"]);
+
+struct AppendHandler<'a, State, T: Clone> {
     tuple: &'a Tuple<T>,
+    state: PhantomData<State>,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for AppendHandler<'a, T>
+impl<'a, Txn, State, T> Handler<'a, Txn, State> for AppendHandler<'a, State, T>
 where
     T: fmt::Debug + Clone + Send + Sync,
-    State: From<T>,
+    State: From<T> + StateInstance,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
@@ -33,34 +38,35 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                // if self.tuple.is_empty() {
-                //     let key =
-                //         Tuple::<Value>::try_cast_from(key, |v| TCError::unexpected(v, "a Tuple"))?;
-                //
-                //     return Ok(Value::Tuple(key).into());
-                // }
-                //
-                // let suffix =
-                //     Tuple::<Value>::try_cast_from(key, |v| TCError::unexpected(v, "a Tuple"))?;
-                //
-                // let items = self.tuple.iter().cloned().map(State::from);
-                // let items = items.chain(suffix.into_iter().map(Scalar::Value).map(State::Scalar));
-                //
-                // Ok(State::Tuple(items.collect()))
-                Err(not_implemented!("tuple append"))
+                if self.tuple.is_empty() {
+                    let key =
+                        Tuple::<Value>::try_cast_from(key, |v| TCError::unexpected(v, "a Tuple"))?;
+
+                    return Ok(Value::Tuple(key).into());
+                }
+
+                let suffix =
+                    Tuple::<Value>::try_cast_from(key, |v| TCError::unexpected(v, "a Tuple"))?;
+
+                let items = self.tuple.iter().cloned().map(State::from);
+                let items = items.chain(suffix.into_iter().map(State::from));
+
+                Ok(State::from(items.collect::<Tuple<State>>()))
             })
         }))
     }
 }
 
-struct ContainsHandler<'a, T> {
+struct ContainsHandler<'a, State, T> {
     tuple: &'a Tuple<T>,
+    state: PhantomData<State>,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for ContainsHandler<'a, T>
+impl<'a, Txn, State, T> Handler<'a, Txn, State> for ContainsHandler<'a, State, T>
 where
     T: Clone + Send + Sync,
-    State: From<T>,
+    State: StateInstance + From<T>,
+    Value: TryCastFrom<State>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
@@ -68,24 +74,26 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                // let present = self
-                //     .tuple
-                //     .iter()
-                //     .cloned()
-                //     .map(State::from)
-                //     .filter_map(Value::opt_cast_from)
-                //     .any(|item| item == key);
-                //
-                // Ok(present.into())
-                Err(not_implemented!("tuple contains"))
+                let present = self
+                    .tuple
+                    .iter()
+                    .cloned()
+                    .map(State::from)
+                    .filter_map(Value::opt_cast_from)
+                    .any(|item| item == key);
+
+                Ok(present.into())
             })
         }))
     }
 }
 
-impl<'a, T> From<&'a Tuple<T>> for ContainsHandler<'a, T> {
+impl<'a, State, T> From<&'a Tuple<T>> for ContainsHandler<'a, State, T> {
     fn from(tuple: &'a Tuple<T>) -> Self {
-        Self { tuple }
+        Self {
+            tuple,
+            state: PhantomData,
+        }
     }
 }
 
@@ -127,37 +135,36 @@ struct MapCopyHandler<'a, FE, T> {
     phantom: PhantomData<FE>,
 }
 
-impl<'a, FE, Txn, State, T> Handler<'a, Txn, State> for MapCopyHandler<'a, FE, T>
+impl<'a, FE, T> Handler<'a, T::Txn, T::State> for MapCopyHandler<'a, FE, T>
 where
     FE: ThreadSafe,
-    Txn: Transaction<FE>,
-    T: Route<FE, Txn = Txn, State = State> + Clone + Send + fmt::Debug + 'a,
+    T: Route<FE> + Clone + Send + fmt::Debug + 'a,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, T::Txn, T::State>>
     where
         'b: 'a,
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                // key.expect_none()?;
-                //
-                // let path = TCPathBuf::from(COPY);
-                // let mut copies: FuturesOrdered<_> = self
-                //     .map
-                //     .iter()
-                //     .map(|(key, item)| {
-                //         let result = Public::get(item, txn, &path, Value::default());
-                //         result.map_ok(move |state| (key, state))
-                //     })
-                //     .collect();
-                //
-                // let mut copy = Map::new();
-                // while let Some((key, item)) = copies.try_next().await? {
-                //     copy.insert(key.clone(), item);
-                // }
-                //
-                // Ok(State::Map(copy.into()))
-                Err(not_implemented!("copy map"))
+                key.expect_none()?;
+
+                let path = TCPathBuf::from(COPY);
+                let mut copies: FuturesOrdered<_> = self
+                    .map
+                    .iter()
+                    .map(|(key, item)| {
+                        let key = key.clone();
+                        let result = Public::get(item, txn, &path, Value::default());
+                        result.map_ok(move |state| (key, state))
+                    })
+                    .collect();
+
+                let mut copy = Map::new();
+                while let Some((key, item)) = copies.try_next().await? {
+                    copy.insert(key, item);
+                }
+
+                Ok(copy.into())
             })
         }))
     }
@@ -172,14 +179,17 @@ impl<'a, FE, T> From<&'a Map<T>> for MapCopyHandler<'a, FE, T> {
     }
 }
 
-struct MapEqHandler<T> {
+struct MapEqHandler<State, T> {
     map: Map<T>,
+    state: PhantomData<State>,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for MapEqHandler<T>
+impl<'a, Txn, State, T> Handler<'a, Txn, State> for MapEqHandler<State, T>
 where
-    State: From<T>,
+    State: StateInstance + From<T>,
     T: fmt::Debug + Send + Sync + 'a,
+    Map<State>: TryCastFrom<State>,
+    Value: TryCastFrom<State>,
 {
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
@@ -187,53 +197,59 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                // let other: Map<State> = params.require(&label("eq").into())?;
-                // params.expect_empty()?;
-                //
-                // if self.map.len() != other.len() {
-                //     return Ok(false.into());
-                // }
-                //
-                // let eq = self
-                //     .map
-                //     .into_iter()
-                //     .zip(other)
-                //     .map(|((this_id, this), (that_id, that))| {
-                //         if this_id != that_id {
-                //             return Ok(false);
-                //         }
-                //
-                //         let this = State::from(this);
-                //         let this =
-                //             Value::try_cast_from(this, |s| TCError::unexpected(s, "a Value"))?;
-                //         let that =
-                //             Value::try_cast_from(that, |s| TCError::unexpected(s, "a Value"))?;
-                //
-                //         Ok(this == that)
-                //     })
-                //     .collect::<TCResult<Vec<bool>>>()?;
-                //
-                // Ok(eq.into_iter().all(|eq| eq).into())
-                Err(not_implemented!("Map eq"))
+                let other: Map<State> = params.require(&label("eq").into())?;
+                params.expect_empty()?;
+
+                if self.map.len() != other.len() {
+                    return Ok(false.into());
+                }
+
+                let eq = self
+                    .map
+                    .into_iter()
+                    .zip(other)
+                    .map(|((this_id, this), (that_id, that))| {
+                        if this_id != that_id {
+                            return Ok(false);
+                        }
+
+                        let this = State::from(this);
+                        let this =
+                            Value::try_cast_from(this, |s| TCError::unexpected(s, "a Value"))?;
+
+                        let that =
+                            Value::try_cast_from(that, |s| TCError::unexpected(s, "a Value"))?;
+
+                        Ok(this == that)
+                    })
+                    .collect::<TCResult<Vec<bool>>>()?;
+
+                Ok(eq.into_iter().all(|eq| eq).into())
             })
         }))
     }
 }
 
-impl<T> From<Map<T>> for MapEqHandler<T> {
+impl<State, T> From<Map<T>> for MapEqHandler<State, T> {
     fn from(map: Map<T>) -> Self {
-        Self { map }
+        Self {
+            map,
+            state: PhantomData,
+        }
     }
 }
 
-struct EqTupleHandler<T> {
+struct EqTupleHandler<State, T> {
     tuple: Tuple<T>,
+    state: PhantomData<State>,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for EqTupleHandler<T>
+impl<'a, Txn, State, T> Handler<'a, Txn, State> for EqTupleHandler<State, T>
 where
     T: fmt::Debug + Send + Sync + 'a,
-    State: From<T>,
+    State: StateInstance + From<T>,
+    Tuple<State>: TryCastFrom<State>,
+    Value: TryCastFrom<State>,
 {
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
@@ -241,43 +257,51 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                // let other: Tuple<State> = params.require(&label("eq").into())?;
-                // params.expect_empty()?;
-                //
-                // if self.tuple.len() != other.len() {
-                //     return Ok(false.into());
-                // }
-                //
-                // let eq = self
-                //     .tuple
-                //     .into_iter()
-                //     .zip(other)
-                //     .map(|(this, that)| {
-                //         let this = State::from(this);
-                //         let this =
-                //             Value::try_cast_from(this, |s| TCError::unexpected(s, "a Value"))?;
-                //         let that =
-                //             Value::try_cast_from(that, |s| TCError::unexpected(s, "a Value"))?;
-                //         Ok(this == that)
-                //     })
-                //     .collect::<TCResult<Vec<bool>>>()?;
-                //
-                // Ok(eq.into_iter().all(|eq| eq).into())
-                Err(not_implemented!("tuple eq"))
+                let other: Tuple<State> = params.require(&label("eq").into())?;
+                params.expect_empty()?;
+
+                if self.tuple.len() != other.len() {
+                    return Ok(false.into());
+                }
+
+                let eq = self
+                    .tuple
+                    .into_iter()
+                    .zip(other)
+                    .map(|(this, that)| {
+                        let this = State::from(this);
+
+                        let this =
+                            Value::try_cast_from(this, |s| TCError::unexpected(s, "a Value"))?;
+
+                        let that =
+                            Value::try_cast_from(that, |s| TCError::unexpected(s, "a Value"))?;
+
+                        Ok(this == that)
+                    })
+                    .collect::<TCResult<Vec<bool>>>()?;
+
+                Ok(eq.into_iter().all(|eq| eq).into())
             })
         }))
     }
 }
 
-impl<T> From<Tuple<T>> for EqTupleHandler<T> {
+impl<State, T> From<Tuple<T>> for EqTupleHandler<State, T> {
     fn from(tuple: Tuple<T>) -> Self {
-        Self { tuple }
+        Self {
+            tuple,
+            state: PhantomData,
+        }
     }
 }
 
-impl<'a, T: Clone> From<&'a Tuple<T>> for AppendHandler<'a, T> {
+impl<'a, State, T: Clone> From<&'a Tuple<T>> for AppendHandler<'a, State, T> {
     fn from(tuple: &'a Tuple<T>) -> Self {
-        Self { tuple }
+        Self {
+            tuple,
+            state: PhantomData,
+        }
     }
 }
 
@@ -287,8 +311,7 @@ struct MapHandler<'a, T: Clone> {
 
 impl<'a, Txn, State, T> Handler<'a, Txn, State> for MapHandler<'a, T>
 where
-    State: From<Map<T>>,
-    State: From<T>,
+    State: StateInstance + From<T> + From<Map<T>>,
     T: Instance + Clone,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
@@ -297,21 +320,20 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                // if key.is_none() {
-                //     Ok(State::from(self.map.clone()))
-                // } else {
-                //     let key = Id::try_cast_from(key, |v| TCError::unexpected(v, "an Id"))?;
-                //     self.map.get(&key).cloned().map(State::from).ok_or_else(|| {
-                //         let msg = format!(
-                //             "{} in Map with keys {}",
-                //             key,
-                //             self.map.keys().collect::<Tuple<&Id>>()
-                //         );
-                //
-                //         TCError::not_found(msg)
-                //     })
-                // }
-                Err(not_implemented!("map op"))
+                if key.is_none() {
+                    Ok(State::from(self.map.clone()))
+                } else {
+                    let key = Id::try_cast_from(key, |v| TCError::unexpected(v, "an Id"))?;
+                    self.map.get(&key).cloned().map(State::from).ok_or_else(|| {
+                        let msg = format!(
+                            "{} in Map with keys {}",
+                            key,
+                            self.map.keys().collect::<Tuple<&Id>>()
+                        );
+
+                        TCError::not_found(msg)
+                    })
+                }
             })
         }))
     }
@@ -322,6 +344,9 @@ where
     FE: ThreadSafe,
     T: Instance + Route<FE> + Clone + fmt::Debug,
     T::State: From<T> + From<Map<T>> + From<Number>,
+    Map<T::State>: TryCastFrom<T::State>,
+    Tuple<T::State>: TryCastFrom<T::State>,
+    Value: TryCastFrom<T::State>,
 {
     type Txn = T::Txn;
     type State = T::State;
@@ -365,22 +390,21 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                // key.expect_none()?;
-                //
-                // let path = TCPathBuf::from(COPY);
-                // let mut copies: FuturesOrdered<_> = self
-                //     .tuple
-                //     .iter()
-                //     .map(|item| Public::get(item, txn, &path, Value::default()))
-                //     .collect();
-                //
-                // let mut copy = Vec::with_capacity(self.tuple.len());
-                // while let Some(item) = copies.try_next().await? {
-                //     copy.push(item);
-                // }
-                //
-                // Ok(State::Tuple(copy.into()))
-                Err(not_implemented!("Tuple copy"))
+                key.expect_none()?;
+
+                let path = TCPathBuf::from(COPY);
+                let mut copies: FuturesOrdered<_> = self
+                    .tuple
+                    .iter()
+                    .map(|item| Public::get(item, txn, &path, Value::default()))
+                    .collect();
+
+                let mut copy = Vec::with_capacity(self.tuple.len());
+                while let Some(item) = copies.try_next().await? {
+                    copy.push(item);
+                }
+
+                Ok(T::State::from(Tuple::from(copy)))
             })
         }))
     }
@@ -484,7 +508,7 @@ struct TupleHandler<'a, T: Clone> {
 
 impl<'a, Txn, State, T> Handler<'a, Txn, State> for TupleHandler<'a, T>
 where
-    State: From<T> + From<Tuple<T>>,
+    State: StateInstance + From<T> + From<Tuple<T>>,
     T: Instance + Clone,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
@@ -493,36 +517,35 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                // let len = self.tuple.len() as i64;
-                //
-                // match key {
-                //     Value::None => Ok(State::from(self.tuple.clone())),
-                //     Value::Tuple(range) if range.matches::<(Bound<Value>, Bound<Value>)>() => {
-                //         let range: (Bound<Value>, Bound<Value>) =
-                //             range.opt_cast_into().expect("range");
-                //         let (start, end) = cast_range(range, len)?;
-                //         let slice = self.tuple[start..end]
-                //             .iter()
-                //             .cloned()
-                //             .map(State::from)
-                //             .collect();
-                //
-                //         Ok(State::Tuple(slice))
-                //     }
-                //     i if i.matches::<Number>() => {
-                //         let i = Number::opt_cast_from(i).expect("tuple index");
-                //         let i = i64::cast_from(i);
-                //         let i = if i < 0 { len + i } else { i };
-                //
-                //         self.tuple
-                //             .get(i as usize)
-                //             .cloned()
-                //             .map(State::from)
-                //             .ok_or_else(|| TCError::not_found(format!("no such index: {}", i)))
-                //     }
-                //     other => Err(TCError::unexpected(other, "a tuple index")),
-                // }
-                Err(not_implemented!("tuple handler"))
+                let len = self.tuple.len() as i64;
+
+                match key {
+                    Value::None => Ok(State::from(self.tuple.clone())),
+                    Value::Tuple(range) if range.matches::<(Bound<Value>, Bound<Value>)>() => {
+                        let range: (Bound<Value>, Bound<Value>) =
+                            range.opt_cast_into().expect("range");
+
+                        let (start, end) = cast_range(range, len)?;
+                        let slice = self.tuple[start..end]
+                            .iter()
+                            .cloned()
+                            .collect::<Tuple<State>>();
+
+                        Ok(State::from(slice))
+                    }
+                    i if i.matches::<Number>() => {
+                        let i = Number::opt_cast_from(i).expect("tuple index");
+                        let i = i64::cast_from(i);
+                        let i = if i < 0 { len + i } else { i };
+
+                        self.tuple
+                            .get(i as usize)
+                            .cloned()
+                            .map(State::from)
+                            .ok_or_else(|| TCError::not_found(format!("no such index: {}", i)))
+                    }
+                    other => Err(TCError::unexpected(other, "a tuple index")),
+                }
             })
         }))
     }
@@ -534,7 +557,7 @@ struct ZipHandler<'a, T: Clone> {
 
 impl<'a, Txn, State, T> Handler<'a, Txn, State> for ZipHandler<'a, T>
 where
-    State: From<T>,
+    State: StateInstance + From<T>,
     T: Clone + Send + Sync,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
@@ -543,30 +566,29 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                // let values: Tuple<Value> =
-                //     key.try_cast_into(|v| bad_request!("invalid values for Tuple/zip: {}", v))?;
-                //
-                // if self.keys.len() != values.len() {
-                //     return Err(bad_request!(
-                //         "cannot zip {} keys with {} values",
-                //         self.keys.len(),
-                //         values.len()
-                //     ));
-                // }
-                //
-                // let zipped =
-                //     self.keys
-                //         .iter()
-                //         .cloned()
-                //         .zip(values.into_iter())
-                //         .map(|(key, value)| {
-                //             let key = State::from(key);
-                //             let value = State::Scalar(Scalar::Value(value));
-                //             State::Tuple(vec![key, value].into())
-                //         });
-                //
-                // Ok(State::Tuple(zipped.collect()))
-                Err(not_implemented!("zip tuples"))
+                let values: Tuple<Value> =
+                    key.try_cast_into(|v| bad_request!("invalid values for Tuple/zip: {}", v))?;
+
+                if self.keys.len() != values.len() {
+                    return Err(bad_request!(
+                        "cannot zip {} keys with {} values",
+                        self.keys.len(),
+                        values.len()
+                    ));
+                }
+
+                let zipped =
+                    self.keys
+                        .iter()
+                        .cloned()
+                        .zip(values.into_iter())
+                        .map(|(key, value)| {
+                            let key = State::from(key);
+                            let value = State::from(value);
+                            State::from(Tuple::from(vec![key, value]))
+                        });
+
+                Ok(State::from(zipped.collect::<Tuple<State>>()))
             })
         }))
     }
@@ -581,8 +603,10 @@ impl<'a, T: Clone> From<&'a Tuple<T>> for ZipHandler<'a, T> {
 impl<FE, T> Route<FE> for Tuple<T>
 where
     FE: ThreadSafe,
-    T: Instance + Route<FE> + Clone + fmt::Debug,
+    T: Instance + Route<FE> + Clone + fmt::Debug + 'static,
     T::State: From<T> + From<Tuple<T>> + From<Number>,
+    Tuple<T::State>: TryCastFrom<T::State>,
+    Value: From<T::State>,
 {
     type Txn = T::Txn;
     type State = T::State;
@@ -614,6 +638,176 @@ where
                 "eq" => Some(Box::new(EqTupleHandler::from(self.clone()))),
                 "map" => Some(Box::new(MapOpHandler::from(self))),
                 "zip" => Some(Box::new(ZipHandler::from(self))),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+}
+
+struct CreateMapHandler;
+
+impl<'a, Txn, State> Handler<'a, Txn, State> for CreateMapHandler
+where
+    State: StateInstance,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let value =
+                    Tuple::<(Id, Value)>::try_cast_from(key, |v| TCError::unexpected(v, "a Map"))?;
+
+                let map = value.into_iter().collect::<Map<State>>();
+
+                Ok(State::from(map))
+            })
+        }))
+    }
+}
+
+pub struct MapStatic<Txn, State> {
+    phantom: PhantomData<(Txn, State)>,
+}
+
+impl<FE, Txn, State> Route<FE> for MapStatic<Txn, State>
+where
+    Txn: Transaction<FE>,
+    State: StateInstance,
+{
+    type Txn = Txn;
+    type State = State;
+
+    fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, Txn, State> + 'a>> {
+        if path.is_empty() {
+            Some(Box::new(CreateMapHandler))
+        } else {
+            None
+        }
+    }
+}
+
+struct CreateTupleHandler;
+
+impl<'a, Txn, State> Handler<'a, Txn, State> for CreateTupleHandler
+where
+    State: StateInstance,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                let value: Tuple<Value> = key.try_into()?;
+                Ok(State::from(value.into_iter().collect::<Tuple<State>>()))
+            })
+        }))
+    }
+}
+
+struct CreateRangeHandler;
+
+impl<'a, Txn, State> Handler<'a, Txn, State> for CreateRangeHandler
+where
+    State: StateInstance,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move {
+                if key.matches::<(i64, i64, usize)>() {
+                    let (start, stop, step): (i64, i64, usize) =
+                        key.opt_cast_into().expect("range");
+
+                    Ok(State::from(
+                        (start..stop)
+                            .step_by(step)
+                            .into_iter()
+                            .map(Number::from)
+                            .collect::<Tuple<State>>(),
+                    ))
+                } else if key.matches::<(i64, i64)>() {
+                    let (start, stop): (i64, i64) = key.opt_cast_into().expect("range");
+                    Ok(State::from(
+                        (start..stop)
+                            .into_iter()
+                            .map(Number::from)
+                            .collect::<Tuple<State>>(),
+                    ))
+                } else if key.matches::<usize>() {
+                    let stop: usize = key.opt_cast_into().expect("range stop");
+                    Ok(State::from(
+                        (0..stop as u64)
+                            .into_iter()
+                            .map(Number::from)
+                            .collect::<Tuple<State>>(),
+                    ))
+                } else {
+                    Err(TCError::unexpected(key, "a range"))
+                }
+            })
+        }))
+    }
+}
+
+struct ConcatenateHandler;
+
+impl<'a, Txn, State> Handler<'a, Txn, State> for ConcatenateHandler
+where
+    State: StateInstance,
+    Tuple<State>: TryCastFrom<State>,
+{
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let l: Tuple<State> = params.require(&label("l").into())?;
+                let r: Tuple<State> = params.require(&label("r").into())?;
+                params.expect_empty()?;
+
+                let mut concat = l.into_inner();
+                concat.extend(r.into_inner());
+                Ok(State::from(Tuple::from(concat)))
+            })
+        }))
+    }
+}
+
+#[derive(Default)]
+pub struct TupleStatic<Txn, State> {
+    phantom: PhantomData<(Txn, State)>,
+}
+
+impl<FE, Txn, State> Route<FE> for TupleStatic<Txn, State>
+where
+    Txn: Transaction<FE>,
+    State: StateInstance,
+    Tuple<State>: TryCastFrom<State>,
+{
+    type Txn = Txn;
+    type State = State;
+
+    fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, Txn, State> + 'a>> {
+        if path.is_empty() {
+            Some(Box::new(CreateTupleHandler))
+        } else if path.len() == 1 {
+            match path[0].as_str() {
+                "concatenate" => Some(Box::new(ConcatenateHandler)),
+                "range" => Some(Box::new(CreateRangeHandler)),
                 _ => None,
             }
         } else {
@@ -685,154 +879,5 @@ fn cast_range(range: (Bound<Value>, Bound<Value>), len: i64) -> TCResult<(usize,
         ))
     } else {
         Ok((start as usize, end as usize))
-    }
-}
-
-struct CreateMapHandler;
-
-impl<'a, Txn, State> Handler<'a, Txn, State> for CreateMapHandler {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, key| {
-            Box::pin(async move {
-                // let value =
-                //     Tuple::<(Id, Value)>::try_cast_from(key, |v| TCError::unexpected(v, "a Map"))?;
-                //
-                // let map = value
-                //     .into_iter()
-                //     .map(|(id, value)| (id, State::from(value)))
-                //     .collect();
-                //
-                // Ok(State::Map(map))
-                Err(not_implemented!("create map"))
-            })
-        }))
-    }
-}
-
-pub struct MapStatic<Txn, State> {
-    phantom: PhantomData<(Txn, State)>,
-}
-
-impl<FE, Txn, State> Route<FE> for MapStatic<Txn, State>
-where
-    Txn: Transaction<FE>,
-    State: StateInstance,
-{
-    type Txn = Txn;
-    type State = State;
-
-    fn route<'a>(
-        &'a self,
-        path: &'a [PathSegment],
-    ) -> Option<Box<dyn Handler<'a, Txn, State> + 'a>> {
-        if path.is_empty() {
-            Some(Box::new(CreateMapHandler))
-        } else {
-            None
-        }
-    }
-}
-
-struct CreateTupleHandler;
-
-impl<'a, Txn, State> Handler<'a, Txn, State> for CreateTupleHandler {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, key| {
-            Box::pin(async move {
-                // let value: Tuple<Value> = key.try_into()?;
-                // Ok(State::Tuple(value.into_iter().map(State::from).collect()))
-                Err(not_implemented!("create tuple"))
-            })
-        }))
-    }
-}
-
-struct CreateRangeHandler;
-
-impl<'a, Txn, State> Handler<'a, Txn, State> for CreateRangeHandler {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, key| {
-            Box::pin(async move {
-                // if key.matches::<(i64, i64, usize)>() {
-                //     let (start, stop, step): (i64, i64, usize) =
-                //         key.opt_cast_into().expect("range");
-                //
-                //     Ok(State::Tuple(
-                //         (start..stop).step_by(step).into_iter().collect(),
-                //     ))
-                // } else if key.matches::<(i64, i64)>() {
-                //     let (start, stop): (i64, i64) = key.opt_cast_into().expect("range");
-                //     Ok(State::Tuple((start..stop).into_iter().collect()))
-                // } else if key.matches::<usize>() {
-                //     let stop: usize = key.opt_cast_into().expect("range stop");
-                //     Ok(State::Tuple((0..stop).into_iter().collect()))
-                // } else {
-                //     Err(TCError::unexpected(key, "a range"))
-                // }
-                Err(not_implemented!("create range"))
-            })
-        }))
-    }
-}
-
-struct ConcatenateHandler;
-
-impl<'a, Txn, State> Handler<'a, Txn, State> for ConcatenateHandler {
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|_txn, mut params| {
-            Box::pin(async move {
-                // let l: Tuple<State> = params.require(&label("l").into())?;
-                // let r: Tuple<State> = params.require(&label("r").into())?;
-                // params.expect_empty()?;
-                //
-                // let mut concat = l.into_inner();
-                // concat.extend(r.into_inner());
-                // Ok(State::Tuple(concat.into()))
-                Err(not_implemented!("concatenate tuples"))
-            })
-        }))
-    }
-}
-
-#[derive(Default)]
-pub struct TupleStatic<Txn, State> {
-    phantom: PhantomData<(Txn, State)>,
-}
-
-impl<FE, Txn, State> Route<FE> for TupleStatic<Txn, State>
-where
-    Txn: Transaction<FE>,
-    State: StateInstance,
-{
-    type Txn = Txn;
-    type State = State;
-
-    fn route<'a>(
-        &'a self,
-        path: &'a [PathSegment],
-    ) -> Option<Box<dyn Handler<'a, Txn, State> + 'a>> {
-        if path.is_empty() {
-            Some(Box::new(CreateTupleHandler))
-        } else if path.len() == 1 {
-            match path[0].as_str() {
-                "concatenate" => Some(Box::new(ConcatenateHandler)),
-                "range" => Some(Box::new(CreateRangeHandler)),
-                _ => None,
-            }
-        } else {
-            None
-        }
     }
 }
