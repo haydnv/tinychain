@@ -1,5 +1,7 @@
 //! A generic scalar [`Value`] enum which supports collation.
 
+pub extern crate uuid;
+
 use std::cmp::Ordering;
 
 use collate::{Collate, Collator};

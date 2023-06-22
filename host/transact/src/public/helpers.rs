@@ -173,7 +173,8 @@ impl<'a, T> From<&'a T> for MethodNotAllowedHandler<'a, T> {
         Self { subject }
     }
 }
-struct SelfHandler<'a, T> {
+
+pub struct SelfHandler<'a, T> {
     subject: &'a T,
 }
 
@@ -207,7 +208,7 @@ impl<'a, T> From<&'a T> for SelfHandler<'a, T> {
     }
 }
 
-struct SelfHandlerOwned<T> {
+pub struct SelfHandlerOwned<T> {
     subject: T,
 }
 

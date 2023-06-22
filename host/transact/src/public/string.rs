@@ -40,11 +40,6 @@ where
                 let params = params
                     .into_iter()
                     .map(|(id, state)| {
-                        // let as_string = match state {
-                        //     State::Scalar(Scalar::Value(value)) => value.to_string(),
-                        //     other => format!("{:?}", other),
-                        // };
-
                         let as_string = if state.matches::<TCString>() {
                             state.opt_cast_into().expect("string")
                         } else {

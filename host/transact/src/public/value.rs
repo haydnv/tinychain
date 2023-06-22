@@ -2,14 +2,11 @@ use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_value::uuid::Uuid;
-use tc_value::Value;
-use tcgeneric::{label, Label, PathSegment};
+use tc_value::{Number, TCString, Value};
+use tcgeneric::{label, Label, PathSegment, Tuple};
 
-use crate::route::{GetHandler, Handler, Route, SelfHandler};
-use crate::state::State;
-
-mod number;
-mod string;
+use super::helpers::SelfHandler;
+use super::{GetHandler, Handler, Route, StateInstance};
 
 pub const PREFIX: Label = label("value");
 
@@ -17,8 +14,12 @@ struct EqHandler<F> {
     call: F,
 }
 
-impl<'a, F: FnOnce(Value) -> bool + Send + 'a> Handler<'a> for EqHandler<F> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+impl<'a, State, F> Handler<'a, State> for EqHandler<F>
+where
+    State: StateInstance,
+    F: FnOnce(Value) -> bool + Send + 'a,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -34,8 +35,13 @@ impl<F> From<F> for EqHandler<F> {
     }
 }
 
-impl Route for Value {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+impl<State: StateInstance> Route<State> for Value
+where
+    Tuple<Self>: Route<State>,
+    Number: Route<State>,
+    TCString: Route<State>,
+{
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         let child_handler = match self {
             Self::Number(number) => number.route(path),
             Self::String(s) => s.route(path),
@@ -63,8 +69,8 @@ struct UuidHandler<'a> {
     dtype: &'a str,
 }
 
-impl<'a> Handler<'a> for UuidHandler<'a> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+impl<'a, State: StateInstance> Handler<'a, State> for UuidHandler<'a> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -93,8 +99,8 @@ impl<'a> Handler<'a> for UuidHandler<'a> {
 
 pub struct Static;
 
-impl Route for Static {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+impl<State: StateInstance> Route<State> for Static {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         if path.is_empty() {
             return None;
         }
