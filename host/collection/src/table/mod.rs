@@ -22,6 +22,7 @@ pub use stream::Rows;
 pub(crate) use stream::TableView;
 
 mod file;
+mod public;
 mod schema;
 mod stream;
 mod view;

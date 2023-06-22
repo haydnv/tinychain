@@ -65,6 +65,12 @@ pub trait StateInstance:
     type FE: ThreadSafe + Clone;
     type Txn: Transaction<Self::FE> + RPCClient<Self>;
     type Closure: ClosureInstance<Self>;
+
+    /// Return `true` if this is a `Map` of states.
+    fn is_map(&self) -> bool;
+
+    /// Return `true` if this is a `Tuple` of states.
+    fn is_tuple(&self) -> bool;
 }
 
 /// Trait to define a [`StateInstance`] representation of a (possibly non-[`StateInstance`]) value
