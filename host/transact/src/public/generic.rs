@@ -12,30 +12,25 @@ use safecast::*;
 
 use tc_error::*;
 use tc_value::{Number, UInt, Value};
-use tcgeneric::{
-    label, path_label, Id, Instance, Map, PathLabel, PathSegment, TCPathBuf, ThreadSafe, Tuple,
-};
-
-use crate::Transaction;
+use tcgeneric::{label, path_label, Id, Instance, Map, PathLabel, PathSegment, TCPathBuf, Tuple};
 
 use super::helpers::AttributeHandler;
 use super::{ClosureInstance, GetHandler, Handler, PostHandler, Public, Route, StateInstance};
 
-type Closure<FE, Txn, State> = Box<dyn ClosureInstance<FE, Txn = Txn, State = State>>;
+type Closure<State> = Box<dyn ClosureInstance<State>>;
 
 const COPY: PathLabel = path_label(&["copy"]);
 
-struct AppendHandler<'a, State, T: Clone> {
+struct AppendHandler<'a, T: Clone> {
     tuple: &'a Tuple<T>,
-    state: PhantomData<State>,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for AppendHandler<'a, State, T>
+impl<'a, State, T> Handler<'a, State> for AppendHandler<'a, T>
 where
+    State: StateInstance + From<T>,
     T: fmt::Debug + Clone + Send + Sync,
-    State: From<T> + StateInstance,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -60,18 +55,17 @@ where
     }
 }
 
-struct ContainsHandler<'a, State, T> {
+struct ContainsHandler<'a, T> {
     tuple: &'a Tuple<T>,
-    state: PhantomData<State>,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for ContainsHandler<'a, State, T>
+impl<'a, State, T> Handler<'a, State> for ContainsHandler<'a, T>
 where
-    T: Clone + Send + Sync,
     State: StateInstance + From<T>,
+    T: Clone + Send + Sync,
     Value: TryCastFrom<State>,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -91,31 +85,25 @@ where
     }
 }
 
-impl<'a, State, T> From<&'a Tuple<T>> for ContainsHandler<'a, State, T> {
+impl<'a, T> From<&'a Tuple<T>> for ContainsHandler<'a, T> {
     fn from(tuple: &'a Tuple<T>) -> Self {
-        Self {
-            tuple,
-            state: PhantomData,
-        }
+        Self { tuple }
     }
 }
 
-struct ForEachHandler<FE, I> {
+struct ForEachHandler<I> {
     source: I,
-    phantom: PhantomData<FE>,
 }
 
-impl<'a, FE, Txn, State, I, T> Handler<'a, Txn, State> for ForEachHandler<FE, I>
+impl<'a, State, I, T> Handler<'a, State> for ForEachHandler<I>
 where
-    FE: ThreadSafe,
-    Txn: Transaction<FE>,
     State: StateInstance + From<T>,
     I: IntoIterator<Item = T> + Send + 'a,
     I::IntoIter: Send + 'a,
     T: 'a,
-    Closure<FE, Txn, State>: TryCastFrom<State>,
+    Closure<State>: TryCastFrom<State>,
 {
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -126,7 +114,7 @@ where
 
                 stream::iter(self.source)
                     .map(|args| {
-                        Closure::<FE, Txn, State>::try_cast_from(op.clone(), |state| {
+                        Closure::try_cast_from(op.clone(), |state| {
                             bad_request!("not a closure: {state:?}")
                         })
                         .map(|op| op.call(txn.clone(), State::from(args)))
@@ -141,26 +129,22 @@ where
     }
 }
 
-impl<FE, I> From<I> for ForEachHandler<FE, I> {
+impl<I> From<I> for ForEachHandler<I> {
     fn from(source: I) -> Self {
-        Self {
-            source,
-            phantom: PhantomData,
-        }
+        Self { source }
     }
 }
 
-struct MapCopyHandler<'a, FE, T> {
+struct MapCopyHandler<'a, T> {
     map: &'a Map<T>,
-    phantom: PhantomData<FE>,
 }
 
-impl<'a, FE, T> Handler<'a, T::Txn, T::State> for MapCopyHandler<'a, FE, T>
+impl<'a, State, T> Handler<'a, State> for MapCopyHandler<'a, T>
 where
-    FE: ThreadSafe,
-    T: Route<FE> + Clone + Send + fmt::Debug + 'a,
+    State: StateInstance,
+    T: Route<State> + Clone + Send + fmt::Debug + 'a,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, T::Txn, T::State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -190,12 +174,9 @@ where
     }
 }
 
-impl<'a, FE, T> From<&'a Map<T>> for MapCopyHandler<'a, FE, T> {
+impl<'a, T> From<&'a Map<T>> for MapCopyHandler<'a, T> {
     fn from(map: &'a Map<T>) -> Self {
-        Self {
-            map,
-            phantom: PhantomData,
-        }
+        Self { map }
     }
 }
 
@@ -204,14 +185,14 @@ struct MapEqHandler<State, T> {
     state: PhantomData<State>,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for MapEqHandler<State, T>
+impl<'a, State, T> Handler<'a, State> for MapEqHandler<State, T>
 where
     State: StateInstance + From<T>,
     T: fmt::Debug + Send + Sync + 'a,
     Map<State>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
 {
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -259,19 +240,18 @@ impl<State, T> From<Map<T>> for MapEqHandler<State, T> {
     }
 }
 
-struct EqTupleHandler<State, T> {
+struct EqTupleHandler<T> {
     tuple: Tuple<T>,
-    state: PhantomData<State>,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for EqTupleHandler<State, T>
+impl<'a, State, T> Handler<'a, State> for EqTupleHandler<T>
 where
     T: fmt::Debug + Send + Sync + 'a,
     State: StateInstance + From<T>,
     Tuple<State>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
 {
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -307,21 +287,15 @@ where
     }
 }
 
-impl<State, T> From<Tuple<T>> for EqTupleHandler<State, T> {
+impl<T> From<Tuple<T>> for EqTupleHandler<T> {
     fn from(tuple: Tuple<T>) -> Self {
-        Self {
-            tuple,
-            state: PhantomData,
-        }
+        Self { tuple }
     }
 }
 
-impl<'a, State, T: Clone> From<&'a Tuple<T>> for AppendHandler<'a, State, T> {
+impl<'a, T: Clone> From<&'a Tuple<T>> for AppendHandler<'a, T> {
     fn from(tuple: &'a Tuple<T>) -> Self {
-        Self {
-            tuple,
-            state: PhantomData,
-        }
+        Self { tuple }
     }
 }
 
@@ -329,12 +303,12 @@ struct MapHandler<'a, T: Clone> {
     map: &'a Map<T>,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for MapHandler<'a, T>
+impl<'a, State, T> Handler<'a, State> for MapHandler<'a, T>
 where
     State: StateInstance + From<T> + From<Map<T>>,
     T: Instance + Clone,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -359,22 +333,15 @@ where
     }
 }
 
-impl<FE, T> Route<FE> for Map<T>
+impl<State, T> Route<State> for Map<T>
 where
-    FE: ThreadSafe,
-    T: Instance + Route<FE> + Clone + fmt::Debug,
-    T::State: From<T> + From<Map<T>> + From<Number>,
-    Map<T::State>: TryCastFrom<T::State>,
-    Tuple<T::State>: TryCastFrom<T::State>,
-    Value: TryCastFrom<T::State>,
+    State: StateInstance + From<T> + From<Map<T>> + From<Number>,
+    T: Instance + Route<State> + Clone + fmt::Debug,
+    Map<State>: TryCastFrom<State>,
+    Tuple<State>: TryCastFrom<State>,
+    Value: TryCastFrom<State>,
 {
-    type Txn = T::Txn;
-    type State = T::State;
-
-    fn route<'a>(
-        &'a self,
-        path: &'a [PathSegment],
-    ) -> Option<Box<dyn Handler<'a, T::Txn, T::State> + 'a>> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         if path.is_empty() {
             Some(Box::new(MapHandler { map: self }))
         } else if let Some(state) = self.deref().get(&path[0]) {
@@ -394,17 +361,16 @@ where
     }
 }
 
-struct TupleCopyHandler<'a, FE, T> {
+struct TupleCopyHandler<'a, T> {
     tuple: &'a Tuple<T>,
-    phantom: PhantomData<FE>,
 }
 
-impl<'a, FE, T> Handler<'a, T::Txn, T::State> for TupleCopyHandler<'a, FE, T>
+impl<'a, State, T> Handler<'a, State> for TupleCopyHandler<'a, T>
 where
-    FE: ThreadSafe,
-    T: Route<FE> + Clone + Send + fmt::Debug + 'a,
+    State: StateInstance,
+    T: Route<State> + Clone + Send + fmt::Debug + 'a,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, T::Txn, T::State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -424,37 +390,31 @@ where
                     copy.push(item);
                 }
 
-                Ok(T::State::from(Tuple::from(copy)))
+                Ok(State::from(Tuple::from(copy)))
             })
         }))
     }
 }
 
-impl<'a, FE, T> From<&'a Tuple<T>> for TupleCopyHandler<'a, FE, T> {
+impl<'a, T> From<&'a Tuple<T>> for TupleCopyHandler<'a, T> {
     fn from(tuple: &'a Tuple<T>) -> Self {
-        Self {
-            tuple,
-            phantom: PhantomData,
-        }
+        Self { tuple }
     }
 }
 
-struct TupleFoldHandler<'a, FE, T> {
+struct TupleFoldHandler<'a, T> {
     tuple: &'a Tuple<T>,
-    phantom: PhantomData<FE>,
 }
 
-impl<'a, FE, Txn, State, T> Handler<'a, Txn, State> for TupleFoldHandler<'a, FE, T>
+impl<'a, State, T> Handler<'a, State> for TupleFoldHandler<'a, T>
 where
-    FE: ThreadSafe,
-    Txn: Transaction<FE>,
     State: StateInstance + From<T>,
     T: Clone + Send + Sync + 'a,
-    Closure<FE, Txn, State>: TryCastFrom<State>,
+    Closure<State>: TryCastFrom<State>,
     Id: TryCastFrom<State>,
     Map<State>: TryFrom<State, Error = TCError>,
 {
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -469,7 +429,7 @@ where
                     let mut params: Map<State> = state.try_into()?;
                     params.insert(item_name.clone(), item.into());
 
-                    let op: Closure<FE, Txn, State> = op
+                    let op: Closure<State> = op
                         .clone()
                         .try_cast_into(|state| bad_request!("not a closure: {state:?}"))?;
 
@@ -482,31 +442,25 @@ where
     }
 }
 
-impl<'a, FE, T: Clone + 'a> From<&'a Tuple<T>> for TupleFoldHandler<'a, FE, T> {
+impl<'a, T: Clone + 'a> From<&'a Tuple<T>> for TupleFoldHandler<'a, T> {
     fn from(tuple: &'a Tuple<T>) -> Self {
-        Self {
-            tuple,
-            phantom: PhantomData,
-        }
+        Self { tuple }
     }
 }
 
-struct MapOpHandler<FE, I> {
+struct MapOpHandler<I> {
     len: usize,
     items: I,
-    phantom: PhantomData<FE>,
 }
 
-impl<'a, FE, Txn, State, I> Handler<'a, Txn, State> for MapOpHandler<FE, I>
+impl<'a, State, I> Handler<'a, State> for MapOpHandler<I>
 where
-    FE: ThreadSafe,
-    Txn: Transaction<FE>,
     State: StateInstance + From<I::Item>,
     I: IntoIterator + Send + 'a,
     I::IntoIter: Send + 'a,
-    Closure<FE, Txn, State>: TryCastFrom<State>,
+    Closure<State>: TryCastFrom<State>,
 {
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -535,17 +489,11 @@ where
     }
 }
 
-impl<'a, FE, T: Clone + 'a> From<&'a Tuple<T>>
-    for MapOpHandler<FE, Cloned<std::slice::Iter<'a, T>>>
-{
+impl<'a, T: Clone + 'a> From<&'a Tuple<T>> for MapOpHandler<Cloned<std::slice::Iter<'a, T>>> {
     fn from(tuple: &'a Tuple<T>) -> Self {
         let len = tuple.len();
         let items = tuple.iter().cloned();
-        Self {
-            len,
-            items,
-            phantom: PhantomData,
-        }
+        Self { len, items }
     }
 }
 
@@ -553,12 +501,12 @@ struct TupleHandler<'a, T: Clone> {
     tuple: &'a Tuple<T>,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for TupleHandler<'a, T>
+impl<'a, State, T> Handler<'a, State> for TupleHandler<'a, T>
 where
     State: StateInstance + From<T> + From<Tuple<T>>,
     T: Instance + Clone,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -602,12 +550,12 @@ struct ZipHandler<'a, T: Clone> {
     keys: &'a Tuple<T>,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for ZipHandler<'a, T>
+impl<'a, State, T> Handler<'a, State> for ZipHandler<'a, T>
 where
     State: StateInstance + From<T>,
     T: Clone + Send + Sync,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -647,24 +595,17 @@ impl<'a, T: Clone> From<&'a Tuple<T>> for ZipHandler<'a, T> {
     }
 }
 
-impl<FE, T> Route<FE> for Tuple<T>
+impl<State, T> Route<State> for Tuple<T>
 where
-    FE: ThreadSafe,
-    T: Instance + Route<FE> + Clone + fmt::Debug + 'static,
-    T::State: From<T> + From<Tuple<T>> + From<Number>,
-    Closure<FE, T::Txn, T::State>: TryCastFrom<T::State>,
-    Id: TryCastFrom<T::State>,
-    Map<T::State>: TryFrom<T::State, Error = TCError>,
-    Tuple<T::State>: TryCastFrom<T::State>,
-    Value: From<T::State>,
+    State: StateInstance + From<T> + From<Tuple<T>>,
+    T: Instance + Route<State> + Clone + fmt::Debug + 'static,
+    Closure<State>: TryCastFrom<State>,
+    Id: TryCastFrom<State>,
+    Map<State>: TryFrom<State, Error = TCError>,
+    Tuple<State>: TryCastFrom<State>,
+    Value: From<State>,
 {
-    type Txn = T::Txn;
-    type State = T::State;
-
-    fn route<'a>(
-        &'a self,
-        path: &'a [PathSegment],
-    ) -> Option<Box<dyn Handler<'a, T::Txn, T::State> + 'a>> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         if path.is_empty() {
             Some(Box::new(TupleHandler { tuple: self }))
         } else if let Ok(i) = usize::from_str(path[0].as_str()) {
@@ -696,11 +637,8 @@ where
 
 struct CreateMapHandler;
 
-impl<'a, Txn, State> Handler<'a, Txn, State> for CreateMapHandler
-where
-    State: StateInstance,
-{
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+impl<'a, State: StateInstance> Handler<'a, State> for CreateMapHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -717,22 +655,10 @@ where
     }
 }
 
-pub struct MapStatic<Txn, State> {
-    phantom: PhantomData<(Txn, State)>,
-}
+pub struct MapStatic;
 
-impl<FE, Txn, State> Route<FE> for MapStatic<Txn, State>
-where
-    Txn: Transaction<FE>,
-    State: StateInstance,
-{
-    type Txn = Txn;
-    type State = State;
-
-    fn route<'a>(
-        &'a self,
-        path: &'a [PathSegment],
-    ) -> Option<Box<dyn Handler<'a, Txn, State> + 'a>> {
+impl<State: StateInstance> Route<State> for MapStatic {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         if path.is_empty() {
             Some(Box::new(CreateMapHandler))
         } else {
@@ -743,11 +669,11 @@ where
 
 struct CreateTupleHandler;
 
-impl<'a, Txn, State> Handler<'a, Txn, State> for CreateTupleHandler
+impl<'a, State> Handler<'a, State> for CreateTupleHandler
 where
     State: StateInstance,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -762,11 +688,11 @@ where
 
 struct CreateRangeHandler;
 
-impl<'a, Txn, State> Handler<'a, Txn, State> for CreateRangeHandler
+impl<'a, State> Handler<'a, State> for CreateRangeHandler
 where
     State: StateInstance,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -809,12 +735,12 @@ where
 
 struct ConcatenateHandler;
 
-impl<'a, Txn, State> Handler<'a, Txn, State> for ConcatenateHandler
+impl<'a, State> Handler<'a, State> for ConcatenateHandler
 where
     State: StateInstance,
     Tuple<State>: TryCastFrom<State>,
 {
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -833,23 +759,14 @@ where
 }
 
 #[derive(Default)]
-pub struct TupleStatic<Txn, State> {
-    phantom: PhantomData<(Txn, State)>,
-}
+pub struct TupleStatic;
 
-impl<FE, Txn, State> Route<FE> for TupleStatic<Txn, State>
+impl<State> Route<State> for TupleStatic
 where
-    Txn: Transaction<FE>,
     State: StateInstance,
     Tuple<State>: TryCastFrom<State>,
 {
-    type Txn = Txn;
-    type State = State;
-
-    fn route<'a>(
-        &'a self,
-        path: &'a [PathSegment],
-    ) -> Option<Box<dyn Handler<'a, Txn, State> + 'a>> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         if path.is_empty() {
             Some(Box::new(CreateTupleHandler))
         } else if path.len() == 1 {

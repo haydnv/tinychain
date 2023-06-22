@@ -12,6 +12,7 @@ use super::Transaction;
 
 pub mod generic;
 pub mod helpers;
+pub mod number;
 
 pub type GetFuture<'a, State> = Pin<Box<dyn Future<Output = TCResult<State>> + Send + 'a>>;
 pub type GetHandler<'a, 'b, Txn, State> =
@@ -38,12 +39,9 @@ pub enum HandlerType {
 }
 
 #[async_trait]
-pub trait ClosureInstance<FE>: Send + Sync {
-    type Txn: Transaction<FE>;
-    type State: StateInstance;
-
+pub trait ClosureInstance<State: StateInstance>: Send + Sync {
     /// Execute this `ClosureInstance` with the given `args`
-    async fn call(self: Box<Self>, txn: Self::Txn, args: Self::State) -> TCResult<Self::State>;
+    async fn call(self: Box<Self>, txn: State::Txn, args: State) -> TCResult<State>;
 }
 
 pub trait StateInstance:
@@ -57,32 +55,34 @@ pub trait StateInstance:
     + Clone
     + fmt::Debug
 {
+    type FE: ThreadSafe;
+    type Txn: Transaction<Self::FE>;
 }
 
 #[async_trait]
-pub trait Handler<'a, Txn, State>: Send {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+pub trait Handler<'a, State: StateInstance>: Send {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
         None
     }
 
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
         None
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
         None
     }
 
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, State::Txn>>
     where
         'b: 'a,
     {
@@ -90,53 +90,35 @@ pub trait Handler<'a, Txn, State>: Send {
     }
 }
 
-pub trait Route<FE>: Send + Sync {
-    type Txn: Transaction<FE>;
-    type State: StateInstance;
-
-    fn route<'a>(
-        &'a self,
-        path: &'a [PathSegment],
-    ) -> Option<Box<dyn Handler<'a, Self::Txn, Self::State> + 'a>>;
+pub trait Route<State>: Send + Sync {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>>;
 }
 
 #[async_trait]
-pub trait Public<FE> {
-    type Txn: Transaction<FE>;
-    type State: StateInstance;
-
-    async fn get(&self, txn: &Self::Txn, path: &[PathSegment], key: Value)
-        -> TCResult<Self::State>;
+pub trait Public<State: StateInstance> {
+    async fn get(&self, txn: &State::Txn, path: &[PathSegment], key: Value) -> TCResult<State>;
 
     async fn put(
         &self,
-        txn: &Self::Txn,
+        txn: &State::Txn,
         path: &[PathSegment],
         key: Value,
-        value: Self::State,
+        value: State,
     ) -> TCResult<()>;
 
     async fn post(
         &self,
-        txn: &Self::Txn,
+        txn: &State::Txn,
         path: &[PathSegment],
-        params: Map<Self::State>,
-    ) -> TCResult<Self::State>;
+        params: Map<State>,
+    ) -> TCResult<State>;
 
-    async fn delete(&self, txn: &Self::Txn, path: &[PathSegment], key: Value) -> TCResult<()>;
+    async fn delete(&self, txn: &State::Txn, path: &[PathSegment], key: Value) -> TCResult<()>;
 }
 
 #[async_trait]
-impl<FE, T: Route<FE> + fmt::Debug> Public<FE> for T {
-    type Txn = T::Txn;
-    type State = T::State;
-
-    async fn get(
-        &self,
-        txn: &Self::Txn,
-        path: &[PathSegment],
-        key: Value,
-    ) -> TCResult<Self::State> {
+impl<State: StateInstance, T: Route<State> + fmt::Debug> Public<State> for T {
+    async fn get(&self, txn: &State::Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         let handler = self
             .route(path)
             .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
@@ -154,10 +136,10 @@ impl<FE, T: Route<FE> + fmt::Debug> Public<FE> for T {
 
     async fn put(
         &self,
-        txn: &Self::Txn,
+        txn: &State::Txn,
         path: &[PathSegment],
         key: Value,
-        value: Self::State,
+        value: State,
     ) -> TCResult<()> {
         let handler = self
             .route(path)
@@ -176,10 +158,10 @@ impl<FE, T: Route<FE> + fmt::Debug> Public<FE> for T {
 
     async fn post(
         &self,
-        txn: &Self::Txn,
+        txn: &State::Txn,
         path: &[PathSegment],
-        params: Map<Self::State>,
-    ) -> TCResult<Self::State> {
+        params: Map<State>,
+    ) -> TCResult<State> {
         let handler = self
             .route(path)
             .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
@@ -195,7 +177,7 @@ impl<FE, T: Route<FE> + fmt::Debug> Public<FE> for T {
         }
     }
 
-    async fn delete(&self, txn: &Self::Txn, path: &[PathSegment], key: Value) -> TCResult<()> {
+    async fn delete(&self, txn: &State::Txn, path: &[PathSegment], key: Value) -> TCResult<()> {
         let handler = self
             .route(path)
             .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;

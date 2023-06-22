@@ -13,11 +13,11 @@ use super::{
 
 pub struct EchoHandler;
 
-impl<'a, Txn, State> Handler<'a, Txn, State> for EchoHandler
+impl<'a, State> Handler<'a, State> for EchoHandler
 where
     State: StateInstance,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -31,13 +31,13 @@ pub struct ErrorHandler<'a> {
     code: &'a Id,
 }
 
-impl<'a, Txn, State> Handler<'a, Txn, State> for ErrorHandler<'a>
+impl<'a, State> Handler<'a, State> for ErrorHandler<'a>
 where
     State: StateInstance,
     TCString: TryCastFrom<State>,
     Tuple<TCString>: TryCastFrom<State>,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -55,7 +55,7 @@ where
         }))
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -79,12 +79,12 @@ pub struct AttributeHandler<T> {
     attribute: T,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for AttributeHandler<T>
+impl<'a, State, T> Handler<'a, State> for AttributeHandler<T>
 where
-    State: From<T>,
+    State: StateInstance + From<T>,
     T: Clone + Send + Sync + 'a,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -110,12 +110,12 @@ pub struct MethodNotAllowedHandler<'a, T> {
     subject: &'a T,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for MethodNotAllowedHandler<'a, T>
+impl<'a, State, T> Handler<'a, State> for MethodNotAllowedHandler<'a, T>
 where
     State: StateInstance,
     T: Clone + Send + Sync + fmt::Debug,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -128,7 +128,7 @@ where
         }))
     }
 
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -141,7 +141,7 @@ where
         }))
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -154,7 +154,7 @@ where
         }))
     }
 
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, State::Txn>>
     where
         'b: 'a,
     {
@@ -177,12 +177,12 @@ struct SelfHandler<'a, T> {
     subject: &'a T,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for SelfHandler<'a, T>
+impl<'a, State, T> Handler<'a, State> for SelfHandler<'a, T>
 where
-    State: From<T>,
+    State: StateInstance + From<T>,
     T: Clone + Send + Sync + fmt::Debug,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -211,12 +211,12 @@ struct SelfHandlerOwned<T> {
     subject: T,
 }
 
-impl<'a, Txn, State, T> Handler<'a, Txn, State> for SelfHandlerOwned<T>
+impl<'a, State, T> Handler<'a, State> for SelfHandlerOwned<T>
 where
-    State: From<T>,
+    State: StateInstance + From<T>,
     T: Send + Sync + fmt::Debug + 'a,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
