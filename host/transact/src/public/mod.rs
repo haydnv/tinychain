@@ -13,6 +13,7 @@ use super::Transaction;
 pub mod generic;
 pub mod helpers;
 pub mod number;
+pub mod string;
 
 pub type GetFuture<'a, State> = Pin<Box<dyn Future<Output = TCResult<State>> + Send + 'a>>;
 pub type GetHandler<'a, 'b, Txn, State> =
