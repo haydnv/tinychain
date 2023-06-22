@@ -6,9 +6,14 @@ use async_hash::Output;
 use async_trait::async_trait;
 use destream::en;
 use freqfs::DirLock;
+use safecast::CastFrom;
 
 use tc_error::*;
+use tc_value::{ToUrl, Value};
 use tcgeneric::Id;
+
+pub use id::{TxnId, MIN_ID};
+use public::StateInstance;
 
 pub mod fs;
 mod id;
@@ -40,8 +45,6 @@ pub mod lock {
     /// A read guard on a committed transactional version of a set
     pub type TxnSetLockVersionGuard<T> = txn_lock::set::TxnSetLockVersionGuard<TxnId, T>;
 }
-
-pub use id::{TxnId, MIN_ID};
 
 /// Defines a method to compute the hash of this state as of a given [`TxnId`]
 #[async_trait]
@@ -98,4 +101,33 @@ pub trait Transaction<FE>: Clone + Sized + Send + Sync + 'static {
 
     /// Create a new transaction subcontext with its own unique [`Dir`].
     async fn subcontext_unique(&self) -> TCResult<Self>;
+}
+
+/// A transactional remote procedure call client
+#[async_trait]
+pub trait RPCClient<State: StateInstance<Txn = Self>>: Transaction<State::FE> {
+    /// Resolve a GET op within this transaction context.
+    async fn get<'a, L, V>(&'a self, link: L, key: V) -> TCResult<State>
+    where
+        L: Into<ToUrl<'a>>,
+        Value: CastFrom<V>;
+
+    /// Resolve a PUT op within this transaction context.
+    async fn put<'a, L, K, V>(&'a self, link: L, key: K, value: V) -> TCResult<()>
+    where
+        L: Into<ToUrl<'a>>,
+        Value: CastFrom<K>,
+        State: CastFrom<V>;
+
+    /// Resolve a POST op within this transaction context.
+    async fn post<'a, L, P>(&'a self, link: L, params: P) -> TCResult<State>
+    where
+        L: Into<ToUrl<'a>>,
+        State: CastFrom<P>;
+
+    /// Resolve a DELETE op within this transaction context.
+    async fn delete<'a, L, V>(&'a self, link: L, key: V) -> TCResult<()>
+    where
+        L: Into<ToUrl<'a>>,
+        Value: CastFrom<V>;
 }

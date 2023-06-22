@@ -43,6 +43,7 @@ serde_json = { version = "1.0" }
 tbon = { path = "../../tbon" }
 tc-collection = { path = "collection" }
 tc-error = { path = "error" }
+tc-scalar = { path = "scalar" }
 tc-transact = { path = "transact" }
 tc-value = { path = "value" }
 tcgeneric = { path = "generic" }

@@ -4,9 +4,10 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use futures::Future;
 
+use crate::RPCClient;
 use tc_error::*;
 use tc_value::{Number, Value};
-use tcgeneric::{Map, PathSegment, TCPath, ThreadSafe, Tuple};
+use tcgeneric::{Instance, Map, PathSegment, TCPath, ThreadSafe, Tuple};
 
 use super::Transaction;
 
@@ -48,17 +49,27 @@ pub trait ClosureInstance<State: StateInstance>: Send + Sync {
 
 pub trait StateInstance:
     Default
+    + Instance
+    + Route<Self>
+    + ToState<Self>
     + From<bool>
     + From<Number>
     + From<Value>
     + From<Map<Self>>
     + From<Tuple<Self>>
-    + ThreadSafe
+    + From<Self::Closure>
     + Clone
     + fmt::Debug
+    + 'static
 {
     type FE: ThreadSafe;
-    type Txn: Transaction<Self::FE>;
+    type Txn: Transaction<Self::FE> + RPCClient<Self>;
+    type Closure: ClosureInstance<Self>;
+}
+
+/// Trait to define a [`StateInstance`] representation of a (possibly non-[`StateInstance`]) value
+pub trait ToState<State: StateInstance> {
+    fn to_state(&self) -> State;
 }
 
 #[async_trait]

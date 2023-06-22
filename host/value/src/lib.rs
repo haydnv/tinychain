@@ -18,7 +18,7 @@ pub use version::*;
 mod class;
 
 mod link {
-    pub use pathlink::{Address, Host, Link, Protocol};
+    pub use pathlink::{Address, Host, Link, Protocol, ToUrl};
 }
 
 mod number {
