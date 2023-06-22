@@ -23,6 +23,8 @@ pub use slice::BTreeSlice;
 pub(crate) use stream::BTreeView;
 pub use stream::Keys;
 
+pub mod public;
+
 mod file;
 mod schema;
 mod slice;

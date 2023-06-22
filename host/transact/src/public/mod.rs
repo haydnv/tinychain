@@ -62,7 +62,7 @@ pub trait StateInstance:
     + fmt::Debug
     + 'static
 {
-    type FE: ThreadSafe;
+    type FE: ThreadSafe + Clone;
     type Txn: Transaction<Self::FE> + RPCClient<Self>;
     type Closure: ClosureInstance<Self>;
 }
