@@ -13,8 +13,9 @@ use tc_transact::public::{
 };
 use tc_transact::{fs, Transaction};
 use tc_value::Value;
-use tcgeneric::{label, Id, Map, PathSegment, Tuple};
+use tcgeneric::{label, Id, Map, PathSegment, ThreadSafe, Tuple};
 
+use crate::btree::Node;
 use crate::Collection;
 
 use super::{
@@ -409,13 +410,8 @@ impl<'a, T> From<&'a T> for TableHandler<'a, T> {
 impl<State> Route<State> for Table<State::Txn, State::FE>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<u64>,
-    Self: TableRead + TableOrder + TableSlice + TableStream + TableWrite + Clone,
-    <Self as TableSlice>::Slice: TableStream,
+    State::FE: AsType<Node> + ThreadSafe,
     Scalar: TryCastFrom<State>,
-    Table<State::Txn, State::FE>: From<<Self as TableStream>::Limit>
-        + From<<Self as TableOrder>::OrderBy>
-        + From<<Self as TableStream>::Selection>
-        + From<<Self as TableSlice>::Slice>,
     Tuple<State>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
 {
@@ -427,13 +423,8 @@ where
 impl<State> Route<State> for TableFile<State::Txn, State::FE>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<u64>,
-    Self: TableRead + TableOrder + TableSlice + TableStream + TableWrite + Clone,
-    <Self as TableSlice>::Slice: TableStream,
+    State::FE: AsType<Node> + ThreadSafe,
     Scalar: TryCastFrom<State>,
-    Table<State::Txn, State::FE>: From<<Self as TableStream>::Limit>
-        + From<<Self as TableOrder>::OrderBy>
-        + From<<Self as TableStream>::Selection>
-        + From<<Self as TableSlice>::Slice>,
     Tuple<State>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
 {
@@ -449,6 +440,7 @@ fn route<'a, State, T>(
 ) -> Option<Box<dyn Handler<'a, State> + 'a>>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<u64>,
+    State::FE: AsType<Node> + ThreadSafe,
     T: TableRead + TableOrder + TableSlice + TableStream + TableWrite + Clone,
     <T as TableSlice>::Slice: TableStream,
     Scalar: TryCastFrom<State>,

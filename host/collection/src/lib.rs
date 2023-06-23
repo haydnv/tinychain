@@ -16,22 +16,22 @@ use btree::{BTreeInstance, BTreeType};
 use table::{TableInstance, TableStream, TableType};
 use tensor::TensorType;
 
-mod base;
-mod schema;
-
+pub use base::{CollectionBase, CollectionVisitor};
 pub use btree::{BTree, BTreeFile};
+pub use schema::Schema;
 pub use table::Table;
 pub use tensor::{
     Dense, DenseBase, DenseCacheFile, DenseView, Sparse, SparseBase, SparseView, Tensor,
     TensorBase, TensorInstance, TensorView,
 };
 
+mod base;
+mod schema;
+
 pub mod btree;
+pub mod public;
 pub mod table;
 pub mod tensor;
-
-pub use base::{CollectionBase, CollectionVisitor};
-pub use schema::Schema;
 
 /// The prefix of the absolute path to [`Collection`] data types
 pub const PREFIX: PathLabel = path_label(&["state", "collection"]);

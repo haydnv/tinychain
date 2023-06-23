@@ -304,13 +304,10 @@ impl<State> Route<State> for BTree<State::Txn, State::FE>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<u64>,
     State::FE: AsType<Node>,
-    BTree<State::Txn, State::FE>:
-        BTreeInstance + From<Self> + From<<Self as BTreeInstance>::Slice> + TryCastFrom<State>,
-    Collection<State::Txn, State::FE>: From<BTree<State::Txn, State::FE>>,
+    BTree<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
     Value: TryCastFrom<State>,
     bool: TryCastFrom<State>,
-    Self: BTreeInstance + BTreeWrite,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         debug!("BTree::route {}", TCPath::from(path));
@@ -322,13 +319,10 @@ impl<State> Route<State> for BTreeFile<State::Txn, State::FE>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<u64>,
     State::FE: AsType<Node>,
-    BTree<State::Txn, State::FE>:
-        BTreeInstance + From<Self> + From<<Self as BTreeInstance>::Slice> + TryCastFrom<State>,
-    Collection<State::Txn, State::FE>: From<BTree<State::Txn, State::FE>>,
+    BTree<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
     Value: TryCastFrom<State>,
     bool: TryCastFrom<State>,
-    Self: BTreeInstance + BTreeWrite,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         route(self, path)
@@ -345,7 +339,6 @@ where
     State::FE: AsType<Node>,
     T: BTreeInstance + BTreeWrite + 'a,
     BTree<State::Txn, State::FE>: BTreeInstance + From<T> + From<T::Slice> + TryCastFrom<State>,
-    Collection<State::Txn, State::FE>: From<BTree<State::Txn, State::FE>>,
     Scalar: TryCastFrom<State>,
     Value: TryCastFrom<State>,
     bool: TryCastFrom<State>,
