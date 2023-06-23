@@ -57,6 +57,7 @@ pub trait StateInstance:
     + From<Value>
     + From<Map<Self>>
     + From<Tuple<Self>>
+    + From<Self::Class>
     + From<Self::Closure>
     + Clone
     + fmt::Debug

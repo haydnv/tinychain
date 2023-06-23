@@ -21,9 +21,9 @@ use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTr
 use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
     size_hint, strides_for, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst,
-    TensorCast, TensorCompare, TensorCompareConst, TensorConvert, TensorInstance, TensorMath,
-    TensorMathConst, TensorPermitRead, TensorRead, TensorReduce, TensorTransform, TensorTrig,
-    TensorUnary, TensorUnaryBoolean,
+    TensorCast, TensorCompare, TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance,
+    TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce, TensorTransform,
+    TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
@@ -652,6 +652,18 @@ where
 
     fn ne_const(self, other: Number) -> TCResult<Self::Compare> {
         Err(bad_request!("cannot calculate {:?} != {} because the result would not be sparse (consider converting to a dense tensor first)", self, other))
+    }
+}
+
+impl<Txn, FE> TensorDiagonal for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
+    type Diagonal = Self;
+
+    fn diagonal(self) -> TCResult<Self::Diagonal> {
+        Err(not_implemented!("diagonal of a sparse tensor"))
     }
 }
 

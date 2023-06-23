@@ -6,7 +6,7 @@ use b_table::collate::{Collate, Collator, Overlap, OverlapsRange, OverlapsValue}
 use destream::{de, en};
 use futures::TryFutureExt;
 use itertools::{Itertools, MultiProduct};
-use safecast::{CastFrom, CastInto};
+use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_value::Value;
@@ -609,6 +609,17 @@ impl FromIterator<u64> for Shape {
     fn from_iter<I: IntoIterator<Item = u64>>(iter: I) -> Self {
         let dims = Vec::<u64>::from_iter(iter);
         Self(dims)
+    }
+}
+
+impl TryCastFrom<Value> for Shape {
+    fn can_cast_from(value: &Value) -> bool {
+        value.matches::<Vec<u64>>()
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Shape> {
+        let shape: Option<Vec<u64>> = value.opt_cast_into();
+        shape.map(Shape::from)
     }
 }
 
