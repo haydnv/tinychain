@@ -17,7 +17,7 @@ use tokio::sync::RwLock;
 use tc_error::*;
 use tc_transact::fs::Persist;
 use tc_transact::lock::{TxnLock, TxnLockVersionGuard};
-use tc_transact::{Transact, Transaction};
+use tc_transact::{RPCClient, Transact, Transaction};
 use tc_value::{Host, Link, Value};
 use tcgeneric::*;
 

@@ -16,7 +16,7 @@ use safecast::CastInto;
 use tc_error::*;
 use tc_transact::fs::Persist;
 use tc_transact::lock::TxnMapLock;
-use tc_transact::{Transact, Transaction, TxnId};
+use tc_transact::{RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{label, Id, Label, Map, PathSegment, ThreadSafe};
 

@@ -13,7 +13,7 @@ use log::debug;
 use safecast::{CastInto, TryCastInto};
 
 use tc_error::*;
-use tc_transact::{AsyncHash, IntoView};
+use tc_transact::{AsyncHash, IntoView, TxnId};
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf};
 
 use crate::fs;
@@ -129,6 +129,13 @@ impl Closure {
     /// Execute this `Closure` with an owned [`Txn`] and the given `args`.
     pub async fn call_owned(self, txn: Txn, args: State) -> TCResult<State> {
         self.call(&txn, args).await
+    }
+}
+
+#[async_trait]
+impl tc_transact::public::ClosureInstance<State> for Closure {
+    async fn call(self: Box<Self>, txn: Txn, args: State) -> TCResult<State> {
+        self.call_owned(txn, args).await
     }
 }
 

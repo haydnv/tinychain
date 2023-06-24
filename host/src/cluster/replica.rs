@@ -6,7 +6,7 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::fs::{Persist, Restore};
-use tc_transact::{Transact, Transaction, TxnId};
+use tc_transact::{RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{label, Label, Map};
 

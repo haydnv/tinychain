@@ -20,7 +20,7 @@ use tc_error::*;
 use tc_value::{Float, Host, Link, Number, TCString, Value, ValueType};
 use tcgeneric::*;
 
-// use crate::closure::Closure;
+use crate::closure::Closure;
 use crate::route::Public;
 use crate::state::{State, ToState};
 use crate::txn::Txn;
@@ -724,15 +724,15 @@ impl TryCastFrom<Scalar> for (Bound<Value>, Bound<Value>) {
     }
 }
 
-// impl TryCastFrom<Scalar> for Closure {
-//     fn can_cast_from(scalar: &Scalar) -> bool {
-//         OpDef::can_cast_from(scalar)
-//     }
-//
-//     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-//         OpDef::opt_cast_from(scalar).map(Self::from)
-//     }
-// }
+impl TryCastFrom<Scalar> for Closure {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        OpDef::can_cast_from(scalar)
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        OpDef::opt_cast_from(scalar).map(Self::from)
+    }
+}
 
 impl TryCastFrom<Scalar> for OpDef {
     fn can_cast_from(scalar: &Scalar) -> bool {

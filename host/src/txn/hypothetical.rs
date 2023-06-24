@@ -10,7 +10,7 @@ use safecast::{TryCastFrom, TryCastInto};
 use tokio::sync::RwLock;
 
 use tc_error::*;
-use tc_transact::{Transaction, TxnId};
+use tc_transact::{RPCClient, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Id, Map, PathLabel, PathSegment};
 

@@ -13,7 +13,7 @@ use tokio::time::Duration;
 use url::Url;
 
 use tc_error::*;
-use tc_value::{Host, Link, Protocol, Value};
+use tc_value::{Host, Link, Protocol, ToUrl, Value};
 use tcgeneric::{NetworkTime, PathSegment, TCBoxTryFuture, TCPath, TCPathBuf};
 
 use crate::kernel::{Dispatch, Kernel};
@@ -35,75 +35,6 @@ impl Config {
     /// Construct the [`Host``] of a [`Gateway`]
     pub fn host(&self) -> Host {
         (Protocol::HTTP, self.addr.clone().into(), self.http_port).into()
-    }
-}
-
-/// An owned or borrowed [`Link`] or [`TCPath`] which can be parsed as a URL.
-pub enum ToUrl<'a> {
-    Link(Link),
-    LinkRef(&'a Link),
-    Path(TCPathBuf),
-    PathRef(TCPath<'a>),
-}
-
-impl<'a> ToUrl<'a> {
-    /// Borrow the [`Host`] component of this link, if any.
-    pub fn host(&self) -> Option<&Host> {
-        match self {
-            Self::Link(link) => link.host(),
-            Self::LinkRef(link) => link.host(),
-            _ => None,
-        }
-    }
-
-    /// Borrow the [`TCPath`] component of this link.
-    pub fn path(&self) -> &[PathSegment] {
-        match self {
-            Self::Link(link) => link.path(),
-            Self::LinkRef(link) => link.path(),
-            Self::Path(path) => path,
-            Self::PathRef(path) => path,
-        }
-    }
-
-    /// Construct a new [`Url`] from this link.
-    pub fn to_url(&self) -> Url {
-        self.to_string().parse().expect("URL")
-    }
-}
-
-impl<'a> fmt::Display for ToUrl<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Link(link) => fmt::Display::fmt(link, f),
-            Self::LinkRef(link) => fmt::Display::fmt(link, f),
-            Self::Path(path) => fmt::Display::fmt(path, f),
-            Self::PathRef(path) => fmt::Display::fmt(path, f),
-        }
-    }
-}
-
-impl<'a> From<Link> for ToUrl<'a> {
-    fn from(link: Link) -> Self {
-        Self::Link(link)
-    }
-}
-
-impl<'a> From<&'a Link> for ToUrl<'a> {
-    fn from(link: &'a Link) -> Self {
-        Self::LinkRef(link)
-    }
-}
-
-impl<'a> From<TCPathBuf> for ToUrl<'a> {
-    fn from(path: TCPathBuf) -> Self {
-        Self::Path(path)
-    }
-}
-
-impl<'a> From<&'a [PathSegment]> for ToUrl<'a> {
-    fn from(path: &'a [PathSegment]) -> Self {
-        Self::PathRef(path.into())
     }
 }
 

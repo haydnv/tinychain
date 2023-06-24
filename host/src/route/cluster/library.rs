@@ -2,7 +2,7 @@ use log::debug;
 use safecast::TryCastFrom;
 
 use tc_error::*;
-use tc_transact::Transaction;
+use tc_transact::{RPCClient, Transaction};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{Map, PathSegment, TCPath, TCPathBuf};
 

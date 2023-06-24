@@ -7,7 +7,7 @@ use log::*;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::{Transact, Transaction};
+use tc_transact::{RPCClient, Transact, Transaction};
 use tc_value::{Host, Link, Value};
 use tcgeneric::{label, PathSegment, TCPath, TCPathBuf, Tuple};
 

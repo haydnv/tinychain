@@ -17,6 +17,7 @@ use log::debug;
 use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
+use tc_transact::RPCClient;
 use tcgeneric::*;
 
 use crate::route::Public;

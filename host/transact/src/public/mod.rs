@@ -4,12 +4,11 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use futures::Future;
 
-use crate::RPCClient;
 use tc_error::*;
 use tc_value::{Number, Value};
 use tcgeneric::{Instance, Map, PathSegment, TCPath, ThreadSafe, Tuple};
 
-use super::Transaction;
+use super::{Transaction, RPCClient};
 
 pub mod generic;
 pub mod helpers;
@@ -77,6 +76,12 @@ pub trait StateInstance:
 /// Trait to define a [`StateInstance`] representation of a (possibly non-[`StateInstance`]) value
 pub trait ToState<State: StateInstance> {
     fn to_state(&self) -> State;
+}
+
+impl<State: StateInstance, T: Clone + Into<State>> ToState<State> for T {
+    fn to_state(&self) -> State {
+        self.clone().into()
+    }
 }
 
 #[async_trait]

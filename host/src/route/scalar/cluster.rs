@@ -1,3 +1,4 @@
+use tc_transact::RPCClient;
 use tcgeneric::{PathSegment, TCPathBuf};
 
 use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};

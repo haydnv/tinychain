@@ -17,7 +17,7 @@ use futures::future::TryFutureExt;
 pub use tc_error::*;
 
 pub mod chain;
-// pub mod closure;
+pub mod closure;
 pub mod cluster;
 pub mod collection;
 pub mod fs;

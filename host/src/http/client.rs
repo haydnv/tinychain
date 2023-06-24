@@ -9,10 +9,9 @@ use url::Url;
 
 use tc_error::*;
 use tc_transact::{IntoView, Transaction, TxnId};
-use tc_value::Value;
+use tc_value::{ToUrl, Value};
 use tcgeneric::label;
 
-use crate::gateway::ToUrl;
 use crate::http::Encoding;
 use crate::state::State;
 use crate::txn::Txn;

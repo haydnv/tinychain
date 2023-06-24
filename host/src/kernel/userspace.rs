@@ -8,7 +8,7 @@ use futures::join;
 use log::{debug, info};
 
 use tc_error::*;
-use tc_transact::{Transact, Transaction, TxnId};
+use tc_transact::{RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath};
 

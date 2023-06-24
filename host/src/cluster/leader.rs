@@ -7,7 +7,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, warn};
 use tokio::sync::RwLock;
 
-use tc_transact::Transaction;
+use tc_transact::{RPCClient, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::Map;
 

@@ -6,7 +6,7 @@ use async_hash::Output;
 use async_trait::async_trait;
 use destream::en;
 use freqfs::DirLock;
-use safecast::CastFrom;
+use safecast::CastInto;
 
 use tc_error::*;
 use tc_value::{ToUrl, Value};
@@ -106,25 +106,25 @@ pub trait RPCClient<State: StateInstance<Txn = Self>>: Transaction<State::FE> {
     /// Resolve a GET op within this transaction context.
     async fn get<'a, L, V>(&'a self, link: L, key: V) -> TCResult<State>
     where
-        L: Into<ToUrl<'a>>,
-        Value: CastFrom<V>;
+        L: Into<ToUrl<'a>> + Send,
+        V: CastInto<Value> + Send;
 
     /// Resolve a PUT op within this transaction context.
     async fn put<'a, L, K, V>(&'a self, link: L, key: K, value: V) -> TCResult<()>
     where
-        L: Into<ToUrl<'a>>,
-        Value: CastFrom<K>,
-        State: CastFrom<V>;
+        L: Into<ToUrl<'a>> + Send,
+        K: CastInto<Value> + Send,
+        V: CastInto<State> + Send;
 
     /// Resolve a POST op within this transaction context.
     async fn post<'a, L, P>(&'a self, link: L, params: P) -> TCResult<State>
     where
-        L: Into<ToUrl<'a>>,
-        State: CastFrom<P>;
+        L: Into<ToUrl<'a>> + Send,
+        P: CastInto<State> + Send;
 
     /// Resolve a DELETE op within this transaction context.
     async fn delete<'a, L, V>(&'a self, link: L, key: V) -> TCResult<()>
     where
-        L: Into<ToUrl<'a>>,
-        Value: CastFrom<V>;
+        L: Into<ToUrl<'a>> + Send,
+        V: CastInto<Value> + Send;
 }

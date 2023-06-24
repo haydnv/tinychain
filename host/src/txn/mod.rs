@@ -13,11 +13,11 @@ use safecast::{CastFrom, CastInto};
 
 use tc_error::*;
 use tc_transact::Transaction;
-use tc_value::{Host, Link, Value};
+use tc_value::{Host, Link, ToUrl, Value};
 use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf, Tuple};
 
 use crate::fs;
-use crate::gateway::{Gateway, ToUrl};
+use crate::gateway::Gateway;
 use crate::state::State;
 
 pub use request::*;
@@ -236,44 +236,43 @@ impl Txn {
             })
             .next()
     }
+}
 
-    /// Resolve a GET op within this transaction context.
-    pub async fn get<'a, L, V>(&'a self, link: L, key: V) -> TCResult<State>
+#[async_trait]
+impl tc_transact::RPCClient<State> for Txn {
+    async fn get<'a, L, V>(&'a self, link: L, key: V) -> TCResult<State>
     where
-        L: Into<ToUrl<'a>>,
-        Value: CastFrom<V>,
+        L: Into<ToUrl<'a>> + Send,
+        V: CastInto<Value> + Send,
     {
         self.gateway.get(self, link.into(), key.cast_into()).await
     }
 
-    /// Resolve a PUT op within this transaction context.
-    pub async fn put<'a, L, K, V>(&'a self, link: L, key: K, value: V) -> TCResult<()>
+    async fn put<'a, L, K, V>(&'a self, link: L, key: K, value: V) -> TCResult<()>
     where
-        L: Into<ToUrl<'a>>,
-        Value: CastFrom<K>,
-        State: CastFrom<V>,
+        L: Into<ToUrl<'a>> + Send,
+        K: CastInto<Value> + Send,
+        V: CastInto<State> + Send,
     {
         self.gateway
             .put(self, link.into(), key.cast_into(), value.cast_into())
             .await
     }
 
-    /// Resolve a POST op within this transaction context.
-    pub async fn post<'a, L, P>(&'a self, link: L, params: P) -> TCResult<State>
+    async fn post<'a, L, P>(&'a self, link: L, params: P) -> TCResult<State>
     where
-        L: Into<ToUrl<'a>>,
-        State: CastFrom<P>,
+        L: Into<ToUrl<'a>> + Send,
+        P: CastInto<State> + Send,
     {
         self.gateway
             .post(self, link.into(), params.cast_into())
             .await
     }
 
-    /// Resolve a DELETE op within this transaction context.
-    pub async fn delete<'a, L, V>(&'a self, link: L, key: V) -> TCResult<()>
+    async fn delete<'a, L, V>(&'a self, link: L, key: V) -> TCResult<()>
     where
-        L: Into<ToUrl<'a>>,
-        Value: CastFrom<V>,
+        L: Into<ToUrl<'a>> + Send,
+        V: CastInto<Value> + Send,
     {
         self.gateway
             .delete(self, link.into(), key.cast_into())
