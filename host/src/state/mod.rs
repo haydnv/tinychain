@@ -57,12 +57,12 @@ where
 pub enum StateType {
     Chain(ChainType),
     Collection(CollectionType),
-    Closure,
+    // Closure,
     Map,
     Object(ObjectType),
     Scalar(ScalarType),
     // Stream,
-    // Tuple,
+    Tuple,
 }
 
 impl Class for StateType {}
@@ -78,7 +78,7 @@ impl NativeClass for StateType {
                 match path[1].as_str() {
                     // "closure" => Some(Self::Closure),
                     "map" => Some(Self::Map),
-                    // "tuple" => Some(Self::Tuple),
+                    "tuple" => Some(Self::Tuple),
                     _ => None,
                 }
             } else if path.len() > 2 {
@@ -101,12 +101,12 @@ impl NativeClass for StateType {
         match self {
             Self::Collection(ct) => ct.path(),
             Self::Chain(ct) => ct.path(),
-            Self::Closure => path_label(&["state", "closure"]).into(),
+            // Self::Closure => path_label(&["state", "closure"]).into(),
             Self::Map => path_label(&["state", "map"]).into(),
             Self::Object(ot) => ot.path(),
             Self::Scalar(st) => st.path(),
             // Self::Stream => path_label(&["state", "stream"]).into(),
-            // Self::Tuple => path_label(&["state", "tuple"]).into(),
+            Self::Tuple => path_label(&["state", "tuple"]).into(),
         }
     }
 }
@@ -181,12 +181,12 @@ impl fmt::Debug for StateType {
         match self {
             Self::Chain(ct) => fmt::Debug::fmt(ct, f),
             Self::Collection(ct) => fmt::Debug::fmt(ct, f),
-            Self::Closure => f.write_str("closure"),
-            Self::Map => f.write_str("Map<Id, State>"),
+            // Self::Closure => f.write_str("closure"),
+            Self::Map => f.write_str("Map<State>"),
             Self::Object(ot) => fmt::Debug::fmt(ot, f),
             Self::Scalar(st) => fmt::Debug::fmt(st, f),
             // Self::Stream => f.write_str("Stream"),
-            // Self::Tuple => f.write_str("Tuple<State>"),
+            Self::Tuple => f.write_str("Tuple<State>"),
         }
     }
 }
@@ -201,7 +201,7 @@ pub enum State {
     Object(Object),
     Scalar(Scalar),
     // Stream(TCStream),
-    // Tuple(Tuple<Self>),
+    Tuple(Tuple<Self>),
 }
 
 impl State {
@@ -210,7 +210,7 @@ impl State {
         match self {
             Self::Map(map) => map.is_empty(),
             Self::Scalar(scalar) => scalar.is_none(),
-            // Self::Tuple(tuple) => tuple.is_empty(),
+            Self::Tuple(tuple) => tuple.is_empty(),
             _ => false,
         }
     }
@@ -233,7 +233,7 @@ impl State {
     pub fn is_tuple(&self) -> bool {
         match self {
             Self::Scalar(scalar) => scalar.is_tuple(),
-            // Self::Tuple(_) => true,
+            Self::Tuple(_) => true,
             _ => false,
         }
     }
@@ -243,7 +243,7 @@ impl State {
         match self {
             Self::Map(map) => map.values().any(Self::is_ref),
             Self::Scalar(scalar) => scalar.is_ref(),
-            // Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
+            Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
             _ => false,
         }
     }
@@ -291,14 +291,14 @@ impl Refer for State {
                 Self::Map(map)
             }
             Self::Scalar(scalar) => Self::Scalar(scalar.dereference_self(path)),
-            // Self::Tuple(tuple) => {
-            //     let tuple = tuple
-            //         .into_iter()
-            //         .map(|state| state.dereference_self(path))
-            //         .collect();
-            //
-            //     Self::Tuple(tuple)
-            // }
+            Self::Tuple(tuple) => {
+                let tuple = tuple
+                    .into_iter()
+                    .map(|state| state.dereference_self(path))
+                    .collect();
+
+                Self::Tuple(tuple)
+            }
             other => other,
         }
     }
@@ -307,7 +307,7 @@ impl Refer for State {
         match self {
             Self::Map(map) => map.values().any(|state| state.is_conditional()),
             Self::Scalar(scalar) => scalar.is_conditional(),
-            // Self::Tuple(tuple) => tuple.iter().any(|state| state.is_conditional()),
+            Self::Tuple(tuple) => tuple.iter().any(|state| state.is_conditional()),
             _ => false,
         }
     }
@@ -321,9 +321,10 @@ impl Refer for State {
 
             Self::Scalar(scalar) => scalar.is_inter_service_write(cluster_path),
 
-            // Self::Tuple(tuple) => tuple
-            //     .iter()
-            //     .any(|state| state.is_inter_service_write(cluster_path)),
+            Self::Tuple(tuple) => tuple
+                .iter()
+                .any(|state| state.is_inter_service_write(cluster_path)),
+
             _ => false,
         }
     }
@@ -340,14 +341,14 @@ impl Refer for State {
                 Self::Map(map)
             }
             Self::Scalar(scalar) => Self::Scalar(scalar.reference_self(path)),
-            // Self::Tuple(tuple) => {
-            //     let tuple = tuple
-            //         .into_iter()
-            //         .map(|state| state.reference_self(path))
-            //         .collect();
-            //
-            //     Self::Tuple(tuple)
-            // }
+            Self::Tuple(tuple) => {
+                let tuple = tuple
+                    .into_iter()
+                    .map(|state| state.reference_self(path))
+                    .collect();
+
+                Self::Tuple(tuple)
+            }
             other => other,
         }
     }
@@ -360,11 +361,11 @@ impl Refer for State {
                 }
             }
             Self::Scalar(scalar) => scalar.requires(deps),
-            // Self::Tuple(tuple) => {
-            //     for state in tuple.iter() {
-            //         state.requires(deps);
-            //     }
-            // }
+            Self::Tuple(tuple) => {
+                for state in tuple.iter() {
+                    state.requires(deps);
+                }
+            }
             _ => {}
         }
     }
@@ -390,19 +391,19 @@ impl Refer for State {
                 Ok(State::Map(map))
             }
             Self::Scalar(scalar) => scalar.resolve(context, txn).await,
-            // Self::Tuple(tuple) => {
-            //     let len = tuple.len();
-            //     let mut resolved = futures::stream::iter(tuple)
-            //         .map(|state| state.resolve(context, txn))
-            //         .buffered(num_cpus::get());
-            //
-            //     let mut tuple = Vec::with_capacity(len);
-            //     while let Some(state) = resolved.try_next().await? {
-            //         tuple.push(state);
-            //     }
-            //
-            //     Ok(State::Tuple(tuple.into()))
-            // }
+            Self::Tuple(tuple) => {
+                let len = tuple.len();
+                let mut resolved = futures::stream::iter(tuple)
+                    .map(|state| state.resolve(context, txn))
+                    .buffered(num_cpus::get());
+
+                let mut tuple = Vec::with_capacity(len);
+                while let Some(state) = resolved.try_next().await? {
+                    tuple.push(state);
+                }
+
+                Ok(State::Tuple(tuple.into()))
+            }
             other => Ok(other),
         }
     }
@@ -423,10 +424,10 @@ impl Instance for State {
             // Self::Closure(_) => StateType::Closure,
             Self::Collection(collection) => StateType::Collection(collection.class()),
             Self::Map(_) => StateType::Map,
-            // Self::Object(object) => StateType::Object(object.class()),
+            Self::Object(object) => StateType::Object(object.class()),
             Self::Scalar(scalar) => StateType::Scalar(scalar.class()),
             // Self::Stream(_) => StateType::Stream,
-            // Self::Tuple(_) => StateType::Tuple,
+            Self::Tuple(_) => StateType::Tuple,
         }
     }
 }
@@ -828,11 +829,12 @@ impl TryFrom<State> for Value {
         match state {
             State::Scalar(scalar) => scalar.try_into(),
 
-            // State::Tuple(tuple) => tuple
-            //     .into_iter()
-            //     .map(Value::try_from)
-            //     .collect::<TCResult<Tuple<Value>>>()
-            //     .map(Value::Tuple),
+            State::Tuple(tuple) => tuple
+                .into_iter()
+                .map(Value::try_from)
+                .collect::<TCResult<Tuple<Value>>>()
+                .map(Value::Tuple),
+
             other => Err(TCError::unexpected(other, "a Value")),
         }
     }
@@ -926,14 +928,14 @@ impl TryCastFrom<State> for CollectionBase {
 impl<T: TryCastFrom<State>> TryCastFrom<State> for (T,) {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            // State::Tuple(tuple) => Self::can_cast_from(tuple),
+            State::Tuple(tuple) => Self::can_cast_from(tuple),
             _ => false,
         }
     }
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
-            // State::Tuple(tuple) => Self::opt_cast_from(tuple),
+            State::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,
         }
     }
@@ -942,14 +944,14 @@ impl<T: TryCastFrom<State>> TryCastFrom<State> for (T,) {
 impl<T1: TryCastFrom<State>, T2: TryCastFrom<State>> TryCastFrom<State> for (T1, T2) {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            // State::Tuple(tuple) => Self::can_cast_from(tuple),
+            State::Tuple(tuple) => Self::can_cast_from(tuple),
             _ => false,
         }
     }
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
-            // State::Tuple(tuple) => Self::opt_cast_from(tuple),
+            State::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,
         }
     }
@@ -960,14 +962,14 @@ impl<T1: TryCastFrom<State>, T2: TryCastFrom<State>, T3: TryCastFrom<State>> Try
 {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            // State::Tuple(tuple) => Self::can_cast_from(tuple),
+            State::Tuple(tuple) => Self::can_cast_from(tuple),
             _ => false,
         }
     }
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
-            // State::Tuple(tuple) => Self::opt_cast_from(tuple),
+            State::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,
         }
     }
@@ -976,14 +978,14 @@ impl<T1: TryCastFrom<State>, T2: TryCastFrom<State>, T3: TryCastFrom<State>> Try
 impl<T: TryCastFrom<State>> TryCastFrom<State> for Vec<T> {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            // State::Tuple(tuple) => Self::can_cast_from(tuple),
+            State::Tuple(tuple) => Self::can_cast_from(tuple),
             _ => false,
         }
     }
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
-            // State::Tuple(source) => Self::opt_cast_from(source),
+            State::Tuple(source) => Self::opt_cast_from(source),
             _ => None,
         }
     }
@@ -992,14 +994,14 @@ impl<T: TryCastFrom<State>> TryCastFrom<State> for Vec<T> {
 impl<T: TryCastFrom<State>> TryCastFrom<State> for Tuple<T> {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            // State::Tuple(tuple) => Vec::<T>::can_cast_from(tuple),
+            State::Tuple(tuple) => Vec::<T>::can_cast_from(tuple),
             _ => false,
         }
     }
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
-            // State::Tuple(tuple) => Vec::<T>::opt_cast_from(tuple).map(Tuple::from),
+            State::Tuple(tuple) => Vec::<T>::opt_cast_from(tuple).map(Tuple::from),
             _ => None,
         }
     }
@@ -1008,7 +1010,7 @@ impl<T: TryCastFrom<State>> TryCastFrom<State> for Tuple<T> {
 impl TryCastFrom<State> for InstanceClass {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            // State::Object(Object::Class(_)) => true,
+            State::Object(Object::Class(_)) => true,
             State::Scalar(scalar) => Self::can_cast_from(scalar),
             _ => false,
         }
@@ -1016,7 +1018,7 @@ impl TryCastFrom<State> for InstanceClass {
 
     fn opt_cast_from(state: State) -> Option<InstanceClass> {
         match state {
-            // State::Object(Object::Class(class)) => Some(class),
+            State::Object(Object::Class(class)) => Some(class),
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
             _ => None,
         }
@@ -1027,7 +1029,7 @@ impl<T: TryCastFrom<State>> TryCastFrom<State> for Map<T> {
     fn can_cast_from(state: &State) -> bool {
         match state {
             State::Map(map) => map.values().all(T::can_cast_from),
-            // State::Tuple(tuple) => tuple.iter().all(|item| item.matches::<(Id, State)>()),
+            State::Tuple(tuple) => tuple.iter().all(|item| item.matches::<(Id, State)>()),
             _ => false,
         }
     }
@@ -1044,16 +1046,16 @@ impl<T: TryCastFrom<State>> TryCastFrom<State> for Map<T> {
 
                 Some(dest)
             }
-            // State::Tuple(tuple) => {
-            //     let mut dest = Map::new();
-            //
-            //     for item in tuple {
-            //         let (key, value): (Id, T) = item.opt_cast_into()?;
-            //         dest.insert(key, value);
-            //     }
-            //
-            //     Some(dest)
-            // }
+            State::Tuple(tuple) => {
+                let mut dest = Map::new();
+
+                for item in tuple {
+                    let (key, value): (Id, T) = item.opt_cast_into()?;
+                    dest.insert(key, value);
+                }
+
+                Some(dest)
+            }
             _ => None,
         }
     }
@@ -1065,7 +1067,7 @@ impl TryCastFrom<State> for Scalar {
             State::Map(map) => map.values().all(Scalar::can_cast_from),
             State::Object(object) => Self::can_cast_from(object),
             State::Scalar(_) => true,
-            // State::Tuple(tuple) => Vec::<Scalar>::can_cast_from(tuple),
+            State::Tuple(tuple) => Vec::<Scalar>::can_cast_from(tuple),
             _ => false,
         }
     }
@@ -1085,9 +1087,10 @@ impl TryCastFrom<State> for Scalar {
             State::Object(object) => Self::opt_cast_from(object),
             State::Scalar(scalar) => Some(scalar),
 
-            // State::Tuple(tuple) => Vec::<Scalar>::opt_cast_from(tuple)
-            //     .map(Tuple::from)
-            //     .map(Scalar::Tuple),
+            State::Tuple(tuple) => Vec::<Scalar>::opt_cast_from(tuple)
+                .map(Tuple::from)
+                .map(Scalar::Tuple),
+
             _ => None,
         }
     }
@@ -1108,9 +1111,10 @@ impl TryCastFrom<State> for Value {
             State::Object(object) => Self::opt_cast_from(object),
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
 
-            // State::Tuple(tuple) => Vec::<Value>::opt_cast_from(tuple)
-            //     .map(Tuple::from)
-            //     .map(Value::Tuple),
+            State::Tuple(tuple) => Vec::<Value>::opt_cast_from(tuple)
+                .map(Tuple::from)
+                .map(Value::Tuple),
+
             _ => None,
         }
     }
@@ -1178,7 +1182,7 @@ impl fmt::Debug for State {
             Self::Object(object) => fmt::Debug::fmt(object, f),
             Self::Scalar(scalar) => fmt::Debug::fmt(scalar, f),
             // Self::Stream(_) => f.write_str("Stream"),
-            // Self::Tuple(tuple) => fmt::Debug::fmt(tuple, f),
+            Self::Tuple(tuple) => fmt::Debug::fmt(tuple, f),
         }
     }
 }
@@ -1216,7 +1220,7 @@ impl StateVisitor {
                     .map_ok(State::Collection)
                     .await
             }
-            StateType::Map => access.next_value(self.txn.clone()).await,
+            // StateType::Map => access.next_value(self.txn.clone()).await,
             // StateType::Object(ot) => {
             //     let txn = self
             //         .txn
@@ -1369,30 +1373,29 @@ impl<'a> de::Visitor for StateVisitor {
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
-        // let mut seq = if let Some(len) = access.size_hint() {
-        //     Vec::with_capacity(len)
-        // } else {
-        //     Vec::new()
-        // };
-        //
-        // let mut i = 0usize;
-        // loop {
-        //     let txn = self
-        //         .txn
-        //         .subcontext(i.into())
-        //         .map_err(de::Error::custom)
-        //         .await?;
-        //
-        //     if let Some(next) = access.next_element(txn).await? {
-        //         seq.push(next);
-        //         i += 1;
-        //     } else {
-        //         break;
-        //     }
-        // }
-        //
-        // Ok(State::Tuple(seq.into()))
-        Err(de::Error::custom("temporarily disabled: State::Tuple"))
+        let mut seq = if let Some(len) = access.size_hint() {
+            Vec::with_capacity(len)
+        } else {
+            Vec::new()
+        };
+
+        let mut i = 0usize;
+        loop {
+            let txn = self
+                .txn
+                .subcontext(i.into())
+                .map_err(de::Error::custom)
+                .await?;
+
+            if let Some(next) = access.next_element(txn).await? {
+                seq.push(next);
+                i += 1;
+            } else {
+                break;
+            }
+        }
+
+        Ok(State::Tuple(seq.into()))
     }
 }
 

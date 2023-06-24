@@ -83,11 +83,20 @@ impl fmt::Debug for CollectionType {
     }
 }
 
-#[derive(Clone)]
 pub enum Collection<Txn, FE> {
     BTree(BTree<Txn, FE>),
     Table(Table<Txn, FE>),
     Tensor(Tensor<Txn, FE>),
+}
+
+impl<Txn, FE> Clone for Collection<Txn, FE> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::BTree(btree) => Self::BTree(btree.clone()),
+            Self::Table(table) => Self::Table(table.clone()),
+            Self::Tensor(tensor) => Self::Tensor(tensor.clone()),
+        }
+    }
 }
 
 as_type!(Collection<Txn, FE>, BTree, BTree<Txn, FE>);
@@ -128,12 +137,12 @@ where
 }
 
 #[async_trait]
-impl<T, FE> AsyncHash<FE> for Collection<T, FE>
+impl<Txn, FE> AsyncHash<FE> for Collection<Txn, FE>
 where
-    T: Transaction<FE>,
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
 {
-    type Txn = T;
+    type Txn = Txn;
 
     async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
         let schema_hash = Hash::<Sha256>::hash(self.schema());
@@ -183,13 +192,12 @@ impl<Txn, FE> From<BTreeFile<Txn, FE>> for Collection<Txn, FE> {
 }
 
 #[async_trait]
-impl<'en, T, FE> IntoView<'en, FE> for Collection<T, FE>
+impl<'en, Txn, FE> IntoView<'en, FE> for Collection<Txn, FE>
 where
-    T: Transaction<FE>,
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
-    Self: 'en,
 {
-    type Txn = T;
+    type Txn = Txn;
     type View = CollectionView<'en>;
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {

@@ -41,6 +41,7 @@ safecast = { path = "../../safecast" }
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
 tbon = { path = "../../tbon" }
+tc-chain = { path = "chain" }
 tc-collection = { path = "collection" }
 tc-error = { path = "error" }
 tc-scalar = { path = "scalar" }

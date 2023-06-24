@@ -1,14 +1,17 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-}
+use async_hash::generic_array::GenericArray;
+use async_hash::{Output, Sha256};
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+use tcgeneric::{label, Label};
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+pub mod block;
+mod history;
+mod store;
+
+pub const CHAIN: Label = label("chain");
+
+const BLOCK_SIZE: usize = 1_000_000; // TODO: reduce to 4,096
+
+#[inline]
+pub(crate) fn null_hash() -> Output<Sha256> {
+    GenericArray::default()
 }
