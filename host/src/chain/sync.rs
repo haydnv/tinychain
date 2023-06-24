@@ -19,7 +19,6 @@ use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Label};
 
-use crate::cluster::Replica;
 use crate::fs;
 use crate::fs::CacheBlock;
 use crate::route::Route;
@@ -64,6 +63,26 @@ impl<T> SyncChain<T> {
     }
 }
 
+impl<T> SyncChain<T>
+where
+    T: Persist<CacheBlock, Txn = Txn> + Restore<CacheBlock> + TryCastFrom<State>,
+{
+    pub(crate) async fn restore_from(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        let backup = txn.get(source, Value::default()).await?;
+        let backup =
+            backup.try_cast_into(|backup| bad_request!("{:?} is not a valid backup", backup))?;
+
+        self.subject.restore(*txn.id(), &backup).await?;
+
+        let (mut pending, mut committed) = try_join!(self.pending.write(), self.committed.write())?;
+
+        *pending = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
+        *committed = ChainBlock::new(null_hash().to_vec());
+
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl<T> ChainInstance<T> for SyncChain<T>
 where
@@ -91,33 +110,6 @@ where
 
     fn subject(&self) -> &T {
         &self.subject
-    }
-}
-
-#[async_trait]
-impl<T> Replica for SyncChain<T>
-where
-    T: Restore<CacheBlock> + Transact + Clone + Send + Sync,
-    T: TryCastFrom<State>,
-    State: From<T>,
-{
-    async fn state(&self, _txn_id: TxnId) -> TCResult<State> {
-        Ok(self.subject.clone().into())
-    }
-
-    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        let backup = txn.get(source, Value::default()).await?;
-        let backup =
-            backup.try_cast_into(|backup| bad_request!("{:?} is not a valid backup", backup))?;
-
-        self.subject.restore(*txn.id(), &backup).await?;
-
-        let (mut pending, mut committed) = try_join!(self.pending.write(), self.committed.write())?;
-
-        *pending = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
-        *committed = ChainBlock::new(null_hash().to_vec());
-
-        Ok(())
     }
 }
 
@@ -189,94 +181,94 @@ where
     }
 }
 
-// #[async_trait]
-// impl<T> Persist<CacheBlock> for SyncChain<T>
-// where
-//     T: Persist<CacheBlock, Txn = Txn> + Send + Sync,
-// {
-//     type Txn = Txn;
-//     type Schema = T::Schema;
-//
-//     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-//         debug!("SyncChain::create");
-//
-//         let subject = T::create(txn_id, schema, store).await?;
-//
-//         let mut dir = subject.dir().try_write_owned()?;
-//
-//         let store = {
-//             let dir = dir.create_dir(STORE.to_string())?;
-//             fs::Dir::load(txn_id, dir)
-//                 .map_ok(super::data::Store::new)
-//                 .await?
-//         };
-//
-//         let mut blocks_dir = dir
-//             .create_dir(BLOCKS.to_string())
-//             .and_then(|dir| dir.try_write_owned())?;
-//
-//         let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
-//         let size_hint = block.get_size();
-//         let pending = blocks_dir.create_file(PENDING.to_string(), block, size_hint)?;
-//
-//         let block = ChainBlock::new(null_hash().to_vec());
-//         let size_hint = block.get_size();
-//         let committed = blocks_dir.create_file(COMMITTED.to_string(), block, size_hint)?;
-//
-//         Ok(Self {
-//             subject,
-//             pending,
-//             committed,
-//             store,
-//         })
-//     }
-//
-//     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-//         debug!("SyncChain::load");
-//
-//         let subject = T::load_or_create(txn_id, schema, store).await?;
-//
-//         let mut dir = subject.dir().write_owned().await;
-//
-//         let store = {
-//             let dir = dir.get_or_create_dir(STORE.to_string())?;
-//             fs::Dir::load(txn_id, dir)
-//                 .map_ok(super::data::Store::new)
-//                 .await?
-//         };
-//
-//         let mut blocks_dir = dir
-//             .get_or_create_dir(BLOCKS.to_string())
-//             .and_then(|dir| dir.try_write_owned())?;
-//
-//         let pending = if let Some(file) = blocks_dir.get_file(&PENDING.to_string()) {
-//             file.clone()
-//         } else {
-//             let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
-//             let size_hint = block.get_size();
-//             blocks_dir.create_file(PENDING.to_string(), block, size_hint)?
-//         };
-//
-//         let committed = if let Some(file) = blocks_dir.get_file(&COMMITTED.to_string()) {
-//             file.clone()
-//         } else {
-//             let block = ChainBlock::new(null_hash().to_vec());
-//             let size_hint = block.get_size();
-//             blocks_dir.create_file(COMMITTED.to_string(), block, size_hint)?
-//         };
-//
-//         Ok(Self {
-//             subject,
-//             pending,
-//             committed,
-//             store,
-//         })
-//     }
-//
-//     fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
-//         self.subject.dir()
-//     }
-// }
+#[async_trait]
+impl<T> Persist<CacheBlock> for SyncChain<T>
+where
+    T: Persist<CacheBlock, Txn = Txn> + Send + Sync,
+{
+    type Txn = Txn;
+    type Schema = T::Schema;
+
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+        debug!("SyncChain::create");
+
+        let subject = T::create(txn_id, schema, store).await?;
+
+        let mut dir = subject.dir().try_write_owned()?;
+
+        let store = {
+            let dir = dir.create_dir(STORE.to_string())?;
+            fs::Dir::load(txn_id, dir)
+                .map_ok(super::data::Store::new)
+                .await?
+        };
+
+        let mut blocks_dir = dir
+            .create_dir(BLOCKS.to_string())
+            .and_then(|dir| dir.try_write_owned())?;
+
+        let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
+        let size_hint = block.get_size();
+        let pending = blocks_dir.create_file(PENDING.to_string(), block, size_hint)?;
+
+        let block = ChainBlock::new(null_hash().to_vec());
+        let size_hint = block.get_size();
+        let committed = blocks_dir.create_file(COMMITTED.to_string(), block, size_hint)?;
+
+        Ok(Self {
+            subject,
+            pending,
+            committed,
+            store,
+        })
+    }
+
+    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+        debug!("SyncChain::load");
+
+        let subject = T::load_or_create(txn_id, schema, store).await?;
+
+        let mut dir = subject.dir().write_owned().await;
+
+        let store = {
+            let dir = dir.get_or_create_dir(STORE.to_string())?;
+            fs::Dir::load(txn_id, dir)
+                .map_ok(super::data::Store::new)
+                .await?
+        };
+
+        let mut blocks_dir = dir
+            .get_or_create_dir(BLOCKS.to_string())
+            .and_then(|dir| dir.try_write_owned())?;
+
+        let pending = if let Some(file) = blocks_dir.get_file(&PENDING.to_string()) {
+            file.clone()
+        } else {
+            let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
+            let size_hint = block.get_size();
+            blocks_dir.create_file(PENDING.to_string(), block, size_hint)?
+        };
+
+        let committed = if let Some(file) = blocks_dir.get_file(&COMMITTED.to_string()) {
+            file.clone()
+        } else {
+            let block = ChainBlock::new(null_hash().to_vec());
+            let size_hint = block.get_size();
+            blocks_dir.create_file(COMMITTED.to_string(), block, size_hint)?
+        };
+
+        Ok(Self {
+            subject,
+            pending,
+            committed,
+            store,
+        })
+    }
+
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
+        self.subject.dir()
+    }
+}
 
 #[async_trait]
 impl<T: Route + fmt::Debug + Send + Sync> Recover for SyncChain<T> {

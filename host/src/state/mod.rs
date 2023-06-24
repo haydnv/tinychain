@@ -24,10 +24,10 @@ use tc_transact::{AsyncHash, Transaction};
 use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
-// use crate::chain::{BlockChain, Chain, ChainType};
+use crate::chain::{BlockChain, Chain, ChainType};
 // use crate::closure::*;
 use crate::collection::*;
-// use crate::object::{InstanceClass, Object, ObjectType, ObjectVisitor};
+use crate::object::{InstanceClass, Object, ObjectType, ObjectVisitor};
 use crate::route::Public;
 use crate::scalar::*;
 // use crate::stream::TCStream;
@@ -55,11 +55,11 @@ where
 /// The [`Class`] of a [`State`].
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum StateType {
-    // Chain(ChainType),
+    Chain(ChainType),
     Collection(CollectionType),
     Closure,
-    // Map,
-    // Object(ObjectType),
+    Map,
+    Object(ObjectType),
     Scalar(ScalarType),
     // Stream,
     // Tuple,
@@ -77,15 +77,15 @@ impl NativeClass for StateType {
             if path.len() == 2 {
                 match path[1].as_str() {
                     // "closure" => Some(Self::Closure),
-                    // "map" => Some(Self::Map),
+                    "map" => Some(Self::Map),
                     // "tuple" => Some(Self::Tuple),
                     _ => None,
                 }
             } else if path.len() > 2 {
                 match path[1].as_str() {
                     "collection" => CollectionType::from_path(path).map(Self::Collection),
-                    // "chain" => ChainType::from_path(path).map(Self::Chain),
-                    // "object" => ObjectType::from_path(path).map(Self::Object),
+                    "chain" => ChainType::from_path(path).map(Self::Chain),
+                    "object" => ObjectType::from_path(path).map(Self::Object),
                     "scalar" => ScalarType::from_path(path).map(Self::Scalar),
                     _ => None,
                 }
@@ -100,10 +100,10 @@ impl NativeClass for StateType {
     fn path(&self) -> TCPathBuf {
         match self {
             Self::Collection(ct) => ct.path(),
-            // Self::Chain(ct) => ct.path(),
+            Self::Chain(ct) => ct.path(),
             Self::Closure => path_label(&["state", "closure"]).into(),
-            // Self::Map => path_label(&["state", "map"]).into(),
-            // Self::Object(ot) => ot.path(),
+            Self::Map => path_label(&["state", "map"]).into(),
+            Self::Object(ot) => ot.path(),
             Self::Scalar(st) => st.path(),
             // Self::Stream => path_label(&["state", "stream"]).into(),
             // Self::Tuple => path_label(&["state", "tuple"]).into(),
@@ -129,17 +129,17 @@ impl From<NumberType> for StateType {
     }
 }
 
-// impl From<ChainType> for StateType {
-//     fn from(ct: ChainType) -> Self {
-//         Self::Chain(ct)
-//     }
-// }
+impl From<ChainType> for StateType {
+    fn from(ct: ChainType) -> Self {
+        Self::Chain(ct)
+    }
+}
 
-// impl From<ObjectType> for StateType {
-//     fn from(ot: ObjectType) -> Self {
-//         Self::Object(ot)
-//     }
-// }
+impl From<ObjectType> for StateType {
+    fn from(ot: ObjectType) -> Self {
+        Self::Object(ot)
+    }
+}
 
 impl From<ScalarType> for StateType {
     fn from(st: ScalarType) -> Self {
@@ -179,11 +179,11 @@ impl TryFrom<StateType> for ScalarType {
 impl fmt::Debug for StateType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            // Self::Chain(ct) => fmt::Debug::fmt(ct, f),
+            Self::Chain(ct) => fmt::Debug::fmt(ct, f),
             Self::Collection(ct) => fmt::Debug::fmt(ct, f),
             Self::Closure => f.write_str("closure"),
-            // Self::Map => f.write_str("Map<Id, State>"),
-            // Self::Object(ot) => fmt::Debug::fmt(ot, f),
+            Self::Map => f.write_str("Map<Id, State>"),
+            Self::Object(ot) => fmt::Debug::fmt(ot, f),
             Self::Scalar(st) => fmt::Debug::fmt(st, f),
             // Self::Stream => f.write_str("Stream"),
             // Self::Tuple => f.write_str("Tuple<State>"),
@@ -195,10 +195,10 @@ impl fmt::Debug for StateType {
 #[derive(Clone)]
 pub enum State {
     Collection(Collection),
-    // Chain(Chain<CollectionBase>),
+    Chain(Chain<CollectionBase>),
     // Closure(Closure),
-    // Map(Map<Self>),
-    // Object(Object),
+    Map(Map<Self>),
+    Object(Object),
     Scalar(Scalar),
     // Stream(TCStream),
     // Tuple(Tuple<Self>),
@@ -208,7 +208,7 @@ impl State {
     /// Return true if this `State` is an empty [`Tuple`] or [`Map`], default [`Link`], or `Value::None`
     pub fn is_none(&self) -> bool {
         match self {
-            // Self::Map(map) => map.is_empty(),
+            Self::Map(map) => map.is_empty(),
             Self::Scalar(scalar) => scalar.is_none(),
             // Self::Tuple(tuple) => tuple.is_empty(),
             _ => false,
@@ -219,7 +219,7 @@ impl State {
     pub fn is_map(&self) -> bool {
         match self {
             Self::Scalar(scalar) => scalar.is_map(),
-            // Self::Map(_) => true,
+            Self::Map(_) => true,
             _ => false,
         }
     }
@@ -241,7 +241,7 @@ impl State {
     /// Return true if this `State` is a reference that needs to be resolved.
     pub fn is_ref(&self) -> bool {
         match self {
-            // Self::Map(map) => map.values().any(Self::is_ref),
+            Self::Map(map) => map.values().any(Self::is_ref),
             Self::Scalar(scalar) => scalar.is_ref(),
             // Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
             _ => false,
@@ -251,7 +251,7 @@ impl State {
     /// Return this `State` as a [`Map`] of [`State`]s, or an error if this is not possible.
     pub fn try_into_map<Err, OnErr: Fn(State) -> Err>(self, err: OnErr) -> Result<Map<State>, Err> {
         match self {
-            // State::Map(states) => Ok(states),
+            State::Map(states) => Ok(states),
             State::Scalar(Scalar::Map(states)) => Ok(states
                 .into_iter()
                 .map(|(id, scalar)| (id, State::Scalar(scalar)))
@@ -282,14 +282,14 @@ impl Refer for State {
     fn dereference_self(self, path: &TCPathBuf) -> Self {
         match self {
             // Self::Closure(closure) => Self::Closure(closure.dereference_self(path)),
-            // Self::Map(map) => {
-            //     let map = map
-            //         .into_iter()
-            //         .map(|(id, state)| (id, state.dereference_self(path)))
-            //         .collect();
-            //
-            //     Self::Map(map)
-            // }
+            Self::Map(map) => {
+                let map = map
+                    .into_iter()
+                    .map(|(id, state)| (id, state.dereference_self(path)))
+                    .collect();
+
+                Self::Map(map)
+            }
             Self::Scalar(scalar) => Self::Scalar(scalar.dereference_self(path)),
             // Self::Tuple(tuple) => {
             //     let tuple = tuple
@@ -305,7 +305,7 @@ impl Refer for State {
 
     fn is_conditional(&self) -> bool {
         match self {
-            // Self::Map(map) => map.values().any(|state| state.is_conditional()),
+            Self::Map(map) => map.values().any(|state| state.is_conditional()),
             Self::Scalar(scalar) => scalar.is_conditional(),
             // Self::Tuple(tuple) => tuple.iter().any(|state| state.is_conditional()),
             _ => false,
@@ -315,10 +315,10 @@ impl Refer for State {
     fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
         match self {
             // Self::Closure(closure) => closure.is_inter_service_write(cluster_path),
+            Self::Map(map) => map
+                .values()
+                .any(|state| state.is_inter_service_write(cluster_path)),
 
-            // Self::Map(map) => map
-            //     .values()
-            //     .any(|state| state.is_inter_service_write(cluster_path)),
             Self::Scalar(scalar) => scalar.is_inter_service_write(cluster_path),
 
             // Self::Tuple(tuple) => tuple
@@ -331,14 +331,14 @@ impl Refer for State {
     fn reference_self(self, path: &TCPathBuf) -> Self {
         match self {
             // Self::Closure(closure) => Self::Closure(closure.reference_self(path)),
-            // Self::Map(map) => {
-            //     let map = map
-            //         .into_iter()
-            //         .map(|(id, state)| (id, state.reference_self(path)))
-            //         .collect();
-            //
-            //     Self::Map(map)
-            // }
+            Self::Map(map) => {
+                let map = map
+                    .into_iter()
+                    .map(|(id, state)| (id, state.reference_self(path)))
+                    .collect();
+
+                Self::Map(map)
+            }
             Self::Scalar(scalar) => Self::Scalar(scalar.reference_self(path)),
             // Self::Tuple(tuple) => {
             //     let tuple = tuple
@@ -354,11 +354,11 @@ impl Refer for State {
 
     fn requires(&self, deps: &mut HashSet<Id>) {
         match self {
-            // Self::Map(map) => {
-            //     for state in map.values() {
-            //         state.requires(deps);
-            //     }
-            // }
+            Self::Map(map) => {
+                for state in map.values() {
+                    state.requires(deps);
+                }
+            }
             Self::Scalar(scalar) => scalar.requires(deps),
             // Self::Tuple(tuple) => {
             //     for state in tuple.iter() {
@@ -377,18 +377,18 @@ impl Refer for State {
         debug!("State::resolve {:?}", self);
 
         match self {
-            // Self::Map(map) => {
-            //     let mut resolved = futures::stream::iter(map)
-            //         .map(|(id, state)| state.resolve(context, txn).map_ok(|state| (id, state)))
-            //         .buffer_unordered(num_cpus::get());
-            //
-            //     let mut map = Map::new();
-            //     while let Some((id, state)) = resolved.try_next().await? {
-            //         map.insert(id, state);
-            //     }
-            //
-            //     Ok(State::Map(map))
-            // }
+            Self::Map(map) => {
+                let mut resolved = futures::stream::iter(map)
+                    .map(|(id, state)| state.resolve(context, txn).map_ok(|state| (id, state)))
+                    .buffer_unordered(num_cpus::get());
+
+                let mut map = Map::new();
+                while let Some((id, state)) = resolved.try_next().await? {
+                    map.insert(id, state);
+                }
+
+                Ok(State::Map(map))
+            }
             Self::Scalar(scalar) => scalar.resolve(context, txn).await,
             // Self::Tuple(tuple) => {
             //     let len = tuple.len();
@@ -419,10 +419,10 @@ impl Instance for State {
 
     fn class(&self) -> StateType {
         match self {
-            // Self::Chain(chain) => StateType::Chain(chain.class()),
+            Self::Chain(chain) => StateType::Chain(chain.class()),
             // Self::Closure(_) => StateType::Closure,
             Self::Collection(collection) => StateType::Collection(collection.class()),
-            // Self::Map(_) => StateType::Map,
+            Self::Map(_) => StateType::Map,
             // Self::Object(object) => StateType::Object(object.class()),
             Self::Scalar(scalar) => StateType::Scalar(scalar.class()),
             // Self::Stream(_) => StateType::Stream,
@@ -440,28 +440,28 @@ impl AsyncHash<crate::fs::CacheBlock> for State {
             Self::Collection(collection) => collection.hash(txn).await,
             // Self::Chain(chain) => chain.hash(txn).await,
             // Self::Closure(closure) => closure.hash(txn).await,
-            // Self::Map(map) => {
-            //     let mut hashes = stream::iter(map)
-            //         .map(|(id, state)| {
-            //             state
-            //                 .hash(txn)
-            //                 .map_ok(|hash| (Hash::<Sha256>::hash(id), hash))
-            //         })
-            //         .buffered(num_cpus::get())
-            //         .map_ok(|(id, state)| {
-            //             let mut inner_hasher = Sha256::default();
-            //             inner_hasher.update(&id);
-            //             inner_hasher.update(&state);
-            //             inner_hasher.finalize()
-            //         });
-            //
-            //     let mut hasher = Sha256::default();
-            //     while let Some(hash) = hashes.try_next().await? {
-            //         hasher.update(&hash);
-            //     }
-            //
-            //     Ok(hasher.finalize())
-            // }
+            Self::Map(map) => {
+                let mut hashes = stream::iter(map)
+                    .map(|(id, state)| {
+                        state
+                            .hash(txn)
+                            .map_ok(|hash| (Hash::<Sha256>::hash(id), hash))
+                    })
+                    .buffered(num_cpus::get())
+                    .map_ok(|(id, state)| {
+                        let mut inner_hasher = Sha256::default();
+                        inner_hasher.update(&id);
+                        inner_hasher.update(&state);
+                        inner_hasher.finalize()
+                    });
+
+                let mut hasher = Sha256::default();
+                while let Some(hash) = hashes.try_next().await? {
+                    hasher.update(&hash);
+                }
+
+                Ok(hasher.finalize())
+            }
             // Self::Object(object) => object.hash(txn).await,
             Self::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),
             // Self::Stream(_stream) => Err(bad_request!(
@@ -495,11 +495,11 @@ impl From<BTree> for State {
     }
 }
 
-// impl From<Chain<CollectionBase>> for State {
-//     fn from(chain: Chain<CollectionBase>) -> Self {
-//         Self::Chain(chain)
-//     }
-// }
+impl From<Chain<CollectionBase>> for State {
+    fn from(chain: Chain<CollectionBase>) -> Self {
+        Self::Chain(chain)
+    }
+}
 
 // impl From<Closure> for State {
 //     fn from(closure: Closure) -> Self {
@@ -525,11 +525,11 @@ impl From<Id> for State {
     }
 }
 
-// impl From<InstanceClass> for State {
-//     fn from(class: InstanceClass) -> Self {
-//         Self::Object(class.into())
-//     }
-// }
+impl From<InstanceClass> for State {
+    fn from(class: InstanceClass) -> Self {
+        Self::Object(class.into())
+    }
+}
 
 impl From<Host> for State {
     fn from(host: Host) -> Self {
@@ -543,27 +543,27 @@ impl From<Link> for State {
     }
 }
 
-// impl From<Map<InstanceClass>> for State {
-//     fn from(map: Map<InstanceClass>) -> Self {
-//         Self::Map(
-//             map.into_iter()
-//                 .map(|(id, class)| (id, State::from(class)))
-//                 .collect(),
-//         )
-//     }
-// }
-//
-// impl From<Map<State>> for State {
-//     fn from(map: Map<State>) -> Self {
-//         State::Map(map)
-//     }
-// }
-//
-// impl From<Map<Scalar>> for State {
-//     fn from(map: Map<Scalar>) -> Self {
-//         State::Scalar(map.into())
-//     }
-// }
+impl From<Map<InstanceClass>> for State {
+    fn from(map: Map<InstanceClass>) -> Self {
+        Self::Map(
+            map.into_iter()
+                .map(|(id, class)| (id, State::from(class)))
+                .collect(),
+        )
+    }
+}
+
+impl From<Map<State>> for State {
+    fn from(map: Map<State>) -> Self {
+        State::Map(map)
+    }
+}
+
+impl From<Map<Scalar>> for State {
+    fn from(map: Map<Scalar>) -> Self {
+        State::Scalar(map.into())
+    }
+}
 
 impl From<Number> for State {
     fn from(n: Number) -> Self {
@@ -571,11 +571,11 @@ impl From<Number> for State {
     }
 }
 
-// impl From<Object> for State {
-//     fn from(object: Object) -> Self {
-//         State::Object(object)
-//     }
-// }
+impl From<Object> for State {
+    fn from(object: Object) -> Self {
+        State::Object(object)
+    }
+}
 
 impl From<OpDef> for State {
     fn from(op_def: OpDef) -> Self {
@@ -770,11 +770,12 @@ impl TryFrom<State> for Scalar {
 
     fn try_from(state: State) -> TCResult<Self> {
         match state {
-            // State::Map(map) => map
-            //     .into_iter()
-            //     .map(|(id, state)| Scalar::try_from(state).map(|scalar| (id, scalar)))
-            //     .collect::<TCResult<Map<Scalar>>>()
-            //     .map(Scalar::Map),
+            State::Map(map) => map
+                .into_iter()
+                .map(|(id, state)| Scalar::try_from(state).map(|scalar| (id, scalar)))
+                .collect::<TCResult<Map<Scalar>>>()
+                .map(Scalar::Map),
+
             State::Scalar(scalar) => Ok(scalar),
 
             // State::Tuple(tuple) => tuple
@@ -792,10 +793,11 @@ impl TryFrom<State> for Map<Scalar> {
 
     fn try_from(state: State) -> TCResult<Map<Scalar>> {
         match state {
-            // State::Map(map) => map
-            //     .into_iter()
-            //     .map(|(id, state)| Scalar::try_from(state).map(|scalar| (id, scalar)))
-            //     .collect(),
+            State::Map(map) => map
+                .into_iter()
+                .map(|(id, state)| Scalar::try_from(state).map(|scalar| (id, scalar)))
+                .collect(),
+
             State::Scalar(Scalar::Map(map)) => Ok(map),
 
             other => Err(TCError::unexpected(other, "a Map")),
@@ -808,7 +810,7 @@ impl TryFrom<State> for Map<State> {
 
     fn try_from(state: State) -> TCResult<Map<State>> {
         match state {
-            // State::Map(map) => Ok(map),
+            State::Map(map) => Ok(map),
             State::Scalar(Scalar::Map(map)) => Ok(map
                 .into_iter()
                 .map(|(id, scalar)| (id, State::Scalar(scalar)))
@@ -836,39 +838,37 @@ impl TryFrom<State> for Value {
     }
 }
 
-// // TODO: impl<T> TryCastFrom<State> for Chain<T> where T: TryCastFrom<State>
-// impl TryCastFrom<State> for Chain<CollectionBase> {
-//     fn can_cast_from(state: &State) -> bool {
-//         match state {
-//             State::Chain(_) => true,
-//             _ => false,
-//         }
-//     }
-//
-//     fn opt_cast_from(state: State) -> Option<Self> {
-//         match state {
-//             State::Chain(chain) => Some(chain),
-//             _ => None,
-//         }
-//     }
-// }
+impl TryCastFrom<State> for Chain<CollectionBase> {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Chain(_) => true,
+            _ => false,
+        }
+    }
 
-// TODO: impl<T> TryCastFrom<State> for BlockChain<T> where T: TryCastFrom<State>
-// impl TryCastFrom<State> for BlockChain<CollectionBase> {
-//     fn can_cast_from(state: &State) -> bool {
-//         match state {
-//             State::Chain(Chain::Block(_)) => true,
-//             _ => false,
-//         }
-//     }
-//
-//     fn opt_cast_from(state: State) -> Option<Self> {
-//         match state {
-//             State::Chain(Chain::Block(chain)) => Some(chain),
-//             _ => None,
-//         }
-//     }
-// }
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Chain(chain) => Some(chain),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for BlockChain<CollectionBase> {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Chain(Chain::Block(_)) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Chain(Chain::Block(chain)) => Some(chain),
+            _ => None,
+        }
+    }
+}
 
 // impl TryCastFrom<State> for Closure {
 //     fn can_cast_from(state: &State) -> bool {
@@ -1005,28 +1005,28 @@ impl<T: TryCastFrom<State>> TryCastFrom<State> for Tuple<T> {
     }
 }
 
-// impl TryCastFrom<State> for InstanceClass {
-//     fn can_cast_from(state: &State) -> bool {
-//         match state {
-//             // State::Object(Object::Class(_)) => true,
-//             State::Scalar(scalar) => Self::can_cast_from(scalar),
-//             _ => false,
-//         }
-//     }
-//
-//     fn opt_cast_from(state: State) -> Option<InstanceClass> {
-//         match state {
-//             // State::Object(Object::Class(class)) => Some(class),
-//             State::Scalar(scalar) => Self::opt_cast_from(scalar),
-//             _ => None,
-//         }
-//     }
-// }
+impl TryCastFrom<State> for InstanceClass {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            // State::Object(Object::Class(_)) => true,
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<InstanceClass> {
+        match state {
+            // State::Object(Object::Class(class)) => Some(class),
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
 
 impl<T: TryCastFrom<State>> TryCastFrom<State> for Map<T> {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            // State::Map(map) => map.values().all(T::can_cast_from),
+            State::Map(map) => map.values().all(T::can_cast_from),
             // State::Tuple(tuple) => tuple.iter().all(|item| item.matches::<(Id, State)>()),
             _ => false,
         }
@@ -1034,16 +1034,16 @@ impl<T: TryCastFrom<State>> TryCastFrom<State> for Map<T> {
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
-            // State::Map(map) => {
-            //     let mut dest = Map::new();
-            //
-            //     for (key, value) in map {
-            //         let value = T::opt_cast_from(value)?;
-            //         dest.insert(key, value);
-            //     }
-            //
-            //     Some(dest)
-            // }
+            State::Map(map) => {
+                let mut dest = Map::new();
+
+                for (key, value) in map {
+                    let value = T::opt_cast_from(value)?;
+                    dest.insert(key, value);
+                }
+
+                Some(dest)
+            }
             // State::Tuple(tuple) => {
             //     let mut dest = Map::new();
             //
@@ -1062,8 +1062,8 @@ impl<T: TryCastFrom<State>> TryCastFrom<State> for Map<T> {
 impl TryCastFrom<State> for Scalar {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            // State::Map(map) => map.values().all(Scalar::can_cast_from),
-            // State::Object(object) => Self::can_cast_from(object),
+            State::Map(map) => map.values().all(Scalar::can_cast_from),
+            State::Object(object) => Self::can_cast_from(object),
             State::Scalar(_) => true,
             // State::Tuple(tuple) => Vec::<Scalar>::can_cast_from(tuple),
             _ => false,
@@ -1072,17 +1072,17 @@ impl TryCastFrom<State> for Scalar {
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
-            // State::Map(map) => {
-            //     let mut dest = Map::new();
-            //
-            //     for (key, state) in map.into_iter() {
-            //         let scalar = Scalar::opt_cast_from(state)?;
-            //         dest.insert(key, scalar);
-            //     }
-            //
-            //     Some(Scalar::Map(dest))
-            // }
-            // State::Object(object) => Self::opt_cast_from(object),
+            State::Map(map) => {
+                let mut dest = Map::new();
+
+                for (key, state) in map.into_iter() {
+                    let scalar = Scalar::opt_cast_from(state)?;
+                    dest.insert(key, scalar);
+                }
+
+                Some(Scalar::Map(dest))
+            }
+            State::Object(object) => Self::opt_cast_from(object),
             State::Scalar(scalar) => Some(scalar),
 
             // State::Tuple(tuple) => Vec::<Scalar>::opt_cast_from(tuple)
@@ -1096,7 +1096,7 @@ impl TryCastFrom<State> for Scalar {
 impl TryCastFrom<State> for Value {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            // State::Object(object) => Self::can_cast_from(object),
+            State::Object(object) => Self::can_cast_from(object),
             State::Scalar(scalar) => Self::can_cast_from(scalar),
             // State::Tuple(tuple) => tuple.iter().all(Self::can_cast_from),
             _ => false,
@@ -1105,7 +1105,7 @@ impl TryCastFrom<State> for Value {
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
-            // State::Object(object) => Self::opt_cast_from(object),
+            State::Object(object) => Self::opt_cast_from(object),
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
 
             // State::Tuple(tuple) => Vec::<Value>::opt_cast_from(tuple)
@@ -1119,7 +1119,7 @@ impl TryCastFrom<State> for Value {
 impl TryCastFrom<State> for Link {
     fn can_cast_from(state: &State) -> bool {
         match state {
-            // State::Object(Object::Class(class)) => Self::can_cast_from(class),
+            State::Object(Object::Class(class)) => Self::can_cast_from(class),
             State::Scalar(scalar) => Self::can_cast_from(scalar),
             _ => false,
         }
@@ -1127,7 +1127,7 @@ impl TryCastFrom<State> for Link {
 
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
-            // State::Object(Object::Class(class)) => Self::opt_cast_from(class).map(Self::from),
+            State::Object(Object::Class(class)) => Self::opt_cast_from(class).map(Self::from),
             State::Scalar(scalar) => Self::opt_cast_from(scalar).map(Self::from),
             _ => None,
         }
@@ -1171,11 +1171,11 @@ from_scalar!(u64);
 impl fmt::Debug for State {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            // Self::Chain(chain) => fmt::Debug::fmt(chain, f),
+            Self::Chain(chain) => fmt::Debug::fmt(chain, f),
             // Self::Closure(closure) => fmt::Debug::fmt(closure, f),
             Self::Collection(collection) => fmt::Debug::fmt(collection, f),
-            // Self::Map(map) => fmt::Debug::fmt(map, f),
-            // Self::Object(object) => fmt::Debug::fmt(object, f),
+            Self::Map(map) => fmt::Debug::fmt(map, f),
+            Self::Object(object) => fmt::Debug::fmt(object, f),
             Self::Scalar(scalar) => fmt::Debug::fmt(scalar, f),
             // Self::Stream(_) => f.write_str("Stream"),
             // Self::Tuple(tuple) => fmt::Debug::fmt(tuple, f),
@@ -1209,14 +1209,14 @@ impl StateVisitor {
             //         .map_ok(State::Closure)
             //         .await
             // }
-            // StateType::Collection(ct) => {
-            //     CollectionVisitor::new(self.txn.clone())
-            //         .visit_map_value(ct, access)
-            //         .map_ok(Collection::from)
-            //         .map_ok(State::Collection)
-            //         .await
-            // }
-            // StateType::Map => access.next_value(self.txn.clone()).await,
+            StateType::Collection(ct) => {
+                CollectionVisitor::new(self.txn.clone())
+                    .visit_map_value(ct, access)
+                    .map_ok(Collection::from)
+                    .map_ok(State::Collection)
+                    .await
+            }
+            StateType::Map => access.next_value(self.txn.clone()).await,
             // StateType::Object(ot) => {
             //     let txn = self
             //         .txn
@@ -1339,34 +1339,32 @@ impl<'a> de::Visitor for StateVisitor {
                 return ScalarVisitor::visit_subject(subject, params).map(State::Scalar);
             }
 
-            // let mut map = Map::new();
-            //
-            // let id = Id::from_str(&key).map_err(de::Error::custom)?;
-            // let txn = self
-            //     .txn
-            //     .subcontext(id.clone())
-            //     .map_err(de::Error::custom)
-            //     .await?;
-            //
-            // let value = access.next_value(txn).await?;
-            // map.insert(id, value);
-            //
-            // while let Some(id) = access.next_key::<Id>(()).await? {
-            //     let txn = self
-            //         .txn
-            //         .subcontext(id.clone())
-            //         .map_err(de::Error::custom)
-            //         .await?;
-            //
-            //     let state = access.next_value(txn).await?;
-            //     map.insert(id, state);
-            // }
-            //
-            // Ok(State::Map(map))
-            Err(de::Error::custom("temporarily disabled: State::Map"))
+            let mut map = Map::new();
+
+            let id = Id::from_str(&key).map_err(de::Error::custom)?;
+            let txn = self
+                .txn
+                .subcontext(id.clone())
+                .map_err(de::Error::custom)
+                .await?;
+
+            let value = access.next_value(txn).await?;
+            map.insert(id, value);
+
+            while let Some(id) = access.next_key::<Id>(()).await? {
+                let txn = self
+                    .txn
+                    .subcontext(id.clone())
+                    .map_err(de::Error::custom)
+                    .await?;
+
+                let state = access.next_value(txn).await?;
+                map.insert(id, state);
+            }
+
+            Ok(State::Map(map))
         } else {
-            // Ok(State::Map(Map::default()))
-            Err(de::Error::custom("temporarily disabled: State::Map"))
+            Ok(State::Map(Map::default()))
         }
     }
 

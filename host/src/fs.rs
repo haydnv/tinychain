@@ -12,9 +12,9 @@ use tokio_util::io::StreamReader;
 
 use tc_collection::{btree, tensor};
 
-// use crate::chain::ChainBlock;
-// use crate::cluster::library;
-// use crate::object::InstanceClass;
+use crate::chain::ChainBlock;
+use crate::cluster::library;
+use crate::object::InstanceClass;
 
 /// A transactional directory
 pub type Dir = tc_transact::fs::Dir<CacheBlock>;
@@ -69,9 +69,9 @@ impl<'en> en::ToStream<'en> for DenseBuffer {
 #[derive(Clone, GetSize)]
 pub enum CacheBlock {
     BTree(btree::Node),
-    // Chain(ChainBlock),
-    // Class(InstanceClass),
-    // Library(library::Version),
+    Chain(ChainBlock),
+    Class(InstanceClass),
+    Library(library::Version),
     Sparse(tensor::Node),
     Dense(DenseBuffer),
 }
@@ -81,9 +81,9 @@ impl<'en> freqfs::FileSave<'en> for CacheBlock {
     async fn save(&'en self, file: &mut fs::File) -> Result<u64, io::Error> {
         match self {
             Self::BTree(node) => persist(node, file).await,
-            // Self::Chain(block) => persist(block, file).await,
-            // Self::Class(class) => persist(class, file).await,
-            // Self::Library(library) => persist(library, file).await,
+            Self::Chain(block) => persist(block, file).await,
+            Self::Class(class) => persist(class, file).await,
+            Self::Library(library) => persist(library, file).await,
             Self::Dense(dense) => persist(dense, file).await,
             Self::Sparse(sparse) => persist(sparse, file).await,
         }
@@ -91,9 +91,9 @@ impl<'en> freqfs::FileSave<'en> for CacheBlock {
 }
 
 as_type!(CacheBlock, BTree, btree::Node);
-// as_type!(CacheBlock, Chain, ChainBlock);
-// as_type!(CacheBlock, Class, InstanceClass);
-// as_type!(CacheBlock, Library, library::Version);
+as_type!(CacheBlock, Chain, ChainBlock);
+as_type!(CacheBlock, Class, InstanceClass);
+as_type!(CacheBlock, Library, library::Version);
 as_type!(CacheBlock, Sparse, tensor::Node);
 
 macro_rules! as_dense_type {

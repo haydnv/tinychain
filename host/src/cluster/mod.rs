@@ -29,6 +29,7 @@ use crate::txn::{Actor, Txn, TxnId};
 pub use class::Class;
 pub use dir::{Dir, DirEntry, DirItem};
 pub use library::Library;
+pub use replica::{Replica, REPLICAS};
 pub use service::Service;
 
 pub mod class;
@@ -37,17 +38,7 @@ pub mod library;
 pub mod service;
 
 mod leader;
-
-/// The name of the endpoint which serves a [`Link`] to each of this [`Cluster`]'s replicas.
-pub const REPLICAS: Label = label("replicas");
-
-/// A state which supports replication in a [`Cluster`]
-#[async_trait]
-pub trait Replica {
-    async fn state(&self, txn_id: TxnId) -> TCResult<State>;
-
-    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
-}
+mod replica;
 
 /// The static configuration of a [`Cluster`]
 #[derive(Clone)]
@@ -542,55 +533,55 @@ where
     }
 }
 
-// #[async_trait]
-// impl<T: Persist<fs::CacheBlock, Txn = Txn>> Persist<fs::CacheBlock> for Cluster<BlockChain<T>>
-// where
-//     BlockChain<T>: Persist<fs::CacheBlock, Schema = (), Txn = Txn>,
-// {
-//     type Txn = Txn;
-//     type Schema = Schema;
-//
-//     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-//         BlockChain::create(txn_id, (), store)
-//             .map_ok(|state| Self::with_state(schema, txn_id, state))
-//             .await
-//     }
-//
-//     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-//         BlockChain::load(txn_id, (), store)
-//             .map_ok(|state| Self::with_state(schema, txn_id, state))
-//             .await
-//     }
-//
-//     fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
-//         Persist::dir(&self.state)
-//     }
-// }
+#[async_trait]
+impl<T: Persist<fs::CacheBlock, Txn = Txn>> Persist<fs::CacheBlock> for Cluster<BlockChain<T>>
+where
+    BlockChain<T>: Persist<fs::CacheBlock, Schema = (), Txn = Txn>,
+{
+    type Txn = Txn;
+    type Schema = Schema;
 
-// #[async_trait]
-// impl<T: Persist<fs::CacheBlock, Txn = Txn>> Persist<fs::CacheBlock> for Cluster<Dir<T>>
-// where
-//     Dir<T>: Persist<fs::CacheBlock, Schema = Schema, Txn = Txn>,
-// {
-//     type Txn = Txn;
-//     type Schema = Schema;
-//
-//     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-//         Dir::create(txn_id, schema.clone(), store)
-//             .map_ok(|state| Self::with_state(schema, txn_id, state))
-//             .await
-//     }
-//
-//     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-//         Dir::load(txn_id, schema.clone(), store)
-//             .map_ok(|state| Self::with_state(schema, txn_id, state))
-//             .await
-//     }
-//
-//     fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
-//         Persist::dir(&self.state)
-//     }
-// }
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+        BlockChain::create(txn_id, (), store)
+            .map_ok(|state| Self::with_state(schema, txn_id, state))
+            .await
+    }
+
+    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+        BlockChain::load(txn_id, (), store)
+            .map_ok(|state| Self::with_state(schema, txn_id, state))
+            .await
+    }
+
+    fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
+        Persist::dir(&self.state)
+    }
+}
+
+#[async_trait]
+impl<T: Persist<fs::CacheBlock, Txn = Txn>> Persist<fs::CacheBlock> for Cluster<Dir<T>>
+where
+    Dir<T>: Persist<fs::CacheBlock, Schema = Schema, Txn = Txn>,
+{
+    type Txn = Txn;
+    type Schema = Schema;
+
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+        Dir::create(txn_id, schema.clone(), store)
+            .map_ok(|state| Self::with_state(schema, txn_id, state))
+            .await
+    }
+
+    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+        Dir::load(txn_id, schema.clone(), store)
+            .map_ok(|state| Self::with_state(schema, txn_id, state))
+            .await
+    }
+
+    fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
+        Persist::dir(&self.state)
+    }
+}
 
 impl<T> Cluster<Dir<T>>
 where

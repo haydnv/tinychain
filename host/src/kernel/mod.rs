@@ -13,12 +13,12 @@ use crate::txn::hypothetical::{self, Hypothetical};
 use crate::txn::Txn;
 
 use system::System;
-// use userspace::UserSpace;
+use userspace::UserSpace;
 
-// pub use userspace::{Class, Library, Service, CLASS, LIB, SERVICE};
+pub use userspace::{Class, Library, Service, CLASS, LIB, SERVICE};
 
 mod system;
-// mod userspace;
+mod userspace;
 
 /// A part of the host [`Kernel`], responsible for dispatching requests to the local host
 #[async_trait]

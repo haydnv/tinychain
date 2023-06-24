@@ -103,81 +103,81 @@ impl Replica for Version {
     }
 }
 
-// #[async_trait]
-// impl Persist<CacheBlock> for Version {
-//     type Txn = Txn;
-//     type Schema = InstanceClass;
-//
-//     async fn create(txn_id: TxnId, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
-//         let (link, proto) = schema.into_inner();
-//
-//         let mut attrs = Map::new();
-//
-//         for (name, attr) in proto {
-//             let attr = match attr {
-//                 Scalar::Ref(tc_ref) => match *tc_ref {
-//                     TCRef::Op(OpRef::Get((chain_type, collection))) => {
-//                         let chain_type = resolve_type::<ChainType>(chain_type)?;
-//                         let schema = try_cast_into_schema(collection)?;
-//                         let store = dir.create_dir(txn_id, name.clone()).await?;
-//                         let chain = Chain::create(txn_id, (chain_type, schema), store).await?;
-//                         Ok(Attr::Chain(chain))
-//                     }
-//                     other => Err(TCError::unexpected(other, "a Service attribute")),
-//                 },
-//                 scalar if scalar.is_ref() => {
-//                     Err(TCError::unexpected(scalar, "a Service attribute"))
-//                 }
-//                 scalar => Ok(Attr::Scalar(scalar)),
-//             }?;
-//
-//             attrs.insert(name, attr);
-//         }
-//
-//         Ok(Self {
-//             attrs,
-//             path: link.into_path(),
-//         })
-//     }
-//
-//     async fn load(txn_id: TxnId, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
-//         debug!("cluster::service::Version::load {:?}", schema);
-//
-//         let (link, proto) = schema.into_inner();
-//
-//         let mut attrs = Map::new();
-//
-//         for (name, attr) in proto {
-//             let attr = match attr {
-//                 Scalar::Ref(tc_ref) => match *tc_ref {
-//                     TCRef::Op(OpRef::Get((chain_type, collection))) => {
-//                         let chain_type = resolve_type::<ChainType>(chain_type)?;
-//                         let schema = try_cast_into_schema(collection)?;
-//                         let store = dir.get_or_create_dir(txn_id, name.clone()).await?;
-//                         let chain = Chain::load(txn_id, (chain_type, schema), store).await?;
-//                         Ok(Attr::Chain(chain))
-//                     }
-//                     other => Err(TCError::unexpected(other, "a Service attribute")),
-//                 },
-//                 scalar if scalar.is_ref() => {
-//                     Err(TCError::unexpected(scalar, "a Service attribute"))
-//                 }
-//                 scalar => Ok(Attr::Scalar(scalar)),
-//             }?;
-//
-//             attrs.insert(name, attr);
-//         }
-//
-//         Ok(Self {
-//             attrs,
-//             path: link.into_path(),
-//         })
-//     }
-//
-//     fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
-//         unimplemented!("cluster::service::Version::dir")
-//     }
-// }
+#[async_trait]
+impl Persist<CacheBlock> for Version {
+    type Txn = Txn;
+    type Schema = InstanceClass;
+
+    async fn create(txn_id: TxnId, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
+        let (link, proto) = schema.into_inner();
+
+        let mut attrs = Map::new();
+
+        for (name, attr) in proto {
+            let attr = match attr {
+                Scalar::Ref(tc_ref) => match *tc_ref {
+                    TCRef::Op(OpRef::Get((chain_type, collection))) => {
+                        let chain_type = resolve_type::<ChainType>(chain_type)?;
+                        let schema = try_cast_into_schema(collection)?;
+                        let store = dir.create_dir(txn_id, name.clone()).await?;
+                        let chain = Chain::create(txn_id, (chain_type, schema), store).await?;
+                        Ok(Attr::Chain(chain))
+                    }
+                    other => Err(TCError::unexpected(other, "a Service attribute")),
+                },
+                scalar if scalar.is_ref() => {
+                    Err(TCError::unexpected(scalar, "a Service attribute"))
+                }
+                scalar => Ok(Attr::Scalar(scalar)),
+            }?;
+
+            attrs.insert(name, attr);
+        }
+
+        Ok(Self {
+            attrs,
+            path: link.into_path(),
+        })
+    }
+
+    async fn load(txn_id: TxnId, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
+        debug!("cluster::service::Version::load {:?}", schema);
+
+        let (link, proto) = schema.into_inner();
+
+        let mut attrs = Map::new();
+
+        for (name, attr) in proto {
+            let attr = match attr {
+                Scalar::Ref(tc_ref) => match *tc_ref {
+                    TCRef::Op(OpRef::Get((chain_type, collection))) => {
+                        let chain_type = resolve_type::<ChainType>(chain_type)?;
+                        let schema = try_cast_into_schema(collection)?;
+                        let store = dir.get_or_create_dir(txn_id, name.clone()).await?;
+                        let chain = Chain::load(txn_id, (chain_type, schema), store).await?;
+                        Ok(Attr::Chain(chain))
+                    }
+                    other => Err(TCError::unexpected(other, "a Service attribute")),
+                },
+                scalar if scalar.is_ref() => {
+                    Err(TCError::unexpected(scalar, "a Service attribute"))
+                }
+                scalar => Ok(Attr::Scalar(scalar)),
+            }?;
+
+            attrs.insert(name, attr);
+        }
+
+        Ok(Self {
+            attrs,
+            path: link.into_path(),
+        })
+    }
+
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
+        unimplemented!("cluster::service::Version::dir")
+    }
+}
 
 #[async_trait]
 impl Transact for Version {
@@ -272,38 +272,38 @@ impl Service {
     }
 }
 
-// #[async_trait]
-// impl DirItem for Service {
-//     type Schema = InstanceClass;
-//     type Version = Version;
-//
-//     async fn create_version(
-//         &self,
-//         txn: &Txn,
-//         number: VersionNumber,
-//         class: InstanceClass,
-//     ) -> TCResult<Version> {
-//         let (link, proto) = class.into_inner();
-//
-//         let proto = validate(&link, &number, proto)?;
-//         let schema = InstanceClass::extend(link, proto);
-//
-//         let txn_id = *txn.id();
-//
-//         self.schema
-//             .create_block(txn_id, number.into(), schema.clone().into())
-//             .await?;
-//
-//         let store = self.dir.create_dir(txn_id, number.clone().into()).await?;
-//         let version = Version::create(txn_id, schema, store).await?;
-//
-//         self.versions
-//             .insert(txn_id, number, version.clone())
-//             .await?;
-//
-//         Ok(version)
-//     }
-// }
+#[async_trait]
+impl DirItem for Service {
+    type Schema = InstanceClass;
+    type Version = Version;
+
+    async fn create_version(
+        &self,
+        txn: &Txn,
+        number: VersionNumber,
+        class: InstanceClass,
+    ) -> TCResult<Version> {
+        let (link, proto) = class.into_inner();
+
+        let proto = validate(&link, &number, proto)?;
+        let schema = InstanceClass::extend(link, proto);
+
+        let txn_id = *txn.id();
+
+        self.schema
+            .create_block(txn_id, number.into(), schema.clone().into())
+            .await?;
+
+        let store = self.dir.create_dir(txn_id, number.clone().into()).await?;
+        let version = Version::create(txn_id, schema, store).await?;
+
+        self.versions
+            .insert(txn_id, number, version.clone())
+            .await?;
+
+        Ok(version)
+    }
+}
 
 #[async_trait]
 impl Replica for Service {
@@ -390,68 +390,68 @@ impl Recover for Service {
     }
 }
 
-// #[async_trait]
-// impl Persist<CacheBlock> for Service {
-//     type Txn = Txn;
-//     type Schema = ();
-//
-//     async fn create(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
-//         if dir.is_empty(txn_id).await? {
-//             let schema = dir.create_file(txn_id, SCHEMA.into()).await?;
-//
-//             Ok(Self {
-//                 dir,
-//                 schema,
-//                 versions: TxnMapLock::new(txn_id),
-//             })
-//         } else {
-//             Err(bad_request!(
-//                 "cannot create a new Service from a non-empty directory"
-//             ))
-//         }
-//     }
-//
-//     async fn load(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
-//         debug!("load Service");
-//
-//         let schema = dir
-//             .get_file::<InstanceClass>(txn_id, &SCHEMA.into())
-//             .await?;
-//
-//         let mut versions = BTreeMap::new();
-//
-//         trace!("loading Service versions...");
-//
-//         let mut blocks = schema.iter(txn_id).await?;
-//         while let Some((number, schema)) = blocks.try_next().await? {
-//             let version_number = number.as_str().parse()?;
-//             trace!("loading Service version {}...", version_number);
-//
-//             // `get_or_create_dir` here in case of a service with no persistent data
-//             let store = dir.get_or_create_dir(txn_id, (*number).clone()).await?;
-//             trace!(
-//                 "got transactional directory for Service version {}",
-//                 version_number
-//             );
-//
-//             let version = Version::load(txn_id, (&*schema).clone(), store).await?;
-//
-//             versions.insert(version_number, version);
-//         }
-//
-//         std::mem::drop(blocks);
-//
-//         Ok(Self {
-//             dir,
-//             schema,
-//             versions: TxnMapLock::with_contents(txn_id, versions),
-//         })
-//     }
-//
-//     fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
-//         self.dir.clone().into_inner()
-//     }
-// }
+#[async_trait]
+impl Persist<CacheBlock> for Service {
+    type Txn = Txn;
+    type Schema = ();
+
+    async fn create(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+        if dir.is_empty(txn_id).await? {
+            let schema = dir.create_file(txn_id, SCHEMA.into()).await?;
+
+            Ok(Self {
+                dir,
+                schema,
+                versions: TxnMapLock::new(txn_id),
+            })
+        } else {
+            Err(bad_request!(
+                "cannot create a new Service from a non-empty directory"
+            ))
+        }
+    }
+
+    async fn load(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+        debug!("load Service");
+
+        let schema = dir
+            .get_file::<InstanceClass>(txn_id, &SCHEMA.into())
+            .await?;
+
+        let mut versions = BTreeMap::new();
+
+        trace!("loading Service versions...");
+
+        let mut blocks = schema.iter(txn_id).await?;
+        while let Some((number, schema)) = blocks.try_next().await? {
+            let version_number = number.as_str().parse()?;
+            trace!("loading Service version {}...", version_number);
+
+            // `get_or_create_dir` here in case of a service with no persistent data
+            let store = dir.get_or_create_dir(txn_id, (*number).clone()).await?;
+            trace!(
+                "got transactional directory for Service version {}",
+                version_number
+            );
+
+            let version = Version::load(txn_id, (&*schema).clone(), store).await?;
+
+            versions.insert(version_number, version);
+        }
+
+        std::mem::drop(blocks);
+
+        Ok(Self {
+            dir,
+            schema,
+            versions: TxnMapLock::with_contents(txn_id, versions),
+        })
+    }
+
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
+        self.dir.clone().into_inner()
+    }
+}
 
 impl fmt::Debug for Service {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

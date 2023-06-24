@@ -246,8 +246,9 @@ where
 
 /// Defines a method to create a new item in this [`Dir`].
 #[async_trait]
-impl<T: DirItem + Route + fmt::Debug> DirCreateItem<T> for Dir<T>
+impl<T> DirCreateItem<T> for Dir<T>
 where
+    T: DirItem + Route + fmt::Debug,
     DirEntry<T>: Clone,
 {
     /// Create a new item in this [`Dir`].

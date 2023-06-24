@@ -1,6 +1,6 @@
 //! TinyChain is a distributed state machine with an HTTP + JSON API designed to provide
 //! cross-service transactions across an ensemble of microservices which implement the
-//! TinyChain protocol. TinyChain itself is also a Turing-complete application platform.
+//! TinyChain protocol.
 //!
 //! TinyChain currently supports `BlockChain`, `BTree`, `Table`, and `Tensor` collection types,
 //! with more planned for the future.
@@ -16,14 +16,14 @@ use futures::future::TryFutureExt;
 
 pub use tc_error::*;
 
-// pub mod chain;
+pub mod chain;
 // pub mod closure;
-// pub mod cluster;
+pub mod cluster;
 pub mod collection;
 pub mod fs;
 pub mod gateway;
 pub mod kernel;
-// pub mod object;
+pub mod object;
 pub mod scalar;
 pub mod state;
 // pub mod stream;

@@ -15,7 +15,6 @@ use tc_transact::{AsyncHash, IntoView, Transact, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::*;
 
-use crate::cluster::Replica;
 use crate::fs;
 use crate::route::Route;
 use crate::state::State;
@@ -31,8 +30,9 @@ mod block;
 mod data;
 mod sync;
 
+pub(crate) const CHAIN: Label = label("chain");
+
 const BLOCK_SIZE: usize = 1_000_000; // TODO: reduce to 4,096
-const CHAIN: Label = label("chain");
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
 /// Defines a method to recover the state of this [`Chain`] from a transaction failure.
@@ -153,28 +153,6 @@ where
 }
 
 #[async_trait]
-impl<T> Replica for Chain<T>
-where
-    T: Transact + Send + Sync,
-    BlockChain<T>: Replica,
-    SyncChain<T>: Replica,
-{
-    async fn state(&self, txn_id: TxnId) -> TCResult<State> {
-        match self {
-            Self::Block(chain) => chain.state(txn_id).await,
-            Self::Sync(chain) => chain.state(txn_id).await,
-        }
-    }
-
-    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        match self {
-            Self::Block(chain) => chain.replicate(txn, source).await,
-            Self::Sync(chain) => chain.replicate(txn, source).await,
-        }
-    }
-}
-
-#[async_trait]
 impl<T: AsyncHash<CacheBlock, Txn = Txn> + Send + Sync> AsyncHash<CacheBlock> for Chain<T> {
     type Txn = Txn;
 
@@ -226,54 +204,54 @@ impl<T: Route + fmt::Debug> Recover for Chain<T> {
     }
 }
 
-// #[async_trait]
-// impl<T> Persist<CacheBlock> for Chain<T>
-// where
-//     T: Persist<CacheBlock, Txn = Txn> + Route + fmt::Debug,
-// {
-//     type Txn = Txn;
-//     type Schema = (ChainType, T::Schema);
-//
-//     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-//         let (class, schema) = schema;
-//
-//         match class {
-//             ChainType::Block => {
-//                 BlockChain::create(txn_id, schema, store)
-//                     .map_ok(Self::Block)
-//                     .await
-//             }
-//             ChainType::Sync => {
-//                 SyncChain::create(txn_id, schema, store)
-//                     .map_ok(Self::Sync)
-//                     .await
-//             }
-//         }
-//     }
-//
-//     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
-//         let (class, schema) = schema;
-//         match class {
-//             ChainType::Block => {
-//                 BlockChain::load(txn_id, schema, store)
-//                     .map_ok(Self::Block)
-//                     .await
-//             }
-//             ChainType::Sync => {
-//                 SyncChain::load(txn_id, schema, store)
-//                     .map_ok(Self::Sync)
-//                     .await
-//             }
-//         }
-//     }
-//
-//     fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
-//         match self {
-//             Self::Block(chain) => chain.dir(),
-//             Self::Sync(chain) => chain.dir(),
-//         }
-//     }
-// }
+#[async_trait]
+impl<T> Persist<CacheBlock> for Chain<T>
+where
+    T: Persist<CacheBlock, Txn = Txn> + Route + fmt::Debug,
+{
+    type Txn = Txn;
+    type Schema = (ChainType, T::Schema);
+
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+        let (class, schema) = schema;
+
+        match class {
+            ChainType::Block => {
+                BlockChain::create(txn_id, schema, store)
+                    .map_ok(Self::Block)
+                    .await
+            }
+            ChainType::Sync => {
+                SyncChain::create(txn_id, schema, store)
+                    .map_ok(Self::Sync)
+                    .await
+            }
+        }
+    }
+
+    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+        let (class, schema) = schema;
+        match class {
+            ChainType::Block => {
+                BlockChain::load(txn_id, schema, store)
+                    .map_ok(Self::Block)
+                    .await
+            }
+            ChainType::Sync => {
+                SyncChain::load(txn_id, schema, store)
+                    .map_ok(Self::Sync)
+                    .await
+            }
+        }
+    }
+
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
+        match self {
+            Self::Block(chain) => chain.dir(),
+            Self::Sync(chain) => chain.dir(),
+        }
+    }
+}
 
 // #[async_trait]
 // impl<T> CopyFrom<CacheBlock, Chain<T>> for Chain<T>
@@ -448,6 +426,6 @@ where
 // }
 
 #[inline]
-fn null_hash() -> Output<Sha256> {
+pub(crate) fn null_hash() -> Output<Sha256> {
     GenericArray::default()
 }
