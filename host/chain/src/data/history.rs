@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::iter;
-use std::marker::PhantomData;
 
 use async_hash::generic_array::GenericArray;
-use async_hash::{Digest, Hash, Output, Sha256};
+use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
@@ -36,14 +35,14 @@ const STORE: Label = label("store");
 const PENDING: &str = "pending";
 const WRITE_AHEAD: &str = "write_ahead";
 
-pub struct History<Txn, FE> {
-    file: DirLock<FE>,
-    store: Store<Txn, FE>,
+pub struct History<State: StateInstance> {
+    file: DirLock<State::FE>,
+    store: Store<State::Txn, State::FE>,
     latest: TxnLock<u64>,
     cutoff: TxnLock<TxnId>,
 }
 
-impl<Txn, FE> Clone for History<Txn, FE> {
+impl<State: StateInstance> Clone for History<State> {
     fn clone(&self) -> Self {
         Self {
             file: self.file.clone(),
@@ -54,12 +53,17 @@ impl<Txn, FE> Clone for History<Txn, FE> {
     }
 }
 
-impl<Txn, FE> History<Txn, FE>
+impl<State> History<State>
 where
-    FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe + Clone,
-    Txn: Transaction<FE>,
+    State: StateInstance,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe + Clone,
 {
-    fn new(file: DirLock<FE>, store: Store<Txn, FE>, latest: u64, cutoff: TxnId) -> Self {
+    fn new(
+        file: DirLock<State::FE>,
+        store: Store<State::Txn, State::FE>,
+        latest: u64,
+        cutoff: TxnId,
+    ) -> Self {
         Self {
             file,
             store,
@@ -68,7 +72,7 @@ where
         }
     }
 
-    pub fn store(&self) -> &Store<Txn, FE> {
+    pub fn store(&self) -> &Store<State::Txn, State::FE> {
         &self.store
     }
 
@@ -82,7 +86,7 @@ where
     async fn read_block(
         &self,
         block_id: u64,
-    ) -> TCResult<freqfs::FileReadGuardOwned<FE, ChainBlock>> {
+    ) -> TCResult<freqfs::FileReadGuardOwned<State::FE, ChainBlock>> {
         let file = self.file.read().await;
         let block = file
             .get_file(&block_id)
@@ -94,35 +98,39 @@ where
     async fn write_block(
         &self,
         block_id: u64,
-    ) -> TCResult<freqfs::FileWriteGuardOwned<FE, ChainBlock>> {
+    ) -> TCResult<freqfs::FileWriteGuardOwned<State::FE, ChainBlock>> {
         let file = self.file.read().await;
-        let block: &FileLock<FE> = file
+        let block: &FileLock<State::FE> = file
             .get_file(&block_id)
             .ok_or_else(|| TCError::not_found(format!("chain block {}", block_id)))?;
 
         block.write_owned().map_err(TCError::from).await
     }
 
-    pub async fn read_pending(&self) -> TCResult<freqfs::FileReadGuardOwned<FE, ChainBlock>> {
+    pub async fn read_pending(
+        &self,
+    ) -> TCResult<freqfs::FileReadGuardOwned<State::FE, ChainBlock>> {
         let file = self.file.read().await;
-        let block: &FileLock<FE> = file
+        let block: &FileLock<State::FE> = file
             .get_file(PENDING)
             .ok_or_else(|| unexpected!("BlockChain is missing its pending block"))?;
 
         block.read_owned().map_err(TCError::from).await
     }
 
-    pub async fn write_pending(&self) -> TCResult<freqfs::FileWriteGuardOwned<FE, ChainBlock>> {
+    pub async fn write_pending(
+        &self,
+    ) -> TCResult<freqfs::FileWriteGuardOwned<State::FE, ChainBlock>> {
         let file = self.file.read().await;
-        let block: &FileLock<FE> = file
+        let block: &FileLock<State::FE> = file
             .get_file(PENDING)
             .ok_or_else(|| unexpected!("BlockChain is missing its pending block"))?;
 
         block.write_owned().map_err(TCError::from).await
     }
 
-    pub async fn read_log(&self) -> TCResult<freqfs::FileReadGuardOwned<FE, ChainBlock>> {
-        let log: FileLock<FE> = {
+    pub async fn read_log(&self) -> TCResult<freqfs::FileReadGuardOwned<State::FE, ChainBlock>> {
+        let log: FileLock<State::FE> = {
             let file = self.file.read().await;
             file.get_file(WRITE_AHEAD).expect("write-ahead log").clone()
         };
@@ -134,12 +142,13 @@ where
         self.store.commit(txn_id).await;
 
         let file = self.file.read().await;
-        let pending: &FileLock<FE> = file.get_file(PENDING).expect("pending transactions");
+        let pending: &FileLock<State::FE> = file.get_file(PENDING).expect("pending transactions");
         let mut pending: FileWriteGuard<ChainBlock> =
             pending.write().await.expect("pending block write lock");
 
         if let Some(mutations) = pending.mutations.remove(&txn_id) {
-            let write_ahead: &FileLock<FE> = file.get_file(WRITE_AHEAD).expect("write-ahead log");
+            let write_ahead: &FileLock<State::FE> =
+                file.get_file(WRITE_AHEAD).expect("write-ahead log");
 
             {
                 let mut write_ahead: FileWriteGuard<ChainBlock> = write_ahead
@@ -155,26 +164,24 @@ where
     }
 }
 
-impl<Txn, FE> History<Txn, FE>
+impl<State> History<State>
 where
-    FE: DenseCacheFile
+    State: StateInstance,
+    State::FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
         + AsType<TensorNode>
         + for<'a> fs::FileSave<'a>
         + Clone,
-    Txn: Transaction<FE>,
 {
-    pub async fn append_put<State>(&self, txn: &Txn, key: Value, value: State) -> TCResult<()>
+    pub async fn append_put(&self, txn_id: TxnId, key: Value, value: State) -> TCResult<()>
     where
-        State: StateInstance<Txn = Txn, FE = FE> + AsyncHash<FE, Txn = Txn>,
-        Collection<Txn, FE>: TryCastFrom<State>,
+        Collection<State::Txn, State::FE>: TryCastFrom<State>,
         Scalar: TryCastFrom<State>,
     {
         let value = StoreEntry::try_from_state(value)?;
-        let value = self.store.save_state(txn, value).await?;
+        let value = self.store.save_state(txn_id, value).await?;
 
-        let txn_id = *txn.id();
         debug!("History::append_put {} {} {:?}", txn_id, key, value);
         let mut block = self.write_pending().await?;
         block.append_put(txn_id, key, value);
@@ -182,11 +189,11 @@ where
         Ok(())
     }
 
-    pub async fn replicate<State, T>(&self, txn: &Txn, subject: &T, other: Self) -> TCResult<()>
+    pub async fn replicate<T>(&self, txn: &State::Txn, subject: &T, other: Self) -> TCResult<()>
     where
-        State: StateInstance<Txn = Txn, FE = FE> + From<Collection<Txn, FE>> + From<Scalar>,
+        State: From<Collection<State::Txn, State::FE>> + From<Scalar>,
         T: Route<State> + fmt::Debug,
-        Collection<Txn, FE>: TryCastFrom<State>,
+        Collection<State::Txn, State::FE>: TryCastFrom<State>,
         Scalar: TryCastFrom<State>,
     {
         let err_divergent =
@@ -307,15 +314,19 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE> fs::Persist<FE> for History<Txn, FE>
+impl<State> fs::Persist<State::FE> for History<State>
 where
-    FE: AsType<ChainBlock> + ThreadSafe + for<'a> fs::FileSave<'a> + Clone,
-    Txn: Transaction<FE>,
+    State: StateInstance,
+    State::FE: AsType<ChainBlock> + ThreadSafe + for<'a> fs::FileSave<'a> + Clone,
 {
-    type Txn = Txn;
+    type Txn = State::Txn;
     type Schema = ();
 
-    async fn create(txn_id: TxnId, _schema: Self::Schema, dir: fs::Dir<FE>) -> TCResult<Self> {
+    async fn create(
+        txn_id: TxnId,
+        _schema: Self::Schema,
+        dir: fs::Dir<State::FE>,
+    ) -> TCResult<Self> {
         debug!("History::create");
 
         let store = dir
@@ -340,7 +351,7 @@ where
         Ok(Self::new(file.clone(), store, latest, cutoff))
     }
 
-    async fn load(txn_id: TxnId, _schema: Self::Schema, dir: fs::Dir<FE>) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, _schema: Self::Schema, dir: fs::Dir<State::FE>) -> TCResult<Self> {
         debug!("History::load");
 
         let store = dir
@@ -388,21 +399,19 @@ where
         Ok(Self::new(file.clone(), store, latest, cutoff))
     }
 
-    fn dir(&self) -> DirLock<FE> {
+    fn dir(&self) -> DirLock<State::FE> {
         self.file.clone()
     }
 }
 
 #[async_trait]
-impl<Txn, FE> AsyncHash<FE> for History<Txn, FE>
+impl<State> AsyncHash for History<State>
 where
-    FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe + Clone,
-    Txn: Transaction<FE>,
+    State: StateInstance,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe + Clone,
 {
-    type Txn = Txn;
-
-    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
-        let latest_block_id = self.latest.read(*txn.id()).await?;
+    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+        let latest_block_id = self.latest.read(txn_id).await?;
         let latest_block = self.read_block(*latest_block_id).await?;
 
         let latest_block = if latest_block.mutations.is_empty() {
@@ -416,32 +425,32 @@ where
         };
 
         if let Some(past_txn_id) = latest_block.mutations.keys().next() {
-            if past_txn_id > txn.id() {
+            if *past_txn_id > txn_id {
                 return Err(conflict!(
                     "requested a hash {} too far before the present {}",
                     past_txn_id,
-                    txn.id()
+                    txn_id,
                 ));
             }
         }
 
         let log = self.read_log().await?;
-        if let Some(mutations) = log.mutations.get(txn.id()) {
+        if let Some(mutations) = log.mutations.get(&txn_id) {
             let mutations = latest_block
                 .mutations
                 .iter()
-                .take_while(|(past_txn_id, _)| *past_txn_id <= txn.id())
-                .chain(iter::once((txn.id(), mutations)));
+                .take_while(|(past_txn_id, _)| *past_txn_id <= &txn_id)
+                .chain(iter::once((&txn_id, mutations)));
 
             Ok(ChainBlock::hash(latest_block.last_hash(), mutations))
         } else {
             let pending = self.read_pending().await?;
-            if let Some(mutations) = pending.mutations.get(txn.id()) {
+            if let Some(mutations) = pending.mutations.get(&txn_id) {
                 let mutations = latest_block
                     .mutations
                     .iter()
-                    .take_while(|(past_txn_id, _)| *past_txn_id <= txn.id())
-                    .chain(iter::once((txn.id(), mutations)));
+                    .take_while(|(past_txn_id, _)| *past_txn_id <= &txn_id)
+                    .chain(iter::once((&txn_id, mutations)));
 
                 Ok(ChainBlock::hash(latest_block.last_hash(), mutations))
             } else {
@@ -452,39 +461,11 @@ where
     }
 }
 
-fn get_or_create_block<FE>(cache: &mut DirWriteGuard<FE>, name: String) -> TCResult<FileLock<FE>>
-where
-    FE: AsType<ChainBlock> + ThreadSafe,
-{
-    if let Some(file) = cache.get_file(&name) {
-        Ok(file.clone())
-    } else {
-        create_block(cache, name)
-    }
-}
-
-fn create_block<FE, I: fmt::Display>(
-    cache: &mut DirWriteGuard<FE>,
-    name: I,
-) -> TCResult<FileLock<FE>>
-where
-    FE: AsType<ChainBlock> + ThreadSafe,
-{
-    let last_hash = Bytes::from(null_hash().to_vec());
-
-    let block = ChainBlock::new(last_hash.clone());
-    let size_hint = block.get_size();
-
-    cache
-        .create_file(name.to_string(), block, size_hint)
-        .map_err(TCError::from)
-}
-
 #[async_trait]
-impl<Txn, FE> Transact for History<Txn, FE>
+impl<State> Transact for History<State>
 where
-    FE: AsType<ChainBlock> + ThreadSafe + Clone + for<'a> fs::FileSave<'a>,
-    Txn: Transaction<FE>,
+    State: StateInstance,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe + Clone,
 {
     type Commit = ();
 
@@ -611,119 +592,192 @@ where
     }
 }
 
-// #[async_trait]
-// impl<State> de::FromStream for History<State::Txn, State::FE>
-// where
-//     State: StateInstance,
-//     State::FE: AsType<ChainBlock>,
-// {
-//     type Context = State::Txn;
-//
-//     async fn from_stream<D: de::Decoder>(
-//         txn: State::Txn,
-//         decoder: &mut D,
-//     ) -> Result<Self, D::Error> {
-//         decoder.decode_seq(HistoryVisitor { txn }).await
-//     }
-// }
-//
-// struct HistoryVisitor<State: StateInstance> {
-//     txn: State::Txn,
-// }
-//
-// #[async_trait]
-// impl<State> de::Visitor for HistoryVisitor<State>
-// where
-//     State: StateInstance + de::FromStream<Context = State::Txn>,
-//     State::FE: AsType<ChainBlock>,
-// {
-//     type Value = History<State::Txn, State::FE>;
-//
-//     fn expecting() -> &'static str {
-//         "Chain history"
-//     }
-//
-//     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-//         let null_hash = null_hash();
-//         let txn_id = *self.txn.id();
-//
-//         let store = {
-//             let dir = self
-//                 .txn
-//                 .context()
-//                 .write()
-//                 .await
-//                 .create_dir(STORE.to_string())
-//                 .map_err(de::Error::custom)?;
-//
-//             let dir = fs::Dir::load(txn_id, dir)
-//                 .map_err(de::Error::custom)
-//                 .await?;
-//
-//             Store::new(dir)
-//         };
-//
-//         let file = {
-//             let mut dir = self.txn.context().write().await;
-//             dir.create_dir(CHAIN.to_string())
-//                 .map_err(de::Error::custom)?
-//         };
-//
-//         let mut guard = file.write().await;
-//
-//         let block = ChainBlock::new(null_hash.to_vec());
-//         let size_hint = block.get_size();
-//         guard
-//             .create_file(PENDING.into(), block, size_hint)
-//             .map_err(de::Error::custom)?;
-//
-//         let block = ChainBlock::new(null_hash.to_vec());
-//         let size_hint = block.get_size();
-//         guard
-//             .create_file(WRITE_AHEAD.into(), block, size_hint)
-//             .map_err(de::Error::custom)?;
-//
-//         let subcontext = |i: u64| self.txn.subcontext(i.into()).map_err(de::Error::custom);
-//
-//         let mut i = 0u64;
-//         let mut last_hash = null_hash.clone();
-//
-//         while let Some(state) = seq.next_element::<State>(subcontext(i).await?).await? {
-//             let (hash, block_data): (Bytes, Map<Tuple<State>>) = state
-//                 .try_cast_into(|s| de::Error::invalid_type(format!("{s:?}"), "a chain block"))?;
-//
-//             if &hash[..] != &last_hash[..] {
-//                 return Err(de::Error::invalid_value(
-//                     format!("block with last hash {}", hex::encode(hash)),
-//                     format!("block with last hash {}", hex::encode(last_hash)),
-//                 ));
-//             }
-//
-//             let mutations = parse_block_state(&store, &self.txn, block_data)
-//                 .map_err(de::Error::custom)
-//                 .await?;
-//
-//             let block = ChainBlock::with_mutations(hash, mutations);
-//             last_hash = block.current_hash();
-//
-//             let size_hint = block.get_size();
-//             guard
-//                 .create_file(i.to_string(), block, size_hint)
-//                 .map_err(de::Error::custom)?;
-//
-//             i += 1;
-//         }
-//
-//         std::mem::drop(guard);
-//
-//         let latest = if i == 0 { 0 } else { i - 1 };
-//         Ok(History::new(file, store, latest, txn_id))
-//     }
-// }
+#[async_trait]
+impl<'en, State> IntoView<'en, State::FE> for History<State>
+where
+    State: StateInstance,
+    State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+{
+    type Txn = State::Txn;
+    type View = HistoryView<'en>;
+
+    async fn into_view(self, txn: State::Txn) -> TCResult<Self::View> {
+        debug!("History::into_view");
+
+        let latest = self.latest.read(*txn.id()).await?;
+
+        let file = self.file.read_owned().await;
+
+        let seq = stream::iter(0..((*latest) + 1))
+            .map(move |block_id| {
+                file.get_file(&block_id)
+                    .cloned()
+                    .ok_or_else(|| unexpected!("missing chain block"))
+            })
+            .and_then(|block| {
+                Box::pin(async move { block.read_owned().map_err(TCError::from).await })
+            })
+            .map_ok(move |block: FileReadGuardOwned<State::FE, ChainBlock>| {
+                let this = self.clone();
+                let txn = txn.clone();
+                let map =
+                    stream::iter(block.mutations.clone()).map(move |(past_txn_id, mutations)| {
+                        debug!("reading block mutations");
+
+                        let this = this.clone();
+                        let txn = txn.clone();
+                        let mutations = stream::iter(mutations)
+                            .then(move |op| Box::pin(load_history(this.clone(), op, txn.clone())));
+
+                        let mutations: TCBoxTryStream<'en, MutationView<'en>> = Box::pin(mutations);
+                        let mutations = en::SeqStream::from(mutations);
+                        (past_txn_id, Ok(mutations))
+                    });
+
+                let map: TCBoxStream<'en, (TxnId, TCResult<MutationViewSeq<'en>>)> = Box::pin(map);
+                (block.last_hash().clone(), en::MapStream::from(map))
+            });
+
+        let seq: TCBoxTryStream<'en, HistoryBlockView<'en>> = Box::pin(seq);
+        Ok(en::SeqStream::from(seq))
+    }
+}
+
+#[async_trait]
+impl<State> de::FromStream for History<State>
+where
+    State: StateInstance + de::FromStream<Context = State::Txn> + From<Scalar>,
+    State::FE: DenseCacheFile
+        + AsType<ChainBlock>
+        + AsType<BTreeNode>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>
+        + Clone,
+    Collection<State::Txn, State::FE>: TryCastFrom<State>,
+    Scalar: TryCastFrom<State>,
+    Value: TryCastFrom<State>,
+    (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
+    (Value,): TryCastFrom<State>,
+    (Value, State): TryCastFrom<State>,
+{
+    type Context = State::Txn;
+
+    async fn from_stream<D: de::Decoder>(
+        txn: State::Txn,
+        decoder: &mut D,
+    ) -> Result<Self, D::Error> {
+        decoder.decode_seq(HistoryVisitor { txn }).await
+    }
+}
+
+struct HistoryVisitor<State: StateInstance> {
+    txn: State::Txn,
+}
+
+#[async_trait]
+impl<State> de::Visitor for HistoryVisitor<State>
+where
+    State: StateInstance + de::FromStream<Context = State::Txn> + From<Scalar>,
+    State::FE: DenseCacheFile
+        + AsType<ChainBlock>
+        + AsType<BTreeNode>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>
+        + Clone,
+    Collection<State::Txn, State::FE>: TryCastFrom<State>,
+    Scalar: TryCastFrom<State>,
+    Value: TryCastFrom<State>,
+    (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
+    (Value,): TryCastFrom<State>,
+    (Value, State): TryCastFrom<State>,
+{
+    type Value = History<State>;
+
+    fn expecting() -> &'static str {
+        "Chain history"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let null_hash = null_hash();
+        let txn_id = *self.txn.id();
+
+        let store = {
+            let dir = self
+                .txn
+                .context()
+                .write()
+                .await
+                .create_dir(STORE.to_string())
+                .map_err(de::Error::custom)?;
+
+            let dir = fs::Dir::load(txn_id, dir)
+                .map_err(de::Error::custom)
+                .await?;
+
+            Store::new(dir)
+        };
+
+        let file = {
+            let mut dir = self.txn.context().write().await;
+            dir.create_dir(CHAIN.to_string())
+                .map_err(de::Error::custom)?
+        };
+
+        let mut guard = file.write().await;
+
+        let block = ChainBlock::new(null_hash.to_vec());
+        let size_hint = block.get_size();
+        guard
+            .create_file(PENDING.into(), block, size_hint)
+            .map_err(de::Error::custom)?;
+
+        let block = ChainBlock::new(null_hash.to_vec());
+        let size_hint = block.get_size();
+        guard
+            .create_file(WRITE_AHEAD.into(), block, size_hint)
+            .map_err(de::Error::custom)?;
+
+        let subcontext = |i: u64| self.txn.subcontext(i.into()).map_err(de::Error::custom);
+
+        let mut i = 0u64;
+        let mut last_hash = null_hash.clone();
+
+        while let Some(state) = seq.next_element::<State>(subcontext(i).await?).await? {
+            let (hash, block_data): (Bytes, Map<Tuple<State>>) = state
+                .try_cast_into(|s| de::Error::invalid_type(format!("{s:?}"), "a chain block"))?;
+
+            if &hash[..] != &last_hash[..] {
+                return Err(de::Error::invalid_value(
+                    format!("block with last hash {}", hex::encode(hash)),
+                    format!("block with last hash {}", hex::encode(last_hash)),
+                ));
+            }
+
+            let mutations = parse_block_state(&store, *self.txn.id(), block_data)
+                .map_err(de::Error::custom)
+                .await?;
+
+            let block = ChainBlock::with_mutations(hash, mutations);
+            last_hash = block.current_hash();
+
+            let size_hint = block.get_size();
+            guard
+                .create_file(i.to_string(), block, size_hint)
+                .map_err(de::Error::custom)?;
+
+            i += 1;
+        }
+
+        std::mem::drop(guard);
+
+        let latest = if i == 0 { 0 } else { i - 1 };
+        Ok(History::new(file, store, latest, txn_id))
+    }
+}
 
 async fn parse_block_state<State>(
     store: &Store<State::Txn, State::FE>,
-    txn: &State::Txn,
+    txn_id: TxnId,
     block_data: Map<Tuple<State>>,
 ) -> TCResult<BTreeMap<TxnId, Vec<Mutation>>>
 where
@@ -750,7 +804,7 @@ where
             } else if op.matches::<(Value, State)>() {
                 let (key, value) = op.opt_cast_into().expect("PUT op");
                 let value = StoreEntry::try_from_state(value)?;
-                let value = store.save_state(txn, value).await?;
+                let value = store.save_state(txn_id, value).await?;
                 parsed.push(Mutation::Put(key, value));
             } else {
                 return Err(unexpected!("unable to parse historical mutation {:?}", op,));
@@ -796,7 +850,7 @@ where
                     .put(txn, &[], key.clone(), state.clone().into_state())
                     .await?;
 
-                let computed_hash = dest.save_state(txn, state).await?;
+                let computed_hash = dest.save_state(txn_id, state).await?;
                 if &computed_hash != original_hash {
                     return Err(bad_request!(
                         "cannot replicate state with inconsistent hash {:?} vs {:?}",
@@ -816,65 +870,14 @@ where
 pub type HistoryView<'en> =
     en::SeqStream<TCResult<HistoryBlockView<'en>>, TCBoxTryStream<'en, HistoryBlockView<'en>>>;
 
-#[async_trait]
-impl<'en, Txn, FE> IntoView<'en, FE> for History<Txn, FE>
-where
-    FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode> + Clone,
-    Txn: Transaction<FE>,
-{
-    type Txn = Txn;
-    type View = HistoryView<'en>;
-
-    async fn into_view(self, txn: Txn) -> TCResult<Self::View> {
-        debug!("History::into_view");
-
-        let latest = self.latest.read(*txn.id()).await?;
-
-        let file = self.file.read_owned().await;
-
-        let seq = stream::iter(0..((*latest) + 1))
-            .map(move |block_id| {
-                file.get_file(&block_id)
-                    .cloned()
-                    .ok_or_else(|| unexpected!("missing chain block"))
-            })
-            .and_then(|block| {
-                Box::pin(async move { block.read_owned().map_err(TCError::from).await })
-            })
-            .map_ok(move |block: FileReadGuardOwned<FE, ChainBlock>| {
-                let this = self.clone();
-                let txn = txn.clone();
-                let map =
-                    stream::iter(block.mutations.clone()).map(move |(past_txn_id, mutations)| {
-                        debug!("reading block mutations");
-
-                        let this = this.clone();
-                        let txn = txn.clone();
-                        let mutations = stream::iter(mutations)
-                            .then(move |op| Box::pin(load_history(this.clone(), op, txn.clone())));
-
-                        let mutations: TCBoxTryStream<'en, MutationView<'en>> = Box::pin(mutations);
-                        let mutations = en::SeqStream::from(mutations);
-                        (past_txn_id, Ok(mutations))
-                    });
-
-                let map: TCBoxStream<'en, (TxnId, TCResult<MutationViewSeq<'en>>)> = Box::pin(map);
-                (block.last_hash().clone(), en::MapStream::from(map))
-            });
-
-        let seq: TCBoxTryStream<'en, HistoryBlockView<'en>> = Box::pin(seq);
-        Ok(en::SeqStream::from(seq))
-    }
-}
-
-async fn load_history<'en, Txn, FE>(
-    history: History<Txn, FE>,
+async fn load_history<'en, State>(
+    history: History<State>,
     op: Mutation,
-    txn: Txn,
+    txn: State::Txn,
 ) -> TCResult<MutationView<'en>>
 where
-    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
-    Txn: Transaction<FE>,
+    State: StateInstance,
+    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     match op {
         Mutation::Delete(key) => Ok(MutationView::Delete(key)),
@@ -921,4 +924,34 @@ impl<'en> en::IntoStream<'en> for MutationView<'en> {
             Self::Put(key, value) => (key, value).into_stream(encoder),
         }
     }
+}
+
+#[inline]
+fn get_or_create_block<FE>(cache: &mut DirWriteGuard<FE>, name: String) -> TCResult<FileLock<FE>>
+where
+    FE: AsType<ChainBlock> + ThreadSafe,
+{
+    if let Some(file) = cache.get_file(&name) {
+        Ok(file.clone())
+    } else {
+        create_block(cache, name)
+    }
+}
+
+#[inline]
+fn create_block<FE, I: fmt::Display>(
+    cache: &mut DirWriteGuard<FE>,
+    name: I,
+) -> TCResult<FileLock<FE>>
+where
+    FE: AsType<ChainBlock> + ThreadSafe,
+{
+    let last_hash = Bytes::from(null_hash().to_vec());
+
+    let block = ChainBlock::new(last_hash.clone());
+    let size_hint = block.get_size();
+
+    cache
+        .create_file(name.to_string(), block, size_hint)
+        .map_err(TCError::from)
 }

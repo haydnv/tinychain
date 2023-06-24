@@ -153,13 +153,11 @@ where
 }
 
 #[async_trait]
-impl<T: AsyncHash<CacheBlock, Txn = Txn> + Send + Sync> AsyncHash<CacheBlock> for Chain<T> {
-    type Txn = Txn;
-
-    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+impl<T: AsyncHash + Send + Sync> AsyncHash for Chain<T> {
+    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         match self {
-            Self::Block(chain) => chain.hash(txn).await,
-            Self::Sync(chain) => chain.hash(txn).await,
+            Self::Block(chain) => chain.hash(txn_id).await,
+            Self::Sync(chain) => chain.hash(txn_id).await,
         }
     }
 }

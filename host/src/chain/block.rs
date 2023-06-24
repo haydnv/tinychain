@@ -147,11 +147,9 @@ impl<T: Route + fmt::Debug> Recover for BlockChain<T> {
 // }
 
 #[async_trait]
-impl<T: Send + Sync> AsyncHash<fs::CacheBlock> for BlockChain<T> {
-    type Txn = Txn;
-
-    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
-        self.history.hash(txn).await
+impl<T: Send + Sync> AsyncHash for BlockChain<T> {
+    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+        self.history.hash(txn_id).await
     }
 }
 

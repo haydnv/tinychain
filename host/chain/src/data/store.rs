@@ -1,7 +1,6 @@
-use async_hash::{Hash, Output};
 use async_trait::async_trait;
 use core::fmt;
-use destream::{de, en};
+use destream::en;
 use futures::future::TryFutureExt;
 use log::debug;
 use safecast::*;
@@ -67,18 +66,16 @@ impl<Txn, FE> StoreEntry<Txn, FE> {
 }
 
 #[async_trait]
-impl<'a, Txn, FE> AsyncHash<FE> for &'a StoreEntry<Txn, FE>
+impl<'a, Txn, FE> AsyncHash for &'a StoreEntry<Txn, FE>
 where
     FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
     Txn: Transaction<FE>,
-    Collection<Txn, FE>: AsyncHash<FE, Txn = Txn>,
+    Collection<Txn, FE>: AsyncHash,
     Scalar: async_hash::Hash<async_hash::Sha256>,
 {
-    type Txn = Txn;
-
-    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<async_hash::Sha256>> {
+    async fn hash(self, txn_id: TxnId) -> TCResult<async_hash::Output<async_hash::Sha256>> {
         match self {
-            StoreEntry::Collection(collection) => collection.clone().hash(txn).await,
+            StoreEntry::Collection(collection) => collection.clone().hash(txn_id).await,
             StoreEntry::Scalar(scalar) => Ok(async_hash::Hash::<async_hash::Sha256>::hash(scalar)),
         }
     }
@@ -183,9 +180,9 @@ where
     FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
     Txn: Transaction<FE>,
 {
-    pub async fn save_state(&self, txn: &Txn, state: StoreEntry<Txn, FE>) -> TCResult<Scalar> {
+    pub async fn save_state(&self, txn_id: TxnId, state: StoreEntry<Txn, FE>) -> TCResult<Scalar> {
         debug!("chain data store saving state {:?}...", state);
-        let hash = (&state).hash(txn).map_ok(Id::from).await?;
+        let hash = (&state).hash(txn_id).map_ok(Id::from).await?;
         Err(not_implemented!("save chain value entry"))
     }
 }

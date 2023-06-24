@@ -6,7 +6,7 @@ use safecast::*;
 use tc_collection::CollectionType;
 use tc_error::*;
 use tc_transact::fs::*;
-use tc_transact::{AsyncHash, Transact};
+use tc_transact::{AsyncHash, Transact, Transaction};
 use tcgeneric::{Id, NativeClass};
 
 use crate::fs;
@@ -27,7 +27,7 @@ impl Store {
     pub async fn save_state(&self, txn: &Txn, state: State) -> TCResult<Scalar> {
         debug!("chain data store saving state {:?}...", state);
 
-        let hash = state.clone().hash(txn).map_ok(Id::from).await?;
+        let hash = state.clone().hash(*txn.id()).map_ok(Id::from).await?;
 
         match state {
             State::Collection(_collection) => Err(not_implemented!("save collection state")),

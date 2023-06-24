@@ -1,270 +1,344 @@
-use std::collections::btree_map::{BTreeMap, Entry};
-use std::fmt;
-use std::iter::FromIterator;
+//! A `Chain` which stores every mutation of its subject in a series of `ChainBlock`s.
+//!
+//! Each block in the chain begins with the hash of the previous block.
 
-use async_hash::{Digest, Hash, Output, Sha256};
+use std::fmt;
+use std::marker::PhantomData;
+
+use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
-use destream::{de, en};
-use futures::{future, TryFutureExt, TryStreamExt};
-use get_size::GetSize;
+use destream::de;
+use futures::future::TryFutureExt;
+use futures::join;
 use log::debug;
+use safecast::{AsType, TryCastFrom};
 
+use tc_collection::btree::Node as BTreeNode;
+use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
+use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
-use tc_transact::TxnId;
+use tc_transact::fs;
+use tc_transact::public::{Route, StateInstance};
+use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
-use tcgeneric::Tuple;
+use tcgeneric::{label, Label, Map, ThreadSafe, Tuple};
 
-#[derive(Clone, Eq, PartialEq)]
-pub enum Mutation {
-    Delete(Value),
-    Put(Value, Scalar),
+use super::data::{ChainBlock, History};
+use super::{ChainInstance, Recover};
+
+pub const HISTORY: Label = label(".history");
+
+/// A `Chain` which stores every mutation of its subject in a series of `ChainBlock`s
+#[derive(Clone)]
+pub struct BlockChain<State: StateInstance, T> {
+    history: History<State>,
+    subject: T,
 }
 
-impl<'a, D: Digest> Hash<D> for &'a Mutation {
-    fn hash(self) -> Output<D> {
-        match self {
-            Mutation::Delete(key) => Hash::<D>::hash(key),
-            Mutation::Put(key, value) => Hash::<D>::hash((key, value)),
-        }
-    }
-}
-
-#[async_trait]
-impl de::FromStream for Mutation {
-    type Context = ();
-
-    async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
-        decoder.decode_seq(MutationVisitor).await
-    }
-}
-
-impl<'en> en::ToStream<'en> for Mutation {
-    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
-        use en::IntoStream;
-
-        match self {
-            Self::Delete(key) => (key,).into_stream(encoder),
-            Self::Put(key, value) => (key, value).into_stream(encoder),
-        }
-    }
-}
-
-impl<'en> en::IntoStream<'en> for Mutation {
-    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        match self {
-            Self::Delete(key) => (key,).into_stream(encoder),
-            Self::Put(key, value) => (key, value).into_stream(encoder),
-        }
-    }
-}
-
-impl fmt::Debug for Mutation {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Delete(key) => write!(f, "DELETE {:?}", key),
-            Self::Put(key, value) => write!(f, "PUT {:?} <- {:?}", key, value),
-        }
-    }
-}
-
-struct MutationVisitor;
-
-#[async_trait]
-impl de::Visitor for MutationVisitor {
-    type Value = Mutation;
-
-    fn expecting() -> &'static str {
-        "a mutation record"
+impl<State, T> BlockChain<State, T>
+where
+    State: StateInstance,
+{
+    fn new(subject: T, history: History<State>) -> Self {
+        Self { subject, history }
     }
 
-    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let key = seq
-            .next_element(())
-            .await?
-            .ok_or_else(|| de::Error::invalid_length(0, Self::expecting()))?;
-
-        match seq.next_element(()).await? {
-            Some(value) => Ok(Mutation::Put(key, value)),
-            None => Ok(Mutation::Delete(key)),
-        }
-    }
-}
-
-/// A single filesystem block belonging to a `Chain`.
-#[derive(Clone, Eq, PartialEq)]
-pub struct ChainBlock {
-    last_hash: Bytes,
-    pub mutations: BTreeMap<TxnId, Vec<Mutation>>,
-}
-
-impl GetSize for ChainBlock {
-    fn get_size(&self) -> usize {
-        let size = self
-            .mutations
-            .iter()
-            .map(|txn| txn.get_size())
-            .sum::<usize>();
-
-        self.last_hash.len() + size
-    }
-}
-
-impl ChainBlock {
-    /// Compute the hash of a [`ChainBlock`] with the given contents
-    pub fn hash<'a, M, R>(last_hash: &'a [u8], mutations: M) -> Output<Sha256>
-    where
-        M: IntoIterator<Item = (&'a TxnId, &'a R)> + 'a,
-        &'a R: IntoIterator<Item = &'a Mutation> + 'a,
-    {
-        let mut hasher = Sha256::new();
-        hasher.update(last_hash);
-
-        let mut txn_hasher = Sha256::new();
-        for (txn_id, mutations) in mutations {
-            let mut mutation_hasher = Sha256::new();
-            mutation_hasher.update(Hash::<Sha256>::hash(txn_id));
-
-            for mutation in mutations {
-                mutation_hasher.update(Hash::<Sha256>::hash(mutation));
-            }
-
-            txn_hasher.update(mutation_hasher.finalize());
-        }
-
-        hasher.update(txn_hasher.finalize());
-        hasher.finalize()
-    }
-
-    /// Return a new, empty block.
-    pub fn new<H: Into<Bytes>>(hash: H) -> Self {
-        Self {
-            last_hash: hash.into(),
-            mutations: BTreeMap::new(),
-        }
-    }
-
-    /// Return a new, empty block with an empty mutation list for the given `TxnId`.
-    pub fn with_txn<H: Into<Bytes>>(hash: H, txn_id: TxnId) -> Self {
-        let mut mutations = BTreeMap::new();
-        mutations.insert(txn_id, Vec::new());
-
-        Self {
-            last_hash: hash.into(),
-            mutations,
-        }
-    }
-
-    /// Return a new, empty block with an the given mutation list for the given `TxnId`.
-    pub fn with_mutations(hash: Bytes, mutations: BTreeMap<TxnId, Vec<Mutation>>) -> Self {
-        Self {
-            last_hash: hash,
-            mutations,
-        }
-    }
-
-    /// Append a [`Mutation`] to this [`ChainBlock`]
-    pub(super) fn append(&mut self, txn_id: TxnId, mutation: Mutation) {
-        match self.mutations.entry(txn_id) {
-            Entry::Vacant(entry) => {
-                entry.insert(vec![mutation]);
-            }
-            Entry::Occupied(mut entry) => {
-                entry.get_mut().push(mutation);
-            }
-        }
-    }
-
-    /// Append a DELETE op to this `ChainBlock`
-    pub fn append_delete(&mut self, txn_id: TxnId, key: Value) {
-        self.append(txn_id, Mutation::Delete(key))
-    }
-
-    /// Append a PUT op to the this `ChainBlock`
-    pub fn append_put(&mut self, txn_id: TxnId, key: Value, value: Scalar) {
-        debug!("ChainBlock::append_put {} <- {:?}", key, value);
-        self.append(txn_id, Mutation::Put(key, value))
-    }
-
-    /// The current hash of this block
-    pub fn current_hash(&self) -> Output<Sha256> {
-        Self::hash(&self.last_hash, &self.mutations)
-    }
-
-    /// The hash of the previous block in the chain
-    pub fn last_hash(&self) -> &Bytes {
-        &self.last_hash
-    }
-
-    /// The current size of this block
-    // TODO: delete
-    pub async fn size(&self) -> TCResult<usize> {
-        let encoded = tbon::en::encode(self)
-            .map_err(|cause| unexpected!("TBON encoding error").consume(cause))?;
-
-        encoded
-            .map_err(|cause| unexpected!("TBON encoding error").consume(cause))
-            .try_fold(0, |size, chunk| future::ready(Ok(size + chunk.len())))
-            .await
+    pub fn history(&self) -> &History<State> {
+        &self.history
     }
 }
 
 #[async_trait]
-impl de::FromStream for ChainBlock {
-    type Context = ();
+impl<State, T> ChainInstance<State, T> for BlockChain<State, T>
+where
+    State: StateInstance,
+    State::FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>
+        + Clone,
+    T: Route<State> + fmt::Debug,
+    Collection<State::Txn, State::FE>: TryCastFrom<State>,
+    Scalar: TryCastFrom<State>,
+{
+    async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
+        self.history.append_delete(txn_id, key).await
+    }
 
-    async fn from_stream<D: de::Decoder>(context: (), decoder: &mut D) -> Result<Self, D::Error> {
-        de::FromStream::from_stream(context, decoder)
-            .map_ok(|(hash, mutations)| Self {
-                last_hash: hash,
+    async fn append_put(&self, txn_id: TxnId, key: Value, value: State) -> TCResult<()> {
+        self.history.append_put(txn_id, key, value).await
+    }
+
+    fn subject(&self) -> &T {
+        &self.subject
+    }
+}
+
+#[async_trait]
+impl<State, T> fs::Persist<State::FE> for BlockChain<State, T>
+where
+    State: StateInstance,
+    State::FE: AsType<ChainBlock> + ThreadSafe + for<'a> fs::FileSave<'a> + Clone,
+    T: Route<State> + fs::Persist<State::FE, Txn = State::Txn> + fmt::Debug,
+{
+    type Txn = State::Txn;
+    type Schema = T::Schema;
+
+    async fn create(
+        txn_id: TxnId,
+        schema: Self::Schema,
+        store: fs::Dir<State::FE>,
+    ) -> TCResult<Self> {
+        debug!("BlockChain::create");
+
+        let subject = T::create(txn_id, schema.clone(), store).await?;
+        let mut dir = subject.dir().try_write_owned()?;
+
+        let history = {
+            let dir = dir.get_or_create_dir(HISTORY.to_string())?;
+            fs::Dir::load(txn_id, dir).await?
+        };
+
+        let history = History::create(txn_id, (), history.into()).await?;
+
+        Ok(BlockChain::new(subject, history))
+    }
+
+    async fn load(
+        txn_id: TxnId,
+        schema: Self::Schema,
+        store: fs::Dir<State::FE>,
+    ) -> TCResult<Self> {
+        debug!("BlockChain::load");
+
+        let subject = T::load(txn_id, schema.clone(), store).await?;
+
+        let mut dir = subject.dir().write_owned().await;
+
+        let history = {
+            let dir = dir.get_or_create_dir(HISTORY.to_string())?;
+            fs::Dir::load(txn_id, dir).await?
+        };
+
+        let history = History::load(txn_id, (), history.into()).await?;
+
+        Ok(BlockChain::new(subject, history))
+    }
+
+    fn dir(&self) -> tc_transact::fs::Inner<State::FE> {
+        self.subject.dir()
+    }
+}
+
+#[async_trait]
+impl<State, T> Recover<State::FE> for BlockChain<State, T>
+where
+    State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Scalar>,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe + Clone,
+    T: Route<State> + fmt::Debug,
+{
+    type Txn = State::Txn;
+
+    async fn recover(&self, txn: &State::Txn) -> TCResult<()> {
+        let write_ahead_log = self.history.read_log().await?;
+
+        for (past_txn_id, mutations) in &write_ahead_log.mutations {
+            super::data::replay_all(
+                &self.subject,
+                past_txn_id,
                 mutations,
-            })
-            .map_err(|e| de::Error::custom(format!("failed to decode ChainBlock: {}", e)))
-            .await
-    }
-}
-
-impl<'en> en::IntoStream<'en> for ChainBlock {
-    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        en::IntoStream::into_stream((self.last_hash, self.mutations), encoder)
-    }
-}
-
-impl<'en> en::ToStream<'en> for ChainBlock {
-    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
-        en::IntoStream::into_stream((&self.last_hash, &self.mutations), encoder)
-    }
-}
-
-#[cfg(debug_assertions)]
-impl fmt::Debug for ChainBlock {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "chain block:")?;
-        writeln!(f, "\thash: {}", hex::encode(&self.last_hash))?;
-        writeln!(f, "\tentries: {}", self.mutations.len())?;
-
-        for (txn_id, mutations) in &self.mutations {
-            writeln!(
-                f,
-                "\t\t{}: {:?}",
-                txn_id,
-                Tuple::<&Mutation>::from_iter(mutations)
-            )?;
+                txn,
+                self.history.store(),
+            )
+            .await?;
         }
 
         Ok(())
     }
 }
 
-#[cfg(not(debug_assertions))]
-impl fmt::Debug for ChainBlock {
+#[async_trait]
+impl<State, T> fs::CopyFrom<State::FE, Self> for BlockChain<State, T>
+where
+    State: StateInstance,
+    State::FE: AsType<ChainBlock> + ThreadSafe + for<'a> fs::FileSave<'a> + Clone,
+    T: Route<State> + fs::Persist<State::FE, Txn = State::Txn> + fmt::Debug,
+{
+    async fn copy_from(
+        _txn: &State::Txn,
+        _store: fs::Dir<State::FE>,
+        _instance: Self,
+    ) -> TCResult<Self> {
+        Err(not_implemented!("BlockChain::copy_from"))
+    }
+}
+
+#[async_trait]
+impl<State, T> AsyncHash for BlockChain<State, T>
+where
+    State: StateInstance,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe + Clone,
+    T: Send + Sync,
+{
+    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+        self.history.hash(txn_id).await
+    }
+}
+
+#[async_trait]
+impl<State, T> Transact for BlockChain<State, T>
+where
+    State: StateInstance,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe + Clone,
+    T: Transact + Send + Sync,
+{
+    type Commit = T::Commit;
+
+    async fn commit(&self, txn_id: TxnId) -> Self::Commit {
+        debug!("BlockChain::commit");
+
+        self.history.write_ahead(txn_id).await;
+
+        let guard = self.subject.commit(txn_id).await;
+        // make sure `self.subject` is committed before moving mutations out of the write-ahead log
+        self.history.commit(txn_id).await;
+        guard
+    }
+
+    async fn rollback(&self, txn_id: &TxnId) {
+        join!(self.subject.rollback(txn_id), self.history.rollback(txn_id));
+    }
+
+    async fn finalize(&self, txn_id: &TxnId) {
+        join!(self.subject.finalize(txn_id), self.history.finalize(txn_id));
+    }
+}
+
+#[async_trait]
+impl<State, T> de::FromStream for BlockChain<State, T>
+where
+    State: StateInstance
+        + de::FromStream<Context = State::Txn>
+        + From<Collection<State::Txn, State::FE>>
+        + From<Scalar>,
+    State::FE: DenseCacheFile
+        + AsType<ChainBlock>
+        + AsType<BTreeNode>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>
+        + Clone,
+    T: Route<State> + de::FromStream<Context = State::Txn> + fmt::Debug,
+    (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
+    Collection<State::Txn, State::FE>: TryCastFrom<State>,
+    Scalar: TryCastFrom<State>,
+    Value: TryCastFrom<State>,
+    (Value,): TryCastFrom<State>,
+    (Value, State): TryCastFrom<State>,
+{
+    type Context = State::Txn;
+
+    async fn from_stream<D: de::Decoder>(
+        txn: State::Txn,
+        decoder: &mut D,
+    ) -> Result<Self, D::Error> {
+        decoder.decode_seq(ChainVisitor::new(txn)).await
+    }
+}
+
+#[async_trait]
+impl<'en, State, T> IntoView<'en, State::FE> for BlockChain<State, T>
+where
+    State: StateInstance,
+    State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    T: IntoView<'en, State::FE, Txn = State::Txn> + Send + Sync,
+{
+    type Txn = State::Txn;
+    type View = (T::View, super::data::HistoryView<'en>);
+
+    async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
+        let history = self.history.into_view(txn.clone()).await?;
+        let subject = self.subject.into_view(txn).await?;
+        Ok((subject, history))
+    }
+}
+
+impl<State, T> fmt::Debug for BlockChain<State, T>
+where
+    State: StateInstance,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "(a Chain block starting at hash {} with {} entries)",
-            hex::encode(&self.last_hash),
-            self.mutations.len()
-        )
+        write!(f, "BlockChain<{}>", std::any::type_name::<T>())
+    }
+}
+
+struct ChainVisitor<State: StateInstance, T> {
+    txn: State::Txn,
+    subject: PhantomData<T>,
+}
+
+impl<State, T> ChainVisitor<State, T>
+where
+    State: StateInstance,
+{
+    fn new(txn: State::Txn) -> Self {
+        Self {
+            txn,
+            subject: PhantomData,
+        }
+    }
+}
+
+#[async_trait]
+impl<State, T> de::Visitor for ChainVisitor<State, T>
+where
+    State: StateInstance
+        + de::FromStream<Context = State::Txn>
+        + From<Collection<State::Txn, State::FE>>
+        + From<Scalar>,
+    State::FE: DenseCacheFile
+        + AsType<ChainBlock>
+        + AsType<BTreeNode>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>
+        + Clone,
+    T: Route<State> + de::FromStream<Context = State::Txn> + fmt::Debug,
+    (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
+    Collection<State::Txn, State::FE>: TryCastFrom<State>,
+    Scalar: TryCastFrom<State>,
+    Value: TryCastFrom<State>,
+    (Value,): TryCastFrom<State>,
+    (Value, State): TryCastFrom<State>,
+{
+    type Value = BlockChain<State, T>;
+
+    fn expecting() -> &'static str {
+        "a BlockChain"
+    }
+
+    async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let subject = seq.next_element::<T>(self.txn.clone()).await?;
+        let subject = subject.ok_or_else(|| de::Error::invalid_length(0, "a BlockChain schema"))?;
+
+        let txn = self
+            .txn
+            .subcontext(HISTORY.into())
+            .map_err(de::Error::custom)
+            .await?;
+
+        let history = seq.next_element::<History<State>>(txn).await?;
+        let history =
+            history.ok_or_else(|| de::Error::invalid_length(1, "a BlockChain history"))?;
+
+        let write_ahead_log = history.read_log().map_err(de::Error::custom).await?;
+        for (past_txn_id, mutations) in &write_ahead_log.mutations {
+            super::data::replay_all(&subject, past_txn_id, mutations, &self.txn, history.store())
+                .map_err(de::Error::custom)
+                .await?;
+        }
+
+        Ok(BlockChain::new(subject, history))
     }
 }

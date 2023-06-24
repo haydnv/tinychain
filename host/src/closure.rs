@@ -185,11 +185,9 @@ impl<'a> Handler<'a> for Closure {
 }
 
 #[async_trait]
-impl AsyncHash<fs::CacheBlock> for Closure {
-    type Txn = Txn;
-
-    async fn hash(self, txn: &Txn) -> TCResult<Output<Sha256>> {
-        let context = State::Map(self.context).hash(txn).await?;
+impl AsyncHash for Closure {
+    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+        let context = State::Map(self.context).hash(txn_id).await?;
 
         let mut hasher = Sha256::default();
         hasher.update(&context);

@@ -363,57 +363,9 @@ impl Persist<fs::CacheBlock> for History {
 }
 
 #[async_trait]
-impl AsyncHash<fs::CacheBlock> for History {
-    type Txn = Txn;
-
-    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
-        let latest_block_id = self.latest.read(*txn.id()).await?;
-        let latest_block = self.read_block(*latest_block_id).await?;
-
-        let latest_block = if latest_block.mutations.is_empty() {
-            if *latest_block_id == 0 {
-                latest_block
-            } else {
-                self.read_block(*latest_block_id - 1).await?
-            }
-        } else {
-            latest_block
-        };
-
-        if let Some(past_txn_id) = latest_block.mutations.keys().next() {
-            if past_txn_id > txn.id() {
-                return Err(conflict!(
-                    "requested a hash {} too far before the present {}",
-                    past_txn_id,
-                    txn.id()
-                ));
-            }
-        }
-
-        let log = self.read_log().await?;
-        if let Some(mutations) = log.mutations.get(txn.id()) {
-            let mutations = latest_block
-                .mutations
-                .iter()
-                .take_while(|(past_txn_id, _)| *past_txn_id <= txn.id())
-                .chain(iter::once((txn.id(), mutations)));
-
-            Ok(ChainBlock::hash(latest_block.last_hash(), mutations))
-        } else {
-            let pending = self.read_pending().await?;
-            if let Some(mutations) = pending.mutations.get(txn.id()) {
-                let mutations = latest_block
-                    .mutations
-                    .iter()
-                    .take_while(|(past_txn_id, _)| *past_txn_id <= txn.id())
-                    .chain(iter::once((txn.id(), mutations)));
-
-                Ok(ChainBlock::hash(latest_block.last_hash(), mutations))
-            } else {
-                // TODO: validate the length of the hash before calling clone_from_slice
-                Ok(GenericArray::clone_from_slice(latest_block.last_hash()))
-            }
-        }
+impl AsyncHash for History {
+    async fn hash(self, _txn_id: TxnId) -> TCResult<Output<Sha256>> {
+        Err(not_implemented!("chain::History::hash"))
     }
 }
 

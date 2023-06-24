@@ -7,7 +7,7 @@ use futures::TryFutureExt;
 use safecast::{as_type, AsType};
 
 use tc_error::*;
-use tc_transact::{AsyncHash, IntoView, Transaction};
+use tc_transact::{AsyncHash, IntoView, Transaction, TxnId};
 use tcgeneric::{
     path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
 };
@@ -137,32 +137,30 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE> AsyncHash<FE> for Collection<Txn, FE>
+impl<Txn, FE> AsyncHash for Collection<Txn, FE>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
 {
-    type Txn = Txn;
-
-    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         let schema_hash = Hash::<Sha256>::hash(self.schema());
 
         let contents_hash = match self {
             Self::BTree(btree) => {
-                let keys = btree.keys(*txn.id()).await?;
+                let keys = btree.keys(txn_id).await?;
                 async_hash::hash_try_stream::<Sha256, _, _, _>(keys).await?
             }
             Self::Table(table) => {
-                let rows = table.rows(*txn.id()).await?;
+                let rows = table.rows(txn_id).await?;
                 async_hash::hash_try_stream::<Sha256, _, _, _>(rows).await?
             }
             Self::Tensor(tensor) => match tensor {
                 Tensor::Dense(dense) => {
-                    let elements = DenseView::from(dense).into_elements(*txn.id()).await?;
+                    let elements = DenseView::from(dense).into_elements(txn_id).await?;
                     async_hash::hash_try_stream::<Sha256, _, _, _>(elements).await?
                 }
                 Tensor::Sparse(sparse) => {
-                    let elements = SparseView::from(sparse).into_elements(*txn.id()).await?;
+                    let elements = SparseView::from(sparse).into_elements(txn_id).await?;
                     async_hash::hash_try_stream::<Sha256, _, _, _>(elements).await?
                 }
             },

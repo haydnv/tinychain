@@ -8,7 +8,7 @@ use destream::{de, en};
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::{AsyncHash, IntoView};
+use tc_transact::{AsyncHash, IntoView, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, path_label, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
@@ -85,10 +85,8 @@ impl tcgeneric::Instance for Object {
 }
 
 #[async_trait]
-impl AsyncHash<CacheBlock> for Object {
-    type Txn = Txn;
-
-    async fn hash(self, _txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+impl AsyncHash for Object {
+    async fn hash(self, _txn_id: TxnId) -> TCResult<Output<Sha256>> {
         match self {
             Self::Class(class) => Ok(async_hash::Hash::<Sha256>::hash(class)),
             Self::Instance(instance) => Err(bad_request!("cannot hash {:?}", instance)),

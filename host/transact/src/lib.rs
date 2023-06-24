@@ -48,12 +48,9 @@ pub mod lock {
 
 /// Defines a method to compute the hash of this state as of a given [`TxnId`]
 #[async_trait]
-pub trait AsyncHash<FE> {
-    /// The type of [`Transaction`] which this state supports
-    type Txn: Transaction<FE>;
-
+pub trait AsyncHash {
     /// Compute the hash of this state as of a given [`TxnId`]
-    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<async_hash::Sha256>>;
+    async fn hash(self, txn_id: TxnId) -> TCResult<Output<async_hash::Sha256>>;
 }
 
 /// Access a view which can be encoded with [`en::IntoStream`].

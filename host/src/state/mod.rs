@@ -20,7 +20,7 @@ use tc_collection::table::TableType;
 use tc_collection::tensor::TensorType;
 use tc_collection::{CollectionType, CollectionVisitor};
 use tc_error::*;
-use tc_transact::{AsyncHash, Transaction};
+use tc_transact::{AsyncHash, Transaction, TxnId};
 use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
@@ -433,19 +433,17 @@ impl Instance for State {
 }
 
 #[async_trait]
-impl AsyncHash<crate::fs::CacheBlock> for State {
-    type Txn = Txn;
-
-    async fn hash(self, txn: &Txn) -> TCResult<Output<Sha256>> {
+impl AsyncHash for State {
+    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         match self {
-            Self::Collection(collection) => collection.hash(txn).await,
-            // Self::Chain(chain) => chain.hash(txn).await,
-            // Self::Closure(closure) => closure.hash(txn).await,
+            Self::Collection(collection) => collection.hash(txn_id).await,
+            // Self::Chain(chain) => chain.hash(txn_id).await,
+            // Self::Closure(closure) => closure.hash(txn_id).await,
             Self::Map(map) => {
                 let mut hashes = stream::iter(map)
                     .map(|(id, state)| {
                         state
-                            .hash(txn)
+                            .hash(txn_id)
                             .map_ok(|hash| (Hash::<Sha256>::hash(id), hash))
                     })
                     .buffered(num_cpus::get())
@@ -463,14 +461,14 @@ impl AsyncHash<crate::fs::CacheBlock> for State {
 
                 Ok(hasher.finalize())
             }
-            // Self::Object(object) => object.hash(txn).await,
+            // Self::Object(object) => object.hash(txn_id).await,
             Self::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),
             // Self::Stream(_stream) => Err(bad_request!(
             //     "cannot hash a Stream; hash its source instead"
             // )),
             // Self::Tuple(tuple) => {
             //     let mut hashes = stream::iter(tuple)
-            //         .map(|state| state.hash(txn))
+            //         .map(|state| state.hash(txn_id))
             //         .buffered(num_cpus::get());
             //
             //     let mut hasher = Sha256::default();
