@@ -36,7 +36,7 @@ hyper = { version = "0.14", features = ["full"] }
 log = { version = "0.4", features = ["release_max_level_info"] }
 num_cpus = "1.13"
 pin-project = "1.0"
-rjwt = "~0.4.1"
+rjwt = "0.4"
 safecast = { path = "../../safecast" }
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
@@ -44,6 +44,7 @@ tbon = { path = "../../tbon" }
 tc-chain = { path = "chain" }
 tc-collection = { path = "collection" }
 tc-error = { path = "error" }
+tc-fs = { path = "fs" }
 tc-scalar = { path = "scalar" }
 tc-transact = { path = "transact" }
 tc-value = { path = "value" }
