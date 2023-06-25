@@ -10,8 +10,6 @@ use tc_value::Host;
 
 use tinychain::*;
 
-use std::any::Any;
-
 fn data_size(flag: &str) -> TCResult<usize> {
     if flag.is_empty() || flag == "0" {
         return Ok(0);
@@ -111,15 +109,15 @@ struct Config {
     pub workspace: PathBuf,
 }
 
-// impl Config {
-//     fn gateway(&self) -> gateway::Config {
-//         gateway::Config {
-//             addr: self.address,
-//             http_port: self.http_port,
-//             request_ttl: self.request_ttl,
-//         }
-//     }
-// }
+impl Config {
+    fn gateway(&self) -> gateway::Config {
+        gateway::Config {
+            addr: self.address,
+            http_port: self.http_port,
+            request_ttl: self.request_ttl,
+        }
+    }
+}
 
 fn main() {
     let config = Config::parse();
@@ -127,7 +125,7 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log_level))
         .init();
 
-    // let gateway_config = config.gateway();
+    let gateway_config = config.gateway();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
@@ -136,18 +134,18 @@ fn main() {
         .build()
         .expect("tokio runtime");
 
-    // let builder = runtime
-    //     .block_on(Builder::load(
-    //         config.cache_size,
-    //         config.data_dir,
-    //         config.workspace,
-    //     ))
-    //     .with_public_key(config.public_key)
-    //     .with_gateway(gateway_config)
-    //     .with_lead(config.replicate);
-    //
-    // match runtime.block_on(builder.replicate_and_serve()) {
-    //     Ok(_) => {}
-    //     Err(cause) => panic!("HTTP server failed: {}", cause),
-    // }
+    let builder = runtime
+        .block_on(Builder::load(
+            config.cache_size,
+            config.data_dir,
+            config.workspace,
+        ))
+        .with_public_key(config.public_key)
+        .with_gateway(gateway_config)
+        .with_lead(config.replicate);
+
+    match runtime.block_on(builder.replicate_and_serve()) {
+        Ok(_) => {}
+        Err(cause) => panic!("HTTP server failed: {}", cause),
+    }
 }

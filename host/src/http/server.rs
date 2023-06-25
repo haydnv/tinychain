@@ -155,7 +155,7 @@ impl HTTPServer {
             TxnId::new(NetworkTime::now())
         };
 
-        let txn = self.gateway.new_txn(txn_id, token).await?;
+        let txn = self.gateway.clone().new_txn(txn_id, token).await?;
         Ok((params, txn, accept_encoding, content_type))
     }
 

@@ -19,7 +19,7 @@ use tcgeneric::{path_label, Id, Map, PathLabel, PathSegment};
 
 use crate::block::CacheBlock;
 
-use super::{Actor, Gateway, Txn};
+use super::{Actor, Txn};
 
 pub const PATH: PathLabel = path_label(&["transact", "hypothetical"]);
 
@@ -40,10 +40,9 @@ impl<State> Hypothetical<State> {
     }
 }
 
-impl<G, State> Hypothetical<State>
+impl<State> Hypothetical<State>
 where
-    G: Gateway<State = State>,
-    State: StateInstance<FE = CacheBlock, Txn = Txn<G>> + Refer<State>,
+    State: StateInstance<FE = CacheBlock, Txn = Txn<State>> + Refer<State>,
     Vec<(Id, State)>: TryCastFrom<State>,
 {
     pub async fn finalize(&self, txn_id: TxnId) {
@@ -59,7 +58,7 @@ where
         }
     }
 
-    pub async fn execute(&self, txn: &Txn<G>, data: State) -> TCResult<State> {
+    pub async fn execute(&self, txn: &Txn<State>, data: State) -> TCResult<State> {
         let txn = txn.clone().claim(&self.actor, PATH.into()).await?;
         let context = Map::<State>::default();
 
@@ -68,7 +67,7 @@ where
             let capture = if let Some((capture, _)) = op_def.last() {
                 capture.clone()
             } else {
-                return Ok(G::State::default());
+                return Ok(State::default());
             };
 
             let executor: Executor<State, State> = Executor::new(&txn, None, op_def);
@@ -98,13 +97,12 @@ where
     }
 }
 
-impl<'a, G, State> Handler<'a, State> for &'a Hypothetical<State>
+impl<'a, State> Handler<'a, State> for &'a Hypothetical<State>
 where
-    G: Gateway<State = State>,
-    State: StateInstance<FE = CacheBlock, Txn = Txn<G>>,
+    State: StateInstance<FE = CacheBlock, Txn = Txn<State>>,
     Link: TryCastFrom<State>,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn<G>, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn<State>, State>>
     where
         'b: 'a,
     {
@@ -122,7 +120,7 @@ where
         }))
     }
 
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn<G>, State>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn<State>, State>>
     where
         'b: 'a,
     {
@@ -151,7 +149,7 @@ where
         }))
     }
 
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn<G>>>
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn<State>>>
     where
         'b: 'a,
     {
@@ -169,10 +167,9 @@ where
     }
 }
 
-impl<G, State> Route<State> for Hypothetical<State>
+impl<State> Route<State> for Hypothetical<State>
 where
-    G: Gateway<State = State>,
-    State: StateInstance<FE = CacheBlock, Txn = Txn<G>>,
+    State: StateInstance<FE = CacheBlock, Txn = Txn<State>>,
     Link: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {

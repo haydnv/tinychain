@@ -136,11 +136,12 @@ impl Gateway {
     }
 
     /// Authorize a transaction to execute on this host.
-    pub async fn new_txn(&self, txn_id: TxnId, token: Option<String>) -> TCResult<Txn> {
+    pub async fn new_txn(self, txn_id: TxnId, token: Option<String>) -> TCResult<Txn> {
         let token = if let Some(token) = token {
             use rjwt::Resolve;
 
-            Resolver::new(self, &self.host().clone().into(), &txn_id)
+            let gateway: Box<dyn GatewayInstance<State = State>> = Box::new(self.clone());
+            Resolver::new(&gateway, &self.host().clone().into(), &txn_id)
                 .consume_and_sign(&self.inner.actor, vec![], token, txn_id.time().into())
                 .map_err(|cause| unauthorized!("credential error").consume(cause))
                 .await?
@@ -148,9 +149,10 @@ impl Gateway {
             self.new_token(&txn_id)?
         };
 
-        self.inner
-            .txn_server
-            .new_txn(self.clone(), txn_id, token)
+        let txn_server = self.inner.txn_server.clone();
+
+        txn_server
+            .new_txn(Arc::new(Box::new(self)), txn_id, token)
             .await
     }
 
@@ -178,15 +180,12 @@ impl GatewayInstance for Gateway {
         Link::from((self.inner.host.clone(), path))
     }
 
-    fn fetch<'a, T>(
+    fn fetch<'a>(
         &'a self,
         txn_id: &'a TxnId,
         link: ToUrl<'a>,
         key: &'a Value,
-    ) -> TCBoxTryFuture<T>
-    where
-        T: destream::FromStream<Context = ()> + 'a,
-    {
+    ) -> TCBoxTryFuture<Value> {
         Box::pin(self.inner.client.fetch(txn_id, link, key))
     }
 

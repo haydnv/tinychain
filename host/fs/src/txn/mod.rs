@@ -30,13 +30,8 @@ pub mod hypothetical;
 mod request;
 mod server;
 
-pub trait Gateway: Clone + ThreadSafe {
-    type State: StateInstance;
-
-    /// Read a simple value.
-    fn fetch<'a, T>(&'a self, txn_id: &'a TxnId, link: ToUrl<'a>, key: &'a Value) -> TCBoxTryFuture<T>
-    where
-        T: destream::FromStream<Context = ()> + 'a;
+pub trait Gateway: ThreadSafe {
+    type State: StateInstance<FE = CacheBlock>;
 
     /// Return this [`Host`]
     fn host(&self) -> &Host;
@@ -44,10 +39,18 @@ pub trait Gateway: Clone + ThreadSafe {
     /// Return a link to the given path on this host.
     fn link(&self, path: TCPathBuf) -> Link;
 
+    /// Read a simple value.
+    fn fetch<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+        link: ToUrl<'a>,
+        key: &'a Value,
+    ) -> TCBoxTryFuture<Value>;
+
     /// Read the [`State`] at `link` with the given `key`.
     fn get<'a>(
         &'a self,
-        txn: &'a Txn<Self>,
+        txn: &'a Txn<Self::State>,
         link: ToUrl<'a>,
         key: Value,
     ) -> TCBoxTryFuture<'a, Self::State>;
@@ -55,7 +58,7 @@ pub trait Gateway: Clone + ThreadSafe {
     /// Update the [`State`] with the given `key` at `link` to `value`.
     fn put<'a>(
         &'a self,
-        txn: &'a Txn<Self>,
+        txn: &'a Txn<Self::State>,
         link: ToUrl<'a>,
         key: Value,
         value: Self::State,
@@ -64,7 +67,7 @@ pub trait Gateway: Clone + ThreadSafe {
     /// Execute the POST op at `link` with the `params`
     fn post<'a>(
         &'a self,
-        txn: &'a Txn<Self>,
+        txn: &'a Txn<Self::State>,
         link: ToUrl<'a>,
         params: Self::State,
     ) -> TCBoxTryFuture<'a, Self::State>;
@@ -72,7 +75,7 @@ pub trait Gateway: Clone + ThreadSafe {
     /// Delete the [`State`] at `link` with the given `key`.
     fn delete<'a>(
         &'a self,
-        txn: &'a Txn<Self>,
+        txn: &'a Txn<Self::State>,
         link: ToUrl<'a>,
         key: Value,
     ) -> TCBoxTryFuture<'a, ()>;
@@ -108,15 +111,19 @@ impl Active {
 
 /// A transaction context.
 #[derive(Clone)]
-pub struct Txn<G> {
+pub struct Txn<State> {
     active: Arc<Active>,
-    gateway: G,
+    gateway: Arc<Box<dyn Gateway<State = State>>>,
     request: Arc<Request>,
     dir: DirLock<CacheBlock>,
 }
 
-impl<G: Gateway> Txn<G> {
-    fn new(active: Arc<Active>, gateway: G, request: Request) -> Self {
+impl<State> Txn<State> {
+    fn new(
+        active: Arc<Active>,
+        gateway: Arc<Box<dyn Gateway<State = State>>>,
+        request: Request,
+    ) -> Self {
         let request = Arc::new(request);
         let dir = active.workspace.clone();
 
@@ -127,7 +134,12 @@ impl<G: Gateway> Txn<G> {
             dir,
         }
     }
+}
 
+impl<State> Txn<State>
+where
+    State: StateInstance<FE = CacheBlock, Txn = Self>,
+{
     /// Return this [`Host`]
     pub fn host(&self) -> &Host {
         self.gateway.host()
@@ -294,11 +306,7 @@ impl<G: Gateway> Txn<G> {
 }
 
 #[async_trait]
-impl<G> Transaction<CacheBlock> for Txn<G>
-where
-    G: Gateway,
-    G::State: StateInstance<FE = CacheBlock, Txn = Self>,
-{
+impl<State: Clone + 'static> Transaction<CacheBlock> for Txn<State> {
     #[inline]
     fn id(&'_ self) -> &'_ TxnId {
         self.request.txn_id()
@@ -336,12 +344,11 @@ where
 }
 
 #[async_trait]
-impl<G> tc_transact::RPCClient<G::State> for Txn<G>
+impl<State> tc_transact::RPCClient<State> for Txn<State>
 where
-    G: Gateway,
-    G::State: StateInstance<FE = CacheBlock, Txn = Self>,
+    State: StateInstance<FE = CacheBlock, Txn = Self>,
 {
-    async fn get<'a, L, V>(&'a self, link: L, key: V) -> TCResult<G::State>
+    async fn get<'a, L, V>(&'a self, link: L, key: V) -> TCResult<State>
     where
         L: Into<ToUrl<'a>> + Send,
         V: CastInto<Value> + Send,
@@ -353,17 +360,17 @@ where
     where
         L: Into<ToUrl<'a>> + Send,
         K: CastInto<Value> + Send,
-        V: CastInto<G::State> + Send,
+        V: CastInto<State> + Send,
     {
         self.gateway
             .put(self, link.into(), key.cast_into(), value.cast_into())
             .await
     }
 
-    async fn post<'a, L, P>(&'a self, link: L, params: P) -> TCResult<G::State>
+    async fn post<'a, L, P>(&'a self, link: L, params: P) -> TCResult<State>
     where
         L: Into<ToUrl<'a>> + Send,
-        P: CastInto<G::State> + Send,
+        P: CastInto<State> + Send,
     {
         self.gateway
             .post(self, link.into(), params.cast_into())

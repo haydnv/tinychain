@@ -34,15 +34,12 @@ impl TxnServer {
     }
 
     /// Return the active `Txn` with the given [`TxnId`], or initiate a new [`Txn`].
-    pub async fn new_txn<G>(
+    pub async fn new_txn<State>(
         &self,
-        gateway: G,
+        gateway: Arc<Box<dyn Gateway<State = State>>>,
         txn_id: TxnId,
         token: (String, Claims),
-    ) -> TCResult<Txn<G>>
-    where
-        G: Gateway,
-    {
+    ) -> TCResult<Txn<State>> {
         debug!("TxnServer::new_txn");
 
         let expires = NetworkTime::try_from(token.1.expires())?;
@@ -85,7 +82,10 @@ impl TxnServer {
         .await?
     }
 
-    pub async fn finalize_expired<G: Gateway>(&self, gateway: &G, now: NetworkTime) {
+    pub async fn finalize_expired<G>(&self, gateway: &G, now: NetworkTime)
+    where
+        G: Gateway,
+    {
         let mut active = self.active.write().await;
 
         let expired = active
