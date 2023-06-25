@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 use log::debug;
 
 use tc_chain::{ChainInstance, ChainType};
+use tc_fs::CacheBlock;
 use tc_transact::fs::Persist;
 use tc_transact::public::Handler;
 use tc_transact::Transaction;
@@ -11,7 +12,6 @@ use tcgeneric::{PathSegment, TCPath};
 
 use crate::chain::{BlockChain, Chain};
 use crate::cluster::Replica;
-use crate::fs::CacheBlock;
 use crate::state::State;
 use crate::txn::Txn;
 

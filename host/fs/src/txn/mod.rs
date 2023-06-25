@@ -19,14 +19,14 @@ use tcgeneric::{
     Id, NetworkTime, PathSegment, TCBoxFuture, TCBoxTryFuture, TCPathBuf, ThreadSafe, Tuple,
 };
 
+use crate::block::CacheBlock;
+
 pub use hypothetical::Hypothetical;
 pub use request::*;
 pub use server::*;
 pub use tc_transact::TxnId;
 
-use crate::block::CacheBlock;
-
-mod hypothetical;
+pub mod hypothetical;
 mod request;
 mod server;
 
@@ -34,9 +34,9 @@ pub trait Gateway: Clone + ThreadSafe {
     type State: StateInstance;
 
     /// Read a simple value.
-    fn fetch<T>(&self, txn_id: &TxnId, link: ToUrl<'_>, key: &Value) -> TCBoxTryFuture<T>
+    fn fetch<'a, T>(&'a self, txn_id: &'a TxnId, link: ToUrl<'a>, key: &'a Value) -> TCBoxTryFuture<T>
     where
-        T: destream::FromStream<Context = ()>;
+        T: destream::FromStream<Context = ()> + 'a;
 
     /// Return this [`Host`]
     fn host(&self) -> &Host;
@@ -48,7 +48,7 @@ pub trait Gateway: Clone + ThreadSafe {
     fn get<'a>(
         &'a self,
         txn: &'a Txn<Self>,
-        link: ToUrl<'_>,
+        link: ToUrl<'a>,
         key: Value,
     ) -> TCBoxTryFuture<'a, Self::State>;
 
@@ -65,7 +65,7 @@ pub trait Gateway: Clone + ThreadSafe {
     fn post<'a>(
         &'a self,
         txn: &'a Txn<Self>,
-        link: ToUrl<'_>,
+        link: ToUrl<'a>,
         params: Self::State,
     ) -> TCBoxTryFuture<'a, Self::State>;
 
@@ -294,8 +294,9 @@ impl<G: Gateway> Txn<G> {
 }
 
 #[async_trait]
-impl<G: Gateway> Transaction<CacheBlock> for Txn<G>
+impl<G> Transaction<CacheBlock> for Txn<G>
 where
+    G: Gateway,
     G::State: StateInstance<FE = CacheBlock, Txn = Self>,
 {
     #[inline]
@@ -335,8 +336,9 @@ where
 }
 
 #[async_trait]
-impl<G: Gateway> tc_transact::RPCClient<G::State> for Txn<G>
+impl<G> tc_transact::RPCClient<G::State> for Txn<G>
 where
+    G: Gateway,
     G::State: StateInstance<FE = CacheBlock, Txn = Self>,
 {
     async fn get<'a, L, V>(&'a self, link: L, key: V) -> TCResult<G::State>

@@ -18,7 +18,6 @@ use tc_transact::public::Handler;
 use tc_transact::{AsyncHash, IntoView, TxnId};
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf};
 
-use crate::fs;
 use crate::route::{DeleteHandler, GetHandler, PostHandler, PutHandler};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
@@ -207,7 +206,7 @@ impl AsyncHash for Closure {
 }
 
 #[async_trait]
-impl<'en> IntoView<'en, fs::CacheBlock> for Closure {
+impl<'en> IntoView<'en, tc_fs::CacheBlock> for Closure {
     type Txn = Txn;
     type View = (HashMap<Id, StateView<'en>>, OpDef);
 

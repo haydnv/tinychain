@@ -8,23 +8,13 @@ use tc_transact::{RPCClient, Transaction};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{Map, PathSegment, TCPath, TCPathBuf};
 
-use crate::cluster::{library, DirItem, Library};
+use crate::cluster::{DirItem, Library};
 use crate::kernel::CLASS;
 use crate::object::InstanceClass;
-use crate::route::object::method::route_attr;
 use crate::state::State;
 
 use super::dir::{expect_version, extract_classes, DirHandler};
 use super::{authorize_install, DeleteHandler, GetHandler, Handler, PostHandler, PutHandler};
-
-impl Route<State> for library::Version {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
-        assert!(!path.is_empty());
-
-        let attr = self.get_attribute(&path[0])?;
-        route_attr(self, &path[0], attr, &path[1..])
-    }
-}
 
 struct LibraryHandler<'a> {
     lib: &'a Library,

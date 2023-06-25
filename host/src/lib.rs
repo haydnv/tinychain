@@ -20,13 +20,12 @@ pub mod chain;
 pub mod closure;
 pub mod cluster;
 pub mod collection;
-pub mod fs;
 pub mod gateway;
 pub mod kernel;
 pub mod object;
 pub mod state;
-// pub mod stream;
 pub mod txn;
+// pub mod stream;
 
 mod http;
 mod route;
@@ -39,12 +38,12 @@ type TokioError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// Build a new host.
 pub struct Builder {
-    cache: Arc<freqfs::Cache<fs::CacheBlock>>,
+    cache: Arc<freqfs::Cache<tc_fs::CacheBlock>>,
     data_dir: PathBuf,
     gateway: Option<gateway::Config>,
     lead: Option<tc_value::Host>,
     public_key: Option<bytes::Bytes>,
-    workspace: freqfs::DirLock<fs::CacheBlock>,
+    workspace: freqfs::DirLock<tc_fs::CacheBlock>,
 }
 
 impl Builder {
@@ -58,7 +57,7 @@ impl Builder {
 
         Self::maybe_create(&workspace);
 
-        let cache = freqfs::Cache::<fs::CacheBlock>::new(cache_size.into(), None);
+        let cache = freqfs::Cache::<tc_fs::CacheBlock>::new(cache_size.into(), None);
 
         let workspace = cache.clone().load(workspace).expect("workspace");
 
@@ -109,14 +108,14 @@ impl Builder {
         }
     }
 
-    async fn load_dir(&self, path: PathBuf, txn_id: tc_transact::TxnId) -> fs::Dir {
+    async fn load_dir(&self, path: PathBuf, txn_id: tc_transact::TxnId) -> tc_fs::Dir {
         Self::maybe_create(&path);
 
         log::debug!("load {} into cache", path.display());
         let cache = self.cache.clone().load(path).expect("cache dir");
 
         log::debug!("load {:?} into the transactional filesystem", cache);
-        fs::Dir::load(txn_id, cache).await.expect("store")
+        tc_fs::Dir::load(txn_id, cache).await.expect("store")
     }
 
     // async fn load_or_create<T>(

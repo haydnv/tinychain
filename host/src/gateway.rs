@@ -11,8 +11,10 @@ use log::debug;
 use tokio::time::Duration;
 
 use tc_error::*;
+use tc_fs::{Actor, Claims, Gateway as GatewayInstance, Resolver, Token, TxnServer};
+use tc_transact::TxnId;
 use tc_value::{Host, Link, Protocol, ToUrl, Value};
-use tcgeneric::{NetworkTime, TCBoxTryFuture, TCPathBuf};
+use tcgeneric::{NetworkTime, TCBoxFuture, TCBoxTryFuture, TCPathBuf};
 
 use crate::kernel::{Dispatch, Kernel};
 use crate::state::State;
@@ -66,14 +68,19 @@ pub trait Server {
     async fn listen(self, port: u16) -> Result<(), Self::Error>;
 }
 
-/// Responsible for handling inbound and outbound traffic over the network.
-pub struct Gateway {
+struct Inner {
     actor: Actor,
     config: Config,
     client: http::Client,
     host: Host,
     kernel: Kernel,
     txn_server: TxnServer,
+}
+
+/// Responsible for handling inbound and outbound traffic over the network.
+#[derive(Clone)]
+pub struct Gateway {
+    inner: Arc<Inner>,
 }
 
 impl Gateway {
@@ -83,10 +90,10 @@ impl Gateway {
     }
 
     /// Initialize a new `Gateway`
-    pub fn new(config: Config, kernel: Kernel, txn_server: TxnServer) -> Arc<Self> {
+    pub fn new(config: Config, kernel: Kernel, txn_server: TxnServer) -> Self {
         let root = Host::from((Protocol::HTTP, config.addr.clone().into(), config.http_port));
 
-        let gateway = Arc::new(Self {
+        let inner = Arc::new(Inner {
             config,
             kernel,
             txn_server,
@@ -95,6 +102,8 @@ impl Gateway {
             actor: Actor::new(Link::default().into()),
         });
 
+        let gateway = Gateway { inner };
+
         spawn_cleanup_thread(gateway.clone());
 
         gateway
@@ -102,30 +111,21 @@ impl Gateway {
 
     /// Return the configured maximum request time-to-live (timeout duration).
     pub fn request_ttl(&self) -> Duration {
-        self.config.request_ttl
-    }
-
-    /// Return the network address of this `Gateway`
-    pub fn host(&self) -> &Host {
-        &self.host
-    }
-
-    /// Return a [`Link`] to the given path at this host.
-    pub fn link(&self, path: TCPathBuf) -> Link {
-        Link::from((self.host.clone(), path))
+        self.inner.config.request_ttl
     }
 
     /// Return a new, signed auth token with no claims.
     pub fn new_token(&self, txn_id: &TxnId) -> TCResult<(String, Claims)> {
         let token = Token::new(
-            self.host.clone().into(),
+            self.inner.host.clone().into(),
             txn_id.time().into(),
-            self.config.request_ttl,
-            self.actor.id().clone(),
+            self.inner.config.request_ttl,
+            self.inner.actor.id().clone(),
             vec![],
         );
 
         let signed = self
+            .inner
             .actor
             .sign_token(&token)
             .map_err(|cause| unexpected!("signing error").consume(cause))?;
@@ -136,45 +136,79 @@ impl Gateway {
     }
 
     /// Authorize a transaction to execute on this host.
-    pub async fn new_txn(self: &Arc<Self>, txn_id: TxnId, token: Option<String>) -> TCResult<Txn> {
+    pub async fn new_txn(&self, txn_id: TxnId, token: Option<String>) -> TCResult<Txn> {
         let token = if let Some(token) = token {
             use rjwt::Resolve;
+
             Resolver::new(self, &self.host().clone().into(), &txn_id)
-                .consume_and_sign(&self.actor, vec![], token, txn_id.time().into())
+                .consume_and_sign(&self.inner.actor, vec![], token, txn_id.time().into())
                 .map_err(|cause| unauthorized!("credential error").consume(cause))
                 .await?
         } else {
             self.new_token(&txn_id)?
         };
 
-        self.txn_server.new_txn(self.clone(), txn_id, token).await
+        self.inner
+            .txn_server
+            .new_txn(self.clone(), txn_id, token)
+            .await
     }
 
-    /// Read a simple value.
-    pub async fn fetch<T>(&self, txn_id: &TxnId, link: ToUrl<'_>, key: &Value) -> TCResult<T>
+    /// Start this `Gateway`'s server
+    pub fn listen(self) -> Pin<Box<impl Future<Output = Result<(), TokioError>> + 'static>> {
+        let port = self.inner.config.http_port;
+        let server = crate::http::HTTPServer::new(self);
+        let listener = server.listen(port).map_err(|e| {
+            let e: TokioError = Box::new(e);
+            e
+        });
+
+        Box::pin(listener)
+    }
+}
+
+impl GatewayInstance for Gateway {
+    type State = State;
+
+    fn host(&self) -> &Host {
+        &self.inner.host
+    }
+
+    fn link(&self, path: TCPathBuf) -> Link {
+        Link::from((self.inner.host.clone(), path))
+    }
+
+    fn fetch<'a, T>(
+        &'a self,
+        txn_id: &'a TxnId,
+        link: ToUrl<'a>,
+        key: &'a Value,
+    ) -> TCBoxTryFuture<T>
     where
-        T: destream::FromStream<Context = ()>,
+        T: destream::FromStream<Context = ()> + 'a,
     {
-        self.client.fetch(txn_id, link, key).await
+        Box::pin(self.inner.client.fetch(txn_id, link, key))
     }
 
-    /// Read the [`State`] at `link` with the given `key`.
-    pub async fn get(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<State> {
+    fn get<'a>(&'a self, txn: &'a Txn, link: ToUrl<'a>, key: Value) -> TCBoxTryFuture<'a, State> {
         debug!("GET {}: {}", link, key);
 
-        match link.host() {
-            None if link.path().is_empty() && key.is_none() => {
-                let public_key = Bytes::from(self.actor.public_key().as_bytes().to_vec());
-                Ok(State::from(Value::from(public_key)))
+        Box::pin(async move {
+            match link.host() {
+                None if link.path().is_empty() && key.is_none() => {
+                    let public_key = Bytes::from(self.inner.actor.public_key().as_bytes().to_vec());
+                    Ok(State::from(Value::from(public_key)))
+                }
+                None => self.inner.kernel.get(txn, link.path(), key).await,
+                Some(host) if host == self.host() => {
+                    self.inner.kernel.get(txn, link.path(), key).await
+                }
+                _ => self.inner.client.get(txn, link, key).await,
             }
-            None => self.kernel.get(txn, link.path(), key).await,
-            Some(host) if host == self.host() => self.kernel.get(txn, link.path(), key).await,
-            _ => self.client.get(txn, link, key).await,
-        }
+        })
     }
 
-    /// Update the [`State`] with the given `key` at `link` to `value`.
-    pub fn put<'a>(
+    fn put<'a>(
         &'a self,
         txn: &'a Txn,
         link: ToUrl<'a>,
@@ -185,66 +219,54 @@ impl Gateway {
             debug!("PUT {}: {} <- {:?}", link, key, value);
 
             match link.host() {
-                None => self.kernel.put(txn, link.path(), key, value).await,
+                None => self.inner.kernel.put(txn, link.path(), key, value).await,
                 Some(host) if host == self.host() => {
-                    self.kernel.put(txn, link.path(), key, value).await
+                    self.inner.kernel.put(txn, link.path(), key, value).await
                 }
-                _ => self.client.put(txn, link, key, value).await,
+                _ => self.inner.client.put(txn, link, key, value).await,
             }
         })
     }
 
-    /// Execute the POST op at `link` with the `params`
-    pub async fn post(&self, txn: &Txn, link: ToUrl<'_>, params: State) -> TCResult<State> {
-        debug!("POST to {} with params {:?}", link, params);
-
-        match link.host() {
-            None => self.kernel.post(txn, link.path(), params).await,
-            Some(host) if host == self.host() => self.kernel.post(txn, link.path(), params).await,
-            _ => self.client.post(txn, link, params).await,
-        }
-    }
-
-    /// Delete the [`State`] at `link` with the given `key`.
-    pub fn delete<'a>(
+    fn post<'a>(
         &'a self,
         txn: &'a Txn,
         link: ToUrl<'a>,
-        key: Value,
-    ) -> TCBoxTryFuture<'a, ()> {
+        params: State,
+    ) -> TCBoxTryFuture<'a, State> {
+        debug!("POST to {} with params {:?}", link, params);
+
+        Box::pin(async move {
+            match link.host() {
+                None => self.inner.kernel.post(txn, link.path(), params).await,
+                Some(host) if host == self.host() => {
+                    self.inner.kernel.post(txn, link.path(), params).await
+                }
+                _ => self.inner.client.post(txn, link, params).await,
+            }
+        })
+    }
+
+    fn delete<'a>(&'a self, txn: &'a Txn, link: ToUrl<'a>, key: Value) -> TCBoxTryFuture<'a, ()> {
         Box::pin(async move {
             debug!("DELETE {}: {}", link, key);
 
             match link.host() {
-                None => self.kernel.delete(txn, link.path(), key).await,
+                None => self.inner.kernel.delete(txn, link.path(), key).await,
                 Some(host) if host == self.host() => {
-                    self.kernel.delete(txn, link.path(), key).await
+                    self.inner.kernel.delete(txn, link.path(), key).await
                 }
-                _ => self.client.delete(txn, link, key).await,
+                _ => self.inner.client.delete(txn, link, key).await,
             }
         })
     }
 
-    /// Start this `Gateway`'s server
-    pub fn listen(
-        self: Arc<Self>,
-    ) -> Pin<Box<impl Future<Output = Result<(), TokioError>> + 'static>> {
-        let port = self.config.http_port;
-        let server = crate::http::HTTPServer::new(self);
-        let listener = server.listen(port).map_err(|e| {
-            let e: TokioError = Box::new(e);
-            e
-        });
-
-        Box::pin(listener)
-    }
-
-    pub(crate) async fn finalize(&self, txn_id: TxnId) {
-        self.kernel.finalize(txn_id).await;
+    fn finalize(&self, txn_id: TxnId) -> TCBoxFuture<()> {
+        Box::pin(self.inner.kernel.finalize(txn_id))
     }
 }
 
-fn spawn_cleanup_thread(gateway: Arc<Gateway>) {
+fn spawn_cleanup_thread(gateway: Gateway) {
     let mut interval = tokio::time::interval(INTERVAL);
 
     tokio::spawn(async move {
@@ -252,6 +274,7 @@ fn spawn_cleanup_thread(gateway: Arc<Gateway>) {
             interval.tick().await;
 
             gateway
+                .inner
                 .txn_server
                 .finalize_expired(&gateway, Gateway::time())
                 .await;

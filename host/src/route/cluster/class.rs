@@ -36,9 +36,8 @@ impl<'a> Handler<'a, State> for ClassVersionHandler<'a> {
             Box::pin(async move {
                 if self.path.is_empty() {
                     let name = key.try_cast_into(|v| TCError::unexpected(v, "a Class name"))?;
-
                     let class = self.class.get_class(*txn.id(), &name).await?;
-                    Ok(State::Object(class.clone().into()))
+                    Ok(State::Object(class.into()))
                 } else {
                     let class = self.class.get_class(*txn.id(), &self.path[0]).await?;
                     class.get(txn, &self.path[1..], key).await

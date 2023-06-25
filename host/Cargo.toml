@@ -50,5 +50,4 @@ tc-transact = { path = "transact" }
 tc-value = { path = "value" }
 tcgeneric = { path = "generic" }
 tokio = { version = "1.24", features = ["rt-multi-thread", "signal"] }
-tokio-util = { version = "0.7", features = ["io"] }
 url = { version = "2.2" }

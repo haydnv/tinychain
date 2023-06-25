@@ -725,16 +725,6 @@ impl TryCastFrom<Scalar> for (Bound<Value>, Bound<Value>) {
     }
 }
 
-// impl TryCastFrom<Scalar> for Closure {
-//     fn can_cast_from(scalar: &Scalar) -> bool {
-//         OpDef::can_cast_from(scalar)
-//     }
-//
-//     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
-//         OpDef::opt_cast_from(scalar).map(Self::from)
-//     }
-// }
-
 impl TryCastFrom<Scalar> for OpDef {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {

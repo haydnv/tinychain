@@ -5,6 +5,7 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_chain::{ChainInstance, CHAIN};
 use tc_error::*;
+use tc_fs::CacheBlock;
 use tc_scalar::Scalar;
 use tc_transact::fs::{Persist, Restore};
 use tc_transact::public::{Public, Route, ToState};
@@ -14,7 +15,6 @@ use tcgeneric::{label, Label, Map};
 
 use crate::chain::{BlockChain, Chain, SyncChain};
 use crate::collection::CollectionBase;
-use crate::fs::CacheBlock;
 use crate::object::InstanceClass;
 use crate::state::State;
 use crate::txn::Txn;

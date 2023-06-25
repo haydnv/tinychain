@@ -8,12 +8,12 @@ use destream::{de, en};
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
+use tc_fs::CacheBlock;
 use tc_scalar::Scalar;
 use tc_transact::{AsyncHash, IntoView, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, path_label, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
-use crate::fs::CacheBlock;
 use crate::state::State;
 use crate::txn::Txn;
 

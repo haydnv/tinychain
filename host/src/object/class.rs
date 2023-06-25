@@ -92,6 +92,13 @@ impl From<StateType> for InstanceClass {
     }
 }
 
+impl From<(Link, Map<Scalar>)> for InstanceClass {
+    fn from(class: (Link, Map<Scalar>)) -> Self {
+        let (extends, proto) = class;
+        Self { extends, proto }
+    }
+}
+
 impl CastFrom<Link> for InstanceClass {
     fn cast_from(extends: Link) -> Self {
         Self {

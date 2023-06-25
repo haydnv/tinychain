@@ -11,12 +11,13 @@ use hyper::{Body, Response};
 use serde::de::DeserializeOwned;
 
 use tc_error::*;
+use tc_fs::Gateway as GatewayInstance;
 use tc_transact::{IntoView, TxnId};
 use tcgeneric::{NetworkTime, TCPathBuf};
 
 use crate::gateway::Gateway;
 use crate::state::State;
-use crate::txn::*;
+use crate::txn::Txn;
 
 use super::{Accept, Encoding};
 
@@ -24,11 +25,11 @@ type GetParams = HashMap<String, String>;
 
 /// TinyChain's HTTP server. Should only be used through a [`Gateway`].
 pub struct HTTPServer {
-    gateway: Arc<Gateway>,
+    gateway: Gateway,
 }
 
 impl HTTPServer {
-    pub fn new(gateway: Arc<Gateway>) -> Self {
+    pub fn new(gateway: Gateway) -> Self {
         Self { gateway }
     }
 

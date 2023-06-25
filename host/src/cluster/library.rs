@@ -19,7 +19,6 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
 use tcgeneric::{label, Instance, Label, Map, PathSegment};
 
-use crate::fs;
 use crate::object::ObjectType;
 use crate::state::State;
 use crate::txn::Txn;
@@ -117,8 +116,8 @@ impl fmt::Debug for Version {
 /// A versioned collection of [`Scalar`]s
 #[derive(Clone)]
 pub struct Library {
-    dir: fs::Dir,
-    versions: fs::File<Version>,
+    dir: tc_fs::Dir,
+    versions: tc_fs::File<Map<Scalar>>,
 }
 
 impl Library {
@@ -134,7 +133,7 @@ impl Library {
         &self,
         txn_id: TxnId,
         number: &VersionNumber,
-    ) -> TCResult<impl Deref<Target = Version>> {
+    ) -> TCResult<impl Deref<Target = Map<Scalar>>> {
         self.versions.read_block(txn_id, &(*number).into()).await
     }
 
@@ -162,14 +161,14 @@ impl DirItem for Library {
         number: VersionNumber,
         schema: Map<Scalar>,
     ) -> TCResult<Version> {
-        let version = Version::from(validate(schema)?);
+        let version = validate(schema)?;
 
         self.versions
             .create_block(*txn.id(), number.into(), version.clone())
             .map_ok(|_| ())
             .await?;
 
-        Ok(version)
+        Ok(version.into())
     }
 }
 
@@ -194,21 +193,21 @@ impl Transact for Library {
 }
 
 #[async_trait]
-impl Persist<fs::CacheBlock> for Library {
+impl Persist<tc_fs::CacheBlock> for Library {
     type Txn = Txn;
     type Schema = ();
 
-    async fn create(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
         let versions = dir.create_file(txn_id, LIB.into()).await?;
         Ok(Self { dir, versions })
     }
 
-    async fn load(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
         let versions = dir.get_file(txn_id, &LIB.into()).await?;
         Ok(Self { dir, versions })
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
+    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
         self.dir.clone().into_inner()
     }
 }

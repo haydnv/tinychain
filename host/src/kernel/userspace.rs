@@ -8,6 +8,7 @@ use futures::join;
 use log::{debug, info};
 
 use tc_error::*;
+use tc_fs::hypothetical;
 use tc_transact::public::{Public, Route};
 use tc_transact::{RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
@@ -16,9 +17,9 @@ use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath};
 use crate::chain::BlockChain;
 use crate::cluster::{Cluster, Dir, DirEntry, Replica};
 use crate::state::State;
-use crate::txn::Txn;
+use crate::txn::{Hypothetical, Txn};
 
-use super::{hypothetical, Dispatch, Hypothetical};
+use super::Dispatch;
 
 /// The type of the class directory
 pub type Class = Cluster<Dir<crate::cluster::Class>>;

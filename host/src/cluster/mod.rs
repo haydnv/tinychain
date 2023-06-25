@@ -16,16 +16,15 @@ use tokio::sync::RwLock;
 
 use tc_chain::Recover;
 use tc_error::*;
-use tc_transact::fs::Persist;
+use tc_transact::fs;
 use tc_transact::lock::{TxnLock, TxnLockVersionGuard};
-use tc_transact::{RPCClient, Transact, Transaction};
+use tc_transact::{RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Host, Link, Value};
 use tcgeneric::*;
 
 use crate::chain::BlockChain;
-use crate::fs;
 use crate::state::State;
-use crate::txn::{Actor, Txn, TxnId};
+use crate::txn::Txn;
 
 pub use class::Class;
 pub use dir::{Dir, DirEntry, DirItem};
@@ -47,12 +46,12 @@ pub struct Schema {
     path: TCPathBuf,
     host: Host,
     lead: Option<Host>,
-    actor: Arc<Actor>, // TODO: remove this and use the public key of the gateway instead
+    actor: Arc<tc_fs::Actor>, // TODO: remove this and use the public key of the gateway instead
 }
 
 impl Schema {
     /// Construct a new [`Schema`].
-    pub fn new(host: Host, path: TCPathBuf, lead: Option<Host>, actor: Arc<Actor>) -> Self {
+    pub fn new(host: Host, path: TCPathBuf, lead: Option<Host>, actor: Arc<tc_fs::Actor>) -> Self {
         Self {
             path,
             host,
@@ -109,7 +108,7 @@ impl Schema {
 #[derive(Clone)]
 pub struct Cluster<T> {
     schema: Schema,
-    actor: Arc<Actor>,
+    actor: Arc<tc_fs::Actor>,
     replicas: TxnLock<BTreeSet<Host>>,
     led: Arc<RwLock<BTreeMap<TxnId, leader::Leader>>>,
     state: T,
@@ -122,7 +121,7 @@ impl<T> Cluster<T> {
 
         Self {
             schema,
-            actor: Arc::new(Actor::new(Value::None)),
+            actor: Arc::new(tc_fs::Actor::new(Value::None)),
             replicas: TxnLock::new(replicas),
             led: Arc::new(RwLock::new(BTreeMap::new())),
             state,
@@ -535,52 +534,54 @@ where
 }
 
 #[async_trait]
-impl<T: Persist<fs::CacheBlock, Txn = Txn>> Persist<fs::CacheBlock> for Cluster<BlockChain<T>>
+impl<T: fs::Persist<tc_fs::CacheBlock, Txn = Txn>> fs::Persist<tc_fs::CacheBlock>
+    for Cluster<BlockChain<T>>
 where
-    BlockChain<T>: Persist<fs::CacheBlock, Schema = (), Txn = Txn>,
+    BlockChain<T>: fs::Persist<tc_fs::CacheBlock, Schema = (), Txn = Txn>,
 {
     type Txn = Txn;
     type Schema = Schema;
 
-    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
         BlockChain::create(txn_id, (), store)
             .map_ok(|state| Self::with_state(schema, txn_id, state))
             .await
     }
 
-    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
         BlockChain::load(txn_id, (), store)
             .map_ok(|state| Self::with_state(schema, txn_id, state))
             .await
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
-        Persist::dir(&self.state)
+    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
+        fs::Persist::dir(&self.state)
     }
 }
 
 #[async_trait]
-impl<T: Persist<fs::CacheBlock, Txn = Txn>> Persist<fs::CacheBlock> for Cluster<Dir<T>>
+impl<T: fs::Persist<tc_fs::CacheBlock, Txn = Txn>> fs::Persist<tc_fs::CacheBlock>
+    for Cluster<Dir<T>>
 where
-    Dir<T>: Persist<fs::CacheBlock, Schema = Schema, Txn = Txn>,
+    Dir<T>: fs::Persist<tc_fs::CacheBlock, Schema = Schema, Txn = Txn>,
 {
     type Txn = Txn;
     type Schema = Schema;
 
-    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
         Dir::create(txn_id, schema.clone(), store)
             .map_ok(|state| Self::with_state(schema, txn_id, state))
             .await
     }
 
-    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
         Dir::load(txn_id, schema.clone(), store)
             .map_ok(|state| Self::with_state(schema, txn_id, state))
             .await
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
-        Persist::dir(&self.state)
+    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
+        fs::Persist::dir(&self.state)
     }
 }
 
@@ -637,9 +638,9 @@ where
 }
 
 #[async_trait]
-impl<T> Recover<fs::CacheBlock> for Cluster<T>
+impl<T> Recover<tc_fs::CacheBlock> for Cluster<T>
 where
-    T: Recover<fs::CacheBlock, Txn = Txn> + Send + Sync,
+    T: Recover<tc_fs::CacheBlock, Txn = Txn> + Send + Sync,
 {
     type Txn = Txn;
 

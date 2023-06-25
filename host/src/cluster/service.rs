@@ -10,7 +10,7 @@ use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
 use futures::join;
 use futures::stream::TryStreamExt;
 use log::{debug, trace};
-use safecast::{as_type, AsType};
+use safecast::{as_type, AsType, CastInto};
 
 use tc_chain::{ChainType, Recover};
 use tc_collection::Schema as CollectionSchema;
@@ -19,18 +19,16 @@ use tc_scalar::{OpRef, Refer, Scalar, Subject, TCRef};
 use tc_transact::fs::*;
 use tc_transact::lock::TxnMapLock;
 use tc_transact::public::ToState;
-use tc_transact::{Transact, Transaction};
+use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, TCPathBuf};
 
 use crate::chain::Chain;
 use crate::cluster::{DirItem, Replica};
 use crate::collection::CollectionBase;
-use crate::fs;
-use crate::fs::CacheBlock;
 use crate::object::{InstanceClass, ObjectType};
 use crate::state::State;
-use crate::txn::{Txn, TxnId};
+use crate::txn::Txn;
 
 pub(super) const SCHEMA: Label = label("schemata");
 
@@ -105,12 +103,12 @@ impl Replica for Version {
 }
 
 #[async_trait]
-impl Persist<CacheBlock> for Version {
+impl Persist<tc_fs::CacheBlock> for Version {
     type Txn = Txn;
-    type Schema = InstanceClass;
+    type Schema = (Link, Map<Scalar>);
 
-    async fn create(txn_id: TxnId, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
-        let (link, proto) = schema.into_inner();
+    async fn create(txn_id: TxnId, schema: Self::Schema, dir: tc_fs::Dir) -> TCResult<Self> {
+        let (link, proto) = schema;
 
         let mut attrs = Map::new();
 
@@ -141,10 +139,10 @@ impl Persist<CacheBlock> for Version {
         })
     }
 
-    async fn load(txn_id: TxnId, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, schema: Self::Schema, dir: tc_fs::Dir) -> TCResult<Self> {
         debug!("cluster::service::Version::load {:?}", schema);
 
-        let (link, proto) = schema.into_inner();
+        let (link, proto) = schema;
 
         let mut attrs = Map::new();
 
@@ -175,7 +173,7 @@ impl Persist<CacheBlock> for Version {
         })
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
+    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
         unimplemented!("cluster::service::Version::dir")
     }
 }
@@ -216,7 +214,7 @@ impl Transact for Version {
 }
 
 #[async_trait]
-impl Recover<CacheBlock> for Version {
+impl Recover<tc_fs::CacheBlock> for Version {
     type Txn = Txn;
 
     async fn recover(&self, txn: &Txn) -> TCResult<()> {
@@ -241,8 +239,8 @@ impl fmt::Debug for Version {
 /// A stateful collection of [`Chain`]s and [`Scalar`] methods ([`Attr`]s)
 #[derive(Clone)]
 pub struct Service {
-    dir: fs::Dir,
-    schema: fs::File<InstanceClass>,
+    dir: tc_fs::Dir,
+    schema: tc_fs::File<(Link, Map<Scalar>)>,
     versions: TxnMapLock<VersionNumber, Version>,
 }
 
@@ -287,18 +285,16 @@ impl DirItem for Service {
         class: InstanceClass,
     ) -> TCResult<Version> {
         let (link, proto) = class.into_inner();
-
         let proto = validate(&link, &number, proto)?;
-        let schema = InstanceClass::extend(link, proto);
 
         let txn_id = *txn.id();
 
         self.schema
-            .create_block(txn_id, number.into(), schema.clone().into())
+            .create_block(txn_id, number.into(), (link.clone(), proto.clone()))
             .await?;
 
         let store = self.dir.create_dir(txn_id, number.clone().into()).await?;
-        let version = Version::create(txn_id, schema, store).await?;
+        let version = Version::create(txn_id, (link, proto), store).await?;
 
         self.versions
             .insert(txn_id, number, version.clone())
@@ -315,8 +311,8 @@ impl Replica for Service {
 
         let mut blocks = self.schema.iter(txn_id).await?;
         while let Some((number, version)) = blocks.try_next().await? {
-            let version = InstanceClass::clone(&*version).into();
-            map.insert(number.as_str().parse()?, version);
+            let version = InstanceClass::from(version.clone());
+            map.insert(number.as_str().parse()?, State::Object(version.into()));
         }
 
         Ok(State::Map(map))
@@ -382,7 +378,7 @@ impl Transact for Service {
 }
 
 #[async_trait]
-impl Recover<CacheBlock> for Service {
+impl Recover<tc_fs::CacheBlock> for Service {
     type Txn = Txn;
 
     async fn recover(&self, txn: &Txn) -> TCResult<()> {
@@ -396,11 +392,11 @@ impl Recover<CacheBlock> for Service {
 }
 
 #[async_trait]
-impl Persist<CacheBlock> for Service {
+impl Persist<tc_fs::CacheBlock> for Service {
     type Txn = Txn;
     type Schema = ();
 
-    async fn create(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
         if dir.is_empty(txn_id).await? {
             let schema = dir.create_file(txn_id, SCHEMA.into()).await?;
 
@@ -416,11 +412,11 @@ impl Persist<CacheBlock> for Service {
         }
     }
 
-    async fn load(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
         debug!("load Service");
 
         let schema = dir
-            .get_file::<InstanceClass>(txn_id, &SCHEMA.into())
+            .get_file::<(Link, Map<Scalar>)>(txn_id, &SCHEMA.into())
             .await?;
 
         let mut versions = BTreeMap::new();
@@ -439,7 +435,8 @@ impl Persist<CacheBlock> for Service {
                 version_number
             );
 
-            let version = Version::load(txn_id, (&*schema).clone(), store).await?;
+            let schema = <(Link, Map<Scalar>)>::clone(&*schema);
+            let version = Version::load(txn_id, schema, store).await?;
 
             versions.insert(version_number, version);
         }
@@ -453,7 +450,7 @@ impl Persist<CacheBlock> for Service {
         })
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
+    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
         self.dir.clone().into_inner()
     }
 }

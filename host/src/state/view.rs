@@ -12,7 +12,6 @@ use tc_transact::IntoView;
 use tcgeneric::{Id, NativeClass};
 
 use crate::collection::CollectionView;
-use crate::fs;
 use crate::object::ObjectView;
 use crate::state::StateType;
 use crate::txn::Txn;
@@ -32,7 +31,7 @@ pub enum StateView<'en> {
 }
 
 #[async_trait]
-impl<'en> IntoView<'en, fs::CacheBlock> for State {
+impl<'en> IntoView<'en, tc_fs::CacheBlock> for State {
     type Txn = Txn;
     type View = StateView<'en>;
 

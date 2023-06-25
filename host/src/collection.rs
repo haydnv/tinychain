@@ -1,4 +1,5 @@
-use crate::fs::CacheBlock;
+use tc_fs::CacheBlock;
+
 use crate::txn::Txn;
 
 /// A collection such as a [`Table`] or [`Tensor`]
