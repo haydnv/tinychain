@@ -2,6 +2,9 @@ use log::{debug, trace};
 use safecast::TryCastFrom;
 
 use tc_error::*;
+use tc_scalar::{OpRef, OpRefType, Scalar, Subject, TCRef};
+use tc_transact::public::helpers::MethodNotAllowedHandler;
+use tc_transact::public::{Handler, Public, Route};
 use tc_transact::{RPCClient, Transaction};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{Id, Map, PathSegment, TCPath, TCPathBuf, Tuple};
@@ -11,15 +14,14 @@ use crate::kernel::CLASS;
 use crate::object::InstanceClass;
 use crate::route::cluster::dir::{expect_version, extract_classes};
 use crate::route::object::method::route_attr;
-use crate::route::*;
-use crate::scalar::{OpRef, OpRefType, Scalar, Subject, TCRef};
 use crate::state::State;
 use crate::txn::Txn;
 
 use super::dir::DirHandler;
+use super::{DeleteHandler, GetHandler, PostHandler, PutHandler};
 
-impl Route for service::Version {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+impl Route<State> for service::Version {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         debug!("service::Version::route {}", TCPath::from(path));
 
         if path.is_empty() {
@@ -124,7 +126,7 @@ impl<'a> ServiceHandler<'a> {
     }
 }
 
-impl<'a> Handler<'a> for ServiceHandler<'a> {
+impl<'a> Handler<'a, State> for ServiceHandler<'a> {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -202,14 +204,14 @@ impl<'a> Handler<'a> for ServiceHandler<'a> {
     }
 }
 
-impl Route for Service {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+impl Route<State> for Service {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         debug!("Service::route {}", TCPath::from(path));
         Some(Box::new(ServiceHandler::new(self, path)))
     }
 }
 
-impl<'a> Handler<'a> for DirHandler<'a, Service> {
+impl<'a> Handler<'a, State> for DirHandler<'a, Service> {
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
     where
         'b: 'a,

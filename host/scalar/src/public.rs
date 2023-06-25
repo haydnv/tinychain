@@ -90,15 +90,16 @@ where
         + From<Scalar>
         + From<Tuple<Scalar>>
         + From<Map<Scalar>>
+        + From<Value>
+        + From<Tuple<Value>>
         + From<Number>,
     Box<dyn ClosureInstance<State>>: TryCastFrom<State>,
     Id: TryCastFrom<State>,
     Map<State>: TryFrom<State, Error = TCError> + TryCastFrom<State>,
+    Number: TryCastFrom<State>,
+    TCString: TryCastFrom<State>,
     Tuple<State>: TryCastFrom<State>,
-    Value: From<State> + TryCastFrom<State>,
-    Tuple<Value>: Route<State>,
-    Number: Route<State>,
-    TCString: Route<State>,
+    Value: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         if path == &COPY[..] {
@@ -136,7 +137,7 @@ where
     }
 }
 
-pub(super) struct Static;
+pub struct Static;
 
 impl<State> Route<State> for Static
 where

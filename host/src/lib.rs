@@ -24,7 +24,6 @@ pub mod fs;
 pub mod gateway;
 pub mod kernel;
 pub mod object;
-pub mod scalar;
 pub mod state;
 // pub mod stream;
 pub mod txn;

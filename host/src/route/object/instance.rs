@@ -4,19 +4,21 @@ use futures::future;
 use log::{debug, info};
 
 use tc_error::*;
+use tc_transact::public::generic::COPY;
+use tc_transact::public::{Handler, Route, ToState};
 use tcgeneric::{Instance, PathSegment, TCPath};
 
 use crate::object::InstanceExt;
-use crate::route::{GetHandler, Handler, Route, COPY};
-use crate::state::{State, ToState};
+use crate::state::State;
 
 use super::method::route_attr;
+use super::GetHandler;
 
 struct CopyHandler<'a, T> {
     instance: &'a T,
 }
 
-impl<'a, T> Handler<'a> for CopyHandler<'a, T>
+impl<'a, T> Handler<'a, State> for CopyHandler<'a, T>
 where
     T: Instance + fmt::Debug + 'a,
 {
@@ -39,11 +41,11 @@ impl<'a, T> From<&'a T> for CopyHandler<'a, T> {
     }
 }
 
-impl<T: ToState + Instance + Route + fmt::Debug> Route for InstanceExt<T>
+impl<T: ToState<State> + Instance + Route<State> + fmt::Debug> Route<State> for InstanceExt<T>
 where
-    Self: ToState,
+    Self: ToState<State>,
 {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         debug!(
             "{:?} with members {:?} route {} (parent is {} {:?})",
             self,

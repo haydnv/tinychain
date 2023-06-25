@@ -12,23 +12,24 @@ use futures::stream::TryStreamExt;
 use log::{debug, trace};
 use safecast::{as_type, AsType};
 
+use tc_chain::{ChainType, Recover};
 use tc_collection::Schema as CollectionSchema;
 use tc_error::*;
+use tc_scalar::{OpRef, Refer, Scalar, Subject, TCRef};
 use tc_transact::fs::*;
 use tc_transact::lock::TxnMapLock;
+use tc_transact::public::ToState;
 use tc_transact::{Transact, Transaction};
-use tc_value::{Value, Version as VersionNumber};
+use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, TCPathBuf};
 
-use crate::chain::{Chain, ChainType, Recover};
+use crate::chain::Chain;
 use crate::cluster::{DirItem, Replica};
 use crate::collection::CollectionBase;
 use crate::fs;
 use crate::fs::CacheBlock;
 use crate::object::{InstanceClass, ObjectType};
-use crate::scalar::value::Link;
-use crate::scalar::{OpRef, Refer, Scalar, Subject, TCRef};
-use crate::state::{State, ToState};
+use crate::state::State;
 use crate::txn::{Txn, TxnId};
 
 pub(super) const SCHEMA: Label = label("schemata");
@@ -77,7 +78,7 @@ impl Instance for Version {
     }
 }
 
-impl ToState for Version {
+impl ToState<State> for Version {
     fn to_state(&self) -> State {
         State::Scalar(Scalar::Cluster(self.path.clone().into()))
     }
@@ -125,7 +126,7 @@ impl Persist<CacheBlock> for Version {
                     }
                     other => Err(TCError::unexpected(other, "a Service attribute")),
                 },
-                scalar if scalar.is_ref() => {
+                scalar if Refer::<State>::is_ref(&scalar) => {
                     Err(TCError::unexpected(scalar, "a Service attribute"))
                 }
                 scalar => Ok(Attr::Scalar(scalar)),
@@ -159,7 +160,7 @@ impl Persist<CacheBlock> for Version {
                     }
                     other => Err(TCError::unexpected(other, "a Service attribute")),
                 },
-                scalar if scalar.is_ref() => {
+                scalar if Refer::<State>::is_ref(&scalar) => {
                     Err(TCError::unexpected(scalar, "a Service attribute"))
                 }
                 scalar => Ok(Attr::Scalar(scalar)),
@@ -215,7 +216,9 @@ impl Transact for Version {
 }
 
 #[async_trait]
-impl Recover for Version {
+impl Recover<CacheBlock> for Version {
+    type Txn = Txn;
+
     async fn recover(&self, txn: &Txn) -> TCResult<()> {
         let recovery = self
             .attrs
@@ -379,7 +382,9 @@ impl Transact for Service {
 }
 
 #[async_trait]
-impl Recover for Service {
+impl Recover<CacheBlock> for Service {
+    type Txn = Txn;
+
     async fn recover(&self, txn: &Txn) -> TCResult<()> {
         let versions = self.versions.iter(*txn.id()).await?;
         let recovery = versions.map(|(_id, version)| async move { version.recover(txn).await });
@@ -491,11 +496,11 @@ fn validate(
         if let Scalar::Op(op_def) = scalar {
             let op_def = if op_def.is_write() {
                 // make sure not to replicate ops internal to this OpDef
-                let op_def = op_def.reference_self(version_link.path());
+                let op_def = op_def.reference_self::<State>(version_link.path());
 
                 for (id, provider) in op_def.form() {
                     // make sure not to duplicate requests to other clusters
-                    if provider.is_inter_service_write(version_link.path()) {
+                    if Refer::<State>::is_inter_service_write(provider, version_link.path()) {
                         return Err(bad_request!(
                             "replicated op {} may not perform inter-service writes: {:?}",
                             id,
@@ -508,7 +513,7 @@ fn validate(
             } else {
                 // make sure to replicate all write ops internal to this OpDef
                 // by routing them through the kernel
-                op_def.dereference_self(version_link.path())
+                op_def.dereference_self::<State>(version_link.path())
             };
 
             // TODO: check that the Version does not reference any other Version of the same service

@@ -8,7 +8,7 @@ use tc_error::*;
 use tc_value::{Number, Value};
 use tcgeneric::{Instance, Map, PathSegment, TCPath, ThreadSafe, Tuple};
 
-use super::{Transaction, RPCClient};
+use super::{RPCClient, Transaction};
 
 pub mod generic;
 pub mod helpers;

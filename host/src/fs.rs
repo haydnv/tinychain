@@ -10,9 +10,9 @@ use safecast::{as_type, AsType};
 use tokio::fs;
 use tokio_util::io::StreamReader;
 
+use tc_chain::ChainBlock;
 use tc_collection::{btree, tensor};
 
-use crate::chain::ChainBlock;
 use crate::cluster::library;
 use crate::object::InstanceClass;
 
@@ -77,7 +77,7 @@ pub enum CacheBlock {
 }
 
 #[async_trait]
-impl<'en> freqfs::FileSave<'en> for CacheBlock {
+impl<'en> tc_transact::fs::FileSave<'en> for CacheBlock {
     async fn save(&'en self, file: &mut fs::File) -> Result<u64, io::Error> {
         match self {
             Self::BTree(node) => persist(node, file).await,

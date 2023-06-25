@@ -3,10 +3,10 @@ use safecast::TryCastFrom;
 use tc_error::*;
 use tc_value::uuid::Uuid;
 use tc_value::{Number, TCString, Value};
-use tcgeneric::{label, Label, PathSegment, Tuple};
+use tcgeneric::{label, Id, Label, Map, PathSegment, Tuple};
 
 use super::helpers::SelfHandler;
-use super::{GetHandler, Handler, Route, StateInstance};
+use super::{ClosureInstance, GetHandler, Handler, Route, StateInstance};
 
 pub const PREFIX: Label = label("value");
 
@@ -35,11 +35,16 @@ impl<F> From<F> for EqHandler<F> {
     }
 }
 
-impl<State: StateInstance> Route<State> for Value
+impl<State> Route<State> for Value
 where
-    Tuple<Self>: Route<State>,
-    Number: Route<State>,
-    TCString: Route<State>,
+    State: StateInstance + From<Value> + From<Tuple<Value>>,
+    Box<dyn ClosureInstance<State>>: TryCastFrom<State>,
+    Id: TryCastFrom<State>,
+    Map<State>: TryFrom<State, Error = TCError>,
+    Number: TryCastFrom<State>,
+    TCString: TryCastFrom<State>,
+    Tuple<State>: TryCastFrom<State>,
+    Value: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         let child_handler = match self {

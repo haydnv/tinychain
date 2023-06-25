@@ -7,6 +7,7 @@ use log::*;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
+use tc_transact::public::{Handler, Public, Route};
 use tc_transact::{RPCClient, Transact, Transaction};
 use tc_value::{Host, Link, Value};
 use tcgeneric::{label, PathSegment, TCPath, TCPathBuf, Tuple};
@@ -16,7 +17,7 @@ use crate::object::InstanceClass;
 use crate::state::State;
 use crate::txn::Txn;
 
-use super::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
+use super::{DeleteHandler, GetHandler, PostHandler, PutHandler};
 
 mod class;
 mod dir;
@@ -27,9 +28,9 @@ pub struct ClusterHandler<'a, T> {
     cluster: &'a Cluster<T>,
 }
 
-impl<'a, T> Handler<'a> for ClusterHandler<'a, T>
+impl<'a, T> Handler<'a, State> for ClusterHandler<'a, T>
 where
-    T: Transact + Public + Send + Sync,
+    T: Transact + Public<State> + Send + Sync,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -206,7 +207,7 @@ struct ReplicaHandler<'a, T> {
     cluster: &'a Cluster<T>,
 }
 
-impl<'a, T> Handler<'a> for ReplicaHandler<'a, T>
+impl<'a, T> Handler<'a, State> for ReplicaHandler<'a, T>
 where
     T: Replica + Send + Sync,
 {
@@ -306,11 +307,11 @@ impl<'a, T> From<&'a Cluster<T>> for ReplicaHandler<'a, T> {
     }
 }
 
-impl<T> Route for Cluster<T>
+impl<T> Route<State> for Cluster<T>
 where
-    T: Replica + Route + Transact + fmt::Debug + Send + Sync,
+    T: Replica + Route<State> + Transact + fmt::Debug + Send + Sync,
 {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         trace!("Cluster::route {}", TCPath::from(path));
 
         match path {

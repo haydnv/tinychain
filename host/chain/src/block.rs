@@ -26,9 +26,7 @@ use tc_value::Value;
 use tcgeneric::{label, Label, Map, ThreadSafe, Tuple};
 
 use super::data::{ChainBlock, History};
-use super::{ChainInstance, Recover};
-
-pub const HISTORY: Label = label(".history");
+use super::{ChainInstance, Recover, HISTORY};
 
 /// A `Chain` which stores every mutation of its subject in a series of `ChainBlock`s
 #[derive(Clone)]

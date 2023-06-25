@@ -14,6 +14,7 @@ use safecast::TryCastInto;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+use tc_chain::Recover;
 use tc_error::*;
 use tc_transact::fs::Persist;
 use tc_transact::lock::{TxnLock, TxnLockVersionGuard};
@@ -21,7 +22,7 @@ use tc_transact::{RPCClient, Transact, Transaction};
 use tc_value::{Host, Link, Value};
 use tcgeneric::*;
 
-use crate::chain::{BlockChain, Recover};
+use crate::chain::BlockChain;
 use crate::fs;
 use crate::state::State;
 use crate::txn::{Actor, Txn, TxnId};
@@ -636,7 +637,12 @@ where
 }
 
 #[async_trait]
-impl<T: Recover + Send + Sync> Recover for Cluster<T> {
+impl<T> Recover<fs::CacheBlock> for Cluster<T>
+where
+    T: Recover<fs::CacheBlock, Txn = Txn> + Send + Sync,
+{
+    type Txn = Txn;
+
     async fn recover(&self, txn: &Txn) -> TCResult<()> {
         self.state.recover(txn).await
     }

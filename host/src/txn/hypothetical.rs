@@ -10,15 +10,15 @@ use safecast::{TryCastFrom, TryCastInto};
 use tokio::sync::RwLock;
 
 use tc_error::*;
+use tc_scalar::{Executor, Refer, Scope};
+use tc_transact::public::{Handler, Route};
 use tc_transact::{RPCClient, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Id, Map, PathLabel, PathSegment};
 
-use crate::scalar::{Executor, Refer, Scope};
+use crate::route::{DeleteHandler, GetHandler, PutHandler};
 use crate::state::State;
 use crate::txn::{Actor, Txn};
-
-use crate::route::{DeleteHandler, GetHandler, Handler, PutHandler, Route};
 
 pub const PATH: PathLabel = path_label(&["transact", "hypothetical"]);
 
@@ -61,10 +61,10 @@ impl Hypothetical {
                 return Ok(State::default());
             };
 
-            let executor: Executor<State> = Executor::new(&txn, None, op_def);
+            let executor: Executor<State, State> = Executor::new(&txn, None, op_def);
             executor.capture(capture).await
         } else {
-            data.resolve(&Scope::<State>::new(None, context), &txn)
+            data.resolve(&Scope::<State, State>::new(None, context), &txn)
                 .await
         };
 
@@ -88,7 +88,7 @@ impl Hypothetical {
     }
 }
 
-impl<'a> Handler<'a> for &'a Hypothetical {
+impl<'a> Handler<'a, State> for &'a Hypothetical {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -154,8 +154,8 @@ impl<'a> Handler<'a> for &'a Hypothetical {
     }
 }
 
-impl Route for Hypothetical {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+impl Route<State> for Hypothetical {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         if path.is_empty() {
             Some(Box::new(self))
         } else {

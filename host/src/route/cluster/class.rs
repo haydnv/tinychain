@@ -2,16 +2,19 @@ use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::Transaction;
+use tc_scalar::OpRefType;
+use tc_transact::public::{Handler, Public, Route};
+use tc_transact::{RPCClient, Transaction};
 use tc_value::Link;
+use tcgeneric::{Map, PathSegment, TCPath};
 
 use crate::cluster::{class, Class, DirItem};
 use crate::object::InstanceClass;
-use crate::route::*;
-use crate::scalar::OpRefType;
 use crate::state::State;
 
 use super::dir::DirHandler;
+
+use super::{DeleteHandler, GetHandler, PostHandler, PutHandler};
 
 struct ClassVersionHandler<'a> {
     class: &'a class::Version,
@@ -24,7 +27,7 @@ impl<'a> ClassVersionHandler<'a> {
     }
 }
 
-impl<'a> Handler<'a> for ClassVersionHandler<'a> {
+impl<'a> Handler<'a, State> for ClassVersionHandler<'a> {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -45,8 +48,8 @@ impl<'a> Handler<'a> for ClassVersionHandler<'a> {
     }
 }
 
-impl Route for class::Version {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+impl Route<State> for class::Version {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         Some(Box::new(ClassVersionHandler::new(self, path)))
     }
 }
@@ -62,7 +65,7 @@ impl<'a> ClassHandler<'a> {
     }
 }
 
-impl<'a> Handler<'a> for ClassHandler<'a> {
+impl<'a> Handler<'a, State> for ClassHandler<'a> {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -149,13 +152,13 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
     }
 }
 
-impl Route for Class {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+impl Route<State> for Class {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         Some(Box::new(ClassHandler::new(self, path)))
     }
 }
 
-impl<'a> Handler<'a> for DirHandler<'a, Class> {
+impl<'a> Handler<'a, State> for DirHandler<'a, Class> {
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
     where
         'b: 'a,

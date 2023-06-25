@@ -10,16 +10,16 @@ use destream::de;
 use futures::future::TryFutureExt;
 use futures::stream::{FuturesUnordered, TryStreamExt};
 use log::debug;
-use safecast::{CastInto, TryCastInto};
+use safecast::{CastInto, TryCastFrom, TryCastInto};
 
 use tc_error::*;
+use tc_scalar::{Executor, OpDef, OpDefType, OpRef, Scalar, SELF};
+use tc_transact::public::Handler;
 use tc_transact::{AsyncHash, IntoView, TxnId};
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf};
 
 use crate::fs;
-use crate::fs::CacheBlock;
-use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler};
-use crate::scalar::{Executor, OpDef, OpDefType, OpRef, Scalar, SELF};
+use crate::route::{DeleteHandler, GetHandler, PostHandler, PutHandler};
 use crate::state::{State, StateView};
 use crate::txn::Txn;
 
@@ -31,11 +31,6 @@ pub struct Closure {
 }
 
 impl Closure {
-    /// Construct a new `Closure`.
-    pub fn new(context: Map<State>, op: OpDef) -> Self {
-        Self { context, op }
-    }
-
     /// Return the context and [`OpDef`] which define this `Closure`.
     pub fn into_inner(self) -> (Map<State>, OpDef) {
         (self.context, self.op)
@@ -46,20 +41,20 @@ impl Closure {
         let mut context = self.context;
         context.remove::<Id>(&SELF.into());
 
-        let op = self.op.dereference_self(path);
+        let op = self.op.dereference_self::<State>(path);
 
         Self { context, op }
     }
 
     /// Return `true` if this `Closure` may write to service other than where it's defined
     pub fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
-        self.op.is_inter_service_write(cluster_path)
+        self.op.is_inter_service_write::<State>(cluster_path)
     }
 
     /// Replace references to the given `path` with `$self`
     pub fn reference_self(self, path: &TCPathBuf) -> Self {
         let before = self.op.clone();
-        let op = self.op.reference_self(path);
+        let op = self.op.reference_self::<State>(path);
 
         let context = if op == before {
             self.context
@@ -139,7 +134,15 @@ impl tc_transact::public::ClosureInstance<State> for Closure {
     }
 }
 
-impl<'a> Handler<'a> for Closure {
+impl From<(Map<State>, OpDef)> for Closure {
+    fn from(tuple: (Map<State>, OpDef)) -> Self {
+        let (context, op) = tuple;
+
+        Self { context, op }
+    }
+}
+
+impl<'a> Handler<'a, State> for Closure {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -204,7 +207,7 @@ impl AsyncHash for Closure {
 }
 
 #[async_trait]
-impl<'en> IntoView<'en, CacheBlock> for Closure {
+impl<'en> IntoView<'en, fs::CacheBlock> for Closure {
     type Txn = Txn;
     type View = (HashMap<Id, StateView<'en>>, OpDef);
 
@@ -238,6 +241,25 @@ impl From<OpDef> for Closure {
         Self {
             context: Map::default(),
             op,
+        }
+    }
+}
+
+impl TryCastFrom<Scalar> for Closure {
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Op(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Op(op) => Some(Self {
+                context: Map::default(),
+                op,
+            }),
+            _ => None,
         }
     }
 }

@@ -1,17 +1,22 @@
 use futures::future;
 use log::debug;
+use safecast::TryCastFrom;
 
 use tc_error::*;
+use tc_scalar::{OpRef, Scalar, TCRef};
+use tc_transact::public::{Public, Route};
 use tc_transact::Transaction;
 use tc_value::{Link, Version as VersionNumber};
+use tcgeneric::{Id, Map, PathSegment, TCPath};
 
 use crate::chain::BlockChain;
 use crate::cluster::dir::{Dir, DirCreate, DirCreateItem, DirEntry, ENTRIES};
 use crate::cluster::{Class, Cluster, DirItem, Library, Replica, Service};
 use crate::object::InstanceClass;
-use crate::route::*;
-use crate::scalar::{OpRef, Scalar, TCRef};
 use crate::state::State;
+use crate::txn::Txn;
+
+use super::{GetHandler, Handler};
 
 pub(super) struct DirHandler<'a, T> {
     pub(super) dir: &'a Dir<T>,
@@ -28,7 +33,7 @@ where
     T: DirItem,
     Dir<T>: DirCreateItem<T> + DirCreate + Replica,
     BlockChain<T>: Replica,
-    Cluster<BlockChain<T>>: Public,
+    Cluster<BlockChain<T>>: Public<State>,
 {
     pub(super) async fn create_item_or_dir<Item>(
         &self,
@@ -75,7 +80,7 @@ struct EntriesHandler<'a, T> {
     dir: &'a Dir<T>,
 }
 
-impl<'a, T: Clone + Send + Sync> Handler<'a> for EntriesHandler<'a, T>
+impl<'a, T: Clone + Send + Sync> Handler<'a, State> for EntriesHandler<'a, T>
 where
     Dir<T>: Replica,
 {
@@ -97,8 +102,11 @@ where
 
 macro_rules! route_dir {
     ($t:ty) => {
-        impl Route for Dir<$t> {
-            fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+        impl Route<State> for Dir<$t> {
+            fn route<'a>(
+                &'a self,
+                path: &'a [PathSegment],
+            ) -> Option<Box<dyn Handler<'a, State> + 'a>> {
                 if path.is_empty() {
                     Some(Box::new(DirHandler::new(self)))
                 } else if path.len() == 1 && &path[0] == &ENTRIES {
@@ -115,13 +123,13 @@ route_dir!(Class);
 route_dir!(Library);
 route_dir!(Service);
 
-impl<T> Route for DirEntry<T>
+impl<T> Route<State> for DirEntry<T>
 where
     T: Send + Sync,
-    Cluster<BlockChain<T>>: Route + Send + Sync,
-    Cluster<Dir<T>>: Route + Send + Sync,
+    Cluster<BlockChain<T>>: Route<State> + Send + Sync,
+    Cluster<Dir<T>>: Route<State> + Send + Sync,
 {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         debug!("DirEntry::route {}", TCPath::from(path));
 
         match self {

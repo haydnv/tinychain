@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use freqfs::DirLock;
 use futures::future::TryFutureExt;
 use log::debug;
-use safecast::{CastFrom, CastInto};
+use safecast::CastInto;
 
 use tc_error::*;
 use tc_transact::Transaction;

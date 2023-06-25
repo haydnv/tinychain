@@ -13,6 +13,7 @@ use get_size_derive::*;
 use safecast::{AsType, TryCastFrom};
 
 use tc_error::*;
+use tc_scalar::{OpDef, Scalar};
 use tc_transact::fs::Persist;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
@@ -20,7 +21,6 @@ use tcgeneric::{label, Instance, Label, Map, PathSegment};
 
 use crate::fs;
 use crate::object::ObjectType;
-use crate::scalar::{OpDef, Scalar};
 use crate::state::State;
 use crate::txn::Txn;
 

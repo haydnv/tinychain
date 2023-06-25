@@ -30,7 +30,8 @@ mod block;
 mod data;
 mod sync;
 
-pub(crate) const CHAIN: Label = label("chain");
+pub const CHAIN: Label = label("chain");
+pub const HISTORY: Label = label(".history");
 
 const BLOCK_SIZE: usize = 1_000_000; // TODO: reduce to 4,096
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
@@ -522,6 +523,6 @@ where
 }
 
 #[inline]
-pub(crate) fn null_hash() -> Output<Sha256> {
+pub fn null_hash() -> Output<Sha256> {
     GenericArray::default()
 }

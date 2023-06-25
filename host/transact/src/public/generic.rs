@@ -19,7 +19,7 @@ use super::{ClosureInstance, GetHandler, Handler, PostHandler, Public, Route, St
 
 type Closure<State> = Box<dyn ClosureInstance<State>>;
 
-const COPY: PathLabel = path_label(&["copy"]);
+pub const COPY: PathLabel = path_label(&["copy"]);
 
 struct AppendHandler<'a, T: Clone> {
     tuple: &'a Tuple<T>,
@@ -603,7 +603,7 @@ where
     Id: TryCastFrom<State>,
     Map<State>: TryFrom<State, Error = TCError>,
     Tuple<State>: TryCastFrom<State>,
-    Value: From<State>,
+    Value: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         if path.is_empty() {

@@ -2,6 +2,8 @@ use log::debug;
 use safecast::TryCastFrom;
 
 use tc_error::*;
+use tc_scalar::Scalar;
+use tc_transact::public::{Public, Route};
 use tc_transact::{RPCClient, Transaction};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{Map, PathSegment, TCPath, TCPathBuf};
@@ -10,15 +12,13 @@ use crate::cluster::{library, DirItem, Library};
 use crate::kernel::CLASS;
 use crate::object::InstanceClass;
 use crate::route::object::method::route_attr;
-use crate::route::{DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route};
-use crate::scalar::Scalar;
 use crate::state::State;
 
-use super::authorize_install;
 use super::dir::{expect_version, extract_classes, DirHandler};
+use super::{authorize_install, DeleteHandler, GetHandler, Handler, PostHandler, PutHandler};
 
-impl Route for library::Version {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+impl Route<State> for library::Version {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         assert!(!path.is_empty());
 
         let attr = self.get_attribute(&path[0])?;
@@ -37,7 +37,7 @@ impl<'a> LibraryHandler<'a> {
     }
 }
 
-impl<'a> Handler<'a> for LibraryHandler<'a> {
+impl<'a> Handler<'a, State> for LibraryHandler<'a> {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -136,13 +136,13 @@ impl<'a> Handler<'a> for LibraryHandler<'a> {
     }
 }
 
-impl Route for Library {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+impl Route<State> for Library {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         Some(Box::new(LibraryHandler::new(self, path)))
     }
 }
 
-impl<'a> Handler<'a> for DirHandler<'a, Library> {
+impl<'a> Handler<'a, State> for DirHandler<'a, Library> {
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
     where
         'b: 'a,

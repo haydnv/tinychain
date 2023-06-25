@@ -10,10 +10,10 @@ use get_size::GetSize;
 use get_size_derive::*;
 use safecast::{CastFrom, TryCastFrom};
 
+use tc_scalar::*;
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, NativeClass, PathLabel};
 
-use crate::scalar::*;
 use crate::state::StateType;
 
 use super::ObjectType;

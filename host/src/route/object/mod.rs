@@ -1,15 +1,18 @@
+use tc_transact::public::generic::COPY;
+use tc_transact::public::helpers::AttributeHandler;
+use tc_transact::public::{Handler, Route};
 use tcgeneric::PathSegment;
 
 use crate::object::{InstanceClass, InstanceExt, Object, ObjectType};
 use crate::state::State;
 
-use super::{AttributeHandler, GetHandler, Handler, PostHandler, Route, COPY};
+use super::{GetHandler, PostHandler};
 
 mod instance;
 pub(super) mod method;
 
-impl Route for ObjectType {
-    fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+impl Route<State> for ObjectType {
+    fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         None
     }
 }
@@ -18,7 +21,7 @@ struct ClassHandler<'a> {
     class: &'a InstanceClass,
 }
 
-impl<'a> Handler<'a> for ClassHandler<'a> {
+impl<'a> Handler<'a, State> for ClassHandler<'a> {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
         'b: 'a,
@@ -47,8 +50,8 @@ impl<'a> Handler<'a> for ClassHandler<'a> {
     }
 }
 
-impl Route for InstanceClass {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+impl Route<State> for InstanceClass {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         if path == &COPY[..] {
             return Some(Box::new(AttributeHandler::from(Object::Class(
                 self.clone(),
@@ -65,8 +68,8 @@ impl Route for InstanceClass {
     }
 }
 
-impl Route for Object {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+impl Route<State> for Object {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         match self {
             Self::Class(class) => class.route(path),
             Self::Instance(instance) => instance.route(path),

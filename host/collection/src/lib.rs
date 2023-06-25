@@ -4,7 +4,7 @@ use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
-use safecast::{as_type, AsType};
+use safecast::{as_type, AsType, TryCastFrom};
 
 use tc_error::*;
 use tc_transact::{AsyncHash, IntoView, Transaction, TxnId};
@@ -226,7 +226,55 @@ where
     }
 }
 
-impl<T, FE> fmt::Debug for Collection<T, FE> {
+impl<Txn, FE> TryCastFrom<Collection<Txn, FE>> for BTree<Txn, FE> {
+    fn can_cast_from(collection: &Collection<Txn, FE>) -> bool {
+        match collection {
+            Collection::BTree(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(collection: Collection<Txn, FE>) -> Option<Self> {
+        match collection {
+            Collection::BTree(btree) => Some(btree),
+            _ => None,
+        }
+    }
+}
+
+impl<Txn, FE> TryCastFrom<Collection<Txn, FE>> for Table<Txn, FE> {
+    fn can_cast_from(collection: &Collection<Txn, FE>) -> bool {
+        match collection {
+            Collection::Table(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(collection: Collection<Txn, FE>) -> Option<Self> {
+        match collection {
+            Collection::Table(table) => Some(table),
+            _ => None,
+        }
+    }
+}
+
+impl<Txn, FE> TryCastFrom<Collection<Txn, FE>> for Tensor<Txn, FE> {
+    fn can_cast_from(collection: &Collection<Txn, FE>) -> bool {
+        match collection {
+            Collection::Tensor(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(collection: Collection<Txn, FE>) -> Option<Self> {
+        match collection {
+            Collection::Tensor(tensor) => Some(tensor),
+            _ => None,
+        }
+    }
+}
+
+impl<Txn, FE> fmt::Debug for Collection<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a Collection")
     }

@@ -15,43 +15,29 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use log::debug;
 use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
 
+use tc_chain::ChainType;
 use tc_collection::btree::BTreeType;
 use tc_collection::table::TableType;
 use tc_collection::tensor::TensorType;
 use tc_collection::{CollectionType, CollectionVisitor};
 use tc_error::*;
-use tc_transact::public::StateInstance;
+use tc_scalar::*;
+use tc_transact::public::{ClosureInstance, Public, StateInstance, ToState};
 use tc_transact::{AsyncHash, Transaction, TxnId};
 use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::*;
 
-use crate::chain::{BlockChain, Chain, ChainType};
+use crate::chain::{BlockChain, Chain};
 use crate::closure::*;
 use crate::collection::*;
 use crate::fs::CacheBlock;
-use crate::object::{InstanceClass, Object, ObjectType, ObjectVisitor};
-use crate::route::Public;
-use crate::scalar::*;
+use crate::object::{InstanceClass, Object, ObjectType};
 // use crate::stream::TCStream;
 use crate::txn::Txn;
 
 pub use view::StateView;
 
 mod view;
-
-// TODO: delete this transitional helper trait
-pub trait ToState {
-    fn to_state(&self) -> State;
-}
-
-impl<T> ToState for T
-where
-    T: tc_transact::public::ToState<State>,
-{
-    fn to_state(&self) -> State {
-        tc_transact::public::ToState::to_state(self)
-    }
-}
 
 /// The [`Class`] of a [`State`].
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -216,34 +202,16 @@ impl State {
         }
     }
 
-    /// Return true if this `State` variant is a [`Map`].
-    pub fn is_map(&self) -> bool {
-        match self {
-            Self::Scalar(scalar) => scalar.is_map(),
-            Self::Map(_) => true,
-            _ => false,
-        }
-    }
-
     /// Return false if this `State` is an empty [`Tuple`] or [`Map`], default [`Link`], or `Value::None`
     pub fn is_some(&self) -> bool {
         !self.is_none()
-    }
-
-    /// Return true if this `State` variant is a [`Tuple`].
-    pub fn is_tuple(&self) -> bool {
-        match self {
-            Self::Scalar(scalar) => scalar.is_tuple(),
-            Self::Tuple(_) => true,
-            _ => false,
-        }
     }
 
     /// Return true if this `State` is a reference that needs to be resolved.
     pub fn is_ref(&self) -> bool {
         match self {
             Self::Map(map) => map.values().any(Self::is_ref),
-            Self::Scalar(scalar) => scalar.is_ref(),
+            Self::Scalar(scalar) => Refer::<State>::is_ref(scalar),
             Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
             _ => false,
         }
@@ -284,16 +252,24 @@ impl StateInstance for State {
     type Closure = Closure;
 
     fn is_map(&self) -> bool {
-        todo!()
+        match self {
+            Self::Scalar(scalar) => scalar.is_map(),
+            Self::Map(_) => true,
+            _ => false,
+        }
     }
 
     fn is_tuple(&self) -> bool {
-        todo!()
+        match self {
+            Self::Scalar(scalar) => scalar.is_tuple(),
+            Self::Tuple(_) => true,
+            _ => false,
+        }
     }
 }
 
 #[async_trait]
-impl Refer for State {
+impl Refer<State> for State {
     fn dereference_self(self, path: &TCPathBuf) -> Self {
         match self {
             Self::Closure(closure) => Self::Closure(closure.dereference_self(path)),
@@ -305,7 +281,7 @@ impl Refer for State {
 
                 Self::Map(map)
             }
-            Self::Scalar(scalar) => Self::Scalar(scalar.dereference_self(path)),
+            Self::Scalar(scalar) => Self::Scalar(Refer::<State>::dereference_self(scalar, path)),
             Self::Tuple(tuple) => {
                 let tuple = tuple
                     .into_iter()
@@ -321,7 +297,7 @@ impl Refer for State {
     fn is_conditional(&self) -> bool {
         match self {
             Self::Map(map) => map.values().any(|state| state.is_conditional()),
-            Self::Scalar(scalar) => scalar.is_conditional(),
+            Self::Scalar(scalar) => Refer::<State>::is_conditional(scalar),
             Self::Tuple(tuple) => tuple.iter().any(|state| state.is_conditional()),
             _ => false,
         }
@@ -334,12 +310,21 @@ impl Refer for State {
                 .values()
                 .any(|state| state.is_inter_service_write(cluster_path)),
 
-            Self::Scalar(scalar) => scalar.is_inter_service_write(cluster_path),
+            Self::Scalar(scalar) => Refer::<State>::is_inter_service_write(scalar, cluster_path),
 
             Self::Tuple(tuple) => tuple
                 .iter()
                 .any(|state| state.is_inter_service_write(cluster_path)),
 
+            _ => false,
+        }
+    }
+
+    fn is_ref(&self) -> bool {
+        match self {
+            Self::Map(map) => map.values().any(|state| state.is_ref()),
+            Self::Scalar(scalar) => Refer::<State>::is_ref(scalar),
+            Self::Tuple(tuple) => tuple.iter().any(|state| state.is_ref()),
             _ => false,
         }
     }
@@ -355,7 +340,7 @@ impl Refer for State {
 
                 Self::Map(map)
             }
-            Self::Scalar(scalar) => Self::Scalar(scalar.reference_self(path)),
+            Self::Scalar(scalar) => Self::Scalar(Refer::<State>::reference_self(scalar, path)),
             Self::Tuple(tuple) => {
                 let tuple = tuple
                     .into_iter()
@@ -375,7 +360,7 @@ impl Refer for State {
                     state.requires(deps);
                 }
             }
-            Self::Scalar(scalar) => scalar.requires(deps),
+            Self::Scalar(scalar) => Refer::<State>::requires(scalar, deps),
             Self::Tuple(tuple) => {
                 for state in tuple.iter() {
                     state.requires(deps);
@@ -385,9 +370,9 @@ impl Refer for State {
         }
     }
 
-    async fn resolve<'a, T: ToState + Instance + Public>(
+    async fn resolve<'a, T: ToState<State> + Instance + Public<Self>>(
         self,
-        context: &'a Scope<'a, T>,
+        context: &'a Scope<'a, Self, T>,
         txn: &'a Txn,
     ) -> TCResult<Self> {
         debug!("State::resolve {:?}", self);
@@ -910,6 +895,47 @@ impl TryCastFrom<State> for Closure {
     }
 }
 
+impl TryCastFrom<State> for Box<dyn ClosureInstance<State>> {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Closure(_) => true,
+            State::Scalar(scalar) => Closure::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Closure(closure) => Some(Box::new(closure)),
+            State::Scalar(scalar) => {
+                if let Some(closure) = Closure::opt_cast_from(scalar) {
+                    let closure: Box<dyn ClosureInstance<State>> = Box::new(closure);
+                    Some(closure)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for Collection {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Collection(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Collection(collection) => Some(collection),
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<State> for CollectionBase {
     fn can_cast_from(state: &State) -> bool {
         match state {
@@ -921,6 +947,54 @@ impl TryCastFrom<State> for CollectionBase {
     fn opt_cast_from(state: State) -> Option<Self> {
         match state {
             State::Collection(collection) => CollectionBase::opt_cast_from(collection),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for BTree {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Collection(collection) => BTree::can_cast_from(collection),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Collection(collection) => BTree::opt_cast_from(collection),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for Table {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Collection(collection) => Table::can_cast_from(collection),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Collection(collection) => Table::opt_cast_from(collection),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for Tensor {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Collection(collection) => Tensor::can_cast_from(collection),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Collection(collection) => Tensor::opt_cast_from(collection),
             _ => None,
         }
     }

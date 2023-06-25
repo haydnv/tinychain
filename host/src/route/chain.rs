@@ -3,19 +3,22 @@ use std::marker::PhantomData;
 
 use log::debug;
 
+use tc_chain::{ChainInstance, ChainType};
 use tc_transact::fs::Persist;
+use tc_transact::public::Handler;
 use tc_transact::Transaction;
 use tcgeneric::{PathSegment, TCPath};
 
-use crate::chain::{BlockChain, Chain, ChainInstance, ChainType};
+use crate::chain::{BlockChain, Chain};
 use crate::cluster::Replica;
 use crate::fs::CacheBlock;
+use crate::state::State;
 use crate::txn::Txn;
 
-use super::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route};
+use super::{DeleteHandler, GetHandler, PostHandler, PutHandler, Route};
 
-impl Route for ChainType {
-    fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+impl Route<State> for ChainType {
+    fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         None
     }
 }
@@ -34,11 +37,11 @@ impl<'a, C, T> AppendHandler<'a, C, T> {
     }
 }
 
-impl<'a, C, T> Handler<'a> for AppendHandler<'a, C, T>
+impl<'a, C, T> Handler<'a, State> for AppendHandler<'a, C, T>
 where
-    C: ChainInstance<T> + Send + Sync + 'a,
-    T: Route + fmt::Debug + 'a,
-    Chain<T>: ChainInstance<T>,
+    C: ChainInstance<State, T> + Send + Sync + 'a,
+    T: Route<State> + fmt::Debug + 'a,
+    Chain<T>: ChainInstance<State, T>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -59,7 +62,7 @@ where
                         debug!("Chain::put {} <- {:?}", key, value);
 
                         self.chain
-                            .append_put(txn, key.clone(), value.clone())
+                            .append_put(*txn.id(), key.clone(), value.clone())
                             .await?;
 
                         put_handler(txn, key, value).await
@@ -101,7 +104,6 @@ where
     }
 }
 
-// TODO: delete
 struct ChainHandler<'a, C, T> {
     chain: &'a C,
     phantom: PhantomData<T>,
@@ -116,10 +118,10 @@ impl<'a, C, T> ChainHandler<'a, C, T> {
     }
 }
 
-impl<'a, C, T> Handler<'a> for ChainHandler<'a, C, T>
+impl<'a, C, T> Handler<'a, State> for ChainHandler<'a, C, T>
 where
     T: Send + Sync + 'a,
-    C: ChainInstance<T> + Replica + Clone + Send + Sync + 'a,
+    C: ChainInstance<State, T> + Replica + Clone + Send + Sync + 'a,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
     where
@@ -134,12 +136,12 @@ where
     }
 }
 
-impl<T> Route for Chain<T>
+impl<T> Route<State> for Chain<T>
 where
-    T: Persist<CacheBlock, Txn = Txn> + Route + Clone + fmt::Debug + Send + Sync,
-    Self: ChainInstance<T> + Replica,
+    T: Persist<CacheBlock, Txn = Txn> + Route<State> + Clone + fmt::Debug,
+    Self: ChainInstance<State, T> + Replica,
 {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         debug!("Chain::route {}", TCPath::from(path));
 
         if path.is_empty() {
@@ -152,12 +154,12 @@ where
     }
 }
 
-impl<T> Route for BlockChain<T>
+impl<T> Route<State> for BlockChain<T>
 where
-    T: Persist<CacheBlock, Txn = Txn> + Route + Clone + fmt::Debug + Send + Sync,
-    Self: ChainInstance<T> + Replica,
+    T: Persist<CacheBlock, Txn = Txn> + Route<State> + Clone + fmt::Debug,
+    Self: ChainInstance<State, T> + Replica,
 {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a> + 'a>> {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         debug!("Chain::route {}", TCPath::from(path));
 
         if path.is_empty() {

@@ -7,11 +7,12 @@ use std::ops::Deref;
 use log::debug;
 use safecast::TryCastFrom;
 
+use tc_scalar::Scalar;
+use tc_transact::public::ToState;
 use tc_value::Value;
 use tcgeneric::Map;
 
-use crate::scalar::Scalar;
-use crate::state::{State, ToState};
+use crate::state::State;
 
 use super::{InstanceClass, Object};
 
@@ -116,7 +117,7 @@ where
     }
 }
 
-impl<T: tcgeneric::Instance + ToState> ToState for InstanceExt<T> {
+impl<T: tcgeneric::Instance + ToState<State>> ToState<State> for InstanceExt<T> {
     fn to_state(&self) -> State {
         let parent = Box::new(self.parent.to_state());
         let class = self.class.clone();

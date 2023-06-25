@@ -5,15 +5,15 @@ use destream::{en, EncodeMap};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::TryFutureExt;
 
+use tc_chain::ChainView;
 use tc_error::*;
+use tc_scalar::{OpDef, Scalar};
 use tc_transact::IntoView;
-use tcgeneric::{Id, NativeClass, TCBoxTryStream};
+use tcgeneric::{Id, NativeClass};
 
-use crate::chain::ChainView;
 use crate::collection::CollectionView;
 use crate::fs;
 use crate::object::ObjectView;
-use crate::scalar::{OpDef, Scalar};
 use crate::state::StateType;
 use crate::txn::Txn;
 

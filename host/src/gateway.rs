@@ -1,6 +1,5 @@
 //! [`Gateway`] handles network traffic.
 
-use std::fmt;
 use std::net::IpAddr;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -10,11 +9,10 @@ use bytes::Bytes;
 use futures::future::{Future, TryFutureExt};
 use log::debug;
 use tokio::time::Duration;
-use url::Url;
 
 use tc_error::*;
 use tc_value::{Host, Link, Protocol, ToUrl, Value};
-use tcgeneric::{NetworkTime, PathSegment, TCBoxTryFuture, TCPath, TCPathBuf};
+use tcgeneric::{NetworkTime, TCBoxTryFuture, TCPathBuf};
 
 use crate::kernel::{Dispatch, Kernel};
 use crate::state::State;

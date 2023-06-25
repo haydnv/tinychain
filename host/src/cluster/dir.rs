@@ -13,18 +13,19 @@ use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
 use log::*;
 use safecast::CastInto;
 
+use tc_chain::Recover;
 use tc_error::*;
 use tc_transact::fs::Persist;
 use tc_transact::lock::TxnMapLock;
+use tc_transact::public::Route;
 use tc_transact::{RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{label, Id, Label, Map, PathSegment, ThreadSafe};
 
-use crate::chain::{BlockChain, Recover};
+use crate::chain::BlockChain;
 use crate::fs;
 use crate::fs::CacheBlock;
 use crate::object::InstanceClass;
-use crate::route::Route;
 use crate::state::State;
 use crate::txn::{Actor, Txn};
 
@@ -202,7 +203,7 @@ impl<T: Send + Sync> DirCreate for Dir<T>
 where
     DirEntry<T>: Clone,
     Cluster<Self>: Clone,
-    Self: Persist<CacheBlock, Txn = Txn, Schema = Schema> + Route + fmt::Debug,
+    Self: Persist<CacheBlock, Txn = Txn, Schema = Schema> + Route<State> + fmt::Debug,
 {
     /// Create a new subdirectory in this [`Dir`].
     async fn create_dir(
@@ -248,7 +249,7 @@ where
 #[async_trait]
 impl<T> DirCreateItem<T> for Dir<T>
 where
-    T: DirItem + Route + fmt::Debug,
+    T: DirItem + Route<State> + fmt::Debug,
     DirEntry<T>: Clone,
 {
     /// Create a new item in this [`Dir`].
@@ -294,12 +295,12 @@ where
 }
 
 #[async_trait]
-impl<T: DirItem + Route + fmt::Debug> Replica for Dir<T>
+impl<T: DirItem + Route<State> + fmt::Debug> Replica for Dir<T>
 where
     BlockChain<T>: Replica,
     DirEntry<T>: Clone,
     Cluster<Self>: Clone,
-    Self: Persist<CacheBlock, Txn = Txn, Schema = Schema> + Route + fmt::Debug,
+    Self: Persist<CacheBlock, Txn = Txn, Schema = Schema> + Route<State> + fmt::Debug,
 {
     async fn state(&self, txn_id: TxnId) -> TCResult<State> {
         let mut state = Map::<State>::new();
@@ -401,11 +402,13 @@ where
 }
 
 #[async_trait]
-impl<T: Send + Sync + 'static> Recover for Dir<T>
+impl<T: Send + Sync + 'static> Recover<CacheBlock> for Dir<T>
 where
     DirEntry<T>: Clone,
-    Cluster<BlockChain<T>>: Recover,
+    Cluster<BlockChain<T>>: Recover<CacheBlock, Txn = Txn>,
 {
+    type Txn = Txn;
+
     async fn recover(&self, txn: &Txn) -> TCResult<()> {
         let contents = self.contents.iter(*txn.id()).await?;
         let recovery = contents.map(|(_name, entry)| async move {
@@ -441,7 +444,7 @@ impl Persist<CacheBlock> for Dir<Class> {
 
             let entry = match entry {
                 fs::DirEntry::Dir(dir) => {
-                    let is_chain = dir.contains(txn_id, &crate::chain::HISTORY.into()).await?;
+                    let is_chain = dir.contains(txn_id, &tc_chain::HISTORY.into()).await?;
 
                     if is_chain {
                         Cluster::load(txn_id, schema, dir)
@@ -481,28 +484,21 @@ impl Persist<CacheBlock> for Dir<Library> {
     async fn load(txn_id: TxnId, schema: Self::Schema, dir: fs::Dir) -> TCResult<Self> {
         // let mut contents = BTreeMap::new();
         //
-        // for (name, entry) in dir.iter() {
+        // let mut entries = dir.iter(txn_id).await?;
+        //
+        // while let Some((name, entry)) = entries.try_next().await? {
         //     let schema = schema.extend(name.clone());
-
-        // match entry {
-        //     fs::DirEntry::Dir(dir) => {
-        //         let dir = Cluster::load(txn_id, schema, dir.clone().into())?;
-        //         contents.insert(name.clone(), DirEntry::Dir(dir));
-        //     }
-        //     fs::DirEntry::File(file) => match file {
-        //         fs::FileEntry::Library(file) => {
-        //             let lib = Cluster::load(txn_id, schema, file.clone().into())?;
+        //
+        //     match entry {
+        //         fs::DirEntry::Dir(dir) => {
+        //             let dir = Cluster::load(txn_id, schema, dir.clone().into()).await?;
+        //             contents.insert(name.clone(), DirEntry::Dir(dir));
+        //         }
+        //         fs::DirEntry::File(file) => {
+        //             let lib = Cluster::load(txn_id, schema, file.clone().into()).await?;
         //             contents.insert(name.clone(), DirEntry::Item(lib));
         //         }
-        //         file => {
-        //             return Err(unexpected!(
-        //                 "{} is in the library directory but {} is not a library",
-        //                 name,
-        //                 file
-        //             ))
-        //         }
-        //     },
-        // };
+        //     };
         // }
         //
         // Self::with_contents(txn_id, schema, dir, contents)

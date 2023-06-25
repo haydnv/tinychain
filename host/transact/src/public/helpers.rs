@@ -75,6 +75,12 @@ where
     }
 }
 
+impl<'a> From<&'a Id> for ErrorHandler<'a> {
+    fn from(code: &'a Id) -> Self {
+        Self { code }
+    }
+}
+
 pub struct AttributeHandler<T> {
     attribute: T,
 }
