@@ -26,6 +26,7 @@ pub use reference::*;
 pub use tc_value as value;
 
 pub mod op;
+pub mod public;
 pub mod reference;
 
 const ERR_NO_SELF: &str = "Op context has no $self--consider using a method instead";
