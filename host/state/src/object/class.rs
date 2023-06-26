@@ -14,7 +14,7 @@ use tc_scalar::*;
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, NativeClass, PathLabel};
 
-use crate::state::StateType;
+use crate::StateType;
 
 use super::ObjectType;
 

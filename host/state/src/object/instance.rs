@@ -12,7 +12,7 @@ use tc_transact::public::ToState;
 use tc_value::Value;
 use tcgeneric::Map;
 
-use crate::state::State;
+use crate::State;
 
 use super::{InstanceClass, Object};
 

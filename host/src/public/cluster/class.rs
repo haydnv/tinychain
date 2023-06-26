@@ -3,18 +3,19 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_scalar::OpRefType;
-use tc_transact::public::{Handler, Public, Route};
+use tc_state::object::InstanceClass;
+use tc_state::State;
+use tc_transact::public::{
+    DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route,
+};
 use tc_transact::Transaction;
 use tc_value::Link;
 use tcgeneric::{Map, PathSegment, TCPath};
 
 use crate::cluster::{class, Class, DirItem};
-use crate::object::InstanceClass;
-use crate::state::State;
+use crate::txn::Txn;
 
 use super::dir::DirHandler;
-
-use super::{DeleteHandler, GetHandler, PostHandler, PutHandler};
 
 struct ClassVersionHandler<'a> {
     class: &'a class::Version,
@@ -28,7 +29,7 @@ impl<'a> ClassVersionHandler<'a> {
 }
 
 impl<'a> Handler<'a, State> for ClassVersionHandler<'a> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -65,7 +66,7 @@ impl<'a> ClassHandler<'a> {
 }
 
 impl<'a> Handler<'a, State> for ClassHandler<'a> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -78,7 +79,7 @@ impl<'a> Handler<'a, State> for ClassHandler<'a> {
         }))
     }
 
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -115,7 +116,7 @@ impl<'a> Handler<'a, State> for ClassHandler<'a> {
         }))
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -137,7 +138,7 @@ impl<'a> Handler<'a, State> for ClassHandler<'a> {
         }))
     }
 
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
     where
         'b: 'a,
     {
@@ -158,7 +159,7 @@ impl Route<State> for Class {
 }
 
 impl<'a> Handler<'a, State> for DirHandler<'a, Class> {
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {

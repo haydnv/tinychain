@@ -26,18 +26,23 @@ use tc_scalar::*;
 use tc_transact::public::{ClosureInstance, Public, StateInstance, ToState};
 use tc_transact::{AsyncHash, Transaction, TxnId};
 use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};
-use tcgeneric::*;
+use tcgeneric::{
+    path_label, Class, Id, Instance, Map, NativeClass, PathSegment, TCPath, TCPathBuf, Tuple,
+};
 
-use crate::chain::{BlockChain, Chain};
-use crate::closure::*;
-use crate::collection::*;
-use crate::object::{InstanceClass, Object, ObjectType, ObjectVisitor};
-// use crate::stream::TCStream;
-use crate::txn::Txn;
+use chain::*;
+use closure::*;
+use collection::*;
+use object::{InstanceClass, Object, ObjectType, ObjectVisitor};
 
-pub use view::StateView;
+pub mod chain;
+pub mod closure;
+pub mod collection;
+pub mod object;
+pub mod public;
+pub mod view;
 
-mod view;
+pub type Txn = tc_fs::Txn<State>;
 
 /// The [`Class`] of a [`State`].
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -48,7 +53,6 @@ pub enum StateType {
     Map,
     Object(ObjectType),
     Scalar(ScalarType),
-    // Stream,
     Tuple,
 }
 
@@ -72,7 +76,7 @@ impl NativeClass for StateType {
                 match path[1].as_str() {
                     "collection" => CollectionType::from_path(path).map(Self::Collection),
                     "chain" => ChainType::from_path(path).map(Self::Chain),
-                    "object" => ObjectType::from_path(path).map(Self::Object),
+                    "public" => ObjectType::from_path(path).map(Self::Object),
                     "scalar" => ScalarType::from_path(path).map(Self::Scalar),
                     _ => None,
                 }
@@ -92,7 +96,6 @@ impl NativeClass for StateType {
             Self::Map => path_label(&["state", "map"]).into(),
             Self::Object(ot) => ot.path(),
             Self::Scalar(st) => st.path(),
-            // Self::Stream => path_label(&["state", "stream"]).into(),
             Self::Tuple => path_label(&["state", "tuple"]).into(),
         }
     }
@@ -172,7 +175,6 @@ impl fmt::Debug for StateType {
             Self::Map => f.write_str("Map<State>"),
             Self::Object(ot) => fmt::Debug::fmt(ot, f),
             Self::Scalar(st) => fmt::Debug::fmt(st, f),
-            // Self::Stream => f.write_str("Stream"),
             Self::Tuple => f.write_str("Tuple<State>"),
         }
     }
@@ -187,7 +189,6 @@ pub enum State {
     Map(Map<Self>),
     Object(Object),
     Scalar(Scalar),
-    // Stream(TCStream),
     Tuple(Tuple<Self>),
 }
 
@@ -426,7 +427,6 @@ impl Instance for State {
             Self::Map(_) => StateType::Map,
             Self::Object(object) => StateType::Object(object.class()),
             Self::Scalar(scalar) => StateType::Scalar(scalar.class()),
-            // Self::Stream(_) => StateType::Stream,
             Self::Tuple(_) => StateType::Tuple,
         }
     }
@@ -463,9 +463,6 @@ impl AsyncHash for State {
             }
             Self::Object(object) => object.hash(txn_id).await,
             Self::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),
-            // Self::Stream(_stream) => Err(bad_request!(
-            //     "cannot hash a Stream; hash its source instead"
-            // )),
             Self::Tuple(tuple) => {
                 let mut hashes = stream::iter(tuple)
                     .map(|state| state.hash(txn_id))
@@ -496,6 +493,12 @@ impl From<BTree> for State {
 impl From<Chain<CollectionBase>> for State {
     fn from(chain: Chain<CollectionBase>) -> Self {
         Self::Chain(chain)
+    }
+}
+
+impl From<BlockChain<CollectionBase>> for State {
+    fn from(chain: BlockChain<CollectionBase>) -> Self {
+        Self::Chain(chain.into())
     }
 }
 
@@ -617,12 +620,6 @@ impl From<Table> for State {
         Self::Collection(table.into())
     }
 }
-
-// impl From<TCStream> for State {
-//     fn from(stream: TCStream) -> Self {
-//         Self::Stream(stream)
-//     }
-// }
 
 impl From<Tensor> for State {
     fn from(tensor: Tensor) -> Self {
@@ -999,25 +996,6 @@ impl TryCastFrom<State> for Tensor {
     }
 }
 
-// impl TryCastFrom<State> for TCStream {
-//     fn can_cast_from(state: &State) -> bool {
-//         match state {
-//             // State::Chain(_) => true, // TODO
-//             State::Collection(_) => true,
-//             State::Stream(_) => true,
-//             _ => false,
-//         }
-//     }
-//
-//     fn opt_cast_from(state: State) -> Option<Self> {
-//         match state {
-//             State::Collection(collection) => Some(Self::from(collection)),
-//             State::Stream(stream) => Some(stream),
-//             _ => None,
-//         }
-//     }
-// }
-
 impl<T: TryCastFrom<State>> TryCastFrom<State> for (T,) {
     fn can_cast_from(state: &State) -> bool {
         match state {
@@ -1180,9 +1158,15 @@ impl TryCastFrom<State> for Scalar {
             State::Object(object) => Self::opt_cast_from(object),
             State::Scalar(scalar) => Some(scalar),
 
-            State::Tuple(tuple) => Vec::<Scalar>::opt_cast_from(tuple)
-                .map(Tuple::from)
-                .map(Scalar::Tuple),
+            State::Tuple(tuple) => {
+                let mut scalar = Tuple::<Scalar>::with_capacity(tuple.len());
+
+                for state in tuple {
+                    scalar.push(state.opt_cast_into()?);
+                }
+
+                Some(Scalar::Tuple(scalar))
+            }
 
             _ => None,
         }
@@ -1204,9 +1188,15 @@ impl TryCastFrom<State> for Value {
             State::Object(object) => Self::opt_cast_from(object),
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
 
-            State::Tuple(tuple) => Vec::<Value>::opt_cast_from(tuple)
-                .map(Tuple::from)
-                .map(Value::Tuple),
+            State::Tuple(tuple) => {
+                let mut value = Tuple::<Value>::with_capacity(tuple.len());
+
+                for state in tuple {
+                    value.push(state.opt_cast_into()?);
+                }
+
+                Some(Value::Tuple(value))
+            }
 
             _ => None,
         }
@@ -1274,7 +1264,6 @@ impl fmt::Debug for State {
             Self::Map(map) => fmt::Debug::fmt(map, f),
             Self::Object(object) => fmt::Debug::fmt(object, f),
             Self::Scalar(scalar) => fmt::Debug::fmt(scalar, f),
-            // Self::Stream(_) => f.write_str("Stream"),
             Self::Tuple(tuple) => fmt::Debug::fmt(tuple, f),
         }
     }
@@ -1332,7 +1321,6 @@ impl StateVisitor {
                     .map_ok(State::Scalar)
                     .await
             }
-            // StateType::Stream => Err(de::Error::invalid_type("Stream", "a Collection")),
             StateType::Tuple => access.next_value(self.txn.clone()).await,
         }
     }

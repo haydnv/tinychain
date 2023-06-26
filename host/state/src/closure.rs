@@ -14,13 +14,12 @@ use safecast::{CastInto, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_scalar::{Executor, OpDef, OpDefType, OpRef, Scalar, SELF};
-use tc_transact::public::Handler;
+use tc_transact::public::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler};
 use tc_transact::{AsyncHash, IntoView, TxnId};
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf};
 
-use crate::route::{DeleteHandler, GetHandler, PostHandler, PutHandler};
-use crate::state::{State, StateView};
-use crate::txn::Txn;
+use super::view::StateView;
+use super::{State, Txn};
 
 /// An [`OpDef`] which closes over zero or more [`State`]s
 #[derive(Clone)]
@@ -142,7 +141,7 @@ impl From<(Map<State>, OpDef)> for Closure {
 }
 
 impl<'a> Handler<'a, State> for Closure {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -153,7 +152,7 @@ impl<'a> Handler<'a, State> for Closure {
         }
     }
 
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -166,7 +165,7 @@ impl<'a> Handler<'a, State> for Closure {
         }
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -179,7 +178,7 @@ impl<'a> Handler<'a, State> for Closure {
         }
     }
 
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
     where
         'b: 'a,
     {

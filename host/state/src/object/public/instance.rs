@@ -5,14 +5,13 @@ use log::{debug, info};
 
 use tc_error::*;
 use tc_transact::public::generic::COPY;
-use tc_transact::public::{Handler, Route, ToState};
+use tc_transact::public::{GetHandler, Handler, Route, ToState};
 use tcgeneric::{Instance, PathSegment, TCPath};
 
 use crate::object::InstanceExt;
-use crate::state::State;
+use crate::{State, Txn};
 
 use super::method::route_attr;
-use super::GetHandler;
 
 struct CopyHandler<'a, T> {
     instance: &'a T,
@@ -22,7 +21,7 @@ impl<'a, T> Handler<'a, State> for CopyHandler<'a, T>
 where
     T: Instance + fmt::Debug + 'a,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -61,7 +60,7 @@ where
             if let Some(handler) = self.parent().route(path) {
                 Some(handler)
             } else if path == &COPY[..] {
-                info!("tried to copy an object with no /copy method implemented");
+                info!("tried to copy an public with no /copy method implemented");
                 Some(Box::new(CopyHandler::from(self)))
             } else {
                 debug!("{:?} has no handler for {}", self, TCPath::from(path));

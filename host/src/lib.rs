@@ -14,22 +14,15 @@ use std::sync::Arc;
 
 use futures::future::TryFutureExt;
 
-use crate::state::State;
 pub use tc_error::*;
 
-pub mod chain;
-pub mod closure;
 pub mod cluster;
-pub mod collection;
 pub mod gateway;
 pub mod kernel;
-pub mod object;
-pub mod state;
 pub mod txn;
-// pub mod stream;
 
 mod http;
-mod route;
+mod public;
 
 /// The minimum size of the transactional filesystem cache, in bytes
 pub const MIN_CACHE_SIZE: usize = 5000;
@@ -170,7 +163,7 @@ impl Builder {
         let txn_id = tc_transact::TxnId::new(gateway::Gateway::time());
         let token = gateway.new_token(&txn_id).expect("token");
 
-        let gateway: Box<dyn tc_fs::Gateway<State = State>> = Box::new(gateway);
+        let gateway: Box<dyn tc_fs::Gateway<State = tc_state::State>> = Box::new(gateway);
         let txn = txn_server
             .new_txn(Arc::new(gateway), txn_id, token)
             .await

@@ -4,15 +4,13 @@ use safecast::TryCastInto;
 
 use tc_error::*;
 use tc_transact::public::helpers::{AttributeHandler, EchoHandler, SelfHandler};
-use tc_transact::public::{Handler, Route};
+use tc_transact::public::{GetHandler, Handler, PostHandler, Route};
 use tc_transact::{AsyncHash, Transaction};
 use tc_value::{Link, Number, Value};
 use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, PathSegment, TCPath};
 
 use crate::object::{InstanceClass, Object};
-use crate::state::{State, StateType};
-
-use super::{GetHandler, PostHandler};
+use crate::{State, StateType, Txn};
 
 pub const PREFIX: Label = label("state");
 
@@ -21,7 +19,7 @@ struct ClassHandler {
 }
 
 impl<'a> Handler<'a, State> for ClassHandler {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -30,7 +28,7 @@ impl<'a> Handler<'a, State> for ClassHandler {
         }))
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -39,7 +37,7 @@ impl<'a> Handler<'a, State> for ClassHandler {
                 let mut proto = Map::new();
                 for (id, member) in params.into_iter() {
                     let member = member.try_cast_into(|s| {
-                        TCError::unexpected(s, "an attribute in an object prototype")
+                        TCError::unexpected(s, "an attribute in an public prototype")
                     })?;
 
                     proto.insert(id, member);
@@ -57,7 +55,7 @@ struct HashHandler {
 }
 
 impl<'a> Handler<'a, State> for HashHandler {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -164,7 +162,6 @@ impl Route<State> for Static {
             "collection" => tc_collection::public::Static.route(&path[1..]),
             "scalar" => tc_scalar::public::Static.route(&path[1..]),
             "map" => tc_transact::public::generic::MapStatic.route(&path[1..]),
-            // "stream" => stream::Static.route(&path[1..]),
             "tuple" => tc_transact::public::generic::TupleStatic.route(&path[1..]),
             _ => None,
         }

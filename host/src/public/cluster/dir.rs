@@ -4,16 +4,16 @@ use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_scalar::{OpRef, Scalar, TCRef};
+use tc_state::chain::BlockChain;
+use tc_state::object::InstanceClass;
+use tc_state::State;
 use tc_transact::public::{Public, Route};
 use tc_transact::Transaction;
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{Id, Map, PathSegment, TCPath};
 
-use crate::chain::BlockChain;
 use crate::cluster::dir::{Dir, DirCreate, DirCreateItem, DirEntry, ENTRIES};
 use crate::cluster::{Class, Cluster, DirItem, Library, Replica, Service};
-use crate::object::InstanceClass;
-use crate::state::State;
 use crate::txn::Txn;
 
 use super::{GetHandler, Handler};
@@ -84,7 +84,7 @@ impl<'a, T: Clone + Send + Sync> Handler<'a, State> for EntriesHandler<'a, T>
 where
     Dir<T>: Replica,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {

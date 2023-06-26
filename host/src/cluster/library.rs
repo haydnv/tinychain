@@ -14,13 +14,13 @@ use safecast::{AsType, TryCastFrom};
 
 use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
+use tc_state::object::ObjectType;
+use tc_state::State;
 use tc_transact::fs::Persist;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
 use tcgeneric::{label, Instance, Label, Map, PathSegment};
 
-use crate::object::ObjectType;
-use crate::state::State;
 use crate::txn::Txn;
 
 use super::DirItem;

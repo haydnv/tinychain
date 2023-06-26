@@ -1,0 +1,32 @@
+[package]
+name = "tc-state"
+version = "0.1.0"
+authors = ["code@tinychain.net"]
+edition = "2021"
+description = "TinyChain's general state enum"
+license = "Apache-2.0"
+readme = "../README.md"
+repository = "https://github.com/haydnv/tinychain.git"
+
+keywords = ["chain", "collection", "object", "scalar", "generic"]
+categories = ["data-structures"]
+
+[dependencies]
+async-hash = { path = "../../../async-hash" }
+async-trait = "0.1"
+bytes = "1.4"
+destream = { path = "../../../destream" }
+futures = "0.3"
+get-size = "0.1"
+get-size-derive = "0.1"
+log = { version = "0.4" }
+num_cpus = "1.13"
+safecast = { path = "../../../safecast" }
+tc-chain = { path = "../chain" }
+tc-collection = { path = "../collection" }
+tc-error = { path = "../error" }
+tc-fs = { path = "../fs" }
+tc-scalar = { path = "../scalar" }
+tc-transact = { path = "../transact" }
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }

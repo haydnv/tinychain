@@ -7,14 +7,14 @@ use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_scalar::{OpRefType, Scalar, ScalarType};
+use tc_state::object::InstanceClass;
+use tc_state::{State, StateType};
 use tc_transact::public::Public;
 use tc_transact::TxnId;
 use tc_value::{Link, Value};
 use tcgeneric::{Map, NativeClass, PathSegment, TCPath, TCPathBuf};
 
-use crate::object::InstanceClass;
-use crate::route::Static;
-use crate::state::{State, StateType};
+use crate::public::Static;
 use crate::txn::Txn;
 
 use super::Dispatch;

@@ -7,17 +7,17 @@ use log::*;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
-use tc_transact::public::{Handler, Public, Route};
+use tc_state::object::InstanceClass;
+use tc_state::State;
+use tc_transact::public::{
+    DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route,
+};
 use tc_transact::{RPCClient, Transact, Transaction};
 use tc_value::{Host, Link, Value};
 use tcgeneric::{label, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::cluster::{Cluster, Replica, REPLICAS};
-use crate::object::InstanceClass;
-use crate::state::State;
 use crate::txn::Txn;
-
-use super::{DeleteHandler, GetHandler, PostHandler, PutHandler};
 
 mod class;
 mod dir;
@@ -32,7 +32,7 @@ impl<'a, T> Handler<'a, State> for ClusterHandler<'a, T>
 where
     T: Transact + Public<State> + Send + Sync,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -63,7 +63,7 @@ where
         }))
     }
 
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -110,7 +110,7 @@ where
         }))
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -177,7 +177,7 @@ where
         }))
     }
 
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
     where
         'b: 'a,
     {
@@ -211,7 +211,7 @@ impl<'a, T> Handler<'a, State> for ReplicaHandler<'a, T>
 where
     T: Replica + Send + Sync,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -228,7 +228,7 @@ where
         }))
     }
 
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -245,7 +245,7 @@ where
         }))
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -285,7 +285,7 @@ where
         }))
     }
 
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
     where
         'b: 'a,
     {

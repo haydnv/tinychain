@@ -3,18 +3,21 @@ use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_scalar::Scalar;
-use tc_transact::public::{Public, Route};
+use tc_state::object::InstanceClass;
+use tc_state::State;
+use tc_transact::public::{
+    DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route,
+};
 use tc_transact::{RPCClient, Transaction};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{Map, PathSegment, TCPath, TCPathBuf};
 
 use crate::cluster::{DirItem, Library};
 use crate::kernel::CLASS;
-use crate::object::InstanceClass;
-use crate::state::State;
+use crate::txn::Txn;
 
+use super::authorize_install;
 use super::dir::{expect_version, extract_classes, DirHandler};
-use super::{authorize_install, DeleteHandler, GetHandler, Handler, PostHandler, PutHandler};
 
 struct LibraryHandler<'a> {
     lib: &'a Library,
@@ -28,7 +31,7 @@ impl<'a> LibraryHandler<'a> {
 }
 
 impl<'a> Handler<'a, State> for LibraryHandler<'a> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -49,7 +52,7 @@ impl<'a> Handler<'a, State> for LibraryHandler<'a> {
         }))
     }
 
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -99,7 +102,7 @@ impl<'a> Handler<'a, State> for LibraryHandler<'a> {
         }))
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -112,7 +115,7 @@ impl<'a> Handler<'a, State> for LibraryHandler<'a> {
         }))
     }
 
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
     where
         'b: 'a,
     {
@@ -133,7 +136,7 @@ impl Route<State> for Library {
 }
 
 impl<'a> Handler<'a, State> for DirHandler<'a, Library> {
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {

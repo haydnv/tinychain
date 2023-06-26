@@ -16,14 +16,14 @@ use tokio::sync::RwLock;
 
 use tc_chain::Recover;
 use tc_error::*;
+use tc_state::chain::BlockChain;
+use tc_state::State;
 use tc_transact::fs;
 use tc_transact::lock::{TxnLock, TxnLockVersionGuard};
 use tc_transact::{RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Host, Link, Value};
 use tcgeneric::*;
 
-use crate::chain::BlockChain;
-use crate::state::State;
 use crate::txn::Txn;
 
 pub use class::Class;

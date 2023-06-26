@@ -1,15 +1,13 @@
 use tc_transact::public::generic::COPY;
 use tc_transact::public::helpers::AttributeHandler;
-use tc_transact::public::{Handler, Route};
+use tc_transact::public::{GetHandler, Handler, PostHandler, Route};
 use tcgeneric::PathSegment;
 
 use crate::object::{InstanceClass, InstanceExt, Object, ObjectType};
-use crate::state::State;
-
-use super::{GetHandler, PostHandler};
+use crate::{State, Txn};
 
 mod instance;
-pub(super) mod method;
+pub mod method;
 
 impl Route<State> for ObjectType {
     fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
@@ -22,7 +20,7 @@ struct ClassHandler<'a> {
 }
 
 impl<'a> Handler<'a, State> for ClassHandler<'a> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -35,7 +33,7 @@ impl<'a> Handler<'a, State> for ClassHandler<'a> {
         }))
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {

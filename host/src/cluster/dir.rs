@@ -16,6 +16,9 @@ use safecast::CastInto;
 use tc_chain::Recover;
 use tc_error::*;
 use tc_scalar::Scalar;
+use tc_state::chain::BlockChain;
+use tc_state::object::InstanceClass;
+use tc_state::State;
 use tc_transact::fs::Persist;
 use tc_transact::lock::TxnMapLock;
 use tc_transact::public::Route;
@@ -23,9 +26,6 @@ use tc_transact::{RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{label, Id, Label, Map, PathSegment, ThreadSafe};
 
-use crate::chain::BlockChain;
-use crate::object::InstanceClass;
-use crate::state::State;
 use crate::txn::Txn;
 
 use super::{Class, Cluster, Library, Replica, Schema, Service, REPLICAS};

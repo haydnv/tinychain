@@ -46,6 +46,7 @@ tc-collection = { path = "collection" }
 tc-error = { path = "error" }
 tc-fs = { path = "fs" }
 tc-scalar = { path = "scalar" }
+tc-state = { path = "state" }
 tc-transact = { path = "transact" }
 tc-value = { path = "value" }
 tcgeneric = { path = "generic" }

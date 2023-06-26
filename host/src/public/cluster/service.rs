@@ -3,6 +3,9 @@ use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_scalar::{OpRef, OpRefType, Scalar, Subject, TCRef};
+use tc_state::object::public::method::route_attr;
+use tc_state::object::InstanceClass;
+use tc_state::State;
 use tc_transact::public::helpers::MethodNotAllowedHandler;
 use tc_transact::public::{Handler, Public, Route};
 use tc_transact::{RPCClient, Transaction};
@@ -11,10 +14,7 @@ use tcgeneric::{Id, Map, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::cluster::{service, DirItem, Replica, Service};
 use crate::kernel::CLASS;
-use crate::object::InstanceClass;
-use crate::route::cluster::dir::{expect_version, extract_classes};
-use crate::route::object::method::route_attr;
-use crate::state::State;
+use crate::public::cluster::dir::{expect_version, extract_classes};
 use crate::txn::Txn;
 
 use super::dir::DirHandler;
@@ -57,7 +57,7 @@ impl<'a> ServiceHandler<'a> {
         Self { service, path }
     }
 
-    fn create_version<'b>(self: Box<Self>) -> PutHandler<'a, 'b>
+    fn create_version<'b>(self: Box<Self>) -> PutHandler<'a, 'b, Txn, State>
     where
         'b: 'a,
     {
@@ -127,7 +127,7 @@ impl<'a> ServiceHandler<'a> {
 }
 
 impl<'a> Handler<'a, State> for ServiceHandler<'a> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -148,7 +148,7 @@ impl<'a> Handler<'a, State> for ServiceHandler<'a> {
         }))
     }
 
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -165,7 +165,7 @@ impl<'a> Handler<'a, State> for ServiceHandler<'a> {
         }
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -186,7 +186,7 @@ impl<'a> Handler<'a, State> for ServiceHandler<'a> {
         }))
     }
 
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
     where
         'b: 'a,
     {
@@ -212,7 +212,7 @@ impl Route<State> for Service {
 }
 
 impl<'a> Handler<'a, State> for DirHandler<'a, Service> {
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {

@@ -1,4 +1,4 @@
-use crate::state::State;
+use super::State;
 
 pub type Chain<T> = tc_chain::Chain<State, T>;
 pub type BlockChain<T> = tc_chain::BlockChain<State, T>;

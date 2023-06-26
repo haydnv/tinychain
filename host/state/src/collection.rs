@@ -1,6 +1,6 @@
 use tc_fs::CacheBlock;
 
-use crate::txn::Txn;
+use super::Txn;
 
 /// A collection such as a [`Table`] or [`Tensor`]
 pub type Collection = tc_collection::Collection<Txn, CacheBlock>;

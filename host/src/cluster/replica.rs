@@ -7,16 +7,16 @@ use tc_chain::{ChainInstance, CHAIN};
 use tc_error::*;
 use tc_fs::CacheBlock;
 use tc_scalar::Scalar;
+use tc_state::chain::{BlockChain, Chain, SyncChain};
+use tc_state::collection::CollectionBase;
+use tc_state::object::InstanceClass;
+use tc_state::State;
 use tc_transact::fs::{Persist, Restore};
 use tc_transact::public::{Public, Route, ToState};
 use tc_transact::{RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{label, Label, Map};
 
-use crate::chain::{BlockChain, Chain, SyncChain};
-use crate::collection::CollectionBase;
-use crate::object::InstanceClass;
-use crate::state::State;
 use crate::txn::Txn;
 
 /// The name of the endpoint which serves a [`Link`] to each of this [`Cluster`]'s replicas.

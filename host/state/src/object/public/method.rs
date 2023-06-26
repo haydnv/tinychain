@@ -5,13 +5,13 @@ use log::debug;
 use tc_error::*;
 use tc_scalar::op::*;
 use tc_scalar::Scalar;
-use tc_transact::public::{Handler, ToState};
+use tc_transact::public::{
+    DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route, ToState,
+};
 use tc_value::Value;
 use tcgeneric::{Id, Instance, Map, PathSegment};
 
-use crate::route::{DeleteHandler, GetHandler, PostHandler, PutHandler, Route};
-use crate::state::State;
-use crate::txn::Txn;
+use crate::{State, Txn};
 
 struct GetMethod<'a, T: Instance> {
     subject: &'a T,
@@ -48,7 +48,7 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> GetMetho
 impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<'a, State>
     for GetMethod<'a, T>
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -92,7 +92,7 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> PutMetho
 impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<'a, State>
     for PutMethod<'a, T>
 {
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -132,7 +132,7 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> PostMeth
 impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<'a, State>
     for PostMethod<'a, T>
 {
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -179,7 +179,7 @@ impl<'a, T> Handler<'a, State> for DeleteMethod<'a, T>
 where
     T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a,
 {
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
     where
         'b: 'a,
     {

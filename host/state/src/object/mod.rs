@@ -1,4 +1,4 @@
-//! User-defined object-orientation features.
+//! User-defined public-orientation features.
 
 use std::fmt;
 
@@ -14,16 +14,16 @@ use tc_transact::{AsyncHash, IntoView, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, path_label, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
-use crate::state::State;
-use crate::txn::Txn;
+use super::{State, Txn};
 
 pub use class::*;
 pub use instance::*;
 
 mod class;
 mod instance;
+pub mod public;
 
-const PREFIX: PathLabel = path_label(&["state", "object"]);
+const PREFIX: PathLabel = path_label(&["state", "public"]);
 
 /// The type of a user-defined [`Object`].
 #[derive(Copy, Clone, Eq, PartialEq)]

@@ -8,12 +8,12 @@ use log::debug;
 use url::Url;
 
 use tc_error::*;
+use tc_state::State;
 use tc_transact::{IntoView, Transaction, TxnId};
 use tc_value::{ToUrl, Value};
 use tcgeneric::label;
 
 use crate::http::Encoding;
-use crate::state::State;
 use crate::txn::Txn;
 
 const IDLE_TIMEOUT: u64 = 30;

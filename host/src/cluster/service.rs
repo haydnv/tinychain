@@ -16,6 +16,10 @@ use tc_chain::{ChainType, Recover};
 use tc_collection::Schema as CollectionSchema;
 use tc_error::*;
 use tc_scalar::{OpRef, Refer, Scalar, Subject, TCRef};
+use tc_state::chain::Chain;
+use tc_state::collection::CollectionBase;
+use tc_state::object::{InstanceClass, ObjectType};
+use tc_state::State;
 use tc_transact::fs::*;
 use tc_transact::lock::TxnMapLock;
 use tc_transact::public::ToState;
@@ -23,11 +27,7 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, TCPathBuf};
 
-use crate::chain::Chain;
 use crate::cluster::{DirItem, Replica};
-use crate::collection::CollectionBase;
-use crate::object::{InstanceClass, ObjectType};
-use crate::state::State;
 use crate::txn::Txn;
 
 pub(super) const SCHEMA: Label = label("schemata");

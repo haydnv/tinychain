@@ -6,15 +6,14 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::TryFutureExt;
 
 use tc_chain::ChainView;
+use tc_collection::CollectionView;
 use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
 use tc_transact::IntoView;
 use tcgeneric::{Id, NativeClass};
 
-use crate::collection::CollectionView;
-use crate::object::ObjectView;
-use crate::state::StateType;
-use crate::txn::Txn;
+use super::object::ObjectView;
+use super::{StateType, Txn};
 
 use super::State;
 

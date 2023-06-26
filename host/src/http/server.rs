@@ -12,11 +12,11 @@ use serde::de::DeserializeOwned;
 
 use tc_error::*;
 use tc_fs::Gateway as GatewayInstance;
+use tc_state::State;
 use tc_transact::{IntoView, TxnId};
 use tcgeneric::{NetworkTime, TCPathBuf};
 
 use crate::gateway::Gateway;
-use crate::state::State;
 use crate::txn::Txn;
 
 use super::{Accept, Encoding};

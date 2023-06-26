@@ -6,13 +6,13 @@ use futures::{TryFutureExt, TryStreamExt};
 
 use tc_error::*;
 use tc_scalar::Scalar;
+use tc_state::object::InstanceClass;
+use tc_state::State;
 use tc_transact::fs;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{Id, Map};
 
-use crate::object::InstanceClass;
-use crate::state::State;
 use crate::txn::Txn;
 
 use super::DirItem;
