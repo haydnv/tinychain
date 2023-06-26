@@ -4,7 +4,7 @@ use safecast::{TryCastFrom, TryCastInto};
 use tc_error::*;
 use tc_scalar::OpRefType;
 use tc_transact::public::{Handler, Public, Route};
-use tc_transact::{RPCClient, Transaction};
+use tc_transact::Transaction;
 use tc_value::Link;
 use tcgeneric::{Map, PathSegment, TCPath};
 

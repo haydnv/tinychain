@@ -10,7 +10,7 @@ use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
 use futures::join;
 use futures::stream::TryStreamExt;
 use log::{debug, trace};
-use safecast::{as_type, AsType, CastInto};
+use safecast::{as_type, AsType};
 
 use tc_chain::{ChainType, Recover};
 use tc_collection::Schema as CollectionSchema;

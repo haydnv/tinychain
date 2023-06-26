@@ -9,7 +9,7 @@ use tc_value::Value;
 use tcgeneric::*;
 
 use crate::state::State;
-use crate::txn::{Hypothetical, Txn};
+use crate::txn::Txn;
 
 use system::System;
 use userspace::UserSpace;

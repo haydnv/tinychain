@@ -1,4 +1,3 @@
-use crate::gateway::Gateway;
 use crate::state::State;
 
 pub type Hypothetical = tc_fs::hypothetical::Hypothetical<State>;

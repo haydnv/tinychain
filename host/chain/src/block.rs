@@ -23,7 +23,7 @@ use tc_transact::fs;
 use tc_transact::public::{Route, StateInstance};
 use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
-use tcgeneric::{label, Label, Map, ThreadSafe, Tuple};
+use tcgeneric::{Map, ThreadSafe, Tuple};
 
 use super::data::{ChainBlock, History};
 use super::{ChainInstance, Recover, HISTORY};

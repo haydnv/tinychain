@@ -115,7 +115,7 @@ pub struct Cluster<T> {
 }
 
 impl<T> Cluster<T> {
-    fn with_state(schema: Schema, txn_id: TxnId, state: T) -> Self {
+    fn with_state(schema: Schema, state: T) -> Self {
         let mut replicas = BTreeSet::new();
         replicas.insert(schema.host.clone());
 
@@ -544,13 +544,13 @@ where
 
     async fn create(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
         BlockChain::create(txn_id, (), store)
-            .map_ok(|state| Self::with_state(schema, txn_id, state))
+            .map_ok(|state| Self::with_state(schema, state))
             .await
     }
 
     async fn load(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
         BlockChain::load(txn_id, (), store)
-            .map_ok(|state| Self::with_state(schema, txn_id, state))
+            .map_ok(|state| Self::with_state(schema, state))
             .await
     }
 
@@ -570,13 +570,13 @@ where
 
     async fn create(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
         Dir::create(txn_id, schema.clone(), store)
-            .map_ok(|state| Self::with_state(schema, txn_id, state))
+            .map_ok(|state| Self::with_state(schema, state))
             .await
     }
 
     async fn load(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
         Dir::load(txn_id, schema.clone(), store)
-            .map_ok(|state| Self::with_state(schema, txn_id, state))
+            .map_ok(|state| Self::with_state(schema, state))
             .await
     }
 

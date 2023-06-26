@@ -15,7 +15,7 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use log::debug;
 use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
 
-use tc_chain::ChainType;
+use tc_chain::{ChainType, ChainVisitor};
 use tc_collection::btree::BTreeType;
 use tc_collection::table::TableType;
 use tc_collection::tensor::TensorType;
@@ -31,7 +31,7 @@ use tcgeneric::*;
 use crate::chain::{BlockChain, Chain};
 use crate::closure::*;
 use crate::collection::*;
-use crate::object::{InstanceClass, Object, ObjectType};
+use crate::object::{InstanceClass, Object, ObjectType, ObjectVisitor};
 // use crate::stream::TCStream;
 use crate::txn::Txn;
 
@@ -437,8 +437,8 @@ impl AsyncHash for State {
     async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         match self {
             Self::Collection(collection) => collection.hash(txn_id).await,
-            // Self::Chain(chain) => chain.hash(txn_id).await,
-            // Self::Closure(closure) => closure.hash(txn_id).await,
+            Self::Chain(chain) => chain.hash(txn_id).await,
+            Self::Closure(closure) => closure.hash(txn_id).await,
             Self::Map(map) => {
                 let mut hashes = stream::iter(map)
                     .map(|(id, state)| {
@@ -461,23 +461,22 @@ impl AsyncHash for State {
 
                 Ok(hasher.finalize())
             }
-            // Self::Object(object) => object.hash(txn_id).await,
+            Self::Object(object) => object.hash(txn_id).await,
             Self::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),
             // Self::Stream(_stream) => Err(bad_request!(
             //     "cannot hash a Stream; hash its source instead"
             // )),
-            // Self::Tuple(tuple) => {
-            //     let mut hashes = stream::iter(tuple)
-            //         .map(|state| state.hash(txn_id))
-            //         .buffered(num_cpus::get());
-            //
-            //     let mut hasher = Sha256::default();
-            //     while let Some(hash) = hashes.try_next().await? {
-            //         hasher.update(&hash);
-            //     }
-            //     Ok(hasher.finalize())
-            // }
-            _ => Err(not_implemented!("State::hash")),
+            Self::Tuple(tuple) => {
+                let mut hashes = stream::iter(tuple)
+                    .map(|state| state.hash(txn_id))
+                    .buffered(num_cpus::get());
+
+                let mut hasher = Sha256::default();
+                while let Some(hash) = hashes.try_next().await? {
+                    hasher.update(&hash);
+                }
+                Ok(hasher.finalize())
+            }
         }
     }
 }
@@ -1295,18 +1294,18 @@ impl StateVisitor {
         debug!("decode instance of {:?}", class);
 
         match class {
-            // StateType::Chain(ct) => {
-            //     ChainVisitor::new(self.txn.clone())
-            //         .visit_map_value(ct, access)
-            //         .map_ok(State::Chain)
-            //         .await
-            // }
-            // StateType::Closure => {
-            //     access
-            //         .next_value(self.txn.clone())
-            //         .map_ok(State::Closure)
-            //         .await
-            // }
+            StateType::Chain(ct) => {
+                ChainVisitor::new(self.txn.clone())
+                    .visit_map_value(ct, access)
+                    .map_ok(State::Chain)
+                    .await
+            }
+            StateType::Closure => {
+                access
+                    .next_value(self.txn.clone())
+                    .map_ok(State::Closure)
+                    .await
+            }
             StateType::Collection(ct) => {
                 CollectionVisitor::new(self.txn.clone())
                     .visit_map_value(ct, access)
@@ -1314,30 +1313,27 @@ impl StateVisitor {
                     .map_ok(State::Collection)
                     .await
             }
-            // StateType::Map => access.next_value(self.txn.clone()).await,
-            // StateType::Object(ot) => {
-            //     let txn = self
-            //         .txn
-            //         .subcontext_unique()
-            //         .map_err(de::Error::custom)
-            //         .await?;
-            //
-            //     let state = access.next_value(txn).await?;
-            //     ObjectVisitor::new()
-            //         .visit_map_value(ot, state)
-            //         .map_ok(State::Object)
-            //         .await
-            // }
+            StateType::Map => access.next_value(self.txn.clone()).await,
+            StateType::Object(ot) => {
+                let txn = self
+                    .txn
+                    .subcontext_unique()
+                    .map_err(de::Error::custom)
+                    .await?;
+
+                let state = access.next_value(txn).await?;
+                ObjectVisitor::new()
+                    .visit_map_value(ot, state)
+                    .map_ok(State::Object)
+                    .await
+            }
             StateType::Scalar(st) => {
                 ScalarVisitor::visit_map_value(st, access)
                     .map_ok(State::Scalar)
                     .await
             }
             // StateType::Stream => Err(de::Error::invalid_type("Stream", "a Collection")),
-            // StateType::Tuple => access.next_value(self.txn.clone()).await,
-            other => Err(de::Error::custom(format!(
-                "temporarily disabled: decode {other:?}"
-            ))),
+            StateType::Tuple => access.next_value(self.txn.clone()).await,
         }
     }
 }

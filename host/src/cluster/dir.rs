@@ -234,7 +234,7 @@ where
 
         let dir = self.dir.create_dir(txn_id, name.clone()).await?;
         let dir = Self::create(txn_id, schema.clone(), dir).await?;
-        let dir = Cluster::with_state(schema, txn_id, dir);
+        let dir = Cluster::with_state(schema, dir);
 
         self.contents
             .insert(txn_id, name, DirEntry::Dir(dir.clone()))
@@ -282,7 +282,7 @@ where
 
             let dir = self.dir.create_dir(txn_id, name.clone()).await?;
             let item = BlockChain::create(txn_id, (), dir).await?;
-            let item = Cluster::with_state(schema, txn_id, item);
+            let item = Cluster::with_state(schema, item);
 
             self.contents
                 .insert(txn_id, name, DirEntry::Item(item.clone()))

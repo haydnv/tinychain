@@ -437,7 +437,7 @@ impl<State, T> ChainVisitor<State, T>
 where
     State: StateInstance,
 {
-    pub(crate) fn new(txn: State::Txn) -> Self {
+    pub fn new(txn: State::Txn) -> Self {
         Self {
             txn,
             phantom: PhantomData,
@@ -465,7 +465,7 @@ where
     (Value,): TryCastFrom<State>,
     (Value, State): TryCastFrom<State>,
 {
-    pub(crate) async fn visit_map_value<A: de::MapAccess>(
+    pub async fn visit_map_value<A: de::MapAccess>(
         self,
         class: ChainType,
         access: &mut A,
