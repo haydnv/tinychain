@@ -8,7 +8,6 @@ use tcgeneric::{Id, PathSegment};
 use crate::state::State;
 use crate::txn::Txn;
 
-mod chain;
 mod cluster;
 mod object;
 mod state;

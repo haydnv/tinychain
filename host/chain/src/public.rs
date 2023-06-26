@@ -2,22 +2,20 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use log::debug;
+use safecast::{AsType, TryCastFrom};
 
-use tc_chain::{ChainInstance, ChainType};
-use tc_fs::CacheBlock;
-use tc_transact::fs::Persist;
-use tc_transact::public::Handler;
+use tc_collection::btree::Node as BTreeNode;
+use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
+use tc_collection::Collection;
+use tc_scalar::Scalar;
+use tc_transact::fs;
+use tc_transact::public::*;
 use tc_transact::Transaction;
 use tcgeneric::{PathSegment, TCPath};
 
-use crate::chain::{BlockChain, Chain};
-use crate::cluster::Replica;
-use crate::state::State;
-use crate::txn::Txn;
+use super::{BlockChain, Chain, ChainBlock, ChainInstance, ChainType};
 
-use super::{DeleteHandler, GetHandler, PostHandler, PutHandler, Route};
-
-impl Route<State> for ChainType {
+impl<State: StateInstance> Route<State> for ChainType {
     fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         None
     }
@@ -37,13 +35,14 @@ impl<'a, C, T> AppendHandler<'a, C, T> {
     }
 }
 
-impl<'a, C, T> Handler<'a, State> for AppendHandler<'a, C, T>
+impl<'a, State, C, T> Handler<'a, State> for AppendHandler<'a, C, T>
 where
+    State: StateInstance,
     C: ChainInstance<State, T> + Send + Sync + 'a,
     T: Route<State> + fmt::Debug + 'a,
-    Chain<T>: ChainInstance<State, T>,
+    Chain<State, T>: ChainInstance<State, T>,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -51,7 +50,7 @@ where
         handler.get()
     }
 
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -74,7 +73,7 @@ where
         }
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
     {
@@ -82,7 +81,7 @@ where
         handler.post()
     }
 
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b>>
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, State::Txn>>
     where
         'b: 'a,
     {
@@ -104,68 +103,42 @@ where
     }
 }
 
-struct ChainHandler<'a, C, T> {
-    chain: &'a C,
-    phantom: PhantomData<T>,
-}
-
-impl<'a, C, T> ChainHandler<'a, C, T> {
-    fn new(chain: &'a C) -> Self {
-        Self {
-            chain,
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<'a, C, T> Handler<'a, State> for ChainHandler<'a, C, T>
+impl<State, T> Route<State> for Chain<State, T>
 where
-    T: Send + Sync + 'a,
-    C: ChainInstance<State, T> + Replica + Clone + Send + Sync + 'a,
-{
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|txn, key| {
-            Box::pin(async move {
-                key.expect_none()?;
-                self.chain.state(*txn.id()).await
-            })
-        }))
-    }
-}
-
-impl<T> Route<State> for Chain<T>
-where
-    T: Persist<CacheBlock, Txn = Txn> + Route<State> + Clone + fmt::Debug,
-    Self: ChainInstance<State, T> + Replica,
+    State: StateInstance,
+    T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + Clone + fmt::Debug,
+    Self: ChainInstance<State, T>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         debug!("Chain::route {}", TCPath::from(path));
 
         if path.is_empty() {
             Some(Box::new(AppendHandler::new(self)))
-        } else if path.len() == 1 && path[0].as_str() == "chain" {
-            Some(Box::new(ChainHandler::new(self)))
         } else {
             self.subject().route(path)
         }
     }
 }
 
-impl<T> Route<State> for BlockChain<T>
+impl<State, T> Route<State> for BlockChain<State, T>
 where
-    T: Persist<CacheBlock, Txn = Txn> + Route<State> + Clone + fmt::Debug,
-    Self: ChainInstance<State, T> + Replica,
+    State: StateInstance,
+
+    State::FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>
+        + Clone,
+    T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + Clone + fmt::Debug,
+    Collection<State::Txn, State::FE>: TryCastFrom<State>,
+    Scalar: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         debug!("Chain::route {}", TCPath::from(path));
 
         if path.is_empty() {
             Some(Box::new(AppendHandler::new(self)))
-        } else if path.len() == 1 && path[0].as_str() == "chain" {
-            Some(Box::new(ChainHandler::new(self)))
         } else {
             self.subject().route(path)
         }

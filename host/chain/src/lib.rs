@@ -28,6 +28,7 @@ pub use sync::SyncChain;
 
 mod block;
 mod data;
+mod public;
 mod sync;
 
 pub const CHAIN: Label = label("chain");
