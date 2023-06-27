@@ -60,11 +60,16 @@ where
         }
 
         let mut version = canon;
-        for (_version_id, delta) in self
+        for (version_id, delta) in self
             .deltas
             .iter()
             .take_while(|(version_id, _delta)| *version_id <= &txn_id)
         {
+            debug!("version at {txn_id} includes a committed delta at {version_id}");
+            version = DenseCow::create(version, delta.clone()).into();
+        }
+
+        if let Some(delta) = self.pending.get(&txn_id) {
             version = DenseCow::create(version, delta.clone()).into();
         }
 
@@ -78,6 +83,7 @@ where
         canon: DenseAccess<Txn, FE, T>,
     ) -> TCResult<DenseCow<FE, DenseAccess<Txn, FE, T>>> {
         if self.commits.contains(&txn_id) {
+            debug_assert!(!self.pending.contains_key(&txn_id));
             return Err(conflict!("{txn_id} has already been committed"));
         } else if self.finalized > Some(txn_id) {
             return Err(conflict!("dense tensor is already finalized at {txn_id}"));

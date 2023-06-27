@@ -201,7 +201,23 @@ where
                 .map(|slice| slice.into_vec())
                 .map_err(TCError::from)
         })
-        .take_while(|result| future::ready(result.is_ok()))
+        .take_while(|result| {
+            future::ready({
+                match result {
+                    Ok(_) => true,
+                    Err(cause) => {
+                        #[cfg(debug_assertions)]
+                        panic!("failed to read dense block! {cause}");
+
+                        #[cfg(not(debug_assertions))]
+                        {
+                            log::error!("failed to read dense block! {cause}");
+                            false
+                        }
+                    }
+                }
+            })
+        })
         .map(|result| result.expect("buffer"));
 
     Ok(Box::pin(blocks))

@@ -11,6 +11,7 @@ use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 use ha_ndarray::*;
+use log::debug;
 use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
@@ -600,9 +601,13 @@ where
     }
 
     async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        debug!("DenseCow::read_block {block_id} at {txn_id}");
+
         let dir = self.dir.read().await;
 
         if let Some(block) = dir.get_file(&block_id) {
+            debug!("DenseCow::read_block {block_id} at {txn_id} found new block");
+
             let buffer: Buffer<S::DType> = block
                 .read_owned::<Buffer<S::DType>>()
                 .map_ok(|block| block.clone().into())
@@ -610,12 +615,16 @@ where
                 .await?;
 
             let block_axis = block_axis_for(self.shape(), self.block_size());
-            let block_data_size = S::DType::dtype().size() * buffer.len();
-            let block_shape = block_shape_for(block_axis, self.shape(), block_data_size);
+            let block_shape = block_shape_for(block_axis, self.shape(), buffer.len());
             let block = ArrayBase::<Buffer<S::DType>>::new(block_shape, buffer)?;
 
             Ok(block.into())
         } else {
+            debug!(
+                "DenseCow::read_block {block_id} at {txn_id} reading from {source:?}",
+                source = self.source
+            );
+
             self.source
                 .read_block(txn_id, block_id)
                 .map_ok(Array::from)
