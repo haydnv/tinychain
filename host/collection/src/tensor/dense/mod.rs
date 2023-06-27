@@ -949,6 +949,23 @@ where
             other => Err(bad_request!("unsupported data type: {:?}", other.class())),
         }
     }
+
+    pub async fn random_normal(
+        store: fs::Dir<FE>,
+        shape: Shape,
+        mean: f32,
+        std: f32,
+    ) -> TCResult<Self> {
+        base::DenseBase::random_normal(store, shape, mean, std)
+            .map_ok(Self::F32)
+            .await
+    }
+
+    pub async fn random_uniform(store: fs::Dir<FE>, shape: Shape) -> TCResult<Self> {
+        base::DenseBase::random_uniform(store, shape)
+            .map_ok(Self::F32)
+            .await
+    }
 }
 
 macro_rules! base_dispatch {

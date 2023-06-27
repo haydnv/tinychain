@@ -6,7 +6,9 @@ use async_trait::async_trait;
 use destream::de;
 use freqfs::*;
 use futures::stream::{StreamExt, TryStreamExt};
-use ha_ndarray::{ArrayBase, Buffer, BufferWrite, CDatatype, NDArrayRead};
+use ha_ndarray::{
+    ArrayBase, ArrayOp, Buffer, BufferWrite, CDatatype, NDArrayMathScalar, NDArrayRead,
+};
 use safecast::AsType;
 
 use tc_error::*;
@@ -218,6 +220,97 @@ where
             shape,
             dtype: PhantomData,
         })
+    }
+
+    async fn construct_with_op<Ctr>(
+        dir: DirLock<FE>,
+        shape: Shape,
+        block_ctr: Ctr,
+    ) -> TCResult<Self>
+    where
+        Ctr: Fn(ha_ndarray::Context, ha_ndarray::Queue, usize) -> TCResult<Buffer<T>> + Copy,
+    {
+        shape.validate()?;
+
+        let size = shape.size();
+        let (block_size, num_blocks) = ideal_block_size_for(&shape);
+        let block_axis = block_axis_for(&shape, block_size);
+        let block_shape = block_shape_for(block_axis, &shape, block_size);
+
+        let context = ha_ndarray::Context::default()?;
+        let queue = ha_ndarray::Queue::new(context.clone(), block_size)?;
+
+        let mut blocks = futures::stream::iter(0..num_blocks as u64)
+            .map(|block_id| {
+                let block_size = if (block_id + 1) * (block_size as u64) > size {
+                    (size - (block_id * size)) as usize
+                } else {
+                    block_size
+                };
+
+                let context = context.clone();
+                let queue = queue.clone();
+                async move {
+                    block_ctr(context, queue, block_size).map(|buffer| (block_id, buffer))
+                }
+            })
+            .buffered(num_cpus::get());
+
+        let mut dir_guard = dir.write().await;
+
+        let dtype_size = T::dtype().size();
+        while let Some((block_id, buffer)) = blocks.try_next().await? {
+            let size_in_bytes = dtype_size * buffer.len();
+            dir_guard.create_file(block_id.to_string(), buffer, size_in_bytes)?;
+        }
+
+        std::mem::drop(dir_guard);
+
+        let block_map = block_map_for(num_blocks as u64, &shape, &block_shape)?;
+
+        Ok(Self {
+            dir,
+            block_map,
+            block_size,
+            shape,
+            dtype: PhantomData,
+        })
+    }
+}
+
+impl<FE> DenseFile<FE, f32>
+where
+    FE: DenseCacheFile + AsType<Buffer<f32>>,
+{
+    pub async fn random_normal(
+        dir: DirLock<FE>,
+        shape: Shape,
+        mean: f32,
+        std: f32,
+    ) -> TCResult<Self> {
+        Self::construct_with_op(dir, shape, |context, queue, block_size| {
+            let op = ha_ndarray::construct::RandomNormal::with_context(context, block_size)?;
+            let random = ArrayOp::new(vec![block_size], op)
+                .mul_scalar(std)?
+                .add_scalar(mean)?;
+
+            random
+                .read(&queue)
+                .and_then(|buffer| buffer.into_buffer())
+                .map_err(TCError::from)
+        })
+        .await
+    }
+
+    pub async fn random_uniform(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
+        Self::construct_with_op(dir, shape, |context, queue, block_size| {
+            let op = ha_ndarray::construct::RandomUniform::with_context(context, block_size)?;
+
+            ha_ndarray::ops::Op::enqueue(&op, &queue)
+                .map(|buffer| buffer)
+                .map_err(TCError::from)
+        })
+        .await
     }
 }
 

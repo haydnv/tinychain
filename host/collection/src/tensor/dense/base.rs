@@ -136,6 +136,29 @@ where
     }
 }
 
+impl<Txn, FE> DenseBase<Txn, FE, f32>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + Clone,
+{
+    pub async fn random_normal(
+        store: fs::Dir<FE>,
+        shape: Shape,
+        mean: f32,
+        std: f32,
+    ) -> TCResult<Self> {
+        let (dir, canon, versions) = fs_init(store).await?;
+        let canon = DenseFile::random_normal(canon, shape, mean, std).await?;
+        Ok(Self::new(dir, canon, versions))
+    }
+
+    pub async fn random_uniform(store: fs::Dir<FE>, shape: Shape) -> TCResult<Self> {
+        let (dir, canon, versions) = fs_init(store).await?;
+        let canon = DenseFile::random_uniform(canon, shape).await?;
+        Ok(Self::new(dir, canon, versions))
+    }
+}
+
 impl<Txn, FE, T> DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,

@@ -20,6 +20,7 @@ where
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     TableFile<State::Txn, State::FE>:
         fs::Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
+    Number: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Vec<Tensor<State::Txn, State::FE>>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
