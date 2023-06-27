@@ -8,7 +8,6 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use collate::Collate;
 use destream::de;
-use freqfs::FileLoad;
 use futures::{join, try_join, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ha_ndarray::*;
 use safecast::{AsType, CastFrom, CastInto};
@@ -1601,7 +1600,7 @@ where
 impl<Txn, FE> de::FromStream for SparseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: FileLoad + AsType<Node> + ThreadSafe + Clone,
+    FE: AsType<Node> + ThreadSafe + Clone,
 {
     type Context = Txn;
 
@@ -1679,7 +1678,7 @@ impl<Txn, FE> SparseVisitor<Txn, FE> {
 impl<Txn, FE> de::Visitor for SparseVisitor<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: FileLoad + AsType<Node> + Clone,
+    FE: AsType<Node> + ThreadSafe + Clone,
 {
     type Value = SparseBase<Txn, FE>;
 

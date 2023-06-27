@@ -7,7 +7,6 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use destream::de::Error;
 use futures::future::{join_all, Future, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::{debug, info, trace, warn};
@@ -15,21 +14,22 @@ use safecast::TryCastInto;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+use tc_chain::Recover;
 use tc_error::*;
-use tc_transact::fs::Persist;
+use tc_state::chain::BlockChain;
+use tc_state::State;
+use tc_transact::fs;
 use tc_transact::lock::{TxnLock, TxnLockVersionGuard};
-use tc_transact::{Transact, Transaction};
+use tc_transact::{RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Host, Link, Value};
 use tcgeneric::*;
 
-use crate::chain::{BlockChain, Recover};
-use crate::fs;
-use crate::state::State;
-use crate::txn::{Actor, Txn, TxnId};
+use crate::txn::Txn;
 
 pub use class::Class;
 pub use dir::{Dir, DirEntry, DirItem};
 pub use library::Library;
+pub use replica::{Replica, REPLICAS};
 pub use service::Service;
 
 pub mod class;
@@ -38,17 +38,7 @@ pub mod library;
 pub mod service;
 
 mod leader;
-
-/// The name of the endpoint which serves a [`Link`] to each of this [`Cluster`]'s replicas.
-pub const REPLICAS: Label = label("replicas");
-
-/// A state which supports replication in a [`Cluster`]
-#[async_trait]
-pub trait Replica {
-    async fn state(&self, txn_id: TxnId) -> TCResult<State>;
-
-    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()>;
-}
+mod replica;
 
 /// The static configuration of a [`Cluster`]
 #[derive(Clone)]
@@ -56,12 +46,12 @@ pub struct Schema {
     path: TCPathBuf,
     host: Host,
     lead: Option<Host>,
-    actor: Arc<Actor>, // TODO: remove this and use the public key of the gateway instead
+    actor: Arc<tc_fs::Actor>, // TODO: remove this and use the public key of the gateway instead
 }
 
 impl Schema {
     /// Construct a new [`Schema`].
-    pub fn new(host: Host, path: TCPathBuf, lead: Option<Host>, actor: Arc<Actor>) -> Self {
+    pub fn new(host: Host, path: TCPathBuf, lead: Option<Host>, actor: Arc<tc_fs::Actor>) -> Self {
         Self {
             path,
             host,
@@ -118,20 +108,20 @@ impl Schema {
 #[derive(Clone)]
 pub struct Cluster<T> {
     schema: Schema,
-    actor: Arc<Actor>,
+    actor: Arc<tc_fs::Actor>,
     replicas: TxnLock<BTreeSet<Host>>,
     led: Arc<RwLock<BTreeMap<TxnId, leader::Leader>>>,
     state: T,
 }
 
 impl<T> Cluster<T> {
-    fn with_state(schema: Schema, txn_id: TxnId, state: T) -> Self {
+    fn with_state(schema: Schema, state: T) -> Self {
         let mut replicas = BTreeSet::new();
         replicas.insert(schema.host.clone());
 
         Self {
             schema,
-            actor: Arc::new(Actor::new(Value::None)),
+            actor: Arc::new(tc_fs::Actor::new(Value::None)),
             replicas: TxnLock::new(replicas),
             led: Arc::new(RwLock::new(BTreeMap::new())),
             state,
@@ -544,52 +534,54 @@ where
 }
 
 #[async_trait]
-impl<T: Persist<fs::CacheBlock, Txn = Txn>> Persist<fs::CacheBlock> for Cluster<BlockChain<T>>
+impl<T: fs::Persist<tc_fs::CacheBlock, Txn = Txn>> fs::Persist<tc_fs::CacheBlock>
+    for Cluster<BlockChain<T>>
 where
-    BlockChain<T>: Persist<fs::CacheBlock, Schema = (), Txn = Txn>,
+    BlockChain<T>: fs::Persist<tc_fs::CacheBlock, Schema = (), Txn = Txn>,
 {
     type Txn = Txn;
     type Schema = Schema;
 
-    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
         BlockChain::create(txn_id, (), store)
-            .map_ok(|state| Self::with_state(schema, txn_id, state))
+            .map_ok(|state| Self::with_state(schema, state))
             .await
     }
 
-    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
         BlockChain::load(txn_id, (), store)
-            .map_ok(|state| Self::with_state(schema, txn_id, state))
+            .map_ok(|state| Self::with_state(schema, state))
             .await
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
-        Persist::dir(&self.state)
+    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
+        fs::Persist::dir(&self.state)
     }
 }
 
 #[async_trait]
-impl<T: Persist<fs::CacheBlock, Txn = Txn>> Persist<fs::CacheBlock> for Cluster<Dir<T>>
+impl<T: fs::Persist<tc_fs::CacheBlock, Txn = Txn>> fs::Persist<tc_fs::CacheBlock>
+    for Cluster<Dir<T>>
 where
-    Dir<T>: Persist<fs::CacheBlock, Schema = Schema, Txn = Txn>,
+    Dir<T>: fs::Persist<tc_fs::CacheBlock, Schema = Schema, Txn = Txn>,
 {
     type Txn = Txn;
     type Schema = Schema;
 
-    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
         Dir::create(txn_id, schema.clone(), store)
-            .map_ok(|state| Self::with_state(schema, txn_id, state))
+            .map_ok(|state| Self::with_state(schema, state))
             .await
     }
 
-    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
         Dir::load(txn_id, schema.clone(), store)
-            .map_ok(|state| Self::with_state(schema, txn_id, state))
+            .map_ok(|state| Self::with_state(schema, state))
             .await
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<fs::CacheBlock> {
-        Persist::dir(&self.state)
+    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
+        fs::Persist::dir(&self.state)
     }
 }
 
@@ -646,7 +638,12 @@ where
 }
 
 #[async_trait]
-impl<T: Recover + Send + Sync> Recover for Cluster<T> {
+impl<T> Recover<tc_fs::CacheBlock> for Cluster<T>
+where
+    T: Recover<tc_fs::CacheBlock, Txn = Txn> + Send + Sync,
+{
+    type Txn = Txn;
+
     async fn recover(&self, txn: &Txn) -> TCResult<()> {
         self.state.recover(txn).await
     }

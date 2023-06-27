@@ -19,6 +19,7 @@ futures = "0.3"
 freqfs = { path = "../../../freqfs", features = ["all"] }
 get-size = "0.1"
 get-size-derive = "0.1"
+num_cpus = "1.15"
 rand = "0.8"
 safecast = { path = "../../../safecast" }
 sha2 = "0.10"

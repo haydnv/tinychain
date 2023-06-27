@@ -46,7 +46,7 @@ impl<FE, T> Clone for DenseFile<FE, T> {
 impl<FE, T> DenseFile<FE, T>
 where
     FE: DenseCacheFile + AsType<Buffer<T>>,
-    T: CDatatype + DType + de::FromStream<Context = ()>,
+    T: CDatatype + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     pub async fn constant(dir: DirLock<FE>, shape: Shape, value: T) -> TCResult<Self> {
@@ -238,7 +238,7 @@ where
 #[async_trait]
 impl<FE, T> DenseInstance for DenseFile<FE, T>
 where
-    FE: FileLoad + AsType<Buffer<T>>,
+    FE: AsType<Buffer<T>> + ThreadSafe,
     T: CDatatype + DType + 'static,
     Buffer<T>: de::FromStream<Context = ()>,
 {
@@ -310,7 +310,7 @@ where
 #[async_trait]
 impl<'a, FE, T> DenseWrite for DenseFile<FE, T>
 where
-    FE: FileLoad + AsType<Buffer<T>>,
+    FE: AsType<Buffer<T>> + ThreadSafe,
     T: CDatatype + DType + 'static,
     Buffer<T>: de::FromStream<Context = ()>,
 {
@@ -363,7 +363,7 @@ where
 #[async_trait]
 impl<'a, FE, T> DenseWriteLock<'a> for DenseFile<FE, T>
 where
-    FE: FileLoad + AsType<Buffer<T>>,
+    FE: AsType<Buffer<T>> + ThreadSafe,
     T: CDatatype + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
@@ -431,7 +431,7 @@ pub struct DenseFileWriteGuard<'a, FE> {
 impl<'a, FE> DenseFileWriteGuard<'a, FE> {
     pub async fn merge<T>(&self, other: DirLock<FE>) -> TCResult<()>
     where
-        FE: FileLoad + AsType<Buffer<T>>,
+        FE: AsType<Buffer<T>> + ThreadSafe,
         T: CDatatype + DType + 'static,
         Buffer<T>: de::FromStream<Context = ()>,
     {
@@ -460,7 +460,7 @@ impl<'a, FE> DenseFileWriteGuard<'a, FE> {
 #[async_trait]
 impl<'a, FE, T> DenseWriteGuard<T> for DenseFileWriteGuard<'a, FE>
 where
-    FE: FileLoad + AsType<Buffer<T>>,
+    FE: AsType<Buffer<T>> + ThreadSafe,
     T: CDatatype + DType + 'static,
     Buffer<T>: de::FromStream<Context = ()>,
 {

@@ -3270,7 +3270,7 @@ where
 #[async_trait]
 impl<FE, T> DenseInstance for DenseVersion<FE, T>
 where
-    FE: FileLoad + AsType<Buffer<T>>,
+    FE: AsType<Buffer<T>> + ThreadSafe,
     T: CDatatype + DType + 'static,
     Buffer<T>: de::FromStream<Context = ()>,
 {
@@ -3326,7 +3326,7 @@ where
 #[async_trait]
 impl<'a, FE, T> DenseWriteLock<'a> for DenseVersion<FE, T>
 where
-    FE: FileLoad + AsType<Buffer<T>>,
+    FE: AsType<Buffer<T>> + ThreadSafe,
     T: CDatatype + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {

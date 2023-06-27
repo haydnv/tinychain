@@ -21,6 +21,8 @@ pub use schema::TableSchema;
 pub use stream::Rows;
 pub(crate) use stream::TableView;
 
+pub mod public;
+
 mod file;
 mod schema;
 mod stream;

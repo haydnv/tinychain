@@ -1,6 +1,6 @@
 //! TinyChain is a distributed state machine with an HTTP + JSON API designed to provide
 //! cross-service transactions across an ensemble of microservices which implement the
-//! TinyChain protocol. TinyChain itself is also a Turing-complete application platform.
+//! TinyChain protocol.
 //!
 //! TinyChain currently supports `BlockChain`, `BTree`, `Table`, and `Tensor` collection types,
 //! with more planned for the future.
@@ -14,24 +14,15 @@ use std::sync::Arc;
 
 use futures::future::TryFutureExt;
 
-use crate::fs::CacheBlock;
 pub use tc_error::*;
 
-pub mod chain;
-pub mod closure;
 pub mod cluster;
-pub mod collection;
-pub mod fs;
 pub mod gateway;
 pub mod kernel;
-pub mod object;
-pub mod scalar;
-pub mod state;
-pub mod stream;
 pub mod txn;
 
 mod http;
-mod route;
+mod public;
 
 /// The minimum size of the transactional filesystem cache, in bytes
 pub const MIN_CACHE_SIZE: usize = 5000;
@@ -41,12 +32,12 @@ type UserSpace = (kernel::Class, kernel::Library, kernel::Service);
 
 /// Build a new host.
 pub struct Builder {
-    cache: Arc<freqfs::Cache<fs::CacheBlock>>,
+    cache: Arc<freqfs::Cache<tc_fs::CacheBlock>>,
     data_dir: PathBuf,
     gateway: Option<gateway::Config>,
     lead: Option<tc_value::Host>,
     public_key: Option<bytes::Bytes>,
-    workspace: freqfs::DirLock<fs::CacheBlock>,
+    workspace: freqfs::DirLock<tc_fs::CacheBlock>,
 }
 
 impl Builder {
@@ -60,7 +51,7 @@ impl Builder {
 
         Self::maybe_create(&workspace);
 
-        let cache = freqfs::Cache::<fs::CacheBlock>::new(cache_size.into(), None);
+        let cache = freqfs::Cache::<tc_fs::CacheBlock>::new(cache_size.into(), None);
 
         let workspace = cache.clone().load(workspace).expect("workspace");
 
@@ -111,14 +102,14 @@ impl Builder {
         }
     }
 
-    async fn load_dir(&self, path: PathBuf, txn_id: tc_transact::TxnId) -> fs::Dir {
+    async fn load_dir(&self, path: PathBuf, txn_id: tc_transact::TxnId) -> tc_fs::Dir {
         Self::maybe_create(&path);
 
         log::debug!("load {} into cache", path.display());
         let cache = self.cache.clone().load(path).expect("cache dir");
 
         log::debug!("load {:?} into the transactional filesystem", cache);
-        fs::Dir::load(txn_id, cache).await.expect("store")
+        tc_fs::Dir::load(txn_id, cache).await.expect("store")
     }
 
     async fn load_or_create<T>(
@@ -127,7 +118,7 @@ impl Builder {
         path_label: tcgeneric::PathLabel,
     ) -> cluster::Cluster<T>
     where
-        cluster::Cluster<T>: tc_transact::fs::Persist<CacheBlock, Schema = cluster::Schema, Txn = txn::Txn>
+        cluster::Cluster<T>: tc_transact::fs::Persist<tc_fs::CacheBlock, Schema = cluster::Schema, Txn = txn::Txn>
             + Send
             + Sync,
     {
@@ -148,11 +139,11 @@ impl Builder {
 
         let actor_id = tcgeneric::TCPathBuf::default().into();
         let actor = if let Some(public_key) = &self.public_key {
-            txn::Actor::with_public_key(actor_id, public_key)
+            tc_fs::Actor::with_public_key(actor_id, public_key)
                 .map(Arc::new)
                 .expect("actor")
         } else {
-            Arc::new(txn::Actor::new(actor_id))
+            Arc::new(tc_fs::Actor::new(actor_id))
         };
 
         let schema = cluster::Schema::new(host, path_label.into(), self.lead.clone(), actor);
@@ -163,16 +154,18 @@ impl Builder {
 
     async fn load_userspace(
         &self,
-        txn_server: txn::TxnServer,
-        gateway: Arc<gateway::Gateway>,
+        txn_server: tc_fs::TxnServer,
+        gateway: gateway::Gateway,
     ) -> UserSpace {
-        use chain::Recover;
+        use tc_chain::Recover;
         use tc_transact::Transact;
 
         let txn_id = tc_transact::TxnId::new(gateway::Gateway::time());
         let token = gateway.new_token(&txn_id).expect("token");
+
+        let gateway: Box<dyn tc_fs::Gateway<State = tc_state::State>> = Box::new(gateway);
         let txn = txn_server
-            .new_txn(gateway, txn_id, token)
+            .new_txn(Arc::new(gateway), txn_id, token)
             .await
             .expect("transaction");
 
@@ -200,11 +193,11 @@ impl Builder {
         (class, library, service)
     }
 
-    async fn bootstrap(self) -> (Arc<gateway::Gateway>, UserSpace) {
+    async fn bootstrap(self) -> (gateway::Gateway, UserSpace) {
         let gateway_config = self.gateway.clone().expect("gateway config");
 
         let kernel = kernel::Kernel::bootstrap();
-        let txn_server = txn::TxnServer::new(self.workspace.clone()).await;
+        let txn_server = tc_fs::TxnServer::new(self.workspace.clone()).await;
         let gateway = gateway::Gateway::new(gateway_config.clone(), kernel, txn_server.clone());
 
         let (class, library, service) = self.load_userspace(txn_server.clone(), gateway).await;
@@ -217,7 +210,7 @@ impl Builder {
         (gateway, (class, library, service))
     }
 
-    async fn replicate(gateway: Arc<gateway::Gateway>, userspace: UserSpace) -> TCResult<()> {
+    async fn replicate(gateway: gateway::Gateway, userspace: UserSpace) -> TCResult<()> {
         let txn = gateway
             .new_txn(tc_transact::TxnId::new(gateway::Gateway::time()), None)
             .await?;

@@ -8,17 +8,18 @@ use futures::join;
 use log::{debug, info};
 
 use tc_error::*;
-use tc_transact::{Transact, Transaction, TxnId};
+use tc_fs::hypothetical;
+use tc_state::chain::BlockChain;
+use tc_state::State;
+use tc_transact::public::{Public, Route};
+use tc_transact::{RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath};
 
-use crate::chain::BlockChain;
 use crate::cluster::{Cluster, Dir, DirEntry, Replica};
-use crate::route::{Public, Route};
-use crate::state::State;
-use crate::txn::Txn;
+use crate::txn::{Hypothetical, Txn};
 
-use super::{hypothetical, Dispatch, Hypothetical};
+use super::Dispatch;
 
 /// The type of the class directory
 pub type Class = Cluster<Dir<crate::cluster::Class>>;
@@ -73,10 +74,10 @@ impl UserSpace {
 #[async_trait]
 impl<T: Transact + Clone + Send + Sync + 'static> Dispatch for Cluster<Dir<T>>
 where
-    Cluster<BlockChain<T>>: Route,
+    Cluster<BlockChain<T>>: Route<State>,
     BlockChain<T>: Replica,
     Dir<T>: Replica,
-    Self: Route,
+    Self: Route<State>,
 {
     async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         let (suffix, cluster) = self.lookup(*txn.id(), path)?;
@@ -230,7 +231,7 @@ async fn execute_post<T>(
 ) -> TCResult<State>
 where
     T: Replica + Transact + Send + Sync + fmt::Debug,
-    Cluster<T>: Route,
+    Cluster<T>: Route<State>,
 {
     let txn = maybe_claim_leadership(cluster, txn).await?;
 
@@ -249,7 +250,7 @@ async fn execute_put<T>(
 ) -> TCResult<()>
 where
     T: Replica + Transact + Send + Sync + fmt::Debug,
-    Cluster<T>: Route,
+    Cluster<T>: Route<State>,
 {
     let txn = maybe_claim_leadership(cluster, txn).await?;
 
@@ -291,7 +292,7 @@ async fn execute_delete<T>(
 ) -> TCResult<()>
 where
     T: Replica + Transact + Send + Sync + fmt::Debug,
-    Cluster<T>: Route,
+    Cluster<T>: Route<State>,
 {
     let txn = maybe_claim_leadership(cluster, txn).await?;
 
@@ -334,7 +335,7 @@ where
     R: Send + Sync,
     Fut: Future<Output = TCResult<R>> + Send,
     F: FnOnce(Txn, &'a Cluster<T>) -> Fut + Send + 'a,
-    Cluster<T>: Route,
+    Cluster<T>: Route<State>,
 {
     Box::pin(async move {
         if let Some(owner) = txn.owner() {

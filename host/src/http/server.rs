@@ -1,11 +1,9 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use destream::de::Error;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
@@ -13,12 +11,13 @@ use hyper::{Body, Response};
 use serde::de::DeserializeOwned;
 
 use tc_error::*;
+use tc_fs::Gateway as GatewayInstance;
+use tc_state::State;
 use tc_transact::{IntoView, TxnId};
 use tcgeneric::{NetworkTime, TCPathBuf};
 
 use crate::gateway::Gateway;
-use crate::state::State;
-use crate::txn::*;
+use crate::txn::Txn;
 
 use super::{Accept, Encoding};
 
@@ -26,11 +25,11 @@ type GetParams = HashMap<String, String>;
 
 /// TinyChain's HTTP server. Should only be used through a [`Gateway`].
 pub struct HTTPServer {
-    gateway: Arc<Gateway>,
+    gateway: Gateway,
 }
 
 impl HTTPServer {
-    pub fn new(gateway: Arc<Gateway>) -> Self {
+    pub fn new(gateway: Gateway) -> Self {
         Self { gateway }
     }
 
@@ -156,7 +155,7 @@ impl HTTPServer {
             TxnId::new(NetworkTime::now())
         };
 
-        let txn = self.gateway.new_txn(txn_id, token).await?;
+        let txn = self.gateway.clone().new_txn(txn_id, token).await?;
         Ok((params, txn, accept_encoding, content_type))
     }
 

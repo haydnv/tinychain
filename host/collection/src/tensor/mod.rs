@@ -1,31 +1,32 @@
-/// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
-use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{Div, Rem};
+/// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
+use std::{fmt, iter};
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use collate::Collator;
 use destream::{de, en};
 use futures::TryFutureExt;
-use safecast::AsType;
+use safecast::{AsType, CastFrom, CastInto, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::{fs, IntoView, Transact, Transaction, TxnId};
-use tc_value::{Number, NumberType, ValueType};
+use tc_value::{Number, NumberType, Value, ValueType};
 use tcgeneric::{
     label, path_label, Class, Instance, Label, NativeClass, PathLabel, PathSegment, TCPathBuf,
     ThreadSafe,
 };
 
-pub use dense::{DenseBase, DenseCacheFile, DenseView};
+pub use dense::{Buffer, DenseBase, DenseCacheFile, DenseView};
 pub use shape::{AxisRange, Range, Shape};
 pub use sparse::{Node, SparseBase, SparseView};
 
 mod block;
 mod complex;
 pub mod dense;
+pub mod public;
 pub mod shape;
 pub mod sparse;
 mod transform;
@@ -61,6 +62,42 @@ impl From<(NumberType, Shape)> for Schema {
     fn from(schema: (NumberType, Shape)) -> Self {
         let (dtype, shape) = schema;
         Self { dtype, shape }
+    }
+}
+
+impl TryCastFrom<Value> for Schema {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Tuple(tuple) => TryCastInto::<(Vec<u64>, TCPathBuf)>::can_cast_into(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Tuple(tuple) => {
+                let (shape, dtype): (Vec<u64>, TCPathBuf) = tuple.opt_cast_into()?;
+                let shape = Shape::from(shape);
+                let dtype = ValueType::from_path(&dtype)?;
+                match dtype {
+                    ValueType::Number(dtype) => Some(Schema { shape, dtype }),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+impl CastFrom<Schema> for Value {
+    fn cast_from(schema: Schema) -> Self {
+        Value::Tuple(
+            vec![
+                ValueType::Number(schema.dtype).path().cast_into(),
+                schema.shape.cast_into(),
+            ]
+            .into(),
+        )
     }
 }
 
@@ -542,6 +579,21 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for Dense<Txn, FE> {
             Self::Base(base) => base.shape(),
             Self::View(view) => view.shape(),
         }
+    }
+}
+
+impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node> + Clone> TensorConvert
+    for Dense<Txn, FE>
+{
+    type Dense = Self;
+    type Sparse = Sparse<Txn, FE>;
+
+    fn into_dense(self) -> Self::Dense {
+        self
+    }
+
+    fn into_sparse(self) -> Self::Sparse {
+        Sparse::View(self.into_view().into_sparse())
     }
 }
 
@@ -1639,9 +1691,21 @@ where
     }
 }
 
+impl<Txn, FE> From<Dense<Txn, FE>> for Tensor<Txn, FE> {
+    fn from(dense: Dense<Txn, FE>) -> Self {
+        Self::Dense(dense)
+    }
+}
+
 impl<Txn, FE> From<DenseView<Txn, FE>> for Tensor<Txn, FE> {
     fn from(dense: DenseView<Txn, FE>) -> Self {
         Self::Dense(dense.into())
+    }
+}
+
+impl<Txn, FE> From<Sparse<Txn, FE>> for Tensor<Txn, FE> {
+    fn from(sparse: Sparse<Txn, FE>) -> Self {
+        Self::Sparse(sparse)
     }
 }
 
@@ -1917,6 +1981,57 @@ where
             TensorType::Sparse => map.next_value(self.txn).map_ok(TensorBase::Sparse).await,
         }
     }
+}
+
+/// Broadcast the given `left` and `right` tensors into their [`broadcast_shape`].
+pub fn broadcast<L, R>(left: L, right: R) -> TCResult<(L::Broadcast, R::Broadcast)>
+where
+    L: TensorInstance + TensorTransform,
+    R: TensorInstance + TensorTransform,
+{
+    let broadcast_shape = broadcast_shape(left.shape(), right.shape())?;
+
+    Ok((
+        left.broadcast(broadcast_shape.clone())?,
+        right.broadcast(broadcast_shape)?,
+    ))
+}
+
+/// Compute the shape returned by broadcasting the given shapes together.
+///
+/// For rules of broadcasting, see:
+/// [https://pytorch.org/docs/stable/notes/broadcasting.html](https://pytorch.org/docs/stable/notes/broadcasting.html)
+pub fn broadcast_shape(left: &[u64], right: &[u64]) -> TCResult<Shape> {
+    let ndim = Ord::max(left.len(), right.len());
+
+    let left: Vec<u64> = iter::repeat(1)
+        .take(ndim - left.len())
+        .chain(left.iter().copied())
+        .collect();
+
+    let right: Vec<u64> = iter::repeat(1)
+        .take(ndim - right.len())
+        .chain(right.iter().copied())
+        .collect();
+
+    let mut shape = Vec::with_capacity(ndim);
+    for (l, r) in left.iter().zip(&right) {
+        if l == r || *l == 1 {
+            shape.push(*r);
+        } else if *r == 1 {
+            shape.push(*l)
+        } else {
+            return Err(bad_request!(
+                "cannot broadcast dimension {} into {} (tensor shapes are {:?} and {:?}",
+                l,
+                r,
+                left,
+                right
+            ));
+        }
+    }
+
+    Ok(shape.into())
 }
 
 #[inline]

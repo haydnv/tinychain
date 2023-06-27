@@ -1,22 +1,18 @@
 /// A replicated, versioned set of [`InstanceClass`]es
-use std::convert::TryFrom;
 use std::fmt;
-use std::ops::Deref;
 
 use async_trait::async_trait;
 use futures::{TryFutureExt, TryStreamExt};
-use log::trace;
 
 use tc_error::*;
-use tc_transact::fs::*;
+use tc_scalar::Scalar;
+use tc_state::object::InstanceClass;
+use tc_state::State;
+use tc_transact::fs;
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::Version as VersionNumber;
+use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{Id, Map};
 
-use crate::fs;
-use crate::fs::CacheBlock;
-use crate::object::InstanceClass;
-use crate::state::State;
 use crate::txn::Txn;
 
 use super::DirItem;
@@ -24,11 +20,11 @@ use super::DirItem;
 /// A version of a set of [`InstanceClass`]es
 #[derive(Clone)]
 pub struct Version {
-    classes: fs::File<InstanceClass>,
+    classes: tc_fs::File<(Link, Map<Scalar>)>,
 }
 
 impl Version {
-    fn with_file(classes: fs::File<InstanceClass>) -> Self {
+    fn with_file(classes: tc_fs::File<(Link, Map<Scalar>)>) -> Self {
         Self { classes }
     }
 
@@ -37,18 +33,23 @@ impl Version {
 
         let mut blocks = self.classes.iter(txn_id).await?;
         while let Some((block_id, class)) = blocks.try_next().await? {
-            classes.insert((*block_id).clone(), class.clone().into());
+            let (link, proto) = class.clone();
+
+            classes.insert(
+                (*block_id).clone(),
+                State::Scalar(Scalar::Tuple(vec![link.into(), proto.into()].into())),
+            );
         }
 
         Ok(State::Map(classes))
     }
 
-    pub async fn get_class(
-        &self,
-        txn_id: TxnId,
-        name: &Id,
-    ) -> TCResult<impl Deref<Target = InstanceClass>> {
-        self.classes.read_block(txn_id, name).await
+    // TODO: there should be a way to return a reference to the block, not clone it
+    pub async fn get_class(&self, txn_id: TxnId, name: &Id) -> TCResult<InstanceClass> {
+        self.classes
+            .read_block(txn_id, name)
+            .map_ok(|block| InstanceClass::from(block.clone()))
+            .await
     }
 }
 
@@ -61,14 +62,14 @@ impl fmt::Debug for Version {
 /// A versioned set of [`InstanceClass`]es
 #[derive(Clone)]
 pub struct Class {
-    dir: fs::Dir,
+    dir: tc_fs::Dir,
 }
 
 impl Class {
     pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
         let file_names = self.dir.entry_names(txn_id).await?;
 
-        let mut latest: Option<Key> = None;
+        let mut latest: Option<fs::Key> = None;
         for version in file_names {
             if let Some(prior) = latest.as_mut() {
                 if &*version > &**prior {
@@ -122,7 +123,7 @@ impl DirItem for Class {
 
         for (name, class) in &schema {
             blocks
-                .create_block(txn_id, name.clone(), class.clone())
+                .create_block(txn_id, name.clone(), class.clone().into_inner())
                 .await?;
         }
 
@@ -148,11 +149,11 @@ impl Transact for Class {
 }
 
 #[async_trait]
-impl Persist<CacheBlock> for Class {
+impl fs::Persist<tc_fs::CacheBlock> for Class {
     type Txn = Txn;
     type Schema = ();
 
-    async fn create(txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
         if dir.is_empty(txn_id).await? {
             Ok(Self { dir })
         } else {
@@ -162,11 +163,11 @@ impl Persist<CacheBlock> for Class {
         }
     }
 
-    async fn load(_txn_id: TxnId, _schema: (), dir: fs::Dir) -> TCResult<Self> {
+    async fn load(_txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
         Ok(Self { dir })
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
+    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
         self.dir.clone().into_inner()
     }
 }

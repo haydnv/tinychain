@@ -1,0 +1,29 @@
+[package]
+name = "tc-chain"
+authors = ["code@tinychain.net"]
+version = "0.1.0"
+edition = "2021"
+description = "TinyChain's BlockChain and SyncChain data structures"
+license = "Apache-2.0"
+readme = "../README.md"
+repository = "https://github.com/haydnv/tinychain.git"
+
+[dependencies]
+async-hash = { path = "../../../async-hash" }
+async-trait = "0.1"
+bytes = "1.3"
+destream = { path = "../../../destream" }
+futures = "0.3"
+freqfs = { path = "../../../freqfs" }
+get-size = "0.1"
+hex = "0.4"
+log = { version = "0.4" }
+num_cpus = "1.13"
+safecast = { path = "../../../safecast" }
+tbon = { path = "../../../tbon" }
+tc-collection = { path = "../collection" }
+tc-error = { path = "../error" }
+tc-scalar = { path = "../scalar" }
+tc-transact = { path = "../transact" }
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }

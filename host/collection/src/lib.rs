@@ -4,10 +4,10 @@ use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
-use safecast::{as_type, AsType};
+use safecast::{as_type, AsType, TryCastFrom};
 
 use tc_error::*;
-use tc_transact::{AsyncHash, IntoView, Transaction};
+use tc_transact::{AsyncHash, IntoView, Transaction, TxnId};
 use tcgeneric::{
     path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
 };
@@ -16,22 +16,22 @@ use btree::{BTreeInstance, BTreeType};
 use table::{TableInstance, TableStream, TableType};
 use tensor::TensorType;
 
-mod base;
-mod schema;
-
+pub use base::{CollectionBase, CollectionVisitor};
 pub use btree::{BTree, BTreeFile};
+pub use schema::Schema;
 pub use table::Table;
 pub use tensor::{
     Dense, DenseBase, DenseCacheFile, DenseView, Sparse, SparseBase, SparseView, Tensor,
     TensorBase, TensorInstance, TensorView,
 };
 
+mod base;
+mod schema;
+
 pub mod btree;
+pub mod public;
 pub mod table;
 pub mod tensor;
-
-pub use base::{CollectionBase, CollectionVisitor};
-pub use schema::Schema;
 
 /// The prefix of the absolute path to [`Collection`] data types
 pub const PREFIX: PathLabel = path_label(&["state", "collection"]);
@@ -83,11 +83,20 @@ impl fmt::Debug for CollectionType {
     }
 }
 
-#[derive(Clone)]
 pub enum Collection<Txn, FE> {
     BTree(BTree<Txn, FE>),
     Table(Table<Txn, FE>),
     Tensor(Tensor<Txn, FE>),
+}
+
+impl<Txn, FE> Clone for Collection<Txn, FE> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::BTree(btree) => Self::BTree(btree.clone()),
+            Self::Table(table) => Self::Table(table.clone()),
+            Self::Tensor(tensor) => Self::Tensor(tensor.clone()),
+        }
+    }
 }
 
 as_type!(Collection<Txn, FE>, BTree, BTree<Txn, FE>);
@@ -128,32 +137,30 @@ where
 }
 
 #[async_trait]
-impl<T, FE> AsyncHash<FE> for Collection<T, FE>
+impl<Txn, FE> AsyncHash for Collection<Txn, FE>
 where
-    T: Transaction<FE>,
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
 {
-    type Txn = T;
-
-    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
+    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         let schema_hash = Hash::<Sha256>::hash(self.schema());
 
         let contents_hash = match self {
             Self::BTree(btree) => {
-                let keys = btree.keys(*txn.id()).await?;
+                let keys = btree.keys(txn_id).await?;
                 async_hash::hash_try_stream::<Sha256, _, _, _>(keys).await?
             }
             Self::Table(table) => {
-                let rows = table.rows(*txn.id()).await?;
+                let rows = table.rows(txn_id).await?;
                 async_hash::hash_try_stream::<Sha256, _, _, _>(rows).await?
             }
             Self::Tensor(tensor) => match tensor {
                 Tensor::Dense(dense) => {
-                    let elements = DenseView::from(dense).into_elements(*txn.id()).await?;
+                    let elements = DenseView::from(dense).into_elements(txn_id).await?;
                     async_hash::hash_try_stream::<Sha256, _, _, _>(elements).await?
                 }
                 Tensor::Sparse(sparse) => {
-                    let elements = SparseView::from(sparse).into_elements(*txn.id()).await?;
+                    let elements = SparseView::from(sparse).into_elements(txn_id).await?;
                     async_hash::hash_try_stream::<Sha256, _, _, _>(elements).await?
                 }
             },
@@ -183,13 +190,12 @@ impl<Txn, FE> From<BTreeFile<Txn, FE>> for Collection<Txn, FE> {
 }
 
 #[async_trait]
-impl<'en, T, FE> IntoView<'en, FE> for Collection<T, FE>
+impl<'en, Txn, FE> IntoView<'en, FE> for Collection<Txn, FE>
 where
-    T: Transaction<FE>,
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
-    Self: 'en,
 {
-    type Txn = T;
+    type Txn = Txn;
     type View = CollectionView<'en>;
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
@@ -220,7 +226,55 @@ where
     }
 }
 
-impl<T, FE> fmt::Debug for Collection<T, FE> {
+impl<Txn, FE> TryCastFrom<Collection<Txn, FE>> for BTree<Txn, FE> {
+    fn can_cast_from(collection: &Collection<Txn, FE>) -> bool {
+        match collection {
+            Collection::BTree(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(collection: Collection<Txn, FE>) -> Option<Self> {
+        match collection {
+            Collection::BTree(btree) => Some(btree),
+            _ => None,
+        }
+    }
+}
+
+impl<Txn, FE> TryCastFrom<Collection<Txn, FE>> for Table<Txn, FE> {
+    fn can_cast_from(collection: &Collection<Txn, FE>) -> bool {
+        match collection {
+            Collection::Table(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(collection: Collection<Txn, FE>) -> Option<Self> {
+        match collection {
+            Collection::Table(table) => Some(table),
+            _ => None,
+        }
+    }
+}
+
+impl<Txn, FE> TryCastFrom<Collection<Txn, FE>> for Tensor<Txn, FE> {
+    fn can_cast_from(collection: &Collection<Txn, FE>) -> bool {
+        match collection {
+            Collection::Tensor(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(collection: Collection<Txn, FE>) -> Option<Self> {
+        match collection {
+            Collection::Tensor(tensor) => Some(tensor),
+            _ => None,
+        }
+    }
+}
+
+impl<Txn, FE> fmt::Debug for Collection<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a Collection")
     }

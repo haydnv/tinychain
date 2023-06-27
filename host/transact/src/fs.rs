@@ -2,7 +2,6 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
-use freqfs::{FileLoad, FileSave};
 use futures::future::TryFutureExt;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use get_size::GetSize;
@@ -13,6 +12,7 @@ use tcgeneric::{Id, ThreadSafe};
 
 use super::{TCResult, Transact, Transaction, TxnId};
 
+pub use freqfs::{FileLoad, FileSave};
 pub use txfs::{Key, VERSIONS};
 
 /// The underlying filesystem directory type backing a [`Dir`]

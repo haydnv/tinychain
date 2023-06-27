@@ -4,12 +4,11 @@ use std::fmt;
 
 use async_trait::async_trait;
 use tc_error::*;
+use tc_state::State;
 use tc_transact::TxnId;
 use tc_value::Value;
 use tcgeneric::*;
 
-use crate::state::State;
-use crate::txn::hypothetical::{self, Hypothetical};
 use crate::txn::Txn;
 
 use system::System;
@@ -54,7 +53,7 @@ impl Kernel {
         }
     }
 
-    /// Initialize a new [`Kernel`] with no userspace.
+    /// Initialize a new [`Kernel`] with the given userspace.
     pub fn with_userspace(class: Class, library: Library, service: Service) -> Self {
         Self {
             system: System,

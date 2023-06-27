@@ -95,15 +95,13 @@ where
 }
 
 #[async_trait]
-impl<T, FE> AsyncHash<FE> for CollectionBase<T, FE>
+impl<T, FE> AsyncHash for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
     FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
 {
-    type Txn = T;
-
-    async fn hash(self, txn: &Self::Txn) -> TCResult<Output<Sha256>> {
-        Collection::from(self).hash(txn).await
+    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+        Collection::from(self).hash(txn_id).await
     }
 }
 

@@ -205,6 +205,15 @@ impl Reduce {
 
         axes.sort();
 
+        for i in 0..(axes.len() - 1) {
+            if axes[i] == axes[i + 1] {
+                return Err(bad_request!(
+                    "cannot reduce dimension {dim} more than once",
+                    dim = axes[i]
+                ));
+            }
+        }
+
         let mut shape = source_shape.clone();
 
         if keepdims {
