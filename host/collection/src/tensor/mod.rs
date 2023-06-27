@@ -15,8 +15,8 @@ use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::{fs, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Number, NumberType, Value, ValueType};
 use tcgeneric::{
-    label, path_label, Class, Instance, Label, NativeClass, PathLabel, PathSegment, TCPathBuf,
-    ThreadSafe,
+    label, path_label, Class, ClassVisitor, Instance, Label, NativeClass, PathLabel, PathSegment,
+    TCPathBuf, ThreadSafe,
 };
 
 pub use dense::{Buffer, DenseBase, DenseCacheFile, DenseView};
@@ -182,6 +182,15 @@ impl NativeClass for TensorType {
             Self::Dense => "dense",
             Self::Sparse => "sparse",
         }))
+    }
+}
+
+#[async_trait]
+impl de::FromStream for TensorType {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_any(ClassVisitor::default()).await
     }
 }
 
@@ -1971,10 +1980,8 @@ where
     }
 
     async fn visit_map<A: de::MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let class = map.next_key::<TCPathBuf>(()).await?;
+        let class = map.next_key::<TensorType>(()).await?;
         let class = class.ok_or_else(|| de::Error::invalid_length(0, Self::expecting()))?;
-        let class = TensorType::from_path(&class)
-            .ok_or_else(|| de::Error::invalid_type(class, "a tensor type (dense or sparse)"))?;
 
         match class {
             TensorType::Dense => map.next_value(self.txn).map_ok(TensorBase::Dense).await,

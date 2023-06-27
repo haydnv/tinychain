@@ -19,7 +19,7 @@ use tc_value::{
     Complex, ComplexType, DType, FloatType, IntType, Number, NumberClass, NumberCollator,
     NumberInstance, NumberType, UIntType, ValueType,
 };
-use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
+use tcgeneric::{Instance, ThreadSafe};
 
 use super::block::Block;
 use super::complex::ComplexRead;
@@ -1674,6 +1674,33 @@ impl<Txn, FE> SparseVisitor<Txn, FE> {
     }
 }
 
+impl<Txn, FE> SparseVisitor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe + Clone,
+{
+    async fn create_base<E: de::Error>(
+        &self,
+        dtype: NumberType,
+        shape: Shape,
+    ) -> Result<SparseBase<Txn, FE>, E> {
+        let (_name, store) = {
+            let mut cxt = self.txn.context().write().await;
+            cxt.create_dir_unique().map_err(de::Error::custom)?
+        };
+
+        let txn_id = *self.txn.id();
+        let schema = Schema::new(shape);
+        let store = fs::Dir::load(txn_id, store)
+            .map_err(de::Error::custom)
+            .await?;
+
+        fs::Persist::create(txn_id, (dtype, schema), store)
+            .map_err(de::Error::custom)
+            .await
+    }
+}
+
 #[async_trait]
 impl<Txn, FE> de::Visitor for SparseVisitor<Txn, FE>
 where
@@ -1687,85 +1714,113 @@ where
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let (dtype, shape) = seq.expect_next::<(TCPathBuf, Shape)>(()).await?;
-        let dtype = if let Some(ValueType::Number(dtype)) = ValueType::from_path(&dtype) {
+        let (dtype, shape) = seq.expect_next::<(ValueType, Shape)>(()).await?;
+        let dtype = if let ValueType::Number(dtype) = dtype {
             Ok(dtype)
         } else {
             Err(de::Error::invalid_type(dtype, "a type of number"))
         }?;
 
+        let txn = self.txn.clone();
+        let shape_clone = shape.clone();
         match dtype {
             NumberType::Bool => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::Bool)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::Bool(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::Complex(ComplexType::C32) => {
-                let visitor = seq
-                    .expect_next::<base::SparseComplexBaseVisitor<Txn, FE, f32>>((self.txn, shape))
-                    .await?;
-
-                visitor
-                    .end()
-                    .map_ok(SparseBase::C32)
-                    .map_err(de::Error::custom)
-                    .await
+                if let Some(visitor) = seq
+                    .next_element::<base::SparseComplexBaseVisitor<Txn, FE, f32>>((txn, shape))
+                    .await?
+                {
+                    visitor
+                        .end()
+                        .map_ok(SparseBase::C32)
+                        .map_err(de::Error::custom)
+                        .await
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::Complex(ComplexType::C64) => {
-                let visitor = seq
-                    .expect_next::<base::SparseComplexBaseVisitor<Txn, FE, f64>>((self.txn, shape))
-                    .await?;
-
-                visitor
-                    .end()
-                    .map_ok(SparseBase::C64)
-                    .map_err(de::Error::custom)
-                    .await
+                if let Some(visitor) = seq
+                    .next_element::<base::SparseComplexBaseVisitor<Txn, FE, f64>>((txn, shape))
+                    .await?
+                {
+                    visitor
+                        .end()
+                        .map_ok(SparseBase::C64)
+                        .map_err(de::Error::custom)
+                        .await
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::Float(FloatType::F32) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::F32)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::F32(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::Float(FloatType::F64) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::F64)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::F64(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::Int(IntType::I16) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::I16)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::I16(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::Int(IntType::I32) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::I32)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::I32(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::Int(IntType::I64) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::I64)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::I64(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::UInt(UIntType::U8) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::U8)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::U8(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::UInt(UIntType::U16) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::U16)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::U16(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::UInt(UIntType::U32) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::U32)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::U32(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::UInt(UIntType::U64) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::U64)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::U64(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             other => Err(de::Error::invalid_type(other, "a specific type of number")),
         }
