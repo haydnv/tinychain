@@ -222,6 +222,20 @@ where
         })
     }
 
+    pub async fn range(dir: DirLock<FE>, shape: Shape, start: T, stop: T) -> TCResult<Self>
+    where
+        T: fmt::Display,
+    {
+        Self::construct_with_op(dir, shape, |context, queue, block_size| {
+            let op = ha_ndarray::construct::Range::with_context(context, start, stop, block_size)?;
+
+            ha_ndarray::ops::Op::enqueue(&op, &queue)
+                .map(|buffer| buffer)
+                .map_err(TCError::from)
+        })
+        .await
+    }
+
     async fn construct_with_op<Ctr>(
         dir: DirLock<FE>,
         shape: Shape,

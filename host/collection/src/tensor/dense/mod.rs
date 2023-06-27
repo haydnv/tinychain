@@ -950,6 +950,74 @@ where
         }
     }
 
+    pub async fn range(
+        store: fs::Dir<FE>,
+        shape: Shape,
+        start: Number,
+        stop: Number,
+    ) -> TCResult<Self> {
+        let dtype = Ord::max(start.class(), stop.class());
+
+        match dtype {
+            NumberType::Bool => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::Bool)
+                    .await
+            }
+            NumberType::Complex(_) => Err(not_implemented!(
+                "construct a range of complex numbers [{start}..{stop})"
+            )),
+            NumberType::Number
+            | NumberType::Float(FloatType::Float)
+            | NumberType::Float(FloatType::F32) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::F32)
+                    .await
+            }
+            NumberType::Float(FloatType::F64) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::F64)
+                    .await
+            }
+            NumberType::Int(IntType::I16) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::I32)
+                    .await
+            }
+            NumberType::Int(IntType::Int) | NumberType::Int(IntType::I32) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::I32)
+                    .await
+            }
+            NumberType::Int(IntType::I64) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::I64)
+                    .await
+            }
+            NumberType::UInt(UIntType::U8) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::U8)
+                    .await
+            }
+            NumberType::UInt(UIntType::U16) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::U16)
+                    .await
+            }
+            NumberType::UInt(UIntType::UInt) | NumberType::UInt(UIntType::U32) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::U32)
+                    .await
+            }
+            NumberType::UInt(UIntType::U64) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::U64)
+                    .await
+            }
+            other => Err(bad_request!("cannot construct a range of type {other:?}")),
+        }
+    }
+
     pub async fn random_normal(
         store: fs::Dir<FE>,
         shape: Shape,

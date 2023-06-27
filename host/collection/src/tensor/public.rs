@@ -712,6 +712,7 @@ struct RangeHandler;
 impl<'a, State> Handler<'a, State> for RangeHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
+    State::FE: DenseCacheFile + Clone,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -720,17 +721,19 @@ where
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.matches::<(Vec<u64>, Number, Number)>() {
-                    // let (shape, start, stop): (Vec<u64>, Number, Number) =
-                    //     key.opt_cast_into().unwrap();
-                    //
-                    // let dir = create_dir(txn).await?;
-                    //
-                    // DenseBase::range(dir, *txn.id(), shape, start, stop)
-                    //     .map_ok(Dense::Base)
-                    //     .map_ok(Tensor::Dense)
-                    //     .map_ok(State::from)
-                    //     .await
-                    Err(not_implemented!("construct a dense tensor from a range"))
+                    let (shape, start, stop): (Vec<u64>, Number, Number) =
+                        key.opt_cast_into().expect("range parameters");
+
+                    let shape = Shape::from(shape);
+                    shape.validate()?;
+
+                    let dir = create_dir(txn).await?;
+
+                    DenseBase::range(dir, shape, start, stop)
+                        .map_ok(Dense::Base)
+                        .map_ok(Tensor::Dense)
+                        .map_ok(State::from)
+                        .await
                 } else {
                     Err(TCError::unexpected(key, "a Tensor schema"))
                 }
@@ -831,7 +834,7 @@ where
                     "constant" => Some(Box::new(ConstantHandler)),
                     "load" => Some(Box::new(LoadHandler { class: Some(*self) })),
                     "range" => Some(Box::new(RangeHandler)),
-                    // "random" if path.len() == 1 => Some(Box::new(RandomUniformHandler)),
+                    "random" if path.len() == 1 => Some(Box::new(RandomUniformHandler)),
                     _ => None,
                 },
                 Self::Sparse => match path[0].as_str() {

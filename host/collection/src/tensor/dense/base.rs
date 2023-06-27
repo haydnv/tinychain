@@ -134,6 +134,15 @@ where
         let canon = DenseFile::constant(canon, shape, value).await?;
         Ok(Self::new(dir, canon, versions))
     }
+
+    pub async fn range(store: fs::Dir<FE>, shape: Shape, start: T, stop: T) -> TCResult<Self>
+    where
+        T: fmt::Display,
+    {
+        let (dir, canon, versions) = fs_init(store).await?;
+        let canon = DenseFile::range(canon, shape, start, stop).await?;
+        Ok(Self::new(dir, canon, versions))
+    }
 }
 
 impl<Txn, FE> DenseBase<Txn, FE, f32>
