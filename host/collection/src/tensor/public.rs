@@ -240,6 +240,7 @@ struct ConstantHandler;
 impl<'a, State> Handler<'a, State> for ConstantHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
+    State::FE: DenseCacheFile + Clone,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -251,11 +252,10 @@ where
                     key.try_cast_into(|v| TCError::unexpected(v, "a Tensor schema"))?;
 
                 let shape = Shape::from(shape);
-                // constant(&txn, shape, value)
-                //     .map_ok(Tensor::from)
-                //     .map_ok(State::from)
-                //     .await
-                Err(not_implemented!("create dense tensor"))
+                constant::<State>(&txn, shape, value)
+                    .map_ok(Tensor::from)
+                    .map_ok(State::from)
+                    .await
             })
         }))
     }
@@ -1809,10 +1809,12 @@ async fn constant<State>(
 ) -> TCResult<Dense<State::Txn, State::FE>>
 where
     State: StateInstance,
+    State::FE: DenseCacheFile + Clone,
 {
-    // let file = create_file(txn).await?;
-    // DenseBase::constant(file, *txn.id(), shape, value).map_ok(Dense::Base).await
-    Err(not_implemented!("create dense tensor"))
+    let store = create_dir(txn).await?;
+    DenseBase::constant(store, *txn.id(), shape, value)
+        .map_ok(Dense::Base)
+        .await
 }
 
 async fn create_sparse<State>(
@@ -1864,16 +1866,28 @@ where
     fs::Dir::load(*txn.id(), dir).await
 }
 
-// async fn create_tensor<Txn, FE>(class: TensorType, schema: Schema, txn: &Txn) -> TCResult<Tensor<Txn, FE>> where Txn: Transaction<FE> {
-//     match class {
-//         TensorType::Dense => {
-//             constant(txn, schema.shape, schema.dtype.zero())
-//                 .map_ok(Tensor::from)
-//                 .await
-//         }
-//         TensorType::Sparse => create_sparse(txn, schema).map_ok(Tensor::from).await,
-//     }
-// }
+async fn create_tensor<State>(
+    class: TensorType,
+    schema: Schema,
+    txn: &State::Txn,
+) -> TCResult<Tensor<State::Txn, State::FE>>
+where
+    State: StateInstance,
+    State::FE: DenseCacheFile + Clone,
+{
+    match class {
+        TensorType::Dense => {
+            constant::<State>(txn, schema.shape, schema.dtype.zero())
+                .map_ok(Tensor::from)
+                .await
+        }
+        TensorType::Sparse => {
+            create_sparse::<State>(txn, schema)
+                .map_ok(Tensor::from)
+                .await
+        }
+    }
+}
 
 fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
     let bound = i64::try_cast_from(bound, |v| TCError::unexpected(v, "an axis bound"))?;

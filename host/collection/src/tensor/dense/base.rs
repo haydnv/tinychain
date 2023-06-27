@@ -125,6 +125,20 @@ impl<Txn, FE, T> Clone for DenseBase<Txn, FE, T> {
 impl<Txn, FE, T> DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + Clone,
+    T: CDatatype + DType,
+    Buffer<T>: de::FromStream<Context = ()>,
+{
+    pub async fn constant(store: fs::Dir<FE>, shape: Shape, value: T) -> TCResult<Self> {
+        let (dir, canon, versions) = fs_init(store).await?;
+        let canon = DenseFile::constant(canon, shape, value).await?;
+        Ok(Self::new(dir, canon, versions))
+    }
+}
+
+impl<Txn, FE, T> DenseBase<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>>,
     T: CDatatype + DType,
     Buffer<T>: de::FromStream<Context = ()>,

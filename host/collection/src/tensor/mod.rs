@@ -1,6 +1,6 @@
+/// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
 use std::marker::PhantomData;
 use std::ops::{Div, Rem};
-/// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
 use std::{fmt, iter};
 
 use async_hash::{Digest, Hash, Output};

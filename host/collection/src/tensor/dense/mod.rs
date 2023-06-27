@@ -15,8 +15,8 @@ use safecast::{AsType, CastFrom, CastInto};
 use tc_error::*;
 use tc_transact::{fs, Transact, Transaction, TxnId};
 use tc_value::{
-    Complex, ComplexType, DType, FloatType, IntType, Number, NumberCollator, NumberInstance,
-    NumberType, UIntType, ValueType,
+    Complex, ComplexType, DType, Float, FloatType, Int, IntType, Number, NumberCollator,
+    NumberInstance, NumberType, UInt, UIntType, ValueType,
 };
 use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
 
@@ -855,6 +855,99 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for DenseBase<Txn, FE> {
 
     fn class(&self) -> Self::Class {
         TensorType::Dense
+    }
+}
+
+impl<Txn, FE> DenseBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + Clone,
+{
+    pub async fn constant(
+        store: fs::Dir<FE>,
+        txn_id: TxnId,
+        shape: Shape,
+        value: Number,
+    ) -> TCResult<Self> {
+        match value {
+            Number::Bool(n) => {
+                base::DenseBase::constant(store, shape, if n.into() { 1u8 } else { 0 })
+                    .map_ok(Self::Bool)
+                    .await
+            }
+            Number::Complex(Complex::C32(n)) => {
+                let shape_clone = shape.clone();
+                let store_clone = store.clone();
+                let re = store_clone
+                    .create_dir(txn_id, REAL.into())
+                    .and_then(|store| base::DenseBase::constant(store, shape_clone, n.re));
+
+                let im = store
+                    .create_dir(txn_id, IMAG.into())
+                    .and_then(|store| base::DenseBase::constant(store, shape, n.im));
+
+                try_join!(re, im).map(Self::C32)
+            }
+            Number::Complex(Complex::C64(n)) => {
+                let shape_clone = shape.clone();
+                let store_clone = store.clone();
+                let re = store_clone
+                    .create_dir(txn_id, REAL.into())
+                    .and_then(|store| base::DenseBase::constant(store, shape_clone, n.re));
+
+                let im = store
+                    .create_dir(txn_id, IMAG.into())
+                    .and_then(|store| base::DenseBase::constant(store, shape, n.im));
+
+                try_join!(re, im).map(Self::C64)
+            }
+            Number::Float(Float::F32(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::F32)
+                    .await
+            }
+            Number::Float(Float::F64(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::F64)
+                    .await
+            }
+            Number::Int(Int::I16(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::I16)
+                    .await
+            }
+            Number::Int(Int::I32(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::I32)
+                    .await
+            }
+            Number::Int(Int::I64(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::I64)
+                    .await
+            }
+            Number::UInt(UInt::U8(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::U8)
+                    .await
+            }
+            Number::UInt(UInt::U16(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::U16)
+                    .await
+            }
+            Number::UInt(UInt::U32(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::U32)
+                    .await
+            }
+            Number::UInt(UInt::U64(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::U64)
+                    .await
+            }
+            other => Err(bad_request!("unsupported data type: {:?}", other.class())),
+        }
     }
 }
 
