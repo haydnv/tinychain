@@ -29,6 +29,7 @@ use super::{
 };
 
 use crate::tensor::block::Block;
+use crate::tensor::dense::block_map_for;
 use crate::tensor::sparse::{Node, SparseAccess, SparseInstance};
 use crate::tensor::transform::{Broadcast, Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
@@ -2022,23 +2023,9 @@ impl<S: DenseInstance> DenseSlice<S> {
         let num_blocks = div_ceil(
             source.size() as u64,
             block_shape.iter().product::<usize>() as u64,
-        ) as usize;
+        );
 
-        let block_map_shape = source
-            .shape()
-            .iter()
-            .take(block_axis)
-            .copied()
-            .map(|dim| {
-                dim.try_into()
-                    .map_err(|cause| bad_request!("invalid dimension: {dim} ({cause})"))
-            })
-            .collect::<Result<_, _>>()?;
-
-        let block_map = ArrayBase::<Vec<_>>::new(
-            block_map_shape,
-            (0..num_blocks as u64).into_iter().collect(),
-        )?;
+        let block_map = block_map_for(num_blocks, transform.shape().as_slice(), &block_shape)?;
 
         let mut block_map_bounds = Vec::with_capacity(block_axis + 1);
         for axis_range in transform.range().iter().take(block_axis).cloned() {
@@ -2053,6 +2040,7 @@ impl<S: DenseInstance> DenseSlice<S> {
                     let i = usize::try_from(*i)
                         .map_err(|cause| bad_request!("invalid index: {cause}"))?
                         / stride;
+
                     ha_ndarray::AxisBound::At(i)
                 }
                 AxisRange::In(axis_range, _step) => {
@@ -2087,13 +2075,13 @@ impl<S: DenseInstance> DenseSlice<S> {
         let block_map = block_map.slice(block_map_bounds)?;
         let block_map = ArrayBase::<Vec<u64>>::copy(&block_map)?;
 
-        let block_size = transform.shape().iter().product::<u64>() as usize / num_blocks;
+        let block_size = transform.shape().size() / num_blocks;
 
         Ok(Self {
             source,
             transform,
             block_map,
-            block_size,
+            block_size: block_size as usize,
         })
     }
 

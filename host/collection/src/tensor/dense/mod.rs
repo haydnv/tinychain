@@ -10,6 +10,7 @@ use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::{join, try_join};
 use ha_ndarray::*;
+use log::debug;
 use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
@@ -1813,34 +1814,62 @@ fn block_axis_for(shape: &[u64], block_size: usize) -> usize {
     debug_assert!(shape.iter().copied().all(|dim| dim > 0));
     debug_assert!(shape.iter().product::<u64>() >= block_size as u64);
 
-    let mut block_ndim = 1;
-    let mut size = 1;
-    for dim in shape.iter().rev() {
-        size *= dim;
+    debug!("compute block axis for shape {shape:?} with block size {block_size:?}");
 
-        if size > block_size as u64 {
-            break;
-        } else {
-            block_ndim += 1;
-        }
+    let mut block_axis = shape.len() - 1;
+    while shape[block_axis..].iter().product::<u64>() < block_size as u64 {
+        block_axis -= 1;
     }
 
-    shape.len() - block_ndim
+    block_axis
+}
+
+#[inline]
+fn block_map_for(
+    num_blocks: u64,
+    shape: &[u64],
+    block_shape: &[usize],
+) -> TCResult<ArrayBase<Vec<u64>>> {
+    debug_assert!(shape.len() >= block_shape.len(), "cannot construct a block map for a tensor of shape {shape:?} with blocks of shape {block_shape:?}");
+
+    let block_axis = shape.len() - block_shape.len();
+    let mut block_map_shape = BlockShape::with_capacity(block_axis + 1);
+    block_map_shape.extend(
+        shape
+            .iter()
+            .take(block_axis)
+            .copied()
+            .map(|dim| dim as usize),
+    );
+    block_map_shape.push(shape[block_axis] as usize / block_shape[0]);
+
+    ArrayBase::<Vec<_>>::new(
+        block_map_shape,
+        (0..num_blocks as u64).into_iter().collect(),
+    )
+    .map_err(TCError::from)
 }
 
 #[inline]
 fn block_shape_for(axis: usize, shape: &[u64], block_size: usize) -> BlockShape {
+    debug_assert!(!shape.is_empty());
+
     if axis == shape.len() - 1 {
         vec![block_size]
     } else {
-        let axis_dim = (shape.iter().skip(axis).product::<u64>() / block_size as u64) as usize;
-        debug_assert_eq!(block_size % axis_dim, 0);
+        let mut block_shape = shape[axis..]
+            .iter()
+            .copied()
+            .map(|dim| dim as usize)
+            .collect::<Vec<usize>>();
 
-        let mut block_shape = BlockShape::with_capacity(shape.len() - axis + 1);
-        block_shape.push(axis_dim);
-        block_shape.extend(shape.iter().skip(axis).copied().map(|dim| dim as usize));
+        let trailing_size = block_shape.iter().skip(1).product::<usize>();
 
-        debug_assert!(!block_shape.is_empty());
+        block_shape[0] = if block_size % trailing_size == 0 {
+            block_size / trailing_size
+        } else {
+            (block_size / trailing_size) + 1
+        };
 
         block_shape
     }

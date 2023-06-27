@@ -358,6 +358,12 @@ impl Slice {
     pub fn new(source_shape: Shape, range: Range) -> TCResult<Slice> {
         source_shape.validate_range(&range)?;
 
+        if range.is_coord(source_shape.as_slice()) {
+            return Err(bad_request!(
+                "slice {range:?} of {source_shape:?} has no size"
+            ));
+        }
+
         let mut shape = Vec::with_capacity(source_shape.len());
 
         for bound in range.iter() {

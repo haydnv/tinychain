@@ -21,7 +21,7 @@ use crate::tensor::{offset_of, Coord, Shape, TensorInstance};
 use super::access::DenseAccess;
 use super::stream::BlockResize;
 use super::{
-    block_axis_for, block_shape_for, div_ceil, ideal_block_size_for, BlockShape, BlockStream,
+    block_axis_for, block_map_for, block_shape_for, div_ceil, ideal_block_size_for, BlockStream,
     DenseCacheFile, DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock,
 };
 
@@ -709,27 +709,3 @@ impl_visitor!(u8, visit_array_u8);
 impl_visitor!(u16, visit_array_u16);
 impl_visitor!(u32, visit_array_u32);
 impl_visitor!(u64, visit_array_u64);
-
-#[inline]
-fn block_map_for(
-    num_blocks: u64,
-    shape: &[u64],
-    block_shape: &[usize],
-) -> TCResult<ArrayBase<Vec<u64>>> {
-    let block_axis = shape.len() - block_shape.len();
-    let mut block_map_shape = BlockShape::with_capacity(block_axis + 1);
-    block_map_shape.extend(
-        shape
-            .iter()
-            .take(block_axis)
-            .copied()
-            .map(|dim| dim as usize),
-    );
-    block_map_shape.push(shape[block_axis] as usize / block_shape[0]);
-
-    ArrayBase::<Vec<_>>::new(
-        block_map_shape,
-        (0..num_blocks as u64).into_iter().collect(),
-    )
-    .map_err(TCError::from)
-}

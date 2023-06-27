@@ -314,7 +314,7 @@ where
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, mut params| {
+        Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
                 let schema: Value = params.require(&label("schema").into())?;
                 let schema =
@@ -567,10 +567,9 @@ where
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, key| {
+        Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 key.expect_none()?;
-
                 self.tensor.diagonal().map(Tensor::from).map(State::from)
             })
         }))
@@ -866,7 +865,6 @@ struct DualHandler<Txn, FE> {
     tensor: Tensor<Txn, FE>,
     op: fn(Tensor<Txn, FE>, Tensor<Txn, FE>) -> TCResult<Tensor<Txn, FE>>,
     op_const: fn(Tensor<Txn, FE>, Number) -> TCResult<Tensor<Txn, FE>>,
-    op_name: &'static str,
 }
 
 impl<Txn, FE> DualHandler<Txn, FE> {
@@ -874,7 +872,6 @@ impl<Txn, FE> DualHandler<Txn, FE> {
         tensor: T,
         op: fn(Tensor<Txn, FE>, Tensor<Txn, FE>) -> TCResult<Tensor<Txn, FE>>,
         op_const: fn(Tensor<Txn, FE>, Number) -> TCResult<Tensor<Txn, FE>>,
-        op_name: &'static str,
     ) -> Self
     where
         Tensor<Txn, FE>: From<T>,
@@ -883,7 +880,6 @@ impl<Txn, FE> DualHandler<Txn, FE> {
             tensor: tensor.into(),
             op,
             op_const,
-            op_name,
         }
     }
 }
@@ -973,7 +969,7 @@ where
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, r| {
+        Some(Box::new(|_txn, r| {
             Box::pin(async move {
                 self.tensor.shape().validate()?;
 
@@ -1313,20 +1309,11 @@ impl<T> From<T> for TensorHandler<T> {
 struct UnaryHandler<Txn, FE> {
     tensor: Tensor<Txn, FE>,
     op: fn(Tensor<Txn, FE>) -> TCResult<Tensor<Txn, FE>>,
-    op_name: &'static str,
 }
 
 impl<Txn, FE> UnaryHandler<Txn, FE> {
-    fn new(
-        tensor: Tensor<Txn, FE>,
-        op: fn(Tensor<Txn, FE>) -> TCResult<Tensor<Txn, FE>>,
-        op_name: &'static str,
-    ) -> Self {
-        Self {
-            tensor,
-            op,
-            op_name,
-        }
+    fn new(tensor: Tensor<Txn, FE>, op: fn(Tensor<Txn, FE>) -> TCResult<Tensor<Txn, FE>>) -> Self {
+        Self { tensor, op }
     }
 }
 
@@ -1359,20 +1346,11 @@ where
 struct UnaryHandlerAsync<Txn, FE, F> {
     tensor: Tensor<Txn, FE>,
     op: fn(Tensor<Txn, FE>, TxnId) -> F,
-    op_name: &'static str,
 }
 
 impl<'a, Txn, FE, F> UnaryHandlerAsync<Txn, FE, F> {
-    fn new(
-        tensor: Tensor<Txn, FE>,
-        op: fn(Tensor<Txn, FE>, TxnId) -> F,
-        op_name: &'static str,
-    ) -> Self {
-        Self {
-            tensor,
-            op,
-            op_name,
-        }
+    fn new(tensor: Tensor<Txn, FE>, op: fn(Tensor<Txn, FE>, TxnId) -> F) -> Self {
+        Self { tensor, op }
     }
 }
 
@@ -1558,32 +1536,27 @@ where
                 tensor,
                 TensorMath::add,
                 TensorMathConst::add_const,
-                "add",
             ))),
             "div" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorMath::div,
                 TensorMathConst::div_const,
-                "div",
             ))),
             "log" => Some(Box::new(LogHandler::new(tensor))),
             "mul" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorMath::mul,
                 TensorMathConst::mul_const,
-                "mul",
             ))),
             "pow" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorMath::pow,
                 TensorMathConst::pow_const,
-                "pow",
             ))),
             "sub" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorMath::sub,
                 TensorMathConst::sub_const,
-                "sub",
             ))),
 
             // boolean ops
@@ -1591,19 +1564,16 @@ where
                 tensor,
                 TensorBoolean::and,
                 TensorBooleanConst::and_const,
-                "and",
             ))),
             "or" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorBoolean::or,
                 TensorBooleanConst::or_const,
-                "or",
             ))),
             "xor" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorBoolean::xor,
                 TensorBooleanConst::xor_const,
-                "xor",
             ))),
 
             // comparison ops
@@ -1611,37 +1581,31 @@ where
                 tensor,
                 TensorCompare::eq,
                 TensorCompareConst::eq_const,
-                "eq",
             ))),
             "gt" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorCompare::gt,
                 TensorCompareConst::gt_const,
-                "gt",
             ))),
             "ge" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorCompare::ge,
                 TensorCompareConst::ge_const,
-                "ge",
             ))),
             "lt" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorCompare::lt,
                 TensorCompareConst::lt_const,
-                "lt",
             ))),
             "le" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorCompare::le,
                 TensorCompareConst::le_const,
-                "le",
             ))),
             "ne" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorCompare::ne,
                 TensorCompareConst::ne_const,
-                "ne",
             ))),
 
             // linear algebra
@@ -1686,84 +1650,36 @@ where
             "transpose" => Some(Box::new(TransposeHandler::from(tensor))),
 
             // trigonometry
-            "asin" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::asin,
-                "asin",
-            ))),
-            "sin" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::sin,
-                "sin",
-            ))),
-            "sinh" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::sinh,
-                "sinh",
-            ))),
+            "asin" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::asin))),
+            "sin" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::sin))),
+            "sinh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::sinh))),
 
-            "acos" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::acos,
-                "acos",
-            ))),
-            "cos" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::cos,
-                "cos",
-            ))),
-            "cosh" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::cosh,
-                "cosh",
-            ))),
+            "acos" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::acos))),
+            "cos" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::cos))),
+            "cosh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::cosh))),
 
-            "atan" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::atan,
-                "atan",
-            ))),
-            "tan" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::tan,
-                "tan",
-            ))),
-            "tanh" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::tanh,
-                "tanh",
-            ))),
+            "atan" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::atan))),
+            "tan" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::tan))),
+            "tanh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::tanh))),
 
             // unary ops
-            "abs" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorUnary::abs,
-                "abs",
-            ))),
+            "abs" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::abs))),
             "all" => Some(Box::new(UnaryHandlerAsync::new(
                 tensor.into(),
                 TensorReduce::all,
-                "all",
             ))),
             "any" => Some(Box::new(UnaryHandlerAsync::new(
                 tensor.into(),
                 TensorReduce::any,
-                "any",
             ))),
-            "exp" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorUnary::exp,
-                "exp",
-            ))),
+            "exp" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::exp))),
             "not" => Some(Box::new(UnaryHandler::new(
                 tensor.into(),
                 TensorUnaryBoolean::not,
-                "not",
             ))),
             "round" => Some(Box::new(UnaryHandler::new(
                 tensor.into(),
                 TensorUnary::round,
-                "round",
             ))),
 
             // views
@@ -1863,7 +1779,12 @@ where
         tensor.write(txn_id, range, value).await
     } else if value.matches::<Number>() {
         let value = Number::opt_cast_from(value).expect("element");
-        tensor.write_value(txn_id, range, value).await
+
+        if let Some(coord) = range.as_coord(tensor.shape()) {
+            tensor.write_value_at(txn_id, coord, value).await
+        } else {
+            tensor.write_value(txn_id, range, value).await
+        }
     } else {
         Err(bad_request!("cannot write {value:?} to a Tensor"))
     }
