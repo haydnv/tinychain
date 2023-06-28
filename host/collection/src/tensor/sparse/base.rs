@@ -84,6 +84,10 @@ where
             version = Version::create(version, delta.filled.clone(), delta.zeros.clone()).into();
         }
 
+        if let Some(delta) = self.pending.get(&txn_id) {
+            version = Version::create(version, delta.filled.clone(), delta.zeros.clone()).into();
+        }
+
         Ok(version)
     }
 
