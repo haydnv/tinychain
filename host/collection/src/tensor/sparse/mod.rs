@@ -28,8 +28,8 @@ use super::dense::{DenseAccess, DenseAccessCast, DenseCacheFile, DenseSparse, De
 use super::{
     Axes, AxisRange, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast,
     TensorCompare, TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorMathConst,
-    TensorPermitRead, TensorPermitWrite, TensorRead, TensorReduce, TensorTransform, TensorType,
-    TensorUnary, TensorUnaryBoolean, TensorWrite, TensorWriteDual, IMAG, REAL,
+    TensorPermitRead, TensorRead, TensorReduce, TensorTransform, TensorType, TensorUnary,
+    TensorUnaryBoolean, TensorWrite, TensorWriteDual, IMAG, REAL,
 };
 
 pub use access::*;
@@ -1083,15 +1083,10 @@ where
             self,
             this,
             {
-                let _write_permit = this.write_permit(txn_id, range.clone()).await?;
                 let mut guard = this.write().await;
                 guard.clear(txn_id, range).await
             },
             {
-                // always acquire these permits in-order to prevent the risk of a deadlock
-                let _write_permit = this.0.write_permit(txn_id, range.clone()).await?;
-                let _write_permit = this.1.write_permit(txn_id, range.clone()).await?;
-
                 let (mut r_guard, mut i_guard) = join!(this.0.write(), this.1.write());
 
                 try_join!(
@@ -1102,7 +1097,6 @@ where
                 Ok(())
             },
             {
-                let _write_permit = this.write_permit(txn_id, range.clone()).await?;
                 let mut guard = this.write().await;
                 guard.clear(txn_id, range).await
             }
@@ -1114,16 +1108,11 @@ where
             self,
             this,
             {
-                let _write_permit = this.write_permit(txn_id, coord.to_vec().into()).await?;
                 let mut guard = this.write().await;
                 guard.write_value(txn_id, coord, value.cast_into()).await
             },
             {
                 let (r_value, i_value) = Complex::cast_from(value).into();
-
-                // always acquire these permits in-order to prevent the risk of a deadlock
-                let _write_permit = this.0.write_permit(txn_id, coord.to_vec().into()).await?;
-                let _write_permit = this.1.write_permit(txn_id, coord.to_vec().into()).await?;
 
                 let (mut r_guard, mut i_guard) = join!(this.0.write(), this.1.write());
 
@@ -1135,7 +1124,6 @@ where
                 Ok(())
             },
             {
-                let _write_permit = this.write_permit(txn_id, coord.to_vec().into()).await?;
                 let mut guard = this.write().await;
                 guard.write_value(txn_id, coord, value.cast_into()).await
             }
@@ -1156,13 +1144,6 @@ where
             this,
             that,
             {
-                // always acquire these permits in-order to prevent the risk of a deadlock
-                let _write_permit = this.write_permit(txn_id, range.clone().into()).await?;
-                let _read_permit = that
-                    .accessor
-                    .read_permit(txn_id, range.clone().into())
-                    .await?;
-
                 if range.is_empty() || range == Range::all(this.shape()) {
                     let mut guard = this.write().await;
                     guard.overwrite(txn_id, that.accessor).await
@@ -1173,20 +1154,6 @@ where
                 }
             },
             {
-                // always acquire these permits in-order to prevent the risk of a deadlock
-                let _r_write_permit = this.0.write_permit(txn_id, range.clone().into()).await?;
-                let _i_write_permit = this.1.write_permit(txn_id, range.clone().into()).await?;
-                let _r_read_permit = that
-                    .0
-                    .accessor
-                    .read_permit(txn_id, range.clone().into())
-                    .await?;
-                let _i_read_permit = that
-                    .1
-                    .accessor
-                    .read_permit(txn_id, range.clone().into())
-                    .await?;
-
                 debug_assert_eq!(this.0.shape(), this.1.shape());
                 if range.is_empty() || range == Range::all(this.0.shape()) {
                     let (mut r_guard, mut i_guard) = join!(this.0.write(), this.1.write());
@@ -1212,13 +1179,6 @@ where
                 }
             },
             {
-                // always acquire these permits in-order to prevent the risk of a deadlock
-                let _write_permit = this.write_permit(txn_id, range.clone().into()).await?;
-                let _read_permit = that
-                    .accessor
-                    .read_permit(txn_id, range.clone().into())
-                    .await?;
-
                 if range.is_empty() || range == Range::all(this.shape()) {
                     let mut guard = this.write().await;
                     guard.overwrite(txn_id, that.accessor).await

@@ -431,6 +431,7 @@ where
 {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         match self {
+            Self::Base(base) => base.read_permit(txn_id, range).await,
             Self::Broadcast(broadcast) => broadcast.read_permit(txn_id, range).await,
             Self::BroadcastAxis(broadcast) => broadcast.read_permit(txn_id, range).await,
             Self::Cow(cow) => cow.read_permit(txn_id, range).await,
@@ -3697,7 +3698,7 @@ where
             let (coords, values) = result?;
 
             let strides = strides.clone().broadcast(coords.shape().to_vec())?;
-            let offsets = coords.mul(strides)?.sum_axis(0, false)?;
+            let offsets = coords.mul(strides)?.sum_axis(1, false)?;
             let offsets = offsets.read(&queue)?.to_slice()?.into_vec();
 
             let values = values.read(&queue)?.to_slice()?.into_vec();
