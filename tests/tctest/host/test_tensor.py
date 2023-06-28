@@ -22,6 +22,7 @@ class DenseTests(HostTest):
 
         expected = expect_dense(tc.F64, shape, [0] + [c] * (np.product(shape) - 1))
         actual = self.host.post(ENDPOINT, cxt)
+
         self.assertEqual(expected, actual)
 
     def testSlice(self):
@@ -726,7 +727,7 @@ def all_close(actual, expected):
 def expect_dense(dtype, shape, flat):
     return {
         str(tc.URI(tc.tensor.Dense)): [
-            [list(shape), str(tc.URI(dtype))],
+            [str(tc.URI(dtype)), list(shape)],
             list(flat),
         ]
     }
@@ -738,7 +739,7 @@ def expect_sparse(dtype, shape, values):
 
     return {
         str(tc.URI(tc.tensor.Sparse)): [
-            [list(shape), str(tc.URI(dtype))],
+            [str(tc.URI(dtype)), list(shape)],
             list(values),
         ]
     }

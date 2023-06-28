@@ -205,7 +205,6 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
     """An n-dimensional array of numbers."""
 
     __uri__ = URI(Collection) + "/tensor"
-
     def __init__(self, form):
         if isinstance(form, Number) or isinstance(deref(form), (bool, float, int)):
             raise ValueError(f"invalid form for Tensor: {form}--consider using a Number instead")
@@ -276,7 +275,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
 
     @property
     def schema(self):
-        return self.shape, self.dtype
+        return self.dtype, self.shape
 
     @property
     def shape(self):
@@ -548,7 +547,7 @@ class Dense(Tensor, typing.Generic[DType]):
         Call this method to initialize a persistent `Tensor` in a `Chain`.
         """
 
-        return cls[dtype].with_shape(shape)(form=ref.Get(URI(cls), (shape, dtype)))
+        return cls[dtype].with_shape(shape)(form=ref.Get(URI(cls), (dtype, shape)))
 
     @classmethod
     def load(cls, shape, data, dtype=F32):
@@ -563,7 +562,7 @@ class Dense(Tensor, typing.Generic[DType]):
                 dense = tc.tensor.Dense.load([1, 3], values, tc.I32)
         """
 
-        return cls[dtype].with_shape(shape)(form=ref.Get(URI(cls, "load"), ((shape, dtype), data)))
+        return cls[dtype].with_shape(shape)(form=ref.Get(URI(cls, "load"), ((dtype, shape), data)))
 
     @classmethod
     def constant(cls, shape, value):
@@ -744,7 +743,7 @@ class Sparse(Tensor, typing.Generic[DType]):
         Call this method to initialize a persistent :class:`Tensor` in a :class:`Chain`.
         """
 
-        op_ref = ref.Get(URI(cls), (shape, dtype))
+        op_ref = ref.Get(URI(cls), (dtype, shape))
 
         try:
             return cls[dtype].with_shape(shape)(form=op_ref)
@@ -765,7 +764,7 @@ class Sparse(Tensor, typing.Generic[DType]):
                 sparse = tc.tensor.Sparse.load([2, 3, 4], zip(coords, values))
         """
 
-        op_ref = ref.Get(URI(cls, "load"), ((shape, dtype), data))
+        op_ref = ref.Get(URI(cls, "load"), ((dtype, shape), data))
 
         try:
             return cls[dtype].with_shape(shape)(form=op_ref)
@@ -790,7 +789,7 @@ class Sparse(Tensor, typing.Generic[DType]):
         If `dtype` is not specified, the data type will be :class:`F32`.
         """
 
-        op_ref = ref.Get(URI(cls), (shape, dtype))
+        op_ref = ref.Get(URI(cls), (dtype, shape))
 
         try:
             return cls[dtype].with_shape(shape)(form=op_ref)
