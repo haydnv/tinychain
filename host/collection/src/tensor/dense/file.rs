@@ -257,7 +257,7 @@ where
         let mut blocks = futures::stream::iter(0..num_blocks as u64)
             .map(|block_id| {
                 let block_size = if (block_id + 1) * (block_size as u64) > size {
-                    (size - (block_id * size)) as usize
+                    (size - (block_id * block_size as u64)) as usize
                 } else {
                     block_size
                 };

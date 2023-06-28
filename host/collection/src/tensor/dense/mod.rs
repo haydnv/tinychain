@@ -1830,7 +1830,9 @@ fn block_map_for(
     shape: &[u64],
     block_shape: &[usize],
 ) -> TCResult<ArrayBase<Vec<u64>>> {
-    debug_assert!(shape.len() >= block_shape.len(), "cannot construct a block map for a tensor of shape {shape:?} with blocks of shape {block_shape:?}");
+    debug!("construct a block map for {shape:?} with block shape {block_shape:?}");
+
+    debug_assert!(shape.len() >= block_shape.len());
 
     let block_axis = shape.len() - block_shape.len();
     let mut block_map_shape = BlockShape::with_capacity(block_axis + 1);
@@ -1841,7 +1843,8 @@ fn block_map_for(
             .copied()
             .map(|dim| dim as usize),
     );
-    block_map_shape.push(shape[block_axis] as usize / block_shape[0]);
+
+    block_map_shape.push(div_ceil(shape[block_axis], block_shape[0] as u64) as usize);
 
     ArrayBase::<Vec<_>>::new(
         block_map_shape,

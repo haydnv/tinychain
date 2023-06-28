@@ -2034,7 +2034,7 @@ impl<S: DenseInstance> DenseSlice<S> {
             block_shape.iter().product::<usize>() as u64,
         );
 
-        let block_map = block_map_for(num_blocks, transform.shape().as_slice(), &block_shape)?;
+        let block_map = block_map_for(num_blocks, source.shape().as_slice(), &block_shape)?;
 
         let mut block_map_bounds = Vec::with_capacity(block_axis + 1);
         for axis_range in transform.range().iter().take(block_axis).cloned() {
@@ -2160,7 +2160,8 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
         let block_axis = block_axis_for(transform.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, transform.shape(), self.block_size);
 
-        let local_bounds = match ha_ndarray::AxisBound::try_from(range[block_axis].clone())? {
+        let global_bound = ha_ndarray::AxisBound::try_from(range[block_axis].clone())?;
+        let local_bounds = match global_bound {
             ha_ndarray::AxisBound::At(i) => {
                 debug_assert_eq!(block_map.size(), 1);
                 vec![ha_ndarray::AxisBound::At(i)]
@@ -2171,16 +2172,22 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
                 if block_map.size() == 1 {
                     vec![ha_ndarray::AxisBound::In(start, stop, step)]
                 } else {
+                    let start = start % stride;
+                    let stop = if stop % stride == 0 {
+                        stride
+                    } else {
+                        stop % stride
+                    };
+
                     let mut local_bounds = Vec::with_capacity(block_map.size());
                     local_bounds.push(ha_ndarray::AxisBound::In(start, stride, step));
 
-                    for i in 0..(block_map.size() - 2) {
-                        let start = stride * i;
-                        local_bounds.push(ha_ndarray::AxisBound::In(start, start + stride, step));
+                    for i in 1..(block_map.size() - 1) {
+                        local_bounds.push(ha_ndarray::AxisBound::In(0, stride, step));
                     }
 
                     local_bounds.push(ha_ndarray::AxisBound::In(
-                        stop - (stop % stride),
+                        0,
                         stop,
                         step,
                     ));
@@ -2199,6 +2206,7 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
         }
 
         debug_assert_eq!(block_map.size(), local_bounds.len());
+
         let blocks = futures::stream::iter(block_map.into_inner().into_iter().zip(local_bounds))
             .map(move |(block_id, local_bound)| {
                 let mut block_bounds = block_bounds.to_vec();
@@ -2212,6 +2220,8 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
                     } else {
                         block_bounds[0] = local_bound;
                     }
+
+                    debug!("slice {block_bounds:?} from {block:?}");
 
                     block.slice(block_bounds).map_err(TCError::from)
                 }

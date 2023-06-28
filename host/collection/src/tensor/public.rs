@@ -1876,12 +1876,20 @@ fn cast_axis_range<R: RangeBounds<Value> + fmt::Debug>(dim: u64, range: R) -> TC
 
     let start = match range.start_bound() {
         Bound::Unbounded => 0,
+        Bound::Included(start) if start.is_none() => 0,
+        Bound::Excluded(start) if start.is_none() => 1,
         Bound::Included(start) => cast_bound(dim, start.clone())?,
         Bound::Excluded(start) => cast_bound(dim, start.clone())? + 1,
     };
 
     let end = match range.end_bound() {
         Bound::Unbounded => dim,
+        Bound::Included(end) if end.is_none() => {
+            return Err(bad_request!(
+                "index {dim} is out of bounds for dimension {dim}"
+            ))
+        }
+        Bound::Excluded(end) if end.is_none() => dim,
         Bound::Included(end) => cast_bound(dim, end.clone())? + 1,
         Bound::Excluded(end) => cast_bound(dim, end.clone())?,
     };
@@ -1924,12 +1932,9 @@ pub fn cast_range(shape: &Shape, scalar: Scalar) -> TCResult<Range> {
             let mut axis_bounds = Vec::with_capacity(shape.len());
 
             for (axis, bound) in bounds.into_iter().enumerate() {
-                let bound =
-                    Value::try_cast_from(bound, |v| bad_request!("invalid axis bound: {v:?}"))?;
-
                 debug!(
-                    "bound for axis {} with dimension {} is {}",
-                    axis, shape[axis], bound
+                    "bound for axis {axis} with dimension {dim} is {bound:?}",
+                    dim = shape[axis],
                 );
 
                 let axis_range = if bound.is_none() {
@@ -1939,10 +1944,16 @@ pub fn cast_range(shape: &Shape, scalar: Scalar) -> TCResult<Range> {
                         .opt_cast_into()
                         .map(AxisRange::Of)
                         .expect("axis range")
-                } else if let Value::Number(value) = bound {
-                    cast_bound(shape[axis], value.into()).map(AxisRange::At)?
+                } else if bound.matches::<(Bound<Value>, Bound<Value>)>() {
+                    let bound: (Bound<Value>, Bound<Value>) =
+                        bound.opt_cast_into().expect("axis range");
+
+                    cast_axis_range(shape[axis], bound)?
+                } else if bound.matches::<Number>() {
+                    let bound = Number::opt_cast_from(bound).expect("axis index");
+                    cast_bound(shape[axis], bound.into()).map(AxisRange::At)?
                 } else {
-                    return Err(bad_request!("invalid bound {} for axis {}", bound, axis));
+                    return Err(bad_request!("invalid bound {bound:?} for axis {axis}"));
                 };
 
                 axis_bounds.push(axis_range);

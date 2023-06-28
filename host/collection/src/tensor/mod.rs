@@ -37,10 +37,6 @@ const IMAG: Label = label("im");
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
-#[cfg(debug_assertions)]
-const IDEAL_BLOCK_SIZE: usize = 24;
-
-#[cfg(not(debug_assertions))]
 const IDEAL_BLOCK_SIZE: usize = 65_536;
 
 pub type Axes = Vec<usize>;
