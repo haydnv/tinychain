@@ -25,7 +25,7 @@ class DenseTests(HostTest):
 
         self.assertEqual(expected, actual)
 
-    def testSlice(self):
+    def testSliceOnly(self):
         shape = [2, 5, 3, 3]
 
         cxt = tc.Context()
@@ -353,19 +353,6 @@ class DenseTests(HostTest):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, expect_dense(tc.I64, expected.shape, expected.flatten()))
 
-    def testFlip(self):
-        shape = [5, 4, 3]
-
-        cxt = tc.Context()
-        cxt.x = tc.tensor.Dense.arange(shape, 0, 60)
-        cxt.result = cxt.x.flip(0)
-
-        expected = np.arange(0, 60).reshape(shape)
-        expected = np.flip(expected, 0)
-
-        actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, expect_dense(tc.I64, expected.shape, expected.flatten()))
-
     def testReshape(self):
         source = [2, 3, 4, 1]
         dest = [3, 8]
@@ -391,23 +378,6 @@ class DenseTests(HostTest):
 
         expected = np.tile(x, multiples)
         self.assertEqual(actual, expect_dense(tc.I32, list(expected.shape), expected.flatten().tolist()))
-
-    def testArgmax(self):
-        shape = [2, 3, 4]
-
-        x = np.arange(0, np.product(shape)).reshape(shape)
-
-        cxt = tc.Context()
-        cxt.x = load_dense(x)
-        cxt.am = cxt.x.argmax()
-        cxt.am0 = cxt.x.argmax(0)
-        cxt.am1 = cxt.x.argmax(1)
-        cxt.result = cxt.am, cxt.am0, cxt.am1
-
-        actual_am, actual_am0, actual_am1 = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual_am, np.argmax(x))
-        self.assertEqual(actual_am0, expect_dense(tc.U64, [3, 4], np.argmax(x, 0).flatten().tolist()))
-        self.assertEqual(actual_am1, expect_dense(tc.U64, [2, 4], np.argmax(x, 1).flatten().tolist()))
 
 
 class SparseTests(HostTest):

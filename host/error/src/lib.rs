@@ -224,6 +224,10 @@ impl From<ParseError> for TCError {
 #[cfg(feature = "ha-ndarray")]
 impl From<ha_ndarray::Error> for TCError {
     fn from(err: ha_ndarray::Error) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("array math error: {err}");
+
+        #[cfg(not(debug_assertions))]
         Self {
             kind: ErrorKind::Internal,
             data: err.to_string().into(),
@@ -250,6 +254,14 @@ impl From<txfs::Error> for TCError {
     }
 }
 
+#[cfg(debug_assertions)]
+impl From<io::Error> for TCError {
+    fn from(cause: io::Error) -> Self {
+        panic!("IO error: {cause}");
+    }
+}
+
+#[cfg(not(debug_assertions))]
 impl From<io::Error> for TCError {
     fn from(cause: io::Error) -> Self {
         match cause.kind() {
