@@ -7,7 +7,7 @@ use destream::de;
 use freqfs::*;
 use futures::stream::{StreamExt, TryStreamExt};
 use ha_ndarray::{
-    ArrayBase, ArrayOp, Buffer, BufferWrite, CDatatype, NDArrayMathScalar, NDArrayRead,
+    ArrayBase, ArrayOp, Buffer, BufferWrite, CDatatype, NDArray, NDArrayMathScalar, NDArrayRead,
 };
 use safecast::AsType;
 
@@ -407,8 +407,7 @@ where
         let block_offset = (offset % self.block_size() as u64) as usize;
 
         let block = self.read_block(txn_id, block_id).await?;
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, self.block_size())?;
+        let queue = ha_ndarray::Queue::new(block.context().clone(), block.size())?;
         let buffer = block.read(&queue)?;
         Ok(buffer.to_slice()?.as_ref()[block_offset])
     }

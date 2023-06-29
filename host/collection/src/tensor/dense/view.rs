@@ -3,7 +3,7 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures::{try_join, Stream, StreamExt, TryStreamExt};
-use ha_ndarray::NDArrayRead;
+use ha_ndarray::{NDArray, NDArrayRead};
 use rayon::prelude::*;
 use safecast::{AsType, CastInto};
 
@@ -168,9 +168,6 @@ where
             self,
             this,
             {
-                let context = ha_ndarray::Context::default()?;
-                let queue = ha_ndarray::Queue::new(context, this.accessor.block_size())?;
-
                 let permit = this.accessor.read_permit(txn_id, Range::default()).await?;
                 let blocks = this.accessor.read_blocks(txn_id).await?;
 
@@ -179,6 +176,7 @@ where
                         let _permit = &permit; // force this closure to capture (move/own) the permit
 
                         let block = result?;
+                        let queue = ha_ndarray::Queue::new(block.context().clone(), block.size())?;
                         let buffer = block.read(&queue)?.to_slice()?.into_vec();
                         let buffer = buffer
                             .into_par_iter()
@@ -195,10 +193,6 @@ where
             {
                 let (re, im) = (this.0.into_inner(), this.1.into_inner());
 
-                let context = ha_ndarray::Context::default()?;
-                let r_queue = ha_ndarray::Queue::new(context.clone(), re.block_size())?;
-                let i_queue = ha_ndarray::Queue::new(context, im.block_size())?;
-
                 // always acquire these permits in-order to avoid the risk of a deadlock
                 let mut permit = re.read_permit(txn_id, Range::default()).await?;
                 let i_permit = im.read_permit(txn_id, Range::default()).await?;
@@ -209,8 +203,9 @@ where
 
                 let r_blocks = r_blocks.map(move |result| {
                     let block = result?;
+                    let queue = ha_ndarray::Queue::new(block.context().clone(), block.size())?;
                     block
-                        .read(&r_queue)
+                        .read(&queue)
                         .and_then(|buffer| buffer.to_slice())
                         .map(|slice| slice.into_vec())
                         .map_err(TCError::from)
@@ -218,8 +213,9 @@ where
 
                 let i_blocks = i_blocks.map(move |result| {
                     let block = result?;
+                    let queue = ha_ndarray::Queue::new(block.context().clone(), block.size())?;
                     block
-                        .read(&i_queue)
+                        .read(&queue)
                         .and_then(|buffer| buffer.to_slice())
                         .map(|slice| slice.into_vec())
                         .map_err(TCError::from)
@@ -245,9 +241,6 @@ where
                 Ok(Box::pin(elements))
             },
             {
-                let context = ha_ndarray::Context::default()?;
-                let queue = ha_ndarray::Queue::new(context, this.accessor.block_size())?;
-
                 let permit = this.accessor.read_permit(txn_id, Range::default()).await?;
                 let blocks = this.accessor.read_blocks(txn_id).await?;
 
@@ -256,6 +249,7 @@ where
                         let _permit = &permit; // force this closure to capture (move/own) the permit
 
                         let block = result?;
+                        let queue = ha_ndarray::Queue::new(block.context().clone(), block.size())?;
                         let buffer = block.read(&queue)?.to_slice()?.into_vec();
                         let buffer = buffer
                             .into_par_iter()

@@ -572,8 +572,7 @@ where
         } else {
             let block = self.source.read_block(txn_id, block_id).await?;
 
-            let context = ha_ndarray::Context::default()?;
-            let queue = ha_ndarray::Queue::new(context, block.size())?;
+            let queue = ha_ndarray::Queue::new(block.context().clone(), block.size())?;
             let buffer = block.read(&queue)?.into_buffer()?;
 
             let type_size = S::DType::dtype().size();
@@ -667,8 +666,7 @@ where
         let block_offset = (offset % self.block_size() as u64) as usize;
 
         let block = self.read_block(txn_id, block_id).await?;
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, self.block_size())?;
+        let queue = ha_ndarray::Queue::new(block.context().clone(), self.block_size())?;
         let buffer = block.read(&queue)?;
         Ok(buffer.to_slice()?.as_ref()[block_offset])
     }
@@ -1816,8 +1814,8 @@ where
             map_slice[x] = ha_ndarray::AxisBound::In(0, self.block_map.shape()[x], 1);
         }
 
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, self.block_map.size())?;
+        let queue =
+            ha_ndarray::Queue::new(self.block_map.context().clone(), self.block_map.size())?;
         let block_map_slice = self.block_map.clone().slice(map_slice)?;
         let source_blocks = block_map_slice.read(&queue)?.to_slice()?;
 

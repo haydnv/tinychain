@@ -5,7 +5,7 @@ use destream::{de, en};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::try_join;
-use ha_ndarray::{Buffer, CDatatype, NDArrayRead};
+use ha_ndarray::{Buffer, CDatatype, NDArray, NDArrayRead, Queue};
 use rayon::prelude::*;
 use safecast::{AsType, CastInto};
 
@@ -40,17 +40,16 @@ impl DenseViewBlocks {
         Txn: Transaction<FE>,
         FE: DenseCacheFile + AsType<Node> + Clone,
     {
-        let context = ha_ndarray::Context::default()?;
         let _permit = tensor.read_permit(txn_id, Range::default()).await?;
 
         match tensor {
             super::DenseView::Bool(tensor) => {
                 let access = tensor.into_inner();
-                let queue = ha_ndarray::Queue::new(context, access.block_size())?;
                 let blocks = access.read_blocks(txn_id).await?;
                 let blocks = blocks
                     .map(move |result| {
                         let block = result?;
+                        let queue = Queue::new(block.context().clone(), block.size())?;
                         let buffer = block.read(&queue)?.to_slice()?.into_vec();
                         TCResult::Ok(buffer.into_iter().map(|i| i != 0).collect::<Vec<bool>>())
                     })
@@ -60,60 +59,20 @@ impl DenseViewBlocks {
                 Ok(Self::Bool(Box::pin(blocks)))
             }
             super::DenseView::C32((re, im)) => {
-                read_from_complex(txn_id, context, re, im)
-                    .map_ok(Self::F32)
-                    .await
+                read_from_complex(txn_id, re, im).map_ok(Self::F32).await
             }
             super::DenseView::C64((re, im)) => {
-                read_from_complex(txn_id, context, re, im)
-                    .map_ok(Self::F64)
-                    .await
+                read_from_complex(txn_id, re, im).map_ok(Self::F64).await
             }
-            super::DenseView::F32(tensor) => {
-                read_from_real(txn_id, context, tensor)
-                    .map_ok(Self::F32)
-                    .await
-            }
-            super::DenseView::F64(tensor) => {
-                read_from_real(txn_id, context, tensor)
-                    .map_ok(Self::F64)
-                    .await
-            }
-            super::DenseView::I16(tensor) => {
-                read_from_real(txn_id, context, tensor)
-                    .map_ok(Self::I16)
-                    .await
-            }
-            super::DenseView::I32(tensor) => {
-                read_from_real(txn_id, context, tensor)
-                    .map_ok(Self::I32)
-                    .await
-            }
-            super::DenseView::I64(tensor) => {
-                read_from_real(txn_id, context, tensor)
-                    .map_ok(Self::I64)
-                    .await
-            }
-            super::DenseView::U8(tensor) => {
-                read_from_real(txn_id, context, tensor)
-                    .map_ok(Self::U8)
-                    .await
-            }
-            super::DenseView::U16(tensor) => {
-                read_from_real(txn_id, context, tensor)
-                    .map_ok(Self::U16)
-                    .await
-            }
-            super::DenseView::U32(tensor) => {
-                read_from_real(txn_id, context, tensor)
-                    .map_ok(Self::U32)
-                    .await
-            }
-            super::DenseView::U64(tensor) => {
-                read_from_real(txn_id, context, tensor)
-                    .map_ok(Self::U64)
-                    .await
-            }
+            super::DenseView::F32(tensor) => read_from_real(txn_id, tensor).map_ok(Self::F32).await,
+            super::DenseView::F64(tensor) => read_from_real(txn_id, tensor).map_ok(Self::F64).await,
+            super::DenseView::I16(tensor) => read_from_real(txn_id, tensor).map_ok(Self::I16).await,
+            super::DenseView::I32(tensor) => read_from_real(txn_id, tensor).map_ok(Self::I32).await,
+            super::DenseView::I64(tensor) => read_from_real(txn_id, tensor).map_ok(Self::I64).await,
+            super::DenseView::U8(tensor) => read_from_real(txn_id, tensor).map_ok(Self::U8).await,
+            super::DenseView::U16(tensor) => read_from_real(txn_id, tensor).map_ok(Self::U16).await,
+            super::DenseView::U32(tensor) => read_from_real(txn_id, tensor).map_ok(Self::U32).await,
+            super::DenseView::U64(tensor) => read_from_real(txn_id, tensor).map_ok(Self::U64).await,
         }
     }
 }
@@ -121,7 +80,6 @@ impl DenseViewBlocks {
 #[inline]
 async fn read_from_complex<Txn, FE, T>(
     txn_id: TxnId,
-    context: ha_ndarray::Context,
     re: DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>,
     im: DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>,
 ) -> TCResult<Blocks<T>>
@@ -133,18 +91,14 @@ where
     Number: From<T> + CastInto<T>,
 {
     let re = re.into_inner();
-    let re_queue = ha_ndarray::Queue::new(context.clone(), re.block_size())?;
-
     let im = im.into_inner();
-    let im_queue = ha_ndarray::Queue::new(context, im.block_size())?;
-
     let (re, im) = try_join!(re.read_blocks(txn_id), im.read_blocks(txn_id))?;
 
     let re = re.map(move |result| {
         let block = result?;
-
+        let queue = Queue::new(block.context().clone(), block.size())?;
         block
-            .read(&re_queue)
+            .read(&queue)
             .and_then(|buffer| buffer.to_slice())
             .map(|slice| slice.into_vec())
             .map_err(TCError::from)
@@ -152,8 +106,9 @@ where
 
     let im = im.map(move |result| {
         let block = result?;
+        let queue = Queue::new(block.context().clone(), block.size())?;
         block
-            .read(&im_queue)
+            .read(&queue)
             .and_then(|buffer| buffer.to_slice())
             .map(|slice| slice.into_vec())
             .map_err(TCError::from)
@@ -178,7 +133,6 @@ where
 #[inline]
 async fn read_from_real<Txn, FE, T>(
     txn_id: TxnId,
-    context: ha_ndarray::Context,
     tensor: DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>,
 ) -> TCResult<Blocks<T>>
 where
@@ -189,12 +143,11 @@ where
     Number: From<T> + CastInto<T>,
 {
     let access = tensor.into_inner();
-    let queue = ha_ndarray::Queue::new(context, access.block_size())?;
     let blocks = access.read_blocks(txn_id).await?;
     let blocks = blocks
         .map(move |result| {
             let block = result?;
-
+            let queue = Queue::new(block.context().clone(), block.size())?;
             block
                 .read(&queue)
                 .and_then(|buffer| buffer.to_slice())

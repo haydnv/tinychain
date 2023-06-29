@@ -5,7 +5,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use destream::de;
 use futures::{Stream, TryStreamExt};
-use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype, NDArrayBoolean, NDArrayMath, NDArrayRead};
+use ha_ndarray::{
+    Array, ArrayBase, Buffer, CDatatype, NDArray, NDArrayBoolean, NDArrayMath, NDArrayRead,
+};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
 
@@ -159,18 +161,15 @@ where
     )
     .await?;
 
-    let context = ha_ndarray::Context::default()?;
-
     let elements = blocks
         .map_ok(move |(offsets, (re, im))| {
-            let context = context.clone();
             let strides = strides.clone();
             let dims = dims.clone();
 
             async move {
                 let coords = offsets.mul(strides)?.rem(dims)?;
 
-                let queue = ha_ndarray::Queue::new(context, size_hint)?;
+                let queue = ha_ndarray::Queue::new(coords.context().clone(), size_hint)?;
 
                 let coords = coords
                     .read(&queue)

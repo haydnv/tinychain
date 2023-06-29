@@ -23,8 +23,8 @@ use crate::tensor::block::Block;
 use crate::tensor::dense::{DenseAccess, DenseCacheFile, DenseInstance, DenseSlice};
 use crate::tensor::transform::{Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
-    size_hint, strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore, Shape,
-    TensorInstance, TensorPermitRead, TensorPermitWrite,
+    strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
+    TensorPermitRead, TensorPermitWrite,
 };
 
 use super::base::SparseBase;
@@ -991,8 +991,6 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let block_op = self.block_op;
         let shape = self.shape().clone();
@@ -1005,10 +1003,9 @@ where
                     (block_op)(left.into(), right.into()).map(|values| (coords, values))
                 })
             })
-            .try_filter_map(move |(coords, values)| {
-                let queue = queue.clone();
-                async move { filter_zeros(&queue, coords, values, ndim) }
-            });
+            .try_filter_map(
+                move |(coords, values)| async move { filter_zeros(coords, values, ndim) },
+            );
 
         Ok(Box::pin(blocks))
     }
@@ -1020,9 +1017,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1145,8 +1141,6 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let block_op = self.block_op;
         let shape = self.shape().clone();
@@ -1159,10 +1153,9 @@ where
                     (block_op)(left.into(), right.into()).map(|values| (coords, values))
                 })
             })
-            .try_filter_map(move |(coords, values)| {
-                let queue = queue.clone();
-                async move { filter_zeros(&queue, coords, values, ndim) }
-            });
+            .try_filter_map(
+                move |(coords, values)| async move { filter_zeros(coords, values, ndim) },
+            );
 
         Ok(Box::pin(blocks))
     }
@@ -1174,9 +1167,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1284,8 +1276,6 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let left_blocks = self.left.blocks(txn_id, range, order).await?;
 
@@ -1295,9 +1285,8 @@ where
                 let values = (self.block_op)(values.into(), self.right)?;
                 Ok((coords, values))
             })
-            .try_filter_map(move |(coords, values)| {
-                let queue = queue.clone();
-                async move { filter_zeros(&queue, coords.into(), values, ndim) }
+            .try_filter_map(move |(coords, values)| async move {
+                filter_zeros(coords.into(), values, ndim)
             });
 
         Ok(Box::pin(blocks))
@@ -1310,9 +1299,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1443,8 +1431,6 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let source_blocks = self
             .left
@@ -1457,10 +1443,9 @@ where
                 let values = (self.block_op)(left, right)?;
                 Ok((coords, values))
             })
-            .try_filter_map(move |(coords, values)| {
-                let queue = queue.clone();
-                async move { filter_zeros(&queue, coords, values, ndim) }
-            });
+            .try_filter_map(
+                move |(coords, values)| async move { filter_zeros(coords, values, ndim) },
+            );
 
         Ok(Box::pin(blocks))
     }
@@ -1472,9 +1457,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1599,8 +1583,6 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let source_blocks = self
             .left
@@ -1613,10 +1595,9 @@ where
                 let values = (self.block_op)(left, right)?;
                 Ok((coords, values))
             })
-            .try_filter_map(move |(coords, values)| {
-                let queue = queue.clone();
-                async move { filter_zeros(&queue, coords, values, ndim) }
-            });
+            .try_filter_map(
+                move |(coords, values)| async move { filter_zeros(coords, values, ndim) },
+            );
 
         Ok(Box::pin(blocks))
     }
@@ -1628,9 +1609,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1743,8 +1723,6 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let left_blocks = self.left.blocks(txn_id, range, order).await?;
         let blocks = left_blocks
@@ -1753,10 +1731,9 @@ where
                     (self.block_op)(block, self.right).map(|values| (coords, values))
                 })
             })
-            .try_filter_map(move |(coords, values)| {
-                let queue = queue.clone();
-                async move { filter_zeros(&queue, coords, values, ndim) }
-            });
+            .try_filter_map(
+                move |(coords, values)| async move { filter_zeros(coords, values, ndim) },
+            );
 
         Ok(Box::pin(blocks))
     }
@@ -1876,15 +1853,8 @@ where
         let shape = self.source.shape().to_vec();
         let ndim = shape.len();
 
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context.clone(), size_hint(self.size()))?;
-
         let strides = strides_for(&shape, ndim);
-        let strides = ArrayBase::<Arc<Vec<_>>>::with_context(
-            context.clone(),
-            vec![strides.len()],
-            Arc::new(strides),
-        )?;
+        let strides = ArrayBase::<Arc<Vec<_>>>::new(vec![strides.len()], Arc::new(strides))?;
 
         let (source_blocks, filled_blocks, zero_blocks) = try_join!(
             self.source.blocks(txn_id, range.clone(), order.to_vec()),
@@ -1892,15 +1862,15 @@ where
             self.zeros.blocks(txn_id, range, order)
         )?;
 
-        let source_elements = offsets(queue.clone(), strides.clone(), source_blocks);
-        let filled_elements = offsets(queue.clone(), strides.clone(), filled_blocks);
-        let zero_elements = offsets(queue, strides.clone(), zero_blocks);
+        let source_elements = offsets(strides.clone(), source_blocks);
+        let filled_elements = offsets(strides.clone(), filled_blocks);
+        let zero_elements = offsets(strides.clone(), zero_blocks);
 
         let elements = stream::TryDiff::new(source_elements, zero_elements);
         let elements = stream::TryMerge::new(elements, filled_elements);
         let offsets = stream::BlockOffsets::new(elements);
 
-        let dims = ArrayBase::<Arc<Vec<_>>>::with_context(context, vec![ndim], Arc::new(shape))?;
+        let dims = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], Arc::new(shape))?;
         let blocks = offsets.map(move |result| {
             let (offsets, values) = result?;
 
@@ -2191,9 +2161,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -2623,15 +2592,14 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
 
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
-
         let blocks = self.blocks(txn_id, range, order).await?;
 
         let elements = blocks
             .map(move |result| {
                 let (coords, values) = result?;
                 let coords = coords.into_inner();
+
+                let queue = Queue::new(values.context().clone(), values.size())?;
                 let values = values.read(&queue)?.to_slice()?;
                 let tuples = coords
                     .into_par_iter()
@@ -2969,9 +2937,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -3074,9 +3041,8 @@ impl<S: SparseInstance<DType = T>, T: CDatatype + DType> SparseInstance for Spar
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -3478,9 +3444,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -3656,16 +3621,17 @@ impl<FE, T> fmt::Debug for SparseVersion<FE, T> {
 fn block_elements<T: CDatatype, C: NDArrayRead<DType = u64>, V: NDArrayRead<DType = T>>(
     blocks: impl Stream<Item = TCResult<(C, V)>> + Send + 'static,
     ndim: usize,
-    size: u64,
 ) -> TCResult<Elements<T>> {
-    let context = ha_ndarray::Context::default()?;
-    let queue = ha_ndarray::Queue::new(context, size_hint(size))?;
-
     let elements = blocks
         .map(move |result| {
             let (coords, values) = result?;
+
+            let queue = Queue::new(coords.context().clone(), coords.size())?;
             let coords = coords.read(&queue)?.to_slice()?;
+
+            let queue = Queue::new(values.context().clone(), values.size())?;
             let values = values.read(&queue)?.to_slice()?;
+
             let tuples = coords
                 .as_ref()
                 .into_par_iter()
@@ -3684,7 +3650,6 @@ fn block_elements<T: CDatatype, C: NDArrayRead<DType = u64>, V: NDArrayRead<DTyp
 
 #[inline]
 fn offsets<C, V, T>(
-    queue: ha_ndarray::Queue,
     strides: ArrayBase<Arc<Vec<u64>>>,
     blocks: impl Stream<Item = Result<(C, V), TCError>> + Send + 'static,
 ) -> impl Stream<Item = Result<(u64, T), TCError>> + Send
@@ -3697,10 +3662,12 @@ where
         .map(move |result| {
             let (coords, values) = result?;
 
+            let queue = Queue::new(coords.context().clone(), coords.size())?;
             let strides = strides.clone().broadcast(coords.shape().to_vec())?;
             let offsets = coords.mul(strides)?.sum_axis(1, false)?;
             let offsets = offsets.read(&queue)?.to_slice()?.into_vec();
 
+            let queue = Queue::new(values.context().clone(), values.size())?;
             let values = values.read(&queue)?.to_slice()?.into_vec();
 
             debug_assert_eq!(offsets.len(), values.len());
@@ -3719,7 +3686,6 @@ where
 
 #[inline]
 fn filter_zeros<T: CDatatype>(
-    queue: &Queue,
     coords: Array<u64>,
     values: Array<T>,
     ndim: usize,
@@ -3731,7 +3697,8 @@ fn filter_zeros<T: CDatatype>(
     if values.all()? {
         Ok(Some((coords, values.into())))
     } else {
-        let coord_slice = coords.read(queue)?.to_slice()?;
+        let queue = Queue::new(coords.context().clone(), coords.size())?;
+        let coord_slice = coords.read(&queue)?.to_slice()?;
         let value_slice = values.into_inner();
         debug_assert_eq!(coord_slice.len() % ndim, 0);
 
@@ -3784,7 +3751,6 @@ where
     debug_assert_eq!(&shape, left.shape());
     debug_assert_eq!(&shape, right.shape());
 
-    let size = shape.as_slice().iter().product();
     let strides = strides_for(&shape, shape.len());
     let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
     let shape = ArrayBase::<Arc<Vec<u64>>>::new(vec![shape.len()], Arc::new(shape.to_vec()))?;
@@ -3794,11 +3760,8 @@ where
         right.blocks(txn_id, range, order)
     )?;
 
-    let context = ha_ndarray::Context::default()?;
-    let queue = ha_ndarray::Queue::new(context.clone(), size_hint(size))?;
-
-    let left = offsets(queue.clone(), strides.clone(), left_blocks);
-    let right = offsets(queue.clone(), strides.clone(), right_blocks);
+    let left = offsets(strides.clone(), left_blocks);
+    let right = offsets(strides.clone(), right_blocks);
 
     let elements = stream::InnerJoin::new(left, right);
     let blocks = stream::BlockOffsetsDual::new(elements);
@@ -3828,7 +3791,6 @@ where
     debug_assert_eq!(&shape, left.shape());
     debug_assert_eq!(&shape, right.shape());
 
-    let size = shape.as_slice().iter().product();
     let strides = strides_for(&shape, shape.len());
     let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
     let shape = ArrayBase::<Arc<Vec<u64>>>::new(vec![shape.len()], Arc::new(shape.to_vec()))?;
@@ -3838,11 +3800,8 @@ where
         right.blocks(txn_id, range, order)
     )?;
 
-    let context = ha_ndarray::Context::default()?;
-    let queue = ha_ndarray::Queue::new(context.clone(), size_hint(size))?;
-
-    let left = offsets(queue.clone(), strides.clone(), left_blocks);
-    let right = offsets(queue.clone(), strides.clone(), right_blocks);
+    let left = offsets(strides.clone(), left_blocks);
+    let right = offsets(strides.clone(), right_blocks);
 
     let elements = stream::OuterJoin::new(left, right, T::zero());
     let blocks = stream::BlockOffsetsDual::new(elements);
