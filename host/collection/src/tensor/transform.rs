@@ -350,6 +350,7 @@ impl Reshape {
 
 #[derive(Clone)]
 pub struct Slice {
+    source_shape: Shape,
     shape: Shape,
     range: Range,
 }
@@ -381,18 +382,25 @@ impl Slice {
 
         shape.extend_from_slice(&source_shape[range.len()..]);
 
+        let shape = Shape::from(shape);
+
         Ok(Slice {
-            shape: shape.into(),
+            source_shape,
+            shape,
             range,
         })
     }
 
-    pub fn range(&'_ self) -> &'_ Range {
+    pub fn range(&self) -> &Range {
         &self.range
     }
 
-    pub fn shape(&'_ self) -> &'_ Shape {
+    pub fn shape(&self) -> &Shape {
         &self.shape
+    }
+
+    pub fn source_shape(&self) -> &Shape {
+        &self.source_shape
     }
 
     pub fn invert_range(&self, range: Range) -> Range {

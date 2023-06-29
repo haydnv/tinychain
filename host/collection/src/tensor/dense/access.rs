@@ -381,46 +381,54 @@ pub struct DenseBroadcast<S> {
 
 impl<S: DenseInstance> DenseBroadcast<S> {
     pub fn new(source: S, shape: Shape) -> TCResult<Self> {
-        let transform = Broadcast::new(source.shape().clone(), shape)?;
+        shape.validate()?;
 
-        let num_blocks = div_ceil(source.size(), source.block_size() as u64);
+        if shape.len() < source.ndim() {
+            return Err(bad_request!("cannot broadcast {source:?} into {shape:?}"));
+        }
+
+        debug!(
+            "broadcast {source:?} with block size {block_size} into {shape:?}",
+            block_size = source.block_size()
+        );
+
+        // characterize the source tensor
+        let num_blocks = source.size() / source.block_size() as u64;
         let block_axis = block_axis_for(source.shape(), source.block_size());
         let source_block_shape = block_shape_for(block_axis, source.shape(), source.block_size());
+        let source_block_map = block_map_for(num_blocks, source.shape(), &source_block_shape)?;
 
-        let mut block_shape = BlockShape::with_capacity(source_block_shape.len());
-        block_shape.push(source_block_shape[0]);
-        block_shape.extend(
-            transform
-                .shape()
-                .iter()
-                .rev()
-                .take(source_block_shape.len() - 1)
-                .rev()
-                .copied()
-                .map(|dim| dim as usize),
-        );
+        // characterize the output tensor (this tensor)
+        let axis_offset = shape.len() - source.ndim();
 
-        let block_size = block_shape.iter().product();
+        let block_shape = shape
+            .iter()
+            .skip(axis_offset + block_axis)
+            .copied()
+            .map(|dim| dim as usize)
+            .collect::<Vec<usize>>();
 
-        let mut block_map_shape = BlockShape::with_capacity(source.ndim());
-        block_map_shape.extend(
-            transform
-                .shape()
-                .iter()
-                .take(block_axis)
-                .copied()
-                .map(|dim| dim as usize),
-        );
-        block_map_shape.push(transform.shape()[block_axis] as usize / source_block_shape[0]);
+        let map_shape = shape
+            .iter()
+            .take(axis_offset + block_axis)
+            .copied()
+            .map(|dim| dim as usize)
+            .collect::<Vec<usize>>();
 
-        let block_map =
-            ArrayBase::<Vec<_>>::new(block_map_shape, (0..num_blocks).into_iter().collect())?;
+        let block_map = if map_shape.is_empty() {
+            source_block_map
+        } else {
+            let block_map = source_block_map.broadcast(map_shape)?;
+            ArrayBase::<Vec<u64>>::copy(&block_map)?
+        };
+
+        let transform = Broadcast::new(source.shape().clone(), shape)?;
 
         Ok(Self {
             source,
             transform,
             block_map,
-            block_size,
+            block_size: block_shape.iter().product(),
         })
     }
 }
@@ -1559,7 +1567,7 @@ impl<L: fmt::Debug, T: CDatatype> fmt::Debug for DenseConst<L, T> {
 pub struct DenseReduce<S, T: CDatatype> {
     source: S,
     transform: Reduce,
-    block_map: ArrayBase<Arc<Vec<u64>>>,
+    block_map: ArrayBase<Vec<u64>>,
     map_axes: Axes,
     block_axes: Axes,
     id: T,
@@ -1598,7 +1606,7 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
         block_map_shape.push(source.shape()[block_axis] as usize / block_shape[0]);
 
         let block_map = (0..num_blocks).into_iter().collect();
-        let block_map = ArrayBase::<Arc<Vec<u64>>>::new(block_map_shape, Arc::new(block_map))?;
+        let block_map = ArrayBase::<Vec<u64>>::new(block_map_shape, block_map)?;
 
         Ok(Self {
             source,
@@ -2025,6 +2033,8 @@ pub struct DenseSlice<S> {
 
 impl<S: DenseInstance> DenseSlice<S> {
     pub fn new(source: S, range: Range) -> TCResult<Self> {
+        debug!("construct a slice {range:?} of {source:?}");
+
         let transform = Slice::new(source.shape().clone(), range)?;
 
         let block_axis = block_axis_for(source.shape(), source.block_size());
@@ -2034,57 +2044,11 @@ impl<S: DenseInstance> DenseSlice<S> {
             block_shape.iter().product::<usize>() as u64,
         );
 
-        let block_map = block_map_for(num_blocks, source.shape().as_slice(), &block_shape)?;
+        let size = transform.shape().iter().product::<u64>();
+        let block_size = size / num_blocks;
+        debug_assert_eq!(block_size * num_blocks, size);
 
-        let mut block_map_bounds = Vec::with_capacity(block_axis + 1);
-        for axis_range in transform.range().iter().take(block_axis).cloned() {
-            let bound = axis_range.try_into()?;
-            block_map_bounds.push(bound);
-        }
-
-        if transform.range().len() > block_axis {
-            let bound = match &transform.range()[block_axis] {
-                AxisRange::At(i) => {
-                    let stride = block_map.shape().last().expect("stride");
-                    let i = usize::try_from(*i)
-                        .map_err(|cause| bad_request!("invalid index: {cause}"))?
-                        / stride;
-
-                    ha_ndarray::AxisBound::At(i)
-                }
-                AxisRange::In(axis_range, _step) => {
-                    let stride = block_shape[0];
-                    let start = usize::try_from(axis_range.start)
-                        .map_err(|cause| bad_request!("invalid range start: {cause}"))?
-                        / stride;
-                    let stop = usize::try_from(axis_range.end)
-                        .map_err(|cause| bad_request!("invalid range stop: {cause}"))?
-                        / stride;
-                    ha_ndarray::AxisBound::In(start, stop, 1)
-                }
-                AxisRange::Of(indices) => {
-                    let stride = block_map.shape().last().expect("stride");
-                    let indices = indices
-                        .iter()
-                        .copied()
-                        .map(|i| {
-                            usize::try_from(i)
-                                .map(|i| i / stride)
-                                .map_err(|cause| bad_request!("invalid index: {cause}"))
-                        })
-                        .collect::<Result<Vec<usize>, TCError>>()?;
-
-                    ha_ndarray::AxisBound::Of(indices)
-                }
-            };
-
-            block_map_bounds.push(bound);
-        }
-
-        let block_map = block_map.slice(block_map_bounds)?;
-        let block_map = ArrayBase::<Vec<u64>>::copy(&block_map)?;
-
-        let block_size = transform.shape().size() / num_blocks;
+        let block_map = Self::block_map(block_axis, num_blocks, &transform, block_shape)?;
 
         Ok(Self {
             source,
@@ -2094,6 +2058,64 @@ impl<S: DenseInstance> DenseSlice<S> {
         })
     }
 
+    fn block_map(
+        block_axis: usize,
+        num_blocks: u64,
+        transform: &Slice,
+        block_shape: BlockShape,
+    ) -> TCResult<ArrayBase<Vec<u64>>> {
+        debug!(
+            "construct block map for slice {:?} of {:?} with block shape {block_shape:?}",
+            transform.range(),
+            transform.source_shape(),
+        );
+
+        let block_map = block_map_for(num_blocks, transform.source_shape(), &block_shape)?;
+
+        let mut block_map_bounds = Vec::with_capacity(block_axis + 1);
+        for axis_range in transform.range().iter().take(block_axis).cloned() {
+            let bound = axis_range.try_into()?;
+            block_map_bounds.push(bound);
+        }
+
+        if transform.range().len() > block_axis {
+            let stride = block_shape[0];
+            let bound = match &transform.range()[block_axis] {
+                AxisRange::At(i) => {
+                    let i = (i / stride as u64) as usize;
+                    ha_ndarray::AxisBound::At(i)
+                }
+                AxisRange::In(axis_range, _step) => {
+                    let start = (axis_range.start / stride as u64) as usize;
+                    let stop = (axis_range.end / stride as u64) as usize;
+                    ha_ndarray::AxisBound::In(start, stop, 1)
+                }
+                AxisRange::Of(indices) => {
+                    let indices = indices
+                        .iter()
+                        .copied()
+                        .map(|i| (i / stride as u64) as usize)
+                        .collect::<Vec<usize>>();
+
+                    ha_ndarray::AxisBound::Of(indices)
+                }
+            };
+
+            block_map_bounds.push(bound);
+        }
+
+        debug!("slice block map is range {block_map_bounds:?} of {block_map:?}");
+
+        let block_map = if block_map_bounds.is_empty() {
+            block_map
+        } else {
+            let block_map = block_map.slice(block_map_bounds)?;
+            ArrayBase::<Vec<u64>>::copy(&block_map)?
+        };
+
+        Ok(block_map)
+    }
+
     #[inline]
     fn block_bounds(&self, block_id: u64) -> TCResult<(u64, Vec<ha_ndarray::AxisBound>)> {
         let source_block_id = source_block_id_for(&self.block_map, block_id)?;
@@ -2101,30 +2123,30 @@ impl<S: DenseInstance> DenseSlice<S> {
         let block_axis = block_axis_for(self.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
 
-        let local_bound =
-            match ha_ndarray::AxisBound::try_from(self.transform.range()[block_axis].clone())? {
-                ha_ndarray::AxisBound::At(i) => ha_ndarray::AxisBound::At(i),
-                ha_ndarray::AxisBound::In(start, stop, step) => {
-                    let stride = block_shape[0];
+        let axis_bound = self.transform.range()[block_axis].clone();
+        let local_bound = match ha_ndarray::AxisBound::try_from(axis_bound)? {
+            ha_ndarray::AxisBound::At(i) => ha_ndarray::AxisBound::At(i),
+            ha_ndarray::AxisBound::In(start, stop, step) => {
+                let stride = block_shape[0];
 
-                    if source_block_id == 0 {
-                        ha_ndarray::AxisBound::In(start, stride, step)
-                    } else if source_block_id == self.block_map.size() as u64 - 1 {
-                        ha_ndarray::AxisBound::In(stop - (stop % stride), stop, step)
-                    } else {
-                        let start = source_block_id as usize * stride;
-                        ha_ndarray::AxisBound::In(start, start + stride, step)
-                    }
+                if source_block_id == 0 {
+                    ha_ndarray::AxisBound::In(start, stride, step)
+                } else if source_block_id == self.block_map.size() as u64 - 1 {
+                    ha_ndarray::AxisBound::In(stop - (stop % stride), stop, step)
+                } else {
+                    let start = source_block_id as usize * stride;
+                    ha_ndarray::AxisBound::In(start, start + stride, step)
                 }
-                ha_ndarray::AxisBound::Of(indices) => {
-                    if source_block_id < indices.len() as u64 {
-                        let i = indices[source_block_id as usize] as usize;
-                        ha_ndarray::AxisBound::At(i)
-                    } else {
-                        return Err(bad_request!("block id {} is out of range", block_id));
-                    }
+            }
+            ha_ndarray::AxisBound::Of(indices) => {
+                if source_block_id < indices.len() as u64 {
+                    let i = indices[source_block_id as usize] as usize;
+                    ha_ndarray::AxisBound::At(i)
+                } else {
+                    return Err(bad_request!("block id {} is out of range", block_id));
                 }
-            };
+            }
+        };
 
         let mut block_bounds = Vec::with_capacity(self.ndim());
         for bound in self.transform.range().iter().take(block_axis).cloned() {
@@ -2182,15 +2204,11 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
                     let mut local_bounds = Vec::with_capacity(block_map.size());
                     local_bounds.push(ha_ndarray::AxisBound::In(start, stride, step));
 
-                    for i in 1..(block_map.size() - 1) {
+                    for _ in 1..(block_map.size() - 1) {
                         local_bounds.push(ha_ndarray::AxisBound::In(0, stride, step));
                     }
 
-                    local_bounds.push(ha_ndarray::AxisBound::In(
-                        0,
-                        stop,
-                        step,
-                    ));
+                    local_bounds.push(ha_ndarray::AxisBound::In(0, stop, step));
 
                     local_bounds
                 }

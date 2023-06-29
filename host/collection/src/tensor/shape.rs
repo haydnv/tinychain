@@ -546,11 +546,11 @@ impl Shape {
         if self.contains_range(range) {
             Ok(())
         } else {
-            Err(bad_request!(
-                "shape {:?} does not contain range {:?}",
-                self,
-                range
-            ))
+            #[cfg(debug_assertions)]
+            panic!("shape {self:?} does not contain {range:?}");
+
+            #[cfg(not(debug_assertions))]
+            Err(bad_request!("shape {self:?} does not contain {range:?}"))
         }
     }
 

@@ -1257,7 +1257,7 @@ where
             {
                 // always acquire these permits in-order to avoid the risk of a deadlock
                 let _write_permit = this.write_permit(txn_id, range.clone()).await?;
-                let _read_permit = that.accessor.read_permit(txn_id, range.clone()).await?;
+                let _read_permit = that.accessor.read_permit(txn_id, Range::default()).await?;
 
                 if range.is_empty() || range == Range::all(this.shape()) {
                     let guard = this.write().await;
@@ -1810,11 +1810,10 @@ where
 
 #[inline]
 fn block_axis_for(shape: &[u64], block_size: usize) -> usize {
-    debug_assert!(!shape.is_empty());
-    debug_assert!(shape.iter().copied().all(|dim| dim > 0));
-    debug_assert!(shape.iter().product::<u64>() >= block_size as u64);
-
     debug!("compute block axis for shape {shape:?} with block size {block_size:?}");
+
+    debug_assert!(!shape.is_empty());
+    debug_assert!(shape.iter().product::<u64>() >= block_size as u64);
 
     let mut block_axis = shape.len() - 1;
     while shape[block_axis..].iter().product::<u64>() < block_size as u64 {
@@ -1833,6 +1832,15 @@ fn block_map_for(
     debug!("construct a block map for {shape:?} with block shape {block_shape:?}");
 
     debug_assert!(shape.len() >= block_shape.len());
+    debug_assert_eq!(
+        block_shape
+            .iter()
+            .copied()
+            .map(|dim| dim as u64)
+            .product::<u64>()
+            * num_blocks,
+        shape.iter().product::<u64>()
+    );
 
     let block_axis = shape.len() - block_shape.len();
     let mut block_map_shape = BlockShape::with_capacity(block_axis + 1);

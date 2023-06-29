@@ -1245,6 +1245,7 @@ struct TensorHandler<T> {
 impl<'a, State, T: 'a> Handler<'a, State> for TensorHandler<T>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
+    State::FE: DenseCacheFile + AsType<Node>,
     T: TensorInstance
         + TensorRead
         + TensorWrite
@@ -1763,19 +1764,27 @@ where
 async fn write<State, T>(tensor: T, txn_id: TxnId, key: Value, value: State) -> TCResult<()>
 where
     State: StateInstance,
+    State::FE: DenseCacheFile + AsType<Node>,
     T: TensorInstance
         + TensorWrite
         + TensorWriteDual<Tensor<State::Txn, State::FE>>
         + TensorTransform
         + Clone,
     Number: TryCastFrom<State>,
-    Tensor<State::Txn, State::FE>: TensorInstance + TryCastFrom<State>,
+    Tensor<State::Txn, State::FE>: TensorInstance
+        + TensorTransform<Broadcast = Tensor<State::Txn, State::FE>>
+        + TryCastFrom<State>,
 {
     debug!("write {value:?} to {key}");
     let range = cast_range(tensor.shape(), Scalar::Value(key))?;
 
     if value.matches::<Tensor<_, _>>() {
         let value = Tensor::<_, _>::opt_cast_from(value).expect("tensor");
+        let value = {
+            let range = range.clone().normalize(tensor.shape());
+            value.broadcast(range.shape())?
+        };
+
         tensor.write(txn_id, range, value).await
     } else if value.matches::<Number>() {
         let value = Number::opt_cast_from(value).expect("element");
@@ -1820,23 +1829,6 @@ where
                 .map_ok(Tensor::from)
                 .await
         }
-    }
-}
-
-fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
-    let bound = i64::try_cast_from(bound, |v| TCError::unexpected(v, "an axis bound"))?;
-    if bound.abs() as u64 > dim {
-        return Err(bad_request!(
-            "index {} is out of bounds for dimension {}",
-            bound,
-            dim
-        ));
-    }
-
-    if bound < 0 {
-        Ok(dim - bound.abs() as u64)
-    } else {
-        Ok(bound as u64)
     }
 }
 
@@ -1900,6 +1892,24 @@ fn cast_axis_range<R: RangeBounds<Value> + fmt::Debug>(dim: u64, range: R) -> TC
         Err(TCError::unexpected(
             format!("{start}..{end}"),
             "axis bounds",
+        ))
+    }
+}
+
+fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
+    let bound = i64::try_cast_from(bound, |v| TCError::unexpected(v, "an axis bound"))?;
+
+    if (bound.abs() as u64) <= dim {
+        if bound < 0 {
+            Ok(dim - bound.abs() as u64)
+        } else {
+            Ok(bound as u64)
+        }
+    } else {
+        Err(bad_request!(
+            "index {} is out of bounds for dimension {}",
+            bound,
+            dim
         ))
     }
 }
