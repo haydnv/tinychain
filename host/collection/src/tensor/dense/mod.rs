@@ -166,6 +166,22 @@ impl<Txn, FE, T: CDatatype> DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>> {
     }
 }
 
+impl<Txn, FE, A> DenseTensor<Txn, FE, A>
+where
+    A: DenseInstance,
+{
+    fn block_size(&self) -> usize {
+        self.accessor.block_size()
+    }
+
+    fn resize_blocks(self, block_size: usize) -> DenseTensor<Txn, FE, DenseResizeBlocks<A>> {
+        DenseTensor {
+            accessor: DenseResizeBlocks::new(self.accessor, block_size),
+            phantom: PhantomData,
+        }
+    }
+}
+
 impl<Txn, FE, A> TensorInstance for DenseTensor<Txn, FE, A>
 where
     Txn: ThreadSafe,

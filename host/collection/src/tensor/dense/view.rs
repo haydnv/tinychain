@@ -114,6 +114,47 @@ macro_rules! view_dispatch_compare {
     };
 }
 
+impl<Txn, FE> DenseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
+    fn block_size(&self) -> usize {
+        view_dispatch!(
+            self,
+            this,
+            this.block_size(),
+            this.0.block_size(),
+            this.block_size()
+        )
+    }
+
+    fn resize_blocks(self, block_size: usize) -> Self {
+        match self {
+            Self::Bool(this) => Self::Bool(dense_from(this.resize_blocks(block_size))),
+            Self::C32((re, im)) => {
+                let re = dense_from(re.resize_blocks(block_size));
+                let im = dense_from(im.resize_blocks(block_size));
+                Self::C32((re, im))
+            }
+            Self::C64((re, im)) => {
+                let re = dense_from(re.resize_blocks(block_size));
+                let im = dense_from(im.resize_blocks(block_size));
+                Self::C64((re, im))
+            }
+            Self::F32(this) => Self::F32(dense_from(this.resize_blocks(block_size))),
+            Self::F64(this) => Self::F64(dense_from(this.resize_blocks(block_size))),
+            Self::I16(this) => Self::I16(dense_from(this.resize_blocks(block_size))),
+            Self::I32(this) => Self::I32(dense_from(this.resize_blocks(block_size))),
+            Self::I64(this) => Self::I64(dense_from(this.resize_blocks(block_size))),
+            Self::U8(this) => Self::U8(dense_from(this.resize_blocks(block_size))),
+            Self::U16(this) => Self::U16(dense_from(this.resize_blocks(block_size))),
+            Self::U32(this) => Self::U32(dense_from(this.resize_blocks(block_size))),
+            Self::U64(this) => Self::U64(dense_from(this.resize_blocks(block_size))),
+        }
+    }
+}
+
 impl<Txn: ThreadSafe, FE: ThreadSafe> DenseView<Txn, FE>
 where
     Txn: Transaction<FE>,
@@ -713,6 +754,14 @@ where
 
     fn add(self, other: Self) -> TCResult<Self::Combine> {
         match (self, other) {
+            (this, that) if this.block_size() > that.block_size() => {
+                let that = that.resize_blocks(this.block_size());
+                this.add(that)
+            }
+            (this, that) if that.block_size() > this.block_size() => {
+                let this = this.resize_blocks(that.block_size());
+                this.add(that)
+            }
             (Self::Bool(this), Self::Bool(that)) => this.or(that).map(dense_from).map(Self::Bool),
             (Self::C32((a, b)), Self::C32((c, d))) => {
                 ComplexMath::add((a.into(), b.into()), (c.into(), d.into()))
@@ -761,6 +810,14 @@ where
 
     fn div(self, other: Self) -> TCResult<Self::LeftCombine> {
         match (self, other) {
+            (this, that) if this.block_size() > that.block_size() => {
+                let that = that.resize_blocks(this.block_size());
+                this.div(that)
+            }
+            (this, that) if that.block_size() > this.block_size() => {
+                let this = this.resize_blocks(that.block_size());
+                this.div(that)
+            }
             (Self::Bool(this), Self::Bool(that)) => this.div(that).map(dense_from).map(Self::Bool),
             (Self::C32((a, b)), Self::C32((c, d))) => {
                 ComplexMath::div((a.into(), b.into()), (c.into(), d.into()))
@@ -808,6 +865,14 @@ where
 
     fn log(self, base: Self) -> TCResult<Self::LeftCombine> {
         match (self, base) {
+            (this, that) if this.block_size() > that.block_size() => {
+                let that = that.resize_blocks(this.block_size());
+                this.log(that)
+            }
+            (this, that) if that.block_size() > this.block_size() => {
+                let this = this.resize_blocks(that.block_size());
+                this.log(that)
+            }
             (Self::Bool(_), _) => Err(bad_request!("a boolean value has no logarithm")),
             (Self::C32(this), that) => Self::C32(this).ln()?.div(that.ln()?),
             (Self::C64(this), that) => Self::C64(this).ln()?.div(that.ln()?),
@@ -831,6 +896,14 @@ where
 
     fn mul(self, other: Self) -> TCResult<Self::LeftCombine> {
         match (self, other) {
+            (this, that) if this.block_size() > that.block_size() => {
+                let that = that.resize_blocks(this.block_size());
+                this.mul(that)
+            }
+            (this, that) if that.block_size() > this.block_size() => {
+                let this = this.resize_blocks(that.block_size());
+                this.mul(that)
+            }
             (Self::Bool(this), Self::Bool(that)) => this.mul(that).map(dense_from).map(Self::Bool),
             (Self::C32((a, b)), Self::C32((c, d))) => {
                 ComplexMath::mul((a.into(), b.into()), (c.into(), d.into()))
@@ -879,6 +952,14 @@ where
 
     fn pow(self, other: Self) -> TCResult<Self::LeftCombine> {
         match (self, other) {
+            (this, that) if this.block_size() > that.block_size() => {
+                let that = that.resize_blocks(this.block_size());
+                this.pow(that)
+            }
+            (this, that) if that.block_size() > this.block_size() => {
+                let this = this.resize_blocks(that.block_size());
+                this.pow(that)
+            }
             (Self::Bool(this), Self::Bool(that)) => this.pow(that).map(dense_from).map(Self::Bool),
             (Self::C32((x, y)), Self::F32(that)) => {
                 ComplexMath::pow((x.into(), y.into()), that.into()).and_then(Self::complex_from)
@@ -919,6 +1000,14 @@ where
 
     fn sub(self, other: Self) -> TCResult<Self::Combine> {
         match (self, other) {
+            (this, that) if this.block_size() > that.block_size() => {
+                let that = that.resize_blocks(this.block_size());
+                this.sub(that)
+            }
+            (this, that) if that.block_size() > this.block_size() => {
+                let this = this.resize_blocks(that.block_size());
+                this.sub(that)
+            }
             (Self::Bool(this), Self::Bool(that)) => this.or(that).map(dense_from).map(Self::Bool),
             (Self::C32((a, b)), Self::C32((c, d))) => {
                 ComplexMath::sub((a.into(), b.into()), (c.into(), d.into()))

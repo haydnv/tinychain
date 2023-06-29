@@ -2119,6 +2119,8 @@ impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
             buffer.extend_from_slice(&source_buffer[0..stop]);
         }
 
+        block_shape[0] = buffer.len() / block_shape.iter().skip(1).product::<usize>();
+
         ArrayBase::<Vec<Self::DType>>::new(block_shape, buffer).map_err(TCError::from)
     }
 
@@ -2139,6 +2141,19 @@ impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
 impl<S: TensorPermitRead> TensorPermitRead for DenseResizeBlocks<S> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.source.read_permit(txn_id, range).await
+    }
+}
+
+impl<Txn, FE, T, S> From<DenseResizeBlocks<S>> for DenseAccess<Txn, FE, T>
+where
+    T: CDatatype,
+    S: Into<DenseAccess<Txn, FE, T>>,
+{
+    fn from(resize: DenseResizeBlocks<S>) -> Self {
+        Self::ResizeBlocks(Box::new(DenseResizeBlocks {
+            source: resize.source.into(),
+            block_size: resize.block_size,
+        }))
     }
 }
 
