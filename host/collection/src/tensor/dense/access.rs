@@ -335,6 +335,7 @@ where
             Self::Cow(cow) => cow.read_permit(txn_id, range).await,
             Self::Diagonal(diag) => diag.read_permit(txn_id, range).await,
             Self::Expand(expand) => expand.read_permit(txn_id, range).await,
+            Self::Reduce(reduce) => reduce.read_permit(txn_id, range).await,
             Self::Reshape(reshape) => reshape.read_permit(txn_id, range).await,
             Self::ResizeBlocks(resize) => resize.read_permit(txn_id, range).await,
             Self::Slice(slice) => slice.read_permit(txn_id, range).await,
@@ -407,16 +408,16 @@ impl<S: DenseInstance> DenseBroadcast<S> {
         // characterize the output tensor (this tensor)
         let axis_offset = shape.len() - source.ndim();
 
-        let block_shape = shape
+        let map_shape = shape
             .iter()
-            .skip(axis_offset + block_axis)
+            .take(axis_offset + block_axis)
             .copied()
             .map(|dim| dim as usize)
             .collect::<Vec<usize>>();
 
-        let map_shape = shape
+        let block_shape = shape
             .iter()
-            .take(axis_offset + block_axis)
+            .skip(axis_offset + block_axis)
             .copied()
             .map(|dim| dim as usize)
             .collect::<Vec<usize>>();
@@ -1589,20 +1590,27 @@ pub struct DenseReduce<S, T: CDatatype> {
 impl<S: DenseInstance> DenseReduce<S, S::DType> {
     fn new(
         source: S,
-        axes: Axes,
+        mut axes: Axes,
         keepdims: bool,
         id: S::DType,
         reduce_all: fn(Array<S::DType>, S::DType) -> TCResult<S::DType>,
         reduce_blocks: Combine<S::DType>,
         reduce_op: fn(Array<S::DType>, &[usize], bool) -> TCResult<Array<S::DType>>,
     ) -> TCResult<Self> {
+        axes.sort();
+
         let num_blocks = div_ceil(source.size(), source.block_size() as u64);
         let block_axis = block_axis_for(source.shape(), source.block_size());
         let block_shape = block_shape_for(block_axis, source.shape(), source.block_size());
         debug_assert_eq!(source.shape()[block_axis] % block_shape[0] as u64, 0);
 
-        let map_axes = axes[..(block_axis + 1)].to_vec();
-        let block_axes = axes[block_axis..].to_vec();
+        let map_axes = axes.iter().copied().filter(|x| *x <= block_axis).collect();
+        let block_axes = axes
+            .iter()
+            .copied()
+            .filter(|x| *x >= block_axis)
+            .map(|x| x - block_axis)
+            .collect();
 
         let transform = Reduce::new(source.shape().clone(), axes, keepdims)?;
 
@@ -1721,6 +1729,8 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             },
             |l, r| l.add(r).map(Array::from).map_err(TCError::from),
             |mut block, axes, keepdims| {
+                debug!("reduce axes {axes:?} of {block:?}");
+
                 for x in axes.iter().rev().copied() {
                     block = block.sum_axis(x, keepdims).map(Array::from)?
                 }
@@ -1803,6 +1813,7 @@ where
             source_block_id as usize,
             &map_strides,
             self.block_map.shape(),
+            0,
         );
 
         let mut map_slice = map_coord
@@ -1816,6 +1827,7 @@ where
 
         let queue =
             ha_ndarray::Queue::new(self.block_map.context().clone(), self.block_map.size())?;
+
         let block_map_slice = self.block_map.clone().slice(map_slice)?;
         let source_blocks = block_map_slice.read(&queue)?.to_slice()?;
 
@@ -1826,6 +1838,7 @@ where
             .read_block(txn_id, source_block_id)
             .map(|result| {
                 result.and_then(|block| {
+                    debug_assert!(self.block_axes.iter().copied().all(|x| x < block.ndim()));
                     (self.reduce_op)(block, &self.block_axes, self.transform.keepdims())
                 })
             })
@@ -1837,6 +1850,11 @@ where
                     .read_block(txn_id, source_block_id)
                     .map(|result| {
                         result.and_then(|block| {
+                            debug_assert!(self
+                                .block_axes
+                                .iter()
+                                .copied()
+                                .all(|x| x < block.ndim()));
                             (self.reduce_op)(block, &self.block_axes, self.transform.keepdims())
                         })
                     })
@@ -2631,8 +2649,8 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
             })
             .collect::<Vec<u64>>();
 
-        let start = coord_of(start, &strides, self.shape());
-        let stop = coord_of(stop, &strides, self.shape());
+        let start = coord_of(start, &strides, self.shape(), 0);
+        let stop = coord_of(stop, &strides, self.shape(), 0);
 
         let range: Range = start
             .into_iter()
@@ -2739,19 +2757,22 @@ impl<S: DenseInstance> DenseTranspose<S> {
         let permutation = transform.axes().to_vec();
         let (map_axes, block_axes) = permutation.split_at(block_axis);
 
-        if map_axes.iter().copied().any(|x| x >= block_axis)
-            || block_axes.iter().copied().any(|x| x <= block_axis)
-        {
-            return Err(bad_request!(
-                "cannot transpose axes {:?} of {:?} without copying",
-                block_axes,
-                source
-            ));
-        }
-
         let block_map = ArrayBase::<Vec<_>>::new(map_shape, (0..num_blocks).into_iter().collect())?;
-        let block_map = block_map.transpose(Some(map_axes.to_vec()))?;
-        let block_map = ArrayBase::<Vec<_>>::copy(&block_map)?;
+
+        let block_map = if num_blocks > 1 {
+            if map_axes.iter().copied().all(|x| x < block_axis)
+                || block_axes.iter().copied().all(|x| x > block_axis)
+            {
+                let block_map = block_map.transpose(Some(map_axes.to_vec()))?;
+                ArrayBase::<Vec<_>>::copy(&block_map).map_err(TCError::from)
+            } else {
+                Err(bad_request!(
+                    "cannot transpose axes {block_axes:?} of {source:?} without copying"
+                ))
+            }
+        } else {
+            Ok(block_map)
+        }?;
 
         Ok(Self {
             source,
