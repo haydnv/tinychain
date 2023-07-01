@@ -209,7 +209,7 @@ class DenseTests(HostTest):
     def testMean(self):
         shape = [2, 3, 4]
         axis = 1
-        x = (np.random.random(np.product(shape)) * 10).reshape(shape)
+        x = np.ones(shape)
 
         cxt = tc.Context()
         cxt.x = tc.tensor.Dense.load(shape, x.flatten().tolist())
@@ -217,9 +217,10 @@ class DenseTests(HostTest):
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.mean(x, axis)
+
         self.assertTrue(all_close(actual, expected))
 
-    def testProduct(self):
+    def testProduct_axis(self):
         shape = [2, 3, 4]
         axis = 1
 
@@ -228,10 +229,13 @@ class DenseTests(HostTest):
         cxt.result = cxt.big.product(axis)
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = np.product(np.arange(0, 24).reshape(shape), axis)
+
+        big = np.arange(0, 24).reshape(shape)
+        expected = np.product(big, axis)
+
         self.assertEqual(actual, expect_dense(tc.I64, [2, 4], expected.flatten()))
 
-    def testProductAll(self):
+    def testProduct_all(self):
         shape = [2, 3]
 
         cxt = tc.Context()

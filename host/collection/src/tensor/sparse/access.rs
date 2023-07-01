@@ -2336,11 +2336,14 @@ where
     pub fn new(
         source: S,
         id: T,
-        axes: Axes,
+        mut axes: Axes,
         keepdims: bool,
         op: fn(Array<T>) -> TCResult<T>,
         value_op: fn(T, T) -> T,
     ) -> TCResult<Self> {
+        axes.sort();
+        axes.dedup();
+
         Reduce::new(source.shape().clone(), axes, keepdims)
             .map(Arc::new)
             .map(|transform| Self {
@@ -2565,7 +2568,7 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
                 .broadcast(vec![values.size(), source_ndim])?;
 
             let offsets = source_coords.mul(source_strides)?;
-            let offsets = offsets.sum_axis(1, false)?;
+            let offsets = offsets.sum(vec![1], false)?;
 
             let broadcast = vec![offsets.size(), ndim];
             let strides = strides.clone().broadcast(broadcast.to_vec())?;
@@ -3654,7 +3657,7 @@ fn offsets<C, V, T>(
     blocks: impl Stream<Item = Result<(C, V), TCError>> + Send + 'static,
 ) -> impl Stream<Item = Result<(u64, T), TCError>> + Send
 where
-    C: NDArrayRead<DType = u64> + NDArrayMath,
+    C: NDArrayRead<DType = u64> + NDArrayMath + 'static,
     V: NDArrayRead<DType = T>,
     T: CDatatype,
 {
@@ -3664,7 +3667,7 @@ where
 
             let queue = Queue::new(coords.context().clone(), coords.size())?;
             let strides = strides.clone().broadcast(coords.shape().to_vec())?;
-            let offsets = coords.mul(strides)?.sum_axis(1, false)?;
+            let offsets = coords.mul(strides)?.sum(vec![1], false)?;
             let offsets = offsets.read(&queue)?.to_slice()?.into_vec();
 
             let queue = Queue::new(values.context().clone(), values.size())?;

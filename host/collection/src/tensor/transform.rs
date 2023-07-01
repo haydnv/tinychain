@@ -200,10 +200,8 @@ pub struct Reduce {
 }
 
 impl Reduce {
-    pub fn new(source_shape: Shape, mut axes: Vec<usize>, keepdims: bool) -> TCResult<Reduce> {
+    pub fn new(source_shape: Shape, axes: Vec<usize>, keepdims: bool) -> TCResult<Reduce> {
         source_shape.validate_axes(&axes)?;
-
-        axes.sort();
 
         for i in 0..(axes.len() - 1) {
             if axes[i] == axes[i + 1] {

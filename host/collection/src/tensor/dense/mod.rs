@@ -670,7 +670,7 @@ where
         let collator = NumberCollator::default();
 
         let max = blocks
-            .map(|result| result.and_then(|block| block.max().map_err(TCError::from)))
+            .map(|result| result.and_then(|block| block.max_all().map_err(TCError::from)))
             .map_ok(Number::from)
             .try_fold(Number::from(A::DType::min()), |max, block_max| {
                 let max = match collator.cmp(&max, &block_max) {
@@ -695,7 +695,7 @@ where
         let collator = NumberCollator::default();
 
         let min = blocks
-            .map(|result| result.and_then(|block| block.min().map_err(TCError::from)))
+            .map(|result| result.and_then(|block| block.min_all().map_err(TCError::from)))
             .map_ok(Number::from)
             .try_fold(Number::from(A::DType::max()), |min, block_min| {
                 let max = match collator.cmp(&min, &block_min) {
@@ -721,7 +721,7 @@ where
             let blocks = self.accessor.read_blocks(txn_id).await?;
 
             let product = blocks
-                .map(|result| result.and_then(|block| block.product().map_err(TCError::from)))
+                .map(|result| result.and_then(|block| block.product_all().map_err(TCError::from)))
                 .try_fold(A::DType::one(), |product, block_product| {
                     future::ready(Ok(product * block_product))
                 })
@@ -742,7 +742,7 @@ where
         let blocks = self.accessor.read_blocks(txn_id).await?;
 
         let sum = blocks
-            .map(|result| result.and_then(|block| block.sum().map_err(TCError::from)))
+            .map(|result| result.and_then(|block| block.sum_all().map_err(TCError::from)))
             .try_fold(A::DType::zero(), |sum, block_sum| {
                 future::ready(Ok(sum + block_sum))
             })

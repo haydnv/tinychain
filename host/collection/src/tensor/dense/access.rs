@@ -1607,6 +1607,7 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
         reduce_op: fn(Array<S::DType>, &[usize], bool) -> TCResult<Array<S::DType>>,
     ) -> TCResult<Self> {
         axes.sort();
+        axes.dedup();
 
         let num_blocks = div_ceil(source.size(), source.block_size() as u64);
         let block_axis = block_axis_for(source.shape(), source.block_size());
@@ -1658,7 +1659,7 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             keepdims,
             S::DType::min(),
             |block, max| {
-                let block_max = block.max()?;
+                let block_max = block.max_all()?;
                 let max = match NumberCollator::default().cmp(&max.into(), &block_max.into()) {
                     Ordering::Less => block_max,
                     Ordering::Equal | Ordering::Greater => max,
@@ -1676,12 +1677,11 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
                     .map(Array::from)
                     .map_err(TCError::from)
             },
-            |mut block, axes, keepdims| {
-                for x in axes.iter().rev().copied() {
-                    block = block.max_axis(x, keepdims).map(Array::from)?
-                }
-
-                Ok(block)
+            |block, axes, keepdims| {
+                block
+                    .max(axes.to_vec(), keepdims)
+                    .map(Array::from)
+                    .map_err(TCError::from)
             },
         )
     }
@@ -1696,7 +1696,7 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             keepdims,
             S::DType::max(),
             |block, min| {
-                let block_min = block.min()?;
+                let block_min = block.min_all()?;
                 let min = match NumberCollator::default().cmp(&min.into(), &block_min.into()) {
                     Ordering::Less | Ordering::Equal => min,
                     Ordering::Greater => block_min,
@@ -1714,12 +1714,11 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
                     .map(Array::from)
                     .map_err(TCError::from)
             },
-            |mut block, axes, keepdims| {
-                for x in axes.iter().rev().copied() {
-                    block = block.min_axis(x, keepdims).map(Array::from)?
-                }
-
-                Ok(block)
+            |block, axes, keepdims| {
+                block
+                    .min(axes.to_vec(), keepdims)
+                    .map(Array::from)
+                    .map_err(TCError::from)
             },
         )
     }
@@ -1732,19 +1731,16 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             S::DType::zero(),
             |block, sum| {
                 block
-                    .sum()
+                    .sum_all()
                     .map(|block_sum| block_sum + sum)
                     .map_err(TCError::from)
             },
             |l, r| l.add(r).map(Array::from).map_err(TCError::from),
-            |mut block, axes, keepdims| {
-                debug!("reduce axes {axes:?} of {block:?}");
-
-                for x in axes.iter().rev().copied() {
-                    block = block.sum_axis(x, keepdims).map(Array::from)?
-                }
-
-                Ok(block)
+            |block, axes, keepdims| {
+                block
+                    .sum(axes.to_vec(), keepdims)
+                    .map(Array::from)
+                    .map_err(TCError::from)
             },
         )
     }
@@ -1756,16 +1752,15 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             keepdims,
             S::DType::one(),
             |block, product| {
-                let block_product = block.product()?;
+                let block_product = block.product_all()?;
                 Ok(block_product * product)
             },
             |l, r| l.mul(r).map(Array::from).map_err(TCError::from),
-            |mut block, axes, keepdims| {
-                for x in axes.iter().rev().copied() {
-                    block = block.product_axis(x, keepdims).map(Array::from)?
-                }
-
-                Ok(block)
+            |block, axes, keepdims| {
+                block
+                    .product(axes.to_vec(), keepdims)
+                    .map(Array::from)
+                    .map_err(TCError::from)
             },
         )
     }

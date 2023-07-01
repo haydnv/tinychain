@@ -635,7 +635,7 @@ where
     }
 
     fn max(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
-        let block_op = |block: Array<A::DType>| block.max().map_err(TCError::from);
+        let block_op = |block: Array<A::DType>| block.max_all().map_err(TCError::from);
 
         fn max_value<T: Into<Number> + Copy>(l: T, r: T) -> T {
             match NumberCollator::default().cmp(&l.into(), &r.into()) {
@@ -667,7 +667,7 @@ where
         blocks
             .map(|result| {
                 result.and_then(|(_coords, values)| {
-                    values.max().map(Number::from).map_err(TCError::from)
+                    values.max_all().map(Number::from).map_err(TCError::from)
                 })
             })
             .try_fold(A::DType::min().into(), move |max, block_max| {
@@ -682,7 +682,7 @@ where
     }
 
     fn min(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
-        let block_op = |block: Array<A::DType>| block.min().map_err(TCError::from);
+        let block_op = |block: Array<A::DType>| block.min_all().map_err(TCError::from);
 
         fn min_value<T: Into<Number> + Copy>(l: T, r: T) -> T {
             match NumberCollator::default().cmp(&l.into(), &r.into()) {
@@ -714,7 +714,7 @@ where
         blocks
             .map(|result| {
                 result.and_then(|(_coords, values)| {
-                    values.max().map(Number::from).map_err(TCError::from)
+                    values.max_all().map(Number::from).map_err(TCError::from)
                 })
             })
             .try_fold(A::DType::min().into(), move |max, block_max| {
@@ -734,7 +734,7 @@ where
             A::DType::one(),
             axes,
             keepdims,
-            |block| block.product().map_err(TCError::from),
+            |block| block.product_all().map_err(TCError::from),
             |l, r| l * r,
         )
         .map(SparseTensor::from)
@@ -750,7 +750,7 @@ where
 
         blocks
             .map(|result| {
-                result.and_then(|(_coords, values)| values.product().map_err(TCError::from))
+                result.and_then(|(_coords, values)| values.product_all().map_err(TCError::from))
             })
             .try_fold(A::DType::one(), move |product, block_product| {
                 futures::future::ready(Ok(product * block_product))
@@ -765,7 +765,7 @@ where
             A::DType::one(),
             axes,
             keepdims,
-            |block| block.sum().map_err(TCError::from),
+            |block| block.sum_all().map_err(TCError::from),
             |l, r| l + r,
         )
         .map(SparseTensor::from)
@@ -780,7 +780,9 @@ where
             .await?;
 
         blocks
-            .map(|result| result.and_then(|(_coords, values)| values.sum().map_err(TCError::from)))
+            .map(|result| {
+                result.and_then(|(_coords, values)| values.sum_all().map_err(TCError::from))
+            })
             .try_fold(A::DType::one(), move |sum, block_sum| {
                 futures::future::ready(Ok(sum + block_sum))
             })
