@@ -25,7 +25,7 @@ futures = "0.3"
 freqfs = { path = "../../../freqfs" }
 ha-ndarray = { path = "../../../ha-ndarray", features = ["freqfs", "stream"] }
 itertools = "0.10"
-log = { version = "0.4" }
+log = { version = "0.4", features = ["release_max_level_info"] }
 num_cpus = "1.15"
 pin-project = "1.1"
 rayon = "1.7"

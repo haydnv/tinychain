@@ -9,11 +9,12 @@ use futures::stream::{StreamExt, TryStreamExt};
 use ha_ndarray::{
     ArrayBase, ArrayOp, Buffer, BufferWrite, CDatatype, NDArray, NDArrayMathScalar, NDArrayRead,
 };
-use safecast::AsType;
+use itertools::Itertools;
+use safecast::{AsType, CastFrom};
 
 use tc_error::*;
 use tc_transact::TxnId;
-use tc_value::{DType, NumberClass, NumberType};
+use tc_value::{DType, Number, NumberClass, NumberType};
 use tcgeneric::ThreadSafe;
 
 use crate::tensor::{offset_of, Coord, Shape, TensorInstance};
@@ -134,6 +135,48 @@ where
 
         if block_id != num_blocks - 1 {
             return Err(bad_request!("cannot create a tensor of shape {shape:?} from {num_blocks} blocks of size {block_size}"));
+        }
+
+        std::mem::drop(dir_guard);
+
+        Ok(Self {
+            dir,
+            block_map,
+            block_size,
+            shape,
+            dtype: PhantomData,
+        })
+    }
+
+    pub async fn from_values(dir: DirLock<FE>, shape: Shape, values: Vec<Number>) -> TCResult<Self>
+    where
+        T: CastFrom<Number>,
+    {
+        shape.validate()?;
+
+        if values.len() as u64 != shape.size() {
+            return Err(bad_request!(
+                "cannot construct a tensor of shape {shape:?} from {len} values",
+                len = values.len()
+            ));
+        }
+
+        let (block_size, num_blocks) = ideal_block_size_for(&shape);
+        let block_axis = block_axis_for(&shape, block_size);
+        let block_shape = block_shape_for(block_axis, &shape, block_size);
+        let block_map = block_map_for(num_blocks as u64, shape.as_slice(), &block_shape)?;
+
+        let blocks = values
+            .into_iter()
+            .map(|n| T::cast_from(n))
+            .chunks(block_size);
+
+        let mut dir_guard = dir.write().await;
+
+        for (block_id, block) in blocks.into_iter().enumerate() {
+            let buffer = Buffer::from(block.collect::<Vec<T>>());
+            let size_in_bytes = buffer.len() * T::dtype().size();
+            dir_guard.create_file(block_id.to_string(), buffer, size_in_bytes)?;
         }
 
         std::mem::drop(dir_guard);

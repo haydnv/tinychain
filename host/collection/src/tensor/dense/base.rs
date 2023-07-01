@@ -11,7 +11,7 @@ use futures::{join, try_join, TryFutureExt};
 use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype};
 use log::debug;
 use rayon::prelude::*;
-use safecast::{AsType, CastInto};
+use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
@@ -138,6 +138,19 @@ where
     pub async fn constant(store: fs::Dir<FE>, shape: Shape, value: T) -> TCResult<Self> {
         let (dir, canon, versions) = fs_init(store).await?;
         let canon = DenseFile::constant(canon, shape, value).await?;
+        Ok(Self::new(dir, canon, versions))
+    }
+
+    pub async fn from_values(
+        store: fs::Dir<FE>,
+        shape: Shape,
+        values: Vec<Number>,
+    ) -> TCResult<Self>
+    where
+        T: CastFrom<Number>,
+    {
+        let (dir, canon, versions) = fs_init(store).await?;
+        let canon = DenseFile::from_values(canon, shape, values).await?;
         Ok(Self::new(dir, canon, versions))
     }
 

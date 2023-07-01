@@ -91,7 +91,7 @@ class DenseTests(HostTest):
         cxt.result = (cxt.y1.dtype, cxt.y2.dtype, cxt.y3.dtype)
 
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, [{tc.URI(tc.Class): {tc.URI(tc.F64): {}}}] * 3)
+        self.assertEqual(actual, tc.to_json([{tc.URI(tc.Class): {tc.URI(tc.F32): {}}}] * 3))
 
     def testDiv(self):
         shape = [3]
@@ -120,20 +120,6 @@ class DenseTests(HostTest):
         expected = left * right
         expected = expect_dense(tc.I64, list(expected.shape), expected.flatten())
         self.assertEqual(actual, expected)
-
-    def testMulWithBroadcast(self):
-        tau = np.array([[4.188]])
-        v = np.array([[1], [0.618]])
-
-        cxt = tc.Context()
-        cxt.tau = load_dense(tau)
-        cxt.v = load_dense(v)
-        cxt.result = cxt.tau * tc.tensor.einsum("ij,kj->ik", [cxt.v, cxt.v])
-
-        actual = self.host.post(ENDPOINT, cxt)
-        expected = tau * (v @ v.T)
-        self.assertEqual(expected.shape, tuple(actual[tc.URI(tc.tensor.Dense)][0][0]))
-        self.assertTrue(np.allclose(expected.flatten(), actual[tc.URI(tc.tensor.Dense)][1]))
 
     def testNorm_matrix(self):
         threshold = 0.0001

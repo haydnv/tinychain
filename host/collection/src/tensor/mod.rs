@@ -64,7 +64,7 @@ impl From<(NumberType, Shape)> for Schema {
 impl TryCastFrom<Value> for Schema {
     fn can_cast_from(value: &Value) -> bool {
         match value {
-            Value::Tuple(tuple) => TryCastInto::<(Vec<u64>, TCPathBuf)>::can_cast_into(tuple),
+            Value::Tuple(tuple) => TryCastInto::<(TCPathBuf, Vec<u64>)>::can_cast_into(tuple),
             _ => false,
         }
     }
@@ -72,7 +72,7 @@ impl TryCastFrom<Value> for Schema {
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
             Value::Tuple(tuple) => {
-                let (shape, dtype): (Vec<u64>, TCPathBuf) = tuple.opt_cast_into()?;
+                let (dtype, shape): (TCPathBuf, Vec<u64>) = tuple.opt_cast_into()?;
                 let shape = Shape::from(shape);
                 let dtype = ValueType::from_path(&dtype)?;
                 match dtype {
@@ -2038,15 +2038,22 @@ pub fn broadcast_shape(left: &[u64], right: &[u64]) -> TCResult<Shape> {
 }
 
 #[inline]
-fn coord_of<T: Copy + Div<Output = T> + Rem<Output = T>>(
+fn coord_of<T: Copy + Div<Output = T> + Rem<Output = T> + PartialEq>(
     offset: T,
     strides: &[T],
     shape: &[T],
+    zero: T,
 ) -> Vec<T> {
     strides
         .iter()
         .copied()
-        .map(|stride| offset / stride)
+        .map(|stride| {
+            if stride == zero {
+                zero
+            } else {
+                offset / stride
+            }
+        })
         .zip(shape.iter().copied())
         .map(|(axis_offset, dim)| axis_offset % dim)
         .collect()

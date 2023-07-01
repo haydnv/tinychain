@@ -424,8 +424,10 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
+                debug!("load a new tensor from {key}");
+
                 let (schema, elements): (Value, Value) =
-                    key.try_cast_into(|v| TCError::unexpected(v, "a Tensor schema"))?;
+                    key.try_cast_into(|v| TCError::unexpected(v, "a Tensor schema and elements"))?;
 
                 let txn_id = *txn.id();
 
@@ -434,10 +436,8 @@ where
                         .opt_cast_into()
                         .expect("tensor coordinate elements");
 
-                    let schema = if schema.matches::<Scalar>() {
-                        schema.opt_cast_into().expect("load tensor schema")
-                    } else if schema.matches::<Shape>() {
-                        let shape = schema.opt_cast_into().expect("load tensor shape");
+                    let schema = if schema.matches::<Shape>() {
+                        let shape = Shape::opt_cast_from(schema).expect("shape");
                         let dtype = if elements.is_empty() {
                             NumberType::Float(FloatType::F32)
                         } else {
@@ -446,7 +446,9 @@ where
 
                         Schema { shape, dtype }
                     } else {
-                        return Err(TCError::unexpected(schema, "a Tensor schema"));
+                        Schema::try_cast_from(schema, |v| {
+                            bad_request!("invalid Tensor schema: {v:?}")
+                        })?
                     };
 
                     let class = self.class.unwrap_or(TensorType::Sparse);
@@ -494,23 +496,14 @@ where
                         ));
                     }
 
-                    // let txn_id = *txn.id();
-                    // let store = create_dir(txn).await?;
-                    // let elements = stream::iter(elements).map(Ok);
-                    // DenseTensorFile::from_values(
-                    //     store,
-                    //     txn_id,
-                    //     schema.shape,
-                    //     schema.dtype,
-                    //     elements,
-                    // )
-                    // .map_ok(Dense::from)
-                    // .map_ok(Tensor::from)
-                    // .map_ok(State::from)
-                    // .await
-                    Err(not_implemented!(
-                        "construct a dense tensor from a tuple of values"
-                    ))
+                    let txn_id = *txn.id();
+                    let store = create_dir(txn).await?;
+
+                    DenseBase::from_values(store, txn_id, schema.shape, schema.dtype, elements)
+                        .map_ok(Dense::Base)
+                        .map_ok(Tensor::from)
+                        .map_ok(State::from)
+                        .await
                 } else {
                     Err(bad_request!("tensor elements must be a Tuple of Numbers or a Tuple of (Coord, Number) pairs, not {}", elements))
                 }

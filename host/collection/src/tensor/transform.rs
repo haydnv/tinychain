@@ -344,7 +344,7 @@ impl Reshape {
             .map(|(x, stride)| x * stride)
             .sum();
 
-        coord_of(offset, &self.source_strides, &self.source_shape)
+        coord_of(offset, &self.source_strides, &self.source_shape, 0)
     }
 }
 

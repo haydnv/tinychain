@@ -25,6 +25,8 @@ pub struct System;
 #[async_trait]
 impl Dispatch for System {
     async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
+        debug!("System::get {path}: {key}", path=TCPath::from(path));
+
         if path.is_empty() {
             if key.is_some() {
                 Err(TCError::not_found(format!(

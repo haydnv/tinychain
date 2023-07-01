@@ -967,6 +967,103 @@ where
         }
     }
 
+    pub async fn from_values(
+        store: fs::Dir<FE>,
+        txn_id: TxnId,
+        shape: Shape,
+        dtype: NumberType,
+        values: Vec<Number>,
+    ) -> TCResult<Self> {
+        match dtype {
+            NumberType::Bool => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::Bool)
+                    .await
+            }
+            NumberType::Complex(ct) => {
+                let mut re = Vec::with_capacity(values.len());
+                let mut im = Vec::with_capacity(values.len());
+                for n in values {
+                    let (r, i) = Complex::cast_from(n).into();
+                    re.push(Number::Float(r));
+                    im.push(Number::Float(i));
+                }
+
+                let (store_re, store_im) = try_join!(
+                    store.create_dir(txn_id, REAL.into()),
+                    store.create_dir(txn_id, IMAG.into())
+                )?;
+
+                match ct {
+                    ComplexType::Complex | ComplexType::C32 => {
+                        let (re, im) = try_join!(
+                            base::DenseBase::from_values(store_re, shape.clone(), re),
+                            base::DenseBase::from_values(store_im, shape, im)
+                        )?;
+
+                        Ok(Self::C32((re, im)))
+                    }
+                    ComplexType::C64 => {
+                        let (re, im) = try_join!(
+                            base::DenseBase::from_values(store_re, shape.clone(), re),
+                            base::DenseBase::from_values(store_im, shape, im)
+                        )?;
+
+                        Ok(Self::C64((re, im)))
+                    }
+                }
+            }
+            NumberType::Number
+            | NumberType::Float(FloatType::Float)
+            | NumberType::Float(FloatType::F32) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::F32)
+                    .await
+            }
+            NumberType::Float(FloatType::F64) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::F64)
+                    .await
+            }
+            NumberType::Int(IntType::I16) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::F32)
+                    .await
+            }
+            NumberType::Int(IntType::Int) | NumberType::Int(IntType::I32) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::I32)
+                    .await
+            }
+            NumberType::Int(IntType::I64) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::I64)
+                    .await
+            }
+            NumberType::UInt(UIntType::U8) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::U8)
+                    .await
+            }
+            NumberType::UInt(UIntType::U16) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::U16)
+                    .await
+            }
+            NumberType::UInt(UIntType::UInt) | NumberType::UInt(UIntType::U32) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::U32)
+                    .await
+            }
+            NumberType::UInt(UIntType::U64) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::U64)
+                    .await
+            }
+            other => Err(bad_request!("cannot construct a range of type {other:?}")),
+        }
+    }
+
     pub async fn range(
         store: fs::Dir<FE>,
         shape: Shape,
