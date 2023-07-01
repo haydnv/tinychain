@@ -30,7 +30,7 @@ pub mod public;
 pub mod shape;
 pub mod sparse;
 mod transform;
-pub(crate) mod view;
+pub(super) mod view;
 
 const REAL: Label = label("re");
 const IMAG: Label = label("im");
@@ -1989,8 +1989,8 @@ where
 /// Broadcast the given `left` and `right` tensors into their [`broadcast_shape`].
 pub fn broadcast<L, R>(left: L, right: R) -> TCResult<(L::Broadcast, R::Broadcast)>
 where
-    L: TensorInstance + TensorTransform,
-    R: TensorInstance + TensorTransform,
+    L: TensorInstance + TensorTransform + fmt::Debug,
+    R: TensorInstance + TensorTransform + fmt::Debug,
 {
     let broadcast_shape = broadcast_shape(left.shape(), right.shape())?;
 

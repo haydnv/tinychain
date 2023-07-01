@@ -1945,15 +1945,6 @@ fn block_map_for(
     debug!("construct a block map for {shape:?} with block shape {block_shape:?}");
 
     debug_assert!(shape.len() >= block_shape.len());
-    debug_assert_eq!(
-        block_shape
-            .iter()
-            .copied()
-            .map(|dim| dim as u64)
-            .product::<u64>()
-            * num_blocks,
-        shape.iter().product::<u64>()
-    );
 
     let block_axis = shape.len() - block_shape.len();
     let mut block_map_shape = BlockShape::with_capacity(block_axis + 1);

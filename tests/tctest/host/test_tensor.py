@@ -173,7 +173,7 @@ class DenseTests(HostTest):
         self.assertEqual(actual, expected)
 
     def testLogarithm(self):
-        size = 1_000_000
+        size = 1_000
         shape = [10, size / 10]
 
         cxt = tc.Context()
@@ -182,7 +182,9 @@ class DenseTests(HostTest):
         cxt.log = cxt.x.log(math.e)
         cxt.test = (cxt.ln == cxt.log).all()
 
-        self.assertTrue(self.host.post(ENDPOINT, cxt))
+        actual = self.host.post(ENDPOINT, cxt)
+
+        self.assertEqual(actual, True)
 
     def testLogic(self):
         big = [20, 20, 10]

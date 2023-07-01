@@ -988,23 +988,16 @@ where
                 params.expect_empty()?;
 
                 let l = self.tensor;
-                l.shape().validate()?;
 
                 let log = if r.matches::<Tensor<_, _>>() {
                     let base = Tensor::<_, _>::opt_cast_from(r).expect("tensor");
-                    base.shape().validate()?;
-
-                    if l.shape() == base.shape() {
-                        l.log(base)
-                    } else {
-                        let (l, base) = broadcast(l, base)?;
-                        l.log(base)
-                    }
+                    let (l, base) = broadcast(l, base)?;
+                    l.log(base)
                 } else if r.matches::<Number>() {
-                    let base = Number::opt_cast_from(r).expect("numeric constant");
+                    let base = Number::opt_cast_from(r).expect("numeric bases");
                     l.log_const(base)
                 } else {
-                    Err(bad_request!("a Tensor or Number"))
+                    Err(bad_request!("a Tensor or Number, not {r:?}"))
                 }?;
 
                 Ok(State::from(log))

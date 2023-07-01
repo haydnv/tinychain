@@ -4,6 +4,7 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use futures::{try_join, Stream, StreamExt, TryStreamExt};
 use ha_ndarray::{NDArray, NDArrayRead};
+use log::trace;
 use rayon::prelude::*;
 use safecast::{AsType, CastInto};
 
@@ -1331,6 +1332,11 @@ where
     type Transpose = Self;
 
     fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
+        if self.shape() == &shape {
+            trace!("no need to broadcast {self:?} into {shape:?}");
+            return Ok(self);
+        }
+
         match self {
             Self::Bool(this) => this.broadcast(shape).map(dense_from).map(Self::Bool),
             Self::C32((re, im)) => {
@@ -1356,6 +1362,10 @@ where
     }
 
     fn expand(self, axes: Axes) -> TCResult<Self::Expand> {
+        if axes.is_empty() {
+            return Ok(self);
+        }
+
         match self {
             Self::Bool(this) => this.expand(axes).map(dense_from).map(Self::Bool),
             Self::C32((re, im)) => {
@@ -1381,6 +1391,10 @@ where
     }
 
     fn reshape(self, shape: Shape) -> TCResult<Self::Reshape> {
+        if self.shape() == &shape {
+            return Ok(self);
+        }
+
         match self {
             Self::Bool(this) => this.reshape(shape).map(dense_from).map(Self::Bool),
             Self::C32((re, im)) => {
@@ -1406,6 +1420,10 @@ where
     }
 
     fn slice(self, range: Range) -> TCResult<Self::Slice> {
+        if range.is_empty() || range == Range::all(self.shape()) {
+            return Ok(self);
+        }
+
         match self {
             Self::Bool(this) => this.slice(range).map(dense_from).map(Self::Bool),
             Self::C32((re, im)) => {
@@ -1431,6 +1449,14 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        if let Some(permutation) = &permutation {
+            if permutation.len() == self.ndim()
+                && permutation.iter().copied().enumerate().all(|(i, x)| i == x)
+            {
+                return Ok(self);
+            }
+        }
+
         match self {
             Self::Bool(this) => this.transpose(permutation).map(dense_from).map(Self::Bool),
             Self::C32((re, im)) => {
