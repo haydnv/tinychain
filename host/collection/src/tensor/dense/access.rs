@@ -1270,7 +1270,11 @@ impl<Txn, FE, T: CDatatype> DenseCompare<Txn, FE, T> {
                 value_op,
             })
         } else {
-            Err(bad_request!("cannot compare {:?} with {:?}", left, right))
+            Err(bad_request!(
+                "cannot compare {left:?} (block size {}) with {right:?} (block size {})",
+                left.block_size(),
+                right.block_size()
+            ))
         }
     }
 }

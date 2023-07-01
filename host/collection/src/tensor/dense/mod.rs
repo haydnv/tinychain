@@ -1923,8 +1923,6 @@ where
 
 #[inline]
 fn block_axis_for(shape: &[u64], block_size: usize) -> usize {
-    debug!("compute block axis for shape {shape:?} with block size {block_size:?}");
-
     debug_assert!(!shape.is_empty());
     debug_assert!(shape.iter().product::<u64>() >= block_size as u64);
 

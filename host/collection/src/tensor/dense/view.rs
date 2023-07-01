@@ -95,22 +95,59 @@ macro_rules! view_dispatch {
     };
 }
 
-macro_rules! view_dispatch_compare {
-    ($this:ident, $that:ident, $left:ident, $right:ident, $bool:expr, $complex:expr, $general:expr, $mismatch:expr) => {
+macro_rules! view_compare {
+    ($this:ident, $that:ident, $complex:expr, $general:expr) => {
         match ($this, $that) {
-            (DenseView::Bool($left), DenseView::Bool($right)) => $bool,
-            (DenseView::C32($left), DenseView::C32($right)) => $complex,
-            (DenseView::C64($left), DenseView::C64($right)) => $complex,
-            (DenseView::F32($left), DenseView::F32($right)) => $general,
-            (DenseView::F64($left), DenseView::F64($right)) => $general,
-            (DenseView::I16($left), DenseView::I16($right)) => $general,
-            (DenseView::I32($left), DenseView::I32($right)) => $general,
-            (DenseView::I64($left), DenseView::I64($right)) => $general,
-            (DenseView::U8($left), DenseView::U8($right)) => $general,
-            (DenseView::U16($left), DenseView::U16($right)) => $general,
-            (DenseView::U32($left), DenseView::U32($right)) => $general,
-            (DenseView::U64($left), DenseView::U64($right)) => $general,
-            ($left, $right) => $mismatch,
+            (this, that) if this.block_size() > that.block_size() => {
+                let that = that.resize_blocks(this.block_size());
+                $general(this, that)
+            }
+            (this, that) if that.block_size() > this.block_size() => {
+                let this = this.resize_blocks(that.block_size());
+                $general(this, that)
+            }
+            (Self::Bool(this), Self::Bool(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::C32((lr, li)), Self::C32((rr, ri))) => {
+                $complex((lr.into(), li.into()), (rr.into(), ri.into()))
+            }
+            (Self::C64((lr, li)), Self::C64((rr, ri))) => {
+                $complex((lr.into(), li.into()), (rr.into(), ri.into()))
+            }
+            (Self::F32(this), Self::F32(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::F64(this), Self::F64(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::I16(this), Self::I16(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::I32(this), Self::I32(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::I64(this), Self::I64(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::U8(this), Self::U8(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::U16(this), Self::U16(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::U32(this), Self::U32(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::U64(this), Self::U64(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (this, that) => {
+                let dtype = Ord::max(this.dtype(), that.dtype());
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
+                $general(this, that)
+            }
         }
     };
 }
@@ -309,74 +346,41 @@ where
     type LeftCombine = Self;
 
     fn and(self, other: Self) -> TCResult<Self::LeftCombine> {
-        view_dispatch_compare!(
+        view_compare!(
             self,
             other,
-            left,
-            right,
-            { left.and(right).map(dense_from).map(Self::Bool) },
-            {
-                let (lr, li) = left;
-                let (rr, ri) = right;
+            |(lr, li): (Self, Self), (rr, ri): (Self, Self)| {
                 let left = lr.or(li)?;
                 let right = rr.or(ri)?;
-
-                left.and(right).map(dense_from).map(Self::Bool)
-            },
-            { left.and(right).map(dense_from).map(Self::Bool) },
-            {
-                let left = TensorCast::cast_into(left, NumberType::Bool)?;
-                let right = TensorCast::cast_into(right, NumberType::Bool)?;
                 left.and(right)
-            }
+            },
+            TensorBoolean::and
         )
     }
 
     fn or(self, other: Self) -> TCResult<Self::Combine> {
-        view_dispatch_compare!(
+        view_compare!(
             self,
             other,
-            left,
-            right,
-            { left.or(right).map(dense_from).map(Self::Bool) },
-            {
-                let (lr, li) = left;
-                let (rr, ri) = right;
+            |(lr, li): (Self, Self), (rr, ri): (Self, Self)| {
                 let left = lr.or(li)?;
                 let right = rr.or(ri)?;
-
-                left.or(right).map(dense_from).map(Self::Bool)
-            },
-            { left.or(right).map(dense_from).map(Self::Bool) },
-            {
-                let left = TensorCast::cast_into(left, NumberType::Bool)?;
-                let right = TensorCast::cast_into(right, NumberType::Bool)?;
                 left.or(right)
-            }
+            },
+            TensorBoolean::or
         )
     }
 
     fn xor(self, other: Self) -> TCResult<Self::Combine> {
-        view_dispatch_compare!(
+        view_compare!(
             self,
             other,
-            left,
-            right,
-            { left.xor(right).map(dense_from).map(Self::Bool) },
-            {
-                let (lr, li) = left;
-                let (rr, ri) = right;
+            |(lr, li): (Self, Self), (rr, ri): (Self, Self)| {
                 let left = lr.or(li)?;
                 let right = rr.or(ri)?;
-
-                left.xor(right).map(dense_from).map(Self::Bool)
-            },
-            { left.xor(right).map(dense_from).map(Self::Bool) },
-            {
-                let left = TensorCast::cast_into(left, NumberType::Bool)?;
-                let right = TensorCast::cast_into(right, NumberType::Bool)?;
                 left.xor(right)
-            }
+            },
+            TensorBoolean::xor
         )
     }
 }
@@ -420,55 +424,6 @@ where
             this.xor_const(other).map(dense_from).map(Self::Bool)
         )
     }
-}
-
-macro_rules! view_compare {
-    ($this:ident, $that:ident, $complex:expr, $general:expr) => {
-        match ($this, $that) {
-            (Self::Bool(this), Self::Bool(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::C32((lr, li)), Self::C32((rr, ri))) => {
-                $complex((lr.into(), li.into()), (rr.into(), ri.into()))
-            }
-            (Self::C64((lr, li)), Self::C64((rr, ri))) => {
-                $complex((lr.into(), li.into()), (rr.into(), ri.into()))
-            }
-            (Self::F32(this), Self::F32(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::F64(this), Self::F64(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::I16(this), Self::I16(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::I32(this), Self::I32(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::I64(this), Self::I64(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::U8(this), Self::U8(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::U16(this), Self::U16(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::U32(this), Self::U32(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::U64(this), Self::U64(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (this, that) => {
-                let dtype = Ord::max(this.dtype(), that.dtype());
-                let this = TensorCast::cast_into(this, dtype)?;
-                let that = TensorCast::cast_into(that, dtype)?;
-                $general(this, that)
-            }
-        }
-    };
 }
 
 impl<Txn, FE> TensorCompare<Self> for DenseView<Txn, FE>
