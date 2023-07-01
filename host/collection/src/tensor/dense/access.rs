@@ -407,6 +407,7 @@ impl<S: DenseInstance> DenseBroadcast<S> {
 
         // characterize the output tensor (this tensor)
         let axis_offset = shape.len() - source.ndim();
+        let block_axis = block_axis_for(&shape, (shape.size() / num_blocks) as usize);
 
         let map_shape = shape
             .iter()
@@ -424,6 +425,10 @@ impl<S: DenseInstance> DenseBroadcast<S> {
 
         let block_map = if map_shape.is_empty() {
             source_block_map
+        } else if source_block_map.size() == map_shape.iter().product::<usize>() {
+            // TODO: this should not be necessary
+            let block_map = source_block_map.reshape(map_shape)?;
+            ArrayBase::<Vec<u64>>::copy(&block_map)?
         } else {
             let block_map = source_block_map.broadcast(map_shape)?;
             ArrayBase::<Vec<u64>>::copy(&block_map)?
