@@ -133,7 +133,7 @@ where
             block_id += 1;
         }
 
-        if block_id != num_blocks - 1 {
+        if block_id != num_blocks {
             return Err(bad_request!("cannot create a tensor of shape {shape:?} from {num_blocks} blocks of size {block_size}"));
         }
 

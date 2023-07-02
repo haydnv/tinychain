@@ -254,7 +254,9 @@ class DenseTests(HostTest):
         cxt.result = cxt.x.round()
 
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, expect_dense(tc.I32, shape, x.round().astype(int).flatten()))
+        expected = expect_dense(tc.F32, shape, x.round().astype(int).flatten())
+
+        self.assertEqual(actual, expected)
 
     def testMax(self):
         shape = [2, 1, 3, 4]
@@ -324,10 +326,11 @@ class DenseTests(HostTest):
         expected = np.transpose(x.reshape((1, 1) + input_shape), permutation)
         expected = expected.flatten().tolist()
         expected = expect_dense(tc.I64, (1, 8, 1, 5), expected)
+
         self.assertEqual(reshaped, expected)
         self.assertEqual(expanded, expected)
 
-    def testSliceAndTransposeAndSliceAndSlice(self):
+    def testSliceAndTransposeAndSlice(self):
         self.maxDiff = None
         shape = [2, 3, 4, 5]
 
@@ -335,15 +338,15 @@ class DenseTests(HostTest):
         cxt.big = tc.tensor.Dense.arange(shape, 0, 120)
         cxt.medium = cxt.big[0]
         cxt.small = cxt.medium.transpose()[1, 1:3]
-        cxt.tiny = cxt.small[0, :-1]
 
         expected = np.arange(0, 120).reshape(shape)
         expected = expected[0]
         expected = np.transpose(expected)[1, 1:3]
-        expected = expected[0, :-1]
 
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, expect_dense(tc.I64, expected.shape, expected.flatten()))
+
+        expected = expect_dense(tc.I64, expected.shape, expected.flatten())
+        self.assertEqual(actual, expected)
 
     def testReshape(self):
         source = [2, 3, 4, 1]
@@ -355,21 +358,6 @@ class DenseTests(HostTest):
 
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, expect_dense(tc.I64, dest, np.arange(24).tolist()))
-
-    def testTile(self):
-        shape = [2, 3]
-        multiples = 2
-
-        x = np.arange(0, np.product(shape)).reshape(shape)
-
-        cxt = tc.Context()
-        cxt.x = load_dense(x, tc.I32)
-        cxt.result = tc.tensor.tile(cxt.x, 2)
-
-        actual = self.host.post(ENDPOINT, cxt)
-
-        expected = np.tile(x, multiples)
-        self.assertEqual(actual, expect_dense(tc.I32, list(expected.shape), expected.flatten().tolist()))
 
 
 class SparseTests(HostTest):

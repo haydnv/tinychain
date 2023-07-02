@@ -1923,12 +1923,21 @@ where
 
 #[inline]
 fn block_axis_for(shape: &[u64], block_size: usize) -> usize {
+    let block_size = block_size as u64;
+
     debug_assert!(!shape.is_empty());
-    debug_assert!(shape.iter().product::<u64>() >= block_size as u64);
+    debug_assert!(shape.iter().product::<u64>() >= block_size);
 
     let mut block_axis = shape.len() - 1;
-    while shape[block_axis..].iter().product::<u64>() < block_size as u64 {
-        block_axis -= 1;
+    let mut trailing_size = shape[block_axis];
+    for x in (0..(shape.len() - 1)).rev() {
+        let size_from = trailing_size * shape[x];
+        if size_from > block_size {
+            break;
+        } else {
+            block_axis = x;
+            trailing_size = size_from;
+        }
     }
 
     block_axis

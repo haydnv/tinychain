@@ -933,11 +933,20 @@ impl<S: fmt::Debug> fmt::Debug for DenseDiagonal<S> {
 pub struct DenseExpand<S> {
     source: S,
     transform: Expand,
+    block_shape: BlockShape,
 }
 
 impl<S: DenseInstance> DenseExpand<S> {
     pub fn new(source: S, axes: Axes) -> TCResult<Self> {
-        Expand::new(source.shape().clone(), axes).map(|transform| Self { source, transform })
+        let transform = Expand::new(source.shape().clone(), axes)?;
+        let block_axis = block_axis_for(transform.shape(), source.block_size());
+        let block_shape = block_shape_for(block_axis, transform.shape(), source.block_size());
+
+        Ok(Self {
+            source,
+            transform,
+            block_shape,
+        })
     }
 }
 
@@ -952,8 +961,8 @@ impl<S: TensorInstance> TensorInstance for DenseExpand<S> {
 }
 
 #[async_trait]
-impl<S: DenseInstance> DenseInstance for DenseExpand<S> {
-    type Block = S::Block;
+impl<S: DenseInstance + Clone> DenseInstance for DenseExpand<S> {
+    type Block = Array<S::DType>;
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
@@ -961,11 +970,34 @@ impl<S: DenseInstance> DenseInstance for DenseExpand<S> {
     }
 
     async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
-        self.source.read_block(txn_id, block_id).await
+        let block = self.source.read_block(txn_id, block_id).await?;
+
+        if block.shape() == &self.block_shape {
+            Ok(block.into())
+        } else {
+            let mut block_shape = self.block_shape.to_vec();
+            block_shape[0] = block.size() / block_shape.iter().skip(1).product::<usize>();
+            block.into().reshape(block_shape).map_err(TCError::from)
+        }
     }
 
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
-        self.source.read_blocks(txn_id).await
+        let source_blocks = self.source.read_blocks(txn_id).await?;
+
+        let block_shape = self.block_shape;
+        let blocks = source_blocks.map(move |result| {
+            let block = result?;
+
+            if block.shape() == &block_shape {
+                Ok(block.into())
+            } else {
+                let mut block_shape = block_shape.to_vec();
+                block_shape[0] = block.size() / block_shape.iter().skip(1).product::<usize>();
+                block.into().reshape(block_shape).map_err(TCError::from)
+            }
+        });
+
+        Ok(Box::pin(blocks))
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
@@ -993,6 +1025,7 @@ where
         Self::Expand(Box::new(DenseExpand {
             source: expand.source.into(),
             transform: expand.transform,
+            block_shape: expand.block_shape,
         }))
     }
 }
@@ -2758,22 +2791,45 @@ impl<S: DenseInstance> DenseTranspose<S> {
             .map(|dim| dim as usize)
             .collect();
 
-        let permutation = transform.axes().to_vec();
-        let (map_axes, block_axes) = permutation.split_at(block_axis);
+        let valid = if num_blocks == 1 {
+            assert_eq!(block_axis, 0);
+            true
+        } else {
+            let valid_map = transform.axes()[..block_axis]
+                .iter()
+                .copied()
+                .all(|x| x < block_axis);
+
+            let valid_block = transform.axes()[block_axis..]
+                .iter()
+                .copied()
+                .all(|x| x > block_axis);
+
+            valid_map && valid_block
+        };
+
+        let (map_axes, block_axes) = if valid {
+            let (map_axes, block_axes) = transform.axes().split_at(block_axis);
+
+            let block_axes = block_axes
+                .iter()
+                .copied()
+                .map(|x| x - block_axis)
+                .collect::<Axes>();
+
+            Ok((map_axes.to_vec(), block_axes))
+        } else {
+            Err(bad_request!(
+                "cannot transpose axes {axes:?} of {source:?} without copying",
+                axes = transform.axes()
+            ))
+        }?;
 
         let block_map = ArrayBase::<Vec<_>>::new(map_shape, (0..num_blocks).into_iter().collect())?;
 
         let block_map = if num_blocks > 1 {
-            if map_axes.iter().copied().all(|x| x < block_axis)
-                || block_axes.iter().copied().all(|x| x > block_axis)
-            {
-                let block_map = block_map.transpose(Some(map_axes.to_vec()))?;
-                ArrayBase::<Vec<_>>::copy(&block_map).map_err(TCError::from)
-            } else {
-                Err(bad_request!(
-                    "cannot transpose axes {block_axes:?} of {source:?} without copying"
-                ))
-            }
+            let block_map = block_map.transpose(Some(map_axes.to_vec()))?;
+            ArrayBase::<Vec<_>>::copy(&block_map).map_err(TCError::from)
         } else {
             Ok(block_map)
         }?;
@@ -2782,7 +2838,7 @@ impl<S: DenseInstance> DenseTranspose<S> {
             source,
             transform,
             block_map,
-            block_axes: block_axes.to_vec(),
+            block_axes,
         })
     }
 }
