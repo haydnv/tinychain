@@ -6,7 +6,6 @@ use std::convert::Infallible;
 use std::{fmt, io};
 
 use destream::en;
-use pathlink::ParseError;
 
 /// A result of type `T`, or a [`TCError`]
 pub type TCResult<T> = Result<T, TCError>;
@@ -212,8 +211,8 @@ impl TCError {
 
 impl std::error::Error for TCError {}
 
-impl From<ParseError> for TCError {
-    fn from(err: ParseError) -> Self {
+impl From<pathlink::ParseError> for TCError {
+    fn from(err: pathlink::ParseError) -> Self {
         Self {
             kind: ErrorKind::BadRequest,
             data: err.into(),
@@ -221,7 +220,6 @@ impl From<ParseError> for TCError {
     }
 }
 
-#[cfg(feature = "ha-ndarray")]
 impl From<ha_ndarray::Error> for TCError {
     fn from(err: ha_ndarray::Error) -> Self {
         #[cfg(debug_assertions)]
