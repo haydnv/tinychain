@@ -7,6 +7,8 @@ use std::str::FromStr;
 use async_hash::generic_array::GenericArray;
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
+use base64::engine::general_purpose::STANDARD_NO_PAD;
+use base64::Engine;
 use bytes::Bytes;
 use destream::de::Error as DestreamError;
 use destream::{de, en};
@@ -236,7 +238,7 @@ impl Serialize for Value {
         match self {
             Self::Bytes(bytes) => {
                 let mut map = serializer.serialize_map(Some(1))?;
-                map.serialize_entry(&self.class().path().to_string(), &base64::encode(&bytes))?;
+                map.serialize_entry(&self.class().path().to_string(), &STANDARD_NO_PAD.encode(&bytes))?;
                 map.end()
             }
             Self::Email(email) => {
@@ -992,7 +994,7 @@ impl ValueVisitor {
         return match class {
             VT::Bytes => {
                 let encoded = map.next_value::<&str>()?;
-                base64::decode(encoded)
+                STANDARD_NO_PAD.decode(encoded)
                     .map(Value::Bytes)
                     .map_err(serde::de::Error::custom)
             }
