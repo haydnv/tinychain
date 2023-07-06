@@ -52,20 +52,20 @@ pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
         FE: AsType<Node> + ThreadSafe,
         Number: CastInto<T>,
     {
-        let mut zeros = zeros
-            .into_table()
-            .rows(b_table::Range::default(), &[], false)
-            .await?;
+        let mut zeros = {
+            let table = zeros.into_table().read().await;
+            table.into_rows()
+        };
 
         while let Some(row) = zeros.try_next().await? {
             let (coord, zero) = unwrap_row(row);
             self.write_value(txn_id, coord, zero).await?;
         }
 
-        let mut filled = filled
-            .into_table()
-            .rows(b_table::Range::default(), &[], false)
-            .await?;
+        let mut filled = {
+            let table = filled.into_table().read().await;
+            table.into_rows()
+        };
 
         while let Some(row) = filled.try_next().await? {
             let (coord, value) = unwrap_row(row);
@@ -1927,7 +1927,7 @@ where
 
         {
             let filled = self.filled.table().read().await;
-            if let Some(mut row) = filled.get(&key).await? {
+            if let Some(mut row) = filled.get_row(key).await? {
                 let value = row.pop().expect("value");
                 return Ok(value.cast_into());
             }

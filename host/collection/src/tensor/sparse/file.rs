@@ -3,8 +3,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use b_table::b_tree::Collator;
-use b_table::{TableLock, TableWriteGuard};
+use b_table::{Collator, TableLock, TableWriteGuard};
 use destream::de;
 use freqfs::DirLock;
 use futures::future::TryFutureExt;
@@ -149,8 +148,9 @@ where
         debug_assert!(validate_order(&order, self.ndim()));
 
         let range = table_range(&range)?;
-        let rows = self.table.rows(range, &order, false).await?;
-        let elements = rows.map_ok(|row| unwrap_row(row)).map_err(TCError::from);
+        let table = self.table.read().await;
+        let rows = table.rows(range, &order, false, None)?;
+        let elements = rows.map_ok(unwrap_row).map_err(TCError::from);
         Ok(Box::pin(elements))
     }
 
@@ -159,7 +159,7 @@ where
 
         let key = coord.into_iter().map(Number::from).collect();
         let table = self.table.read().await;
-        if let Some(mut row) = table.get(&key).await? {
+        if let Some(mut row) = table.get_row(key).await? {
             let value = row.pop().expect("value");
             Ok(value.cast_into())
         } else {
@@ -238,7 +238,8 @@ where
         if range == Range::default() || range == Range::all(&self.shape) {
             self.table.truncate().map_err(TCError::from).await
         } else {
-            Err(not_implemented!("delete {range:?}"))
+            let range = table_range(&range)?;
+            self.table.delete_range(range).map_err(TCError::from).await
         }
     }
 
@@ -275,7 +276,7 @@ where
         let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
 
         if value == T::zero() {
-            self.table.delete(&coord).await?;
+            self.table.delete_row(coord).await?;
         } else {
             self.table.upsert(coord, vec![value.into()]).await?;
         }

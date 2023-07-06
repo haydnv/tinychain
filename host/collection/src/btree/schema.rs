@@ -3,7 +3,6 @@ use std::ops::Bound;
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
-use b_table::b_tree;
 use destream::{de, en};
 use log::trace;
 use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};

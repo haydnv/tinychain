@@ -47,7 +47,7 @@ const BLOCK_SIZE: usize = 4_096;
 
 pub type Blocks<C, V> = Pin<Box<dyn Stream<Item = Result<(C, V), TCError>> + Send>>;
 pub type Elements<T> = Pin<Box<dyn Stream<Item = Result<(Coord, T), TCError>> + Send>>;
-pub type Node = b_table::b_tree::Node<Vec<Vec<Number>>>;
+pub type Node = b_table::Node<Number>;
 
 #[async_trait]
 pub trait SparseInstance: TensorInstance + fmt::Debug {

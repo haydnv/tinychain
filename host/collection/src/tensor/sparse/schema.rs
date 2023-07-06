@@ -18,7 +18,7 @@ impl IndexSchema {
     }
 }
 
-impl b_table::b_tree::Schema for IndexSchema {
+impl b_table::BTreeSchema for IndexSchema {
     type Error = TCError;
     type Value = Number;
 

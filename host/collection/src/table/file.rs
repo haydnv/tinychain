@@ -4,7 +4,7 @@ use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use b_table::{b_tree, TableLock};
+use b_table::TableLock;
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, DirWriteGuard};
@@ -92,12 +92,20 @@ where
         order: &[Id],
         reverse: bool,
     ) -> TCResult<TCBoxTryStream<'a, Key>> {
-        let inserted = self.inserts.rows(range.clone(), order, reverse).await?;
-        let inserted = inserted.map_err(TCError::from);
+        let inserted = {
+            let inserts = self.inserts.read().await;
+            let inserted = inserts.rows(range.clone(), order, reverse, None)?;
+            inserted.map_err(TCError::from)
+        };
+
         rows = Box::pin(collate::try_merge(collator.clone(), rows, inserted));
 
-        let deleted = self.deletes.rows(range, order, reverse).await?;
-        let deleted = deleted.map_err(TCError::from);
+        let deleted = {
+            let deletes = self.deletes.read().await;
+            let deleted = deletes.rows(range, order, reverse, None)?;
+            deleted.map_err(TCError::from)
+        };
+
         rows = Box::pin(collate::try_diff(collator.clone(), rows, deleted));
 
         Ok(rows)
@@ -211,8 +219,11 @@ where
 
         // read-lock the canonical version BEFORE locking self.state,
         // to avoid a deadlock or conflict with Self::finalize
-        let rows = self.canon.rows(range.clone(), &order, reverse).await?;
-        let mut rows: TCBoxTryStream<'static, Key> = Box::pin(rows.map_err(TCError::from));
+        let mut rows: TCBoxTryStream<'static, Key> = {
+            let table = self.canon.read().await;
+            let rows = table.rows(range.clone(), &order, reverse, None)?;
+            Box::pin(rows.map_err(TCError::from))
+        };
 
         trace!("got canon rows");
 
@@ -348,7 +359,7 @@ where
         if let Some(pending) = pending {
             let (inserted, deleted) = pending.read().await;
 
-            if let Some(row) = inserted.get(&key).await? {
+            if let Some(row) = inserted.get_row(key.to_vec()).await? {
                 return Ok(Some(row));
             } else if deleted.contains(&key).await? {
                 return Ok(None);
@@ -358,7 +369,7 @@ where
         for delta in deltas.into_iter().rev() {
             let (inserted, deleted) = delta.read().await;
 
-            if let Some(row) = inserted.get(&key).await? {
+            if let Some(row) = inserted.get_row(key.to_vec()).await? {
                 return Ok(Some(row));
             } else if deleted.contains(&key).await? {
                 return Ok(None);
@@ -366,7 +377,7 @@ where
         }
 
         let canon = self.canon.read().await;
-        canon.get(&key).map_err(TCError::from).await
+        canon.get_row(key).map_err(TCError::from).await
     }
 }
 
@@ -458,7 +469,7 @@ where
             return Ok(());
         }
 
-        let mut row = inserts.get(&key).await?;
+        let mut row = inserts.get_row(key.to_vec()).await?;
 
         if row.is_none() {
             for delta in deltas {
@@ -466,7 +477,7 @@ where
 
                 if deleted.contains(&key).await? {
                     return Ok(());
-                } else if let Some(insert) = inserted.get(&key).await? {
+                } else if let Some(insert) = inserted.get_row(key.to_vec()).await? {
                     row = Some(insert);
                     break;
                 }
@@ -474,7 +485,7 @@ where
         }
 
         if row.is_none() {
-            row = canon.get(&key).await?;
+            row = canon.get_row(key.to_vec()).await?;
         }
 
         if let Some(mut row) = row {
@@ -483,7 +494,7 @@ where
             let values = row.drain(key.len()..).collect();
             debug_assert_eq!(key, row[..key.len()]);
 
-            inserts.delete(&key).await?;
+            inserts.delete_row(key.to_vec()).await?;
             deletes.upsert(key, values).await?;
         }
 
@@ -504,7 +515,7 @@ where
 
         let (mut inserts, mut deletes) = pending.write().await;
 
-        deletes.delete(&key).await?;
+        deletes.delete_row(key.to_vec()).await?;
         inserts.upsert(key, values).await?;
 
         Ok(())
@@ -784,7 +795,7 @@ where
             let values = row.drain(key_len..).collect();
             let key = row;
 
-            deletes.delete(&key).await?;
+            deletes.delete_row(key.to_vec()).await?;
             inserts.upsert(key, values).await?;
         }
 
