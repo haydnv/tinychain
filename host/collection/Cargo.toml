@@ -15,24 +15,25 @@ categories = ["database", "database-implementations", "data-structures"]
 opencl = ["ha-ndarray/opencl"]
 
 [dependencies]
-async-hash = { path = "../../../async-hash" }
+async-hash = "0.5"
 async-trait = "0.1"
 b-table = { path = "../../../b-table", features = ["all"] }
-collate = { path = "../../../collate", features = ["stream"] }
-destream = { path = "../../../destream" }
-ds-ext = { path = "../../../ds-ext" }
+b-tree = { path = "../../../b-tree", features = ["all"] }
+collate = { version = "0.3", features = ["stream"] }
+destream = "0.7"
+ds-ext = "0.1"
 futures = "0.3"
 freqfs = { path = "../../../freqfs" }
 ha-ndarray = { path = "../../../ha-ndarray", features = ["freqfs", "stream"] }
-itertools = "0.10"
+itertools = "0.11"
 log = { version = "0.4", features = ["release_max_level_info"] }
 num_cpus = "1.15"
 pin-project = "1.1"
 rayon = "1.7"
-safecast = { path = "../../../safecast" }
-tc-error = { path = "../error", features = ["ha-ndarray"] }
+safecast = "0.2"
+tc-error = { path = "../error" }
 tc-scalar = { path = "../scalar" }
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }
 tcgeneric = { path = "../generic" }
-tokio = { version = "1.26", features = ["sync"] }
+tokio = { version = "1.29", features = ["sync"] }

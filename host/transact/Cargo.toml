@@ -12,20 +12,20 @@ keywords = ["tinychain", "transaction", "executor"]
 categories = ["concurrency", "data-structures"]
 
 [dependencies]
-async-hash = { path = "../../../async-hash" }
+async-hash = "0.5"
 async-trait = "0.1"
-destream = { path = "../../../destream" }
+destream = "0.7"
 futures = "0.3"
 freqfs = { path = "../../../freqfs", features = ["all"] }
 get-size = "0.1"
 get-size-derive = "0.1"
 num_cpus = "1.15"
 rand = "0.8"
-safecast = { path = "../../../safecast" }
+safecast = "0.2"
 sha2 = "0.10"
 tcgeneric = { path = "../generic" }
 tc-error = { path = "../error" }
 tc-value = { path = "../value" }
-tokio = { version = "1.26", features = ["sync"] }
+tokio = { version = "1.29", features = ["sync"] }
 txfs = { path = "../../../txfs", features = ["logging"] }
 txn_lock = { path = "../../../txn_lock", features = ["logging"] }

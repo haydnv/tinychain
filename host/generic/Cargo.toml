@@ -11,16 +11,16 @@ repository = "https://github.com/haydnv/tinychain.git"
 categories = ["data-structures"]
 
 [dependencies]
-async-hash = "0.4"
+async-hash = "0.5"
 async-trait = "0.1"
-destream = { path = "../../../destream" }
-ds-ext = { path = "../../../ds-ext", features = ["all"] }
+destream = "0.7"
+ds-ext = { version = "0.1", features = ["all"] }
 futures = "0.3"
 get-size = "0.1"
 get-size-derive = "0.1"
 hex = "0.4"
 pathlink = { path = "../../../pathlink", features = ["all"] }
-safecast = { path = "../../../safecast" }
+safecast = "0.2"
 serde = { version = "1.0", features = [] }
 sha2 = "0.10"
 tc-error = { path = "../error" }

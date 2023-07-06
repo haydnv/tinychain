@@ -12,8 +12,8 @@ keywords = ["tinychain", "error", "service", "mesh"]
 categories = ["rust-patterns"]
 
 [dependencies]
-destream = { path = "../../../destream" }
-ha-ndarray = { path = "../../../ha-ndarray", optional = true }
+destream = "0.7"
+ha-ndarray = { path = "../../../ha-ndarray" }
 log = { version = "0.4", features = ["release_max_level_info"] }
 pathlink = { path = "../../../pathlink" }
 serde = "1.0"
