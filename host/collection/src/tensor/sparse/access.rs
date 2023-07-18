@@ -3794,9 +3794,10 @@ where
     debug_assert_eq!(&shape, left.shape());
     debug_assert_eq!(&shape, right.shape());
 
-    let strides = strides_for(&shape, shape.len());
-    let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
-    let shape = ArrayBase::<Arc<Vec<u64>>>::new(vec![shape.len()], Arc::new(shape.to_vec()))?;
+    let ndim = shape.len();
+    let strides = strides_for(&shape, ndim);
+    let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![ndim], Arc::new(strides))?;
+    let dims = ArrayBase::<Arc<Vec<u64>>>::new(vec![ndim], Arc::new(shape.to_vec()))?;
 
     let (left_blocks, right_blocks) = try_join!(
         left.blocks(txn_id, range.clone(), order.to_vec()),
@@ -3808,9 +3809,20 @@ where
 
     let elements = stream::OuterJoin::new(left, right, T::zero());
     let blocks = stream::BlockOffsetsDual::new(elements);
-    let coord_blocks = blocks.map_ok(move |(offsets, values)| {
-        let coords = (offsets * strides.clone()) % shape.clone();
-        (coords.into(), values)
+    let coord_blocks = blocks.map(move |result| {
+        let (offsets, values) = result?;
+        let len = offsets.size();
+
+        debug_assert_eq!(offsets.ndim(), 1);
+
+        let strides = strides.clone().broadcast(vec![len, ndim])?;
+        let dims = dims.clone().broadcast(vec![len, ndim])?;
+        let offsets = offsets.broadcast(vec![len, ndim])?;
+        let coords = offsets.mul(strides)?.rem(dims)?;
+
+        debug_assert_eq!(coords.shape(), [len, ndim]);
+
+        Ok((coords.into(), values))
     });
 
     Ok(coord_blocks)

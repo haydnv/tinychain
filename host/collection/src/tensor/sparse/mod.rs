@@ -1077,7 +1077,7 @@ where
     FE: DenseCacheFile + AsType<Node>,
 {
     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
-        if !bool::cast_from(value) {
+        if bool::cast_from(value) {
             return Err(bad_request!("cannot write a scalar value {} to a sparse range {:?} because the result would be dense", value, range));
         }
 

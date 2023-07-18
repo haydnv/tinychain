@@ -239,7 +239,8 @@ where
             self.table.truncate().map_err(TCError::from).await
         } else {
             let range = table_range(&range)?;
-            self.table.delete_range(range).map_err(TCError::from).await
+            self.table.delete_range(range).await?;
+            Ok(())
         }
     }
 
