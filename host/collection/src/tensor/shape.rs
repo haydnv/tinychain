@@ -309,11 +309,11 @@ impl Range {
     /// let mut range = Range::from(&[0u64][..]);
     /// assert_eq!(range.to_shape(&Shape::from(vec![2, 3, 4])).unwrap(), Shape::from(vec![3, 4]));
     /// ```
-    pub fn normalize(mut self, shape: &Shape) -> Self {
+    pub fn normalize(mut self, shape: &[u64]) -> Self {
         assert!(self.len() <= shape.len());
 
-        for axis in self.axes.len()..shape.len() {
-            self.axes.push(AxisRange::all(shape[axis]))
+        for dim in shape[self.axes.len()..].iter().copied() {
+            self.axes.push(AxisRange::all(dim))
         }
 
         self

@@ -508,6 +508,8 @@ where
         S: TensorInstance + Into<SparseAccess<Txn, FE, T>>,
     {
         let source_shape = source.shape().to_vec();
+        log::debug!("SparseBroadcast::new {source_shape:?} into {shape:?}");
+
         let mut inner = source.into();
 
         let axes = (0..source_shape.len()).into_iter().rev();
@@ -582,20 +584,27 @@ where
         mut range: Range,
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
+        log::debug!("stream elements in range {range:?} with order {order:?}");
+
         let ndim = self.ndim();
         let offset = ndim - self.inner.ndim();
 
         if offset == 0 {
             return self.inner.elements(txn_id, range, order).await;
+        } else {
+            log::trace!("there are {offset} outer dimensions to broadcast");
         }
 
         self.shape.validate_range(&range)?;
         debug_assert!(validate_order(&order, ndim));
 
-        let mut inner_range = Vec::with_capacity(self.inner.ndim());
-        while range.len() > offset {
-            inner_range.push(range.pop().expect("bound"));
-        }
+        let inner_range = if offset < range.len() {
+            range.drain(offset..).collect::<Range>()
+        } else {
+            Range::default()
+        };
+
+        let outer_range = range.normalize(&self.shape()[..offset]);
 
         let inner_order = if order
             .iter()
@@ -611,11 +620,15 @@ where
             ))
         }?;
 
-        let outer = range.into_iter().multi_cartesian_product();
+        log::trace!("constructing the cartesian product of outer broadcast {outer_range:?}...");
+
+        let outer = outer_range.into_iter().multi_cartesian_product();
 
         let inner = self.inner;
         let elements = futures::stream::iter(outer)
             .then(move |outer_coord| {
+                log::trace!("outer coord is {outer_coord:?}");
+
                 let inner = inner.clone();
                 let inner_range = inner_range.to_vec();
                 let inner_order = inner_order.to_vec();
@@ -626,6 +639,8 @@ where
                         .await?;
 
                     let elements = inner_elements.map_ok(move |(inner_coord, value)| {
+                        log::trace!("inner coord is {inner_coord:?}, value is {value:?}");
+
                         let mut coord = Vec::with_capacity(ndim);
                         coord.extend_from_slice(&outer_coord);
                         coord.extend(inner_coord);
@@ -692,6 +707,8 @@ pub struct SparseBroadcastAxis<S> {
 
 impl<S: TensorInstance + fmt::Debug> SparseBroadcastAxis<S> {
     fn new(source: S, axis: usize, dim: u64) -> TCResult<Self> {
+        log::debug!("SparseBroadcastAxis::new: broadcast axis {axis} of {source:?} into {dim}");
+
         let shape = if axis < source.ndim() {
             let mut shape = source.shape().to_vec();
             if shape[axis] == 1 {
@@ -939,6 +956,8 @@ where
         block_op: fn(Array<T>, Array<T>) -> TCResult<Array<T>>,
         value_op: fn(T, T) -> T,
     ) -> TCResult<Self> {
+        log::debug!("SparseCombine::new({left:?}, {right:?})");
+
         if left.shape() == right.shape() {
             Ok(Self {
                 left,
@@ -977,7 +996,7 @@ impl<L, R, T> SparseInstance for SparseCombine<L, R, T>
 where
     L: SparseInstance<DType = T>,
     R: SparseInstance<DType = T>,
-    T: CDatatype + DType + PartialEq,
+    T: CDatatype + DType + PartialEq + fmt::Debug,
 {
     type CoordBlock = Array<u64>;
     type ValueBlock = Array<T>;
@@ -1839,7 +1858,7 @@ where
     S: SparseInstance<DType = T>,
     Number: CastInto<T>,
 {
-    type CoordBlock = ArrayBase<Vec<u64>>;
+    type CoordBlock = Array<u64>;
     type ValueBlock = ArrayBase<Vec<T>>;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
@@ -1850,6 +1869,8 @@ where
         range: Range,
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
+        log::debug!("SparseCow::blocks in range {range:?} with order {order:?}");
+
         let shape = self.source.shape().to_vec();
         let ndim = shape.len();
 
@@ -1873,17 +1894,7 @@ where
         let dims = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], Arc::new(shape))?;
         let blocks = offsets.map(move |result| {
             let (offsets, values) = result?;
-
-            let num_offsets = offsets.size();
-            let block_shape = vec![num_offsets, ndim];
-            let coords = offsets
-                .expand_dims(vec![1])?
-                .broadcast(block_shape.to_vec())?
-                .mul(strides.clone().broadcast(block_shape.to_vec())?)?
-                .rem(dims.clone().broadcast(block_shape)?)?;
-
-            let coords = ArrayBase::<Vec<_>>::copy(&coords)?;
-
+            let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
             Ok((coords, values))
         });
 
@@ -1899,14 +1910,21 @@ where
         let ndim = self.ndim();
         let blocks = self.blocks(txn_id, range, order).await?;
         let elements = blocks
-            .map_ok(move |(coords, values)| {
+            .map(move |result| {
+                let (coords, values) = result?;
+                let context = coords.context().clone();
+                let queue = ha_ndarray::Queue::new(context, coords.size())?;
+                let coords = coords.read(&queue)?.to_slice()?;
                 let tuples = coords
-                    .into_inner()
+                    .as_ref()
                     .into_par_iter()
+                    .copied()
                     .chunks(ndim)
                     .zip(values.into_inner());
 
-                futures::stream::iter(tuples.map(Ok).collect::<Vec<_>>())
+                let elements = futures::stream::iter(tuples.map(Ok).collect::<Vec<_>>());
+
+                TCResult::Ok(elements)
             })
             .try_flatten();
 
@@ -3789,7 +3807,7 @@ pub(super) async fn merge_blocks_outer<L, R, T>(
 where
     L: SparseInstance<DType = T>,
     R: SparseInstance<DType = T>,
-    T: CDatatype,
+    T: CDatatype + fmt::Debug,
 {
     debug_assert_eq!(&shape, left.shape());
     debug_assert_eq!(&shape, right.shape());
@@ -3811,19 +3829,30 @@ where
     let blocks = stream::BlockOffsetsDual::new(elements);
     let coord_blocks = blocks.map(move |result| {
         let (offsets, values) = result?;
-        let len = offsets.size();
-
-        debug_assert_eq!(offsets.ndim(), 1);
-
-        let strides = strides.clone().broadcast(vec![len, ndim])?;
-        let dims = dims.clone().broadcast(vec![len, ndim])?;
-        let offsets = offsets.broadcast(vec![len, ndim])?;
-        let coords = offsets.mul(strides)?.rem(dims)?;
-
-        debug_assert_eq!(coords.shape(), [len, ndim]);
-
-        Ok((coords.into(), values))
+        let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
+        Ok((coords, values))
     });
 
     Ok(coord_blocks)
+}
+
+#[inline]
+fn offsets_to_coords(
+    offsets: Array<u64>,
+    strides: ArrayBase<Arc<Vec<u64>>>,
+    dims: ArrayBase<Arc<Vec<u64>>>,
+) -> TCResult<Array<u64>> {
+    debug_assert!(!strides.clone().eq_scalar(0)?.any()?);
+
+    let ndim = dims.size();
+    let num_offsets = offsets.size();
+    let block_shape = vec![num_offsets, ndim];
+
+    offsets
+        .expand_dims(vec![1])?
+        .broadcast(block_shape.to_vec())?
+        .div(strides.broadcast(block_shape.to_vec())?)?
+        .rem(dims.broadcast(block_shape)?)
+        .map(Array::from)
+        .map_err(TCError::from)
 }

@@ -688,7 +688,7 @@ impl<L, R, T> Stream for OuterJoin<L, R, T>
 where
     L: Stream<Item = TCResult<(u64, T)>>,
     R: Stream<Item = TCResult<(u64, T)>>,
-    T: Copy + PartialEq,
+    T: Copy + PartialEq + fmt::Debug,
 {
     type Item = TCResult<(u64, (T, T))>;
 
@@ -726,15 +726,21 @@ where
                 false
             };
 
+            log::trace!(
+                "sparse outer join state: ({:?}, {:?})",
+                this.pending_left,
+                this.pending_right
+            );
+
             if this.pending_left.is_some() && this.pending_right.is_some() {
                 let l_offset = this.pending_left.as_ref().unwrap().0;
                 let r_offset = this.pending_right.as_ref().unwrap().0;
 
                 break match l_offset.cmp(&r_offset) {
                     Ordering::Equal => {
-                        let (offset, l_value) = this.pending_left.take().unwrap();
-                        let (_offset, r_value) = this.pending_right.take().unwrap();
-                        Some(Ok((offset, (l_value, r_value))))
+                        let (_, l_value) = this.pending_left.take().unwrap();
+                        let (_, r_value) = this.pending_right.take().unwrap();
+                        Some(Ok((l_offset, (l_value, r_value))))
                     }
                     Ordering::Less => {
                         let (offset, l_value) = this.pending_left.take().unwrap();
