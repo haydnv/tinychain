@@ -766,7 +766,7 @@ where
     fn sum(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
         SparseReduce::new(
             self.accessor,
-            A::DType::one(),
+            A::DType::zero(),
             axes,
             keepdims,
             |block| block.sum_all().map_err(TCError::from),
