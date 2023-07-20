@@ -26,7 +26,7 @@ use super::{
     TensorWriteDual,
 };
 
-const AXIS: Label = label("axis");
+const AXES: Label = label("axes");
 const KEEPDIMS: Label = label("keepdims");
 const RIGHT: Label = label("r");
 const TENSOR: Label = label("tensor");
@@ -202,7 +202,7 @@ where
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
                 let tensors: Vec<Tensor<_, _>> = params.require(&TENSORS.into())?;
-                let axis: Value = params.or_default(&AXIS.into())?;
+                let axis: Value = params.or_default(&AXES.into())?;
                 params.expect_empty()?;
 
                 if tensors.is_empty() {
@@ -1110,8 +1110,8 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let axis = if params.contains_key::<Id>(&AXIS.into()) {
-                    let axis = params.require(&AXIS.into())?;
+                let axis = if params.contains_key::<Id>(&AXES.into()) {
+                    let axis = params.require(&AXES.into())?;
                     cast_axis(axis, self.tensor.ndim()).map(Some)?
                 } else {
                     None
@@ -1191,13 +1191,13 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let axis = if key.is_none() {
+                let axes = if key.is_none() {
                     None
                 } else {
                     cast_axes(key, self.tensor.ndim()).map(Some)?
                 };
 
-                self.call(*txn.id(), axis, false).await
+                self.call(*txn.id(), axes, false).await
             })
         }))
     }
@@ -1208,8 +1208,8 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let axis = if params.contains_key::<Id>(&AXIS.into()) {
-                    let axes = params.require(&AXIS.into())?;
+                let axis = if params.contains_key::<Id>(&AXES.into()) {
+                    let axes = params.require(&AXES.into())?;
                     cast_axes(axes, self.tensor.ndim()).map(Some)?
                 } else {
                     None
@@ -1600,34 +1600,26 @@ where
             // "matmul" => Some(Box::new(MatMulHandler::new(tensor))),
 
             // reduce ops
-            "max" => {
-                return Some(Box::new(ReduceHandler::new(
-                    tensor,
-                    TensorReduce::max,
-                    TensorReduce::max_all,
-                )))
-            }
-            "min" => {
-                return Some(Box::new(ReduceHandler::new(
-                    tensor,
-                    TensorReduce::min,
-                    TensorReduce::min_all,
-                )))
-            }
-            "product" => {
-                return Some(Box::new(ReduceHandler::new(
-                    tensor,
-                    TensorReduce::product,
-                    TensorReduce::product_all,
-                )))
-            }
-            "sum" => {
-                return Some(Box::new(ReduceHandler::new(
-                    tensor,
-                    TensorReduce::sum,
-                    TensorReduce::sum_all,
-                )))
-            }
+            "max" => Some(Box::new(ReduceHandler::new(
+                tensor,
+                TensorReduce::max,
+                TensorReduce::max_all,
+            ))),
+            "min" => Some(Box::new(ReduceHandler::new(
+                tensor,
+                TensorReduce::min,
+                TensorReduce::min_all,
+            ))),
+            "product" => Some(Box::new(ReduceHandler::new(
+                tensor,
+                TensorReduce::product,
+                TensorReduce::product_all,
+            ))),
+            "sum" => Some(Box::new(ReduceHandler::new(
+                tensor,
+                TensorReduce::sum,
+                TensorReduce::sum_all,
+            ))),
 
             // transforms
             "broadcast" => Some(Box::new(BroadcastHandler::from(tensor))),
@@ -1823,7 +1815,7 @@ fn cast_axes(axes: Value, ndim: usize) -> TCResult<Axes> {
 
     match axes {
         Value::Number(x) => cast_axis(Value::Number(x), ndim).map(|x| vec![x]),
-        Value::Tuple(tuple) => {
+        Value::Tuple(tuple) if !tuple.is_empty() => {
             let mut axes = Axes::with_capacity(tuple.len());
             for value in tuple {
                 let x = cast_axis(value, ndim)?;

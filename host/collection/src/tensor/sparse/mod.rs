@@ -43,6 +43,157 @@ mod schema;
 mod stream;
 mod view;
 
+mod reduce {
+    use tcgeneric::TCBoxTryFuture;
+
+    use super::*;
+
+    pub(super) fn reduce_all<A>(txn_id: TxnId, accessor: A) -> TCBoxTryFuture<'static, bool>
+    where
+        A: SparseInstance + TensorPermitRead,
+    {
+        Box::pin(async move {
+            let _permit = accessor.read_permit(txn_id, Range::default()).await?;
+
+            let range = Range::all(accessor.shape());
+            let axes = (0..accessor.ndim()).into_iter().collect();
+            let mut filled_at = accessor.filled_at(txn_id, Range::default(), axes).await?;
+            let mut affected = range.affected();
+
+            while let Some(actual) = filled_at.try_next().await? {
+                if affected.next() != Some(actual) {
+                    return Ok(false);
+                }
+            }
+
+            Ok(affected.next().is_none())
+        })
+    }
+
+    pub(super) fn reduce_any<A>(txn_id: TxnId, accessor: A) -> TCBoxTryFuture<'static, bool>
+    where
+        A: SparseInstance + TensorPermitRead,
+    {
+        Box::pin(async move {
+            let _permit = accessor.read_permit(txn_id, Range::default()).await?;
+
+            let axes = (0..accessor.ndim()).into_iter().collect();
+            let mut filled_at = accessor.filled_at(txn_id, Range::default(), axes).await?;
+
+            filled_at.try_next().map_ok(|r| r.is_some()).await
+        })
+    }
+
+    pub(super) fn reduce_max<A>(txn_id: TxnId, accessor: A) -> TCBoxTryFuture<'static, A::DType>
+    where
+        A: SparseInstance + TensorPermitRead,
+        A::DType: Into<Number>,
+    {
+        Box::pin(async move {
+            let _permit = accessor.read_permit(txn_id, Range::default()).await?;
+
+            // TODO: use a type-specific collator
+            let collator = NumberCollator::default();
+            let blocks = accessor.blocks(txn_id, Range::default(), vec![]).await?;
+
+            blocks
+                .map(|result| {
+                    result.and_then(|(_coords, values)| values.max_all().map_err(TCError::from))
+                })
+                .try_fold(A::DType::min(), move |max, block_max| {
+                    let max = match collator.cmp(&max.into(), &block_max.into()) {
+                        Ordering::Less => block_max,
+                        Ordering::Equal | Ordering::Greater => max,
+                    };
+
+                    futures::future::ready(Ok(max))
+                })
+                .await
+        })
+    }
+
+    pub(super) fn reduce_min<A>(txn_id: TxnId, accessor: A) -> TCBoxTryFuture<'static, A::DType>
+    where
+        A: SparseInstance + TensorPermitRead,
+        A::DType: Into<Number>,
+    {
+        Box::pin(async move {
+            let _permit = accessor.read_permit(txn_id, Range::default()).await?;
+
+            // TODO: use a type-specific collator
+            let collator = NumberCollator::default();
+            let blocks = accessor.blocks(txn_id, Range::default(), vec![]).await?;
+
+            blocks
+                .map(|result| {
+                    result.and_then(|(_coords, values)| values.max_all().map_err(TCError::from))
+                })
+                .try_fold(A::DType::min(), move |max, block_max| {
+                    let max = match collator.cmp(&max.into(), &block_max.into()) {
+                        Ordering::Less => block_max,
+                        Ordering::Equal | Ordering::Greater => max,
+                    };
+
+                    futures::future::ready(Ok(max))
+                })
+                .await
+        })
+    }
+
+    pub(super) fn reduce_product<A>(txn_id: TxnId, accessor: A) -> TCBoxTryFuture<'static, A::DType>
+    where
+        A: SparseInstance + TensorPermitRead + Clone + fmt::Debug,
+    {
+        Box::pin(async move {
+            log::debug!("calculate the total product of {accessor:?}");
+
+            let _permit = accessor.read_permit(txn_id, Range::default()).await?;
+
+            if !reduce_all(txn_id, accessor.clone()).await? {
+                return Ok(A::DType::zero());
+            } else {
+                log::trace!("all elements in {accessor:?} are filled...");
+            }
+
+            let blocks = accessor.blocks(txn_id, Range::default(), vec![]).await?;
+
+            let product: A::DType = blocks
+                .map(|result| {
+                    result.and_then(|(_coords, values)| values.product_all().map_err(TCError::from))
+                })
+                .try_fold(
+                    A::DType::one(),
+                    move |product: A::DType, block_product: A::DType| {
+                        futures::future::ready(Ok(product * block_product))
+                    },
+                )
+                .await?;
+
+            Ok(product)
+        })
+    }
+
+    pub(super) fn reduce_sum<A>(txn_id: TxnId, accessor: A) -> TCBoxTryFuture<'static, A::DType>
+    where
+        A: SparseInstance + TensorPermitRead,
+    {
+        Box::pin(async move {
+            let _permit = accessor.read_permit(txn_id, Range::default()).await?;
+
+            let blocks = accessor.blocks(txn_id, Range::default(), vec![]).await?;
+
+            blocks
+                .map(|result| {
+                    result.and_then(|(_coords, values)| values.sum_all().map_err(TCError::from))
+                })
+                .try_fold(A::DType::zero(), move |sum, block_sum| {
+                    futures::future::ready(Ok(sum + block_sum))
+                })
+                .await
+        })
+    }
+}
+
 const BLOCK_SIZE: usize = 4_096;
 
 pub type Blocks<C, V> = Pin<Box<dyn Stream<Item = Result<(C, V), TCError>> + Send>>;
@@ -597,199 +748,60 @@ where
 impl<Txn, FE, A> TensorReduce for SparseTensor<Txn, FE, A>
 where
     Txn: Transaction<FE>,
-    FE: ThreadSafe,
+    FE: DenseCacheFile + AsType<Buffer<A::DType>> + AsType<Node>,
     A: SparseInstance + TensorPermitRead + Clone,
-    Number: From<A::DType>,
+    A::DType: fmt::Debug,
+    Buffer<A::DType>: de::FromStream<Context = ()>,
+    Number: From<A::DType> + CastInto<A::DType>,
+    SparseAccess<Txn, FE, A::DType>: From<A>,
 {
-    type Reduce = SparseTensor<Txn, FE, SparseReduce<A, A::DType>>;
+    type Reduce = SparseTensor<Txn, FE, SparseReduce<Txn, FE, A::DType>>;
 
     async fn all(self, txn_id: TxnId) -> TCResult<bool> {
-        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-
-        let range = Range::all(self.shape());
-        let axes = (0..self.ndim()).into_iter().collect();
-        let filled_at = self
-            .accessor
-            .filled_at(txn_id, Range::default(), axes)
-            .await?;
-
-        let mut coords = futures::stream::iter(range.affected())
-            .zip(filled_at)
-            .map(|(expected, result)| result.map(|actual| (expected, actual)));
-
-        while let Some((expected, actual)) = coords.try_next().await? {
-            if expected != actual {
-                return Ok(false);
-            }
-        }
-
-        Ok(true)
+        reduce::reduce_all(txn_id, self.accessor).await
     }
 
     async fn any(self, txn_id: TxnId) -> TCResult<bool> {
-        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-
-        let axes = (0..self.ndim()).into_iter().collect();
-        let mut filled_at = self
-            .accessor
-            .filled_at(txn_id, Range::default(), axes)
-            .await?;
-
-        filled_at.try_next().map_ok(|r| r.is_some()).await
+        reduce::reduce_any(txn_id, self.accessor).await
     }
 
     fn max(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
-        let block_op = |block: Array<A::DType>| block.max_all().map_err(TCError::from);
-
-        fn max_value<T: Into<Number> + Copy>(l: T, r: T) -> T {
-            match NumberCollator::default().cmp(&l.into(), &r.into()) {
-                Ordering::Less => r,
-                Ordering::Equal | Ordering::Greater => l,
-            }
-        }
-
-        SparseReduce::new(
-            self.accessor,
-            A::DType::min(),
-            axes,
-            keepdims,
-            block_op,
-            max_value,
-        )
-        .map(SparseTensor::from)
+        SparseReduce::new(self.accessor, axes, keepdims, reduce::reduce_max).map(SparseTensor::from)
     }
 
     async fn max_all(self, txn_id: TxnId) -> TCResult<Number> {
-        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-
-        let collator = NumberCollator::default();
-        let blocks = self
-            .accessor
-            .blocks(txn_id, Range::default(), vec![])
-            .await?;
-
-        blocks
-            .map(|result| {
-                result.and_then(|(_coords, values)| {
-                    values.max_all().map(Number::from).map_err(TCError::from)
-                })
-            })
-            .try_fold(A::DType::min().into(), move |max, block_max| {
-                let max = match collator.cmp(&max, &block_max) {
-                    Ordering::Less => block_max,
-                    Ordering::Equal | Ordering::Greater => max,
-                };
-
-                futures::future::ready(Ok(max))
-            })
+        reduce::reduce_max(txn_id, self.accessor)
+            .map_ok(Number::from)
             .await
     }
 
     fn min(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
-        let block_op = |block: Array<A::DType>| block.min_all().map_err(TCError::from);
-
-        fn min_value<T: Into<Number> + Copy>(l: T, r: T) -> T {
-            match NumberCollator::default().cmp(&l.into(), &r.into()) {
-                Ordering::Greater => r,
-                Ordering::Equal | Ordering::Less => l,
-            }
-        }
-
-        SparseReduce::new(
-            self.accessor,
-            A::DType::max(),
-            axes,
-            keepdims,
-            block_op,
-            min_value,
-        )
-        .map(SparseTensor::from)
+        SparseReduce::new(self.accessor, axes, keepdims, reduce::reduce_min).map(SparseTensor::from)
     }
 
     async fn min_all(self, txn_id: TxnId) -> TCResult<Number> {
-        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-
-        let collator = NumberCollator::default();
-        let blocks = self
-            .accessor
-            .blocks(txn_id, Range::default(), vec![])
-            .await?;
-
-        blocks
-            .map(|result| {
-                result.and_then(|(_coords, values)| {
-                    values.max_all().map(Number::from).map_err(TCError::from)
-                })
-            })
-            .try_fold(A::DType::min().into(), move |max, block_max| {
-                let max = match collator.cmp(&max, &block_max) {
-                    Ordering::Less => block_max,
-                    Ordering::Equal | Ordering::Greater => max,
-                };
-
-                futures::future::ready(Ok(max))
-            })
+        reduce::reduce_min(txn_id, self.accessor)
+            .map_ok(Number::from)
             .await
     }
 
     fn product(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
-        SparseReduce::new(
-            self.accessor,
-            A::DType::one(),
-            axes,
-            keepdims,
-            |block| block.product_all().map_err(TCError::from),
-            |l, r| l * r,
-        )
-        .map(SparseTensor::from)
+        SparseReduce::new(self.accessor, axes, keepdims, reduce::reduce_product)
+            .map(SparseTensor::from)
     }
 
     async fn product_all(self, txn_id: TxnId) -> TCResult<Number> {
-        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-
-        let blocks = self
-            .accessor
-            .blocks(txn_id, Range::default(), vec![])
-            .await?;
-
-        blocks
-            .map(|result| {
-                result.and_then(|(_coords, values)| values.product_all().map_err(TCError::from))
-            })
-            .try_fold(A::DType::one(), move |product, block_product| {
-                futures::future::ready(Ok(product * block_product))
-            })
+        reduce::reduce_product(txn_id, self.accessor)
             .map_ok(Number::from)
             .await
     }
 
     fn sum(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
-        SparseReduce::new(
-            self.accessor,
-            A::DType::zero(),
-            axes,
-            keepdims,
-            |block| block.sum_all().map_err(TCError::from),
-            |l, r| l + r,
-        )
-        .map(SparseTensor::from)
+        SparseReduce::new(self.accessor, axes, keepdims, reduce::reduce_sum).map(SparseTensor::from)
     }
 
     async fn sum_all(self, txn_id: TxnId) -> TCResult<Number> {
-        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-
-        let blocks = self
-            .accessor
-            .blocks(txn_id, Range::default(), vec![])
-            .await?;
-
-        blocks
-            .map(|result| {
-                result.and_then(|(_coords, values)| values.sum_all().map_err(TCError::from))
-            })
-            .try_fold(A::DType::one(), move |sum, block_sum| {
-                futures::future::ready(Ok(sum + block_sum))
-            })
+        reduce::reduce_sum(txn_id, self.accessor)
             .map_ok(Number::from)
             .await
     }

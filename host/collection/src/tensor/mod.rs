@@ -2102,6 +2102,6 @@ fn validate_order(order: &[usize], ndim: usize) -> bool {
     if order.is_empty() {
         true
     } else {
-        order.len() == ndim && order.iter().all(|x| x < &ndim)
+        order.iter().all(|x| x < &ndim)
     }
 }

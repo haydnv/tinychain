@@ -836,13 +836,13 @@ class Sparse(Tensor, typing.Generic[DType]):
         return Sparse(form=Tensor.mul(self, other))
 
 
-def _reduce_args(axis=None, keepdims=False):
+def _reduce_args(axes=None, keepdims=False):
     args = {}
 
-    if axis is not None:
-        args["axis"] = axis
+    if axes is not None:
+        args["axes"] = axes
 
-    if keepdims:
-        args["keepdims"] = keepdims
+        if keepdims:
+            args["keepdims"] = keepdims
 
     return args

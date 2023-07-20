@@ -17,7 +17,7 @@ use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{DType, Number, NumberType};
-use tcgeneric::ThreadSafe;
+use tcgeneric::{TCBoxTryFuture, ThreadSafe};
 
 use crate::tensor::block::Block;
 use crate::tensor::dense::{DenseAccess, DenseCacheFile, DenseInstance, DenseSlice};
@@ -300,7 +300,7 @@ pub enum SparseAccess<Txn, FE, T: CDatatype> {
     Cow(Box<SparseCow<FE, T, Self>>),
     Dense(Box<SparseDense<DenseAccess<Txn, FE, T>>>),
     Expand(Box<SparseExpand<Self>>),
-    Reduce(Box<SparseReduce<Self, T>>),
+    Reduce(Box<SparseReduce<Txn, FE, T>>),
     Reshape(Box<SparseReshape<Self>>),
     Slice(Box<SparseSlice<Self>>),
     Transpose(Box<SparseTranspose<Self>>),
@@ -2340,44 +2340,60 @@ impl<S: fmt::Debug> fmt::Debug for SparseExpand<S> {
     }
 }
 
-#[derive(Clone)]
-pub struct SparseReduce<S, T: CDatatype> {
-    source: S,
+pub struct SparseReduce<Txn, FE, T: CDatatype> {
+    reductor: fn(TxnId, SparseSlice<SparseAccess<Txn, FE, T>>) -> TCBoxTryFuture<'static, T>,
+    source: SparseAccess<Txn, FE, T>,
     transform: Arc<Reduce>,
-    id: T,
-    op: fn(Array<T>) -> TCResult<T>,
-    value_op: fn(T, T) -> T,
 }
 
-impl<S, T> SparseReduce<S, T>
+impl<Txn, FE, T: CDatatype> Clone for SparseReduce<Txn, FE, T> {
+    fn clone(&self) -> Self {
+        SparseReduce {
+            reductor: self.reductor,
+            source: self.source.clone(),
+            transform: self.transform.clone(),
+        }
+    }
+}
+
+impl<Txn, FE, T> SparseReduce<Txn, FE, T>
 where
-    S: SparseInstance<DType = T> + Clone,
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
     T: CDatatype + DType,
 {
-    pub fn new(
+    pub fn new<S>(
         source: S,
-        id: T,
         mut axes: Axes,
         keepdims: bool,
-        op: fn(Array<T>) -> TCResult<T>,
-        value_op: fn(T, T) -> T,
-    ) -> TCResult<Self> {
+        reductor: fn(TxnId, SparseSlice<SparseAccess<Txn, FE, T>>) -> TCBoxTryFuture<'static, T>,
+    ) -> TCResult<Self>
+    where
+        SparseAccess<Txn, FE, T>: From<S>,
+    {
         axes.sort();
         axes.dedup();
+
+        let source = SparseAccess::from(source);
 
         log::debug!("SparseReduce::new axes {axes:?} of {source:?}");
 
         Reduce::new(source.shape().clone(), axes, keepdims)
             .map(Arc::new)
             .map(|transform| Self {
+                reductor,
                 source,
                 transform,
-                id,
-                op,
-                value_op,
             })
     }
+}
 
+impl<Txn, FE, T> SparseReduce<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
+    T: CDatatype + DType,
+{
     async fn reduce_element(&self, txn_id: TxnId, coord: Coord) -> TCResult<(Coord, T)>
     where
         T: fmt::Debug,
@@ -2386,28 +2402,16 @@ where
 
         let source_range = self.transform.invert_coord(&coord);
         let slice = SparseSlice::new(self.source.clone(), source_range.into())?;
-        let blocks = slice
-            .blocks(txn_id, Range::default(), Axes::default())
-            .await?;
-
-        let reduced = blocks
-            .try_fold(self.id, |reduced, (_coords, values)| async move {
-                log::trace!("values are {values:?}");
-                let value = (self.op)(values.into())?;
-                log::trace!("values reduced to {value:?}");
-                let reduced = (self.value_op)(reduced, value);
-                log::trace!("total reduced to {reduced:?}");
-                Ok(reduced)
-            })
-            .await?;
-
-        Ok((coord, reduced))
+        (self.reductor)(txn_id, slice)
+            .map_ok(|reduced| (coord, reduced))
+            .await
     }
 }
 
-impl<S, T> TensorInstance for SparseReduce<S, T>
+impl<Txn, FE, T> TensorInstance for SparseReduce<Txn, FE, T>
 where
-    S: ThreadSafe,
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
     T: CDatatype + DType,
 {
     fn dtype(&self) -> NumberType {
@@ -2420,15 +2424,18 @@ where
 }
 
 #[async_trait]
-impl<S, T> SparseInstance for SparseReduce<S, T>
+impl<Txn, FE, T> SparseInstance for SparseReduce<Txn, FE, T>
 where
-    S: SparseInstance<DType = T> + Clone,
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
     T: CDatatype + DType + fmt::Debug,
+    Buffer<T>: de::FromStream<Context = ()>,
+    Number: From<T> + CastInto<T>,
 {
     type CoordBlock = ArrayBase<Vec<u64>>;
     type ValueBlock = ArrayBase<Vec<T>>;
     type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
-    type DType = S::DType;
+    type DType = T;
 
     async fn blocks(
         self,
@@ -2467,13 +2474,15 @@ where
             .filled_at(txn_id, source_range, source_axes)
             .await?;
 
+        let zero = T::zero();
         let elements = filled_at
             .map(move |result| {
                 let coord = result?;
                 let this = self.clone();
                 Ok(async move { this.reduce_element(txn_id, coord).await })
             })
-            .try_buffered(num_cpus::get());
+            .try_buffered(num_cpus::get())
+            .try_filter(move |(_coord, value)| futures::future::ready(*value != zero));
 
         Ok(Box::pin(elements))
     }
@@ -2486,10 +2495,11 @@ where
 }
 
 #[async_trait]
-impl<S, T> TensorPermitRead for SparseReduce<S, T>
+impl<Txn, FE, T> TensorPermitRead for SparseReduce<Txn, FE, T>
 where
-    S: TensorPermitRead,
-    T: CDatatype,
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
 {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.transform.shape().validate_range(&range)?;
@@ -2498,23 +2508,16 @@ where
     }
 }
 
-impl<Txn, FE, S, T> From<SparseReduce<S, T>> for SparseAccess<Txn, FE, T>
+impl<Txn, FE, T> From<SparseReduce<Txn, FE, T>> for SparseAccess<Txn, FE, T>
 where
-    S: Into<SparseAccess<Txn, FE, T>>,
     T: CDatatype,
 {
-    fn from(reduce: SparseReduce<S, T>) -> Self {
-        Self::Reduce(Box::new(SparseReduce {
-            source: reduce.source.into(),
-            transform: reduce.transform,
-            id: reduce.id,
-            op: reduce.op,
-            value_op: reduce.value_op,
-        }))
+    fn from(reduce: SparseReduce<Txn, FE, T>) -> Self {
+        Self::Reduce(Box::new(reduce))
     }
 }
 
-impl<S: fmt::Debug, T: CDatatype> fmt::Debug for SparseReduce<S, T> {
+impl<Txn, FE, T: CDatatype + DType> fmt::Debug for SparseReduce<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
