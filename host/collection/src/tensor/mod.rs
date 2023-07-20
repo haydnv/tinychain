@@ -1677,7 +1677,10 @@ where
     async fn write(self, txn_id: TxnId, range: Range, value: Self) -> TCResult<()> {
         match self {
             Self::Dense(this) => this.write(txn_id, range, value.into_dense()).await,
-            Self::Sparse(this) => this.write(txn_id, range, value.into_sparse()).await,
+            Self::Sparse(this) => match value {
+                Self::Sparse(value) => this.write(txn_id, range, value).await,
+                Self::Dense(value) => Err(bad_request!("cannot write {value:?} to {this:?}")),
+            },
         }
     }
 }
