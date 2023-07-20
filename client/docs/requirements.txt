@@ -17,7 +17,7 @@ mistune==0.8.4
 packaging==22.0
 pipenv==2022.12.19
 platformdirs==2.6.2
-Pygments==2.14.0
+Pygments==2.15.0
 pytz==2022.7
 requests==2.28.1
 rjwt==0.1.1
