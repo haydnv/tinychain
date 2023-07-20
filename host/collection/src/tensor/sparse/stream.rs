@@ -459,7 +459,7 @@ impl<T, S: Stream<Item = TCResult<(Coord, T)>>> Stream for FilledAt<S> {
                         }
                     }
                 },
-                None => break None,
+                None => break this.pending.take().map(Ok),
                 Some(Err(cause)) => break Some(Err(cause)),
             }
         })

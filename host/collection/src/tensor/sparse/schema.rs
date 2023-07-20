@@ -58,7 +58,7 @@ impl b_table::IndexSchema for IndexSchema {
 
 impl fmt::Debug for IndexSchema {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("sparse tensor index schema")
+        write!(f, "sparse tensor index on axes {:?}", self.columns)
     }
 }
 

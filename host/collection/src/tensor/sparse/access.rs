@@ -1894,7 +1894,10 @@ where
         let dims = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], Arc::new(shape))?;
         let blocks = offsets.map(move |result| {
             let (offsets, values) = result?;
+            log::trace!("block has {} values", values.size());
+
             let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
+
             Ok((coords, values))
         });
 
@@ -2362,6 +2365,8 @@ where
         axes.sort();
         axes.dedup();
 
+        log::debug!("SparseReduce::new axes {axes:?} of {source:?}");
+
         Reduce::new(source.shape().clone(), axes, keepdims)
             .map(Arc::new)
             .map(|transform| Self {
@@ -2373,7 +2378,12 @@ where
             })
     }
 
-    async fn reduce_element(&self, txn_id: TxnId, coord: Coord) -> TCResult<(Coord, T)> {
+    async fn reduce_element(&self, txn_id: TxnId, coord: Coord) -> TCResult<(Coord, T)>
+    where
+        T: fmt::Debug,
+    {
+        self.shape().validate_coord(&coord)?;
+
         let source_range = self.transform.invert_coord(&coord);
         let slice = SparseSlice::new(self.source.clone(), source_range.into())?;
         let blocks = slice
@@ -2382,8 +2392,12 @@ where
 
         let reduced = blocks
             .try_fold(self.id, |reduced, (_coords, values)| async move {
+                log::trace!("values are {values:?}");
                 let value = (self.op)(values.into())?;
-                Ok((self.value_op)(reduced, value))
+                log::trace!("values reduced to {value:?}");
+                let reduced = (self.value_op)(reduced, value);
+                log::trace!("total reduced to {reduced:?}");
+                Ok(reduced)
             })
             .await?;
 
@@ -2409,7 +2423,7 @@ where
 impl<S, T> SparseInstance for SparseReduce<S, T>
 where
     S: SparseInstance<DType = T> + Clone,
-    T: CDatatype + DType,
+    T: CDatatype + DType + fmt::Debug,
 {
     type CoordBlock = ArrayBase<Vec<u64>>;
     type ValueBlock = ArrayBase<Vec<T>>;
@@ -2431,13 +2445,22 @@ where
         self,
         txn_id: TxnId,
         range: Range,
-        order: Axes,
+        mut order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
+        order.reserve(self.ndim() - order.len());
+
+        for x in 0..self.ndim() {
+            if !order.contains(&x) {
+                order.push(x);
+            }
+        }
+
         self.transform.shape().validate_range(&range)?;
         self.transform.shape().validate_axes(&order)?;
 
         let source_range = self.transform.invert_range(range);
         let source_axes = self.transform.invert_axes(order);
+
         let filled_at = self
             .source
             .clone()
@@ -2693,6 +2716,8 @@ where
     S: TensorInstance + fmt::Debug,
 {
     pub fn new(source: S, range: Range) -> TCResult<Self> {
+        log::debug!("SparseSlice::new range {range:?} of {source:?}");
+
         Slice::new(source.shape().clone(), range).map(|transform| Self { source, transform })
     }
 

@@ -1901,8 +1901,6 @@ fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
 }
 
 pub fn cast_range(shape: &Shape, scalar: Scalar) -> TCResult<Range> {
-    debug!("tensor bounds from {scalar:?} (shape is {shape:?})");
-
     match scalar {
         Scalar::Value(Value::Number(i)) => {
             let bound = cast_bound(shape[0], i.into())?;
