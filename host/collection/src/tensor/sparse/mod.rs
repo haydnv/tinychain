@@ -79,12 +79,16 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
     where
         Self: Sized,
     {
+        if axes.is_empty() {
+            return Err(bad_request!("cannot transpose an empty set of axes"));
+        }
+
         let ndim = self.ndim();
 
         let elided = (0..ndim).filter(|x| !axes.contains(x));
 
         let mut order = Vec::with_capacity(ndim);
-        order.copy_from_slice(&axes);
+        order.extend(axes.iter().copied());
         order.extend(elided);
 
         self.elements(txn_id, range, order)
@@ -473,8 +477,8 @@ where
         SparseCombine::new(
             self.accessor,
             other.accessor,
-            |l, r| l.add(r).map(Array::from).map_err(TCError::from),
-            |l, r| l + r,
+            |l, r| l.sub(r).map(Array::from).map_err(TCError::from),
+            |l, r| l - r,
         )
         .map(SparseTensor::from)
     }
