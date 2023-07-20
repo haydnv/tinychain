@@ -5,9 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use destream::de;
 use futures::{Stream, TryStreamExt};
-use ha_ndarray::{
-    Array, ArrayBase, Buffer, CDatatype, NDArray, NDArrayBoolean, NDArrayMath, NDArrayRead,
-};
+use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype, NDArrayBoolean, NDArrayMath, NDArrayRead};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
 
@@ -22,7 +20,7 @@ use tcgeneric::ThreadSafe;
 use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTrig, ComplexUnary};
 use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
-    size_hint, strides_for, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst,
+    autoqueue, strides_for, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst,
     TensorCast, TensorCompare, TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance,
     TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce, TensorTransform,
     TensorTrig, TensorUnary, TensorUnaryBoolean,
@@ -145,7 +143,6 @@ where
 
     let ndim = re.ndim();
     let shape = re.shape().clone();
-    let size_hint = size_hint(re.size());
 
     let strides = strides_for(shape.as_slice(), shape.len());
     let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
@@ -168,8 +165,7 @@ where
 
             async move {
                 let coords = offsets.mul(strides)?.rem(dims)?;
-
-                let queue = ha_ndarray::Queue::new(coords.context().clone(), size_hint)?;
+                let queue = autoqueue(&coords)?;
 
                 let coords = coords
                     .read(&queue)

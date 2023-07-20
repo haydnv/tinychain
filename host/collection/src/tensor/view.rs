@@ -5,7 +5,7 @@ use destream::{de, en};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::try_join;
-use ha_ndarray::{Buffer, CDatatype, NDArray, NDArrayRead, Queue};
+use ha_ndarray::{Buffer, CDatatype, NDArrayRead};
 use rayon::prelude::*;
 use safecast::{AsType, CastInto};
 
@@ -17,7 +17,7 @@ use tcgeneric::{NativeClass, TCPathBuf};
 
 use super::dense::{DenseAccess, DenseCacheFile, DenseInstance, DenseTensor};
 use super::sparse::Node;
-use super::{Coord, Dense, Range, Sparse, Tensor, TensorInstance, TensorPermitRead};
+use super::{autoqueue, Coord, Dense, Range, Sparse, Tensor, TensorInstance, TensorPermitRead};
 
 type Blocks<T> = Pin<Box<dyn Stream<Item = Vec<T>> + Send>>;
 
@@ -49,7 +49,7 @@ impl DenseViewBlocks {
                 let blocks = blocks
                     .map(move |result| {
                         let block = result?;
-                        let queue = Queue::new(block.context().clone(), block.size())?;
+                        let queue = autoqueue(&block)?;
                         let buffer = block.read(&queue)?.to_slice()?.into_vec();
                         TCResult::Ok(buffer.into_iter().map(|i| i != 0).collect::<Vec<bool>>())
                     })
@@ -96,7 +96,8 @@ where
 
     let re = re.map(move |result| {
         let block = result?;
-        let queue = Queue::new(block.context().clone(), block.size())?;
+        let queue = autoqueue(&block)?;
+
         block
             .read(&queue)
             .and_then(|buffer| buffer.to_slice())
@@ -106,7 +107,8 @@ where
 
     let im = im.map(move |result| {
         let block = result?;
-        let queue = Queue::new(block.context().clone(), block.size())?;
+        let queue = autoqueue(&block)?;
+
         block
             .read(&queue)
             .and_then(|buffer| buffer.to_slice())
@@ -147,7 +149,8 @@ where
     let blocks = blocks
         .map(move |result| {
             let block = result?;
-            let queue = Queue::new(block.context().clone(), block.size())?;
+            let queue = autoqueue(&block)?;
+
             block
                 .read(&queue)
                 .and_then(|buffer| buffer.to_slice())

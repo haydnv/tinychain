@@ -390,7 +390,7 @@ struct CreateHandler {
 impl<'a, State> Handler<'a, State> for CreateHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + Clone,
+    State::FE: DenseCacheFile + AsType<Node> + Clone,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -1731,12 +1731,14 @@ async fn create_sparse<State>(
 ) -> TCResult<Sparse<State::Txn, State::FE>>
 where
     State: StateInstance,
+    State::FE: AsType<Node> + ThreadSafe + Clone,
 {
-    // let store = txn.context().create_store_unique(*txn.id()).await?;
-    // SparseBase::create(*txn.id(), (schema.dtype, schema.shape.into()), store)
-    //     .map_ok(Sparse::Base)
-    //     .await
-    Err(not_implemented!("create sparse tensor"))
+    let dtype = schema.dtype;
+    let schema = crate::tensor::sparse::Schema::new(schema.shape);
+    let store = create_dir(txn).await?;
+    tc_transact::fs::Persist::create(*txn.id(), (dtype, schema), store)
+        .map_ok(Sparse::Base)
+        .await
 }
 
 async fn write<State, T>(tensor: T, txn_id: TxnId, key: Value, value: State) -> TCResult<()>
@@ -1794,7 +1796,7 @@ async fn create_tensor<State>(
 ) -> TCResult<Tensor<State::Txn, State::FE>>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + Clone,
+    State::FE: DenseCacheFile + AsType<Node> + Clone,
 {
     match class {
         TensorType::Dense => {

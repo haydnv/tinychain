@@ -7,7 +7,7 @@ use destream::de;
 use freqfs::*;
 use futures::stream::{StreamExt, TryStreamExt};
 use ha_ndarray::{
-    ArrayBase, ArrayOp, Buffer, BufferWrite, CDatatype, NDArray, NDArrayMathScalar, NDArrayRead,
+    ArrayBase, ArrayOp, Buffer, BufferWrite, CDatatype, NDArrayMathScalar, NDArrayRead,
 };
 use itertools::Itertools;
 use safecast::{AsType, CastFrom};
@@ -17,7 +17,7 @@ use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberClass, NumberType};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::{offset_of, Coord, Shape, TensorInstance};
+use crate::tensor::{autoqueue, offset_of, Coord, Shape, TensorInstance};
 
 use super::access::DenseAccess;
 use super::stream::BlockResize;
@@ -450,7 +450,7 @@ where
         let block_offset = (offset % self.block_size() as u64) as usize;
 
         let block = self.read_block(txn_id, block_id).await?;
-        let queue = ha_ndarray::Queue::new(block.context().clone(), block.size())?;
+        let queue = autoqueue(&block)?;
         let buffer = block.read(&queue)?;
         Ok(buffer.to_slice()?.as_ref()[block_offset])
     }
@@ -621,9 +621,6 @@ where
         let block_axis = block_axis_for(&self.shape, self.block_size);
         let block_shape = block_shape_for(block_axis, &self.shape, self.block_size);
 
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, block_shape.iter().product())?;
-
         let blocks = other.read_blocks(txn_id).await?;
         let blocks = BlockResize::new(blocks, block_shape)?;
 
@@ -631,12 +628,12 @@ where
             .enumerate()
             .map(|(block_id, result)| {
                 let dir = self.dir.clone();
-                let queue = queue.clone();
 
                 async move {
                     let mut block = dir.write_file(&block_id).await?;
 
                     let data = result?;
+                    let queue = autoqueue(&data)?;
                     let data = data.read(&queue)?;
                     debug_assert_eq!(block.len(), data.len());
                     block.write(data)?;

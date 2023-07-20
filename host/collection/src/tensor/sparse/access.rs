@@ -23,8 +23,8 @@ use crate::tensor::block::Block;
 use crate::tensor::dense::{DenseAccess, DenseCacheFile, DenseInstance, DenseSlice};
 use crate::tensor::transform::{Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
-    strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
-    TensorPermitRead, TensorPermitWrite,
+    autoqueue, strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore, Shape,
+    TensorInstance, TensorPermitRead, TensorPermitWrite,
 };
 
 use super::base::SparseBase;
@@ -1915,8 +1915,8 @@ where
         let elements = blocks
             .map(move |result| {
                 let (coords, values) = result?;
-                let context = coords.context().clone();
-                let queue = ha_ndarray::Queue::new(context, coords.size())?;
+
+                let queue = autoqueue(&coords)?;
                 let coords = coords.read(&queue)?.to_slice()?;
                 let tuples = coords
                     .as_ref()
@@ -2646,8 +2646,9 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
                 let (coords, values) = result?;
                 let coords = coords.into_inner();
 
-                let queue = Queue::new(values.context().clone(), values.size())?;
+                let queue = autoqueue(&values)?;
                 let values = values.read(&queue)?.to_slice()?;
+
                 let tuples = coords
                     .into_par_iter()
                     .chunks(ndim)
@@ -2940,7 +2941,7 @@ where
     S: SparseInstance,
     <S::CoordBlock as NDArrayTransform>::Transpose: NDArrayRead<DType = u64> + Into<Array<u64>>,
 {
-    type CoordBlock = <S::CoordBlock as NDArrayTransform>::Transpose;
+    type CoordBlock = ArrayBase<Vec<u64>>;
     type ValueBlock = S::ValueBlock;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
@@ -2969,10 +2970,24 @@ where
             .blocks(txn_id, source_range, source_order)
             .await?;
 
-        let permutation = self.transform.axes().to_vec();
+        let transform = self.transform;
         let blocks = source_blocks.map(move |result| {
             let (source_coords, values) = result?;
-            let coords = source_coords.transpose(Some(permutation.to_vec()))?;
+
+            let queue = autoqueue(&source_coords)?;
+            let source_coords = source_coords.read(&queue)?.to_slice()?;
+
+            let ndim = transform.shape().len();
+            let coords = source_coords
+                .into_vec()
+                .into_par_iter()
+                .chunks(ndim)
+                .map(|source_coord| transform.invert_coord(source_coord))
+                .flatten()
+                .collect();
+
+            let coords = ArrayBase::<Vec<u64>>::new(vec![values.size(), ndim], coords)?;
+
             Ok((coords, values))
         });
 
@@ -3675,10 +3690,10 @@ fn block_elements<T: CDatatype, C: NDArrayRead<DType = u64>, V: NDArrayRead<DTyp
         .map(move |result| {
             let (coords, values) = result?;
 
-            let queue = Queue::new(coords.context().clone(), coords.size())?;
+            let queue = autoqueue(&coords)?;
             let coords = coords.read(&queue)?.to_slice()?;
 
-            let queue = Queue::new(values.context().clone(), values.size())?;
+            let queue = autoqueue(&values)?;
             let values = values.read(&queue)?.to_slice()?;
 
             let tuples = coords
@@ -3711,12 +3726,12 @@ where
         .map(move |result| {
             let (coords, values) = result?;
 
-            let queue = Queue::new(coords.context().clone(), coords.size())?;
+            let queue = autoqueue(&coords)?;
             let strides = strides.clone().broadcast(coords.shape().to_vec())?;
             let offsets = coords.mul(strides)?.sum(vec![1], false)?;
             let offsets = offsets.read(&queue)?.to_slice()?.into_vec();
 
-            let queue = Queue::new(values.context().clone(), values.size())?;
+            let queue = autoqueue(&values)?;
             let values = values.read(&queue)?.to_slice()?.into_vec();
 
             debug_assert_eq!(offsets.len(), values.len());
@@ -3746,7 +3761,7 @@ fn filter_zeros<T: CDatatype>(
     if values.all()? {
         Ok(Some((coords, values.into())))
     } else {
-        let queue = Queue::new(coords.context().clone(), coords.size())?;
+        let queue = autoqueue(&coords)?;
         let coord_slice = coords.read(&queue)?.to_slice()?;
         let value_slice = values.into_inner();
         debug_assert_eq!(coord_slice.len() % ndim, 0);

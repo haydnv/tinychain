@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use collate::Collator;
 use destream::{de, en};
 use futures::TryFutureExt;
+use ha_ndarray::{NDArray, Queue};
 use safecast::{AsType, CastFrom, CastInto, TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -50,8 +51,8 @@ type Semaphore = tc_transact::lock::Semaphore<Collator<u64>, Range>;
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct Schema {
-    dtype: NumberType,
-    shape: Shape,
+    pub dtype: NumberType,
+    pub shape: Shape,
 }
 
 impl From<(NumberType, Shape)> for Schema {
@@ -2041,6 +2042,11 @@ pub fn broadcast_shape(left: &[u64], right: &[u64]) -> TCResult<Shape> {
 }
 
 #[inline]
+fn autoqueue<A: NDArray>(array: &A) -> Result<Queue, ha_ndarray::Error> {
+    Queue::new(array.context().clone(), array.size())
+}
+
+#[inline]
 fn coord_of<T: Copy + Div<Output = T> + Rem<Output = T> + PartialEq>(
     offset: T,
     strides: &[T],
@@ -2073,11 +2079,6 @@ fn offset_of(coord: Coord, shape: &[u64]) -> u64 {
     });
 
     coord.into_iter().zip(strides).map(|(i, dim)| i * dim).sum()
-}
-
-#[inline]
-fn size_hint(size: u64) -> usize {
-    size.try_into().ok().unwrap_or_else(|| usize::MAX)
 }
 
 #[inline]

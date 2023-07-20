@@ -3,7 +3,7 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures::{try_join, Stream, StreamExt, TryStreamExt};
-use ha_ndarray::{NDArray, NDArrayRead};
+use ha_ndarray::NDArrayRead;
 use log::trace;
 use rayon::prelude::*;
 use safecast::{AsType, CastInto};
@@ -17,10 +17,10 @@ use tcgeneric::ThreadSafe;
 use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTrig, ComplexUnary};
 use crate::tensor::sparse::{sparse_from, Node};
 use crate::tensor::{
-    Axes, Coord, Range, Shape, SparseView, TensorBoolean, TensorBooleanConst, TensorCast,
-    TensorCompare, TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance, TensorMath,
-    TensorMathConst, TensorPermitRead, TensorRead, TensorReduce, TensorTransform, TensorTrig,
-    TensorUnary, TensorUnaryBoolean,
+    autoqueue, Axes, Coord, Range, Shape, SparseView, TensorBoolean, TensorBooleanConst,
+    TensorCast, TensorCompare, TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance,
+    TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce, TensorTransform,
+    TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{dense_from, DenseAccess, DenseCacheFile, DenseInstance, DenseTensor, DenseUnaryCast};
@@ -214,7 +214,7 @@ where
                         let _permit = &permit; // force this closure to capture (move/own) the permit
 
                         let block = result?;
-                        let queue = ha_ndarray::Queue::new(block.context().clone(), block.size())?;
+                        let queue = autoqueue(&block)?;
                         let buffer = block.read(&queue)?.to_slice()?.into_vec();
                         let buffer = buffer
                             .into_par_iter()
@@ -241,7 +241,8 @@ where
 
                 let r_blocks = r_blocks.map(move |result| {
                     let block = result?;
-                    let queue = ha_ndarray::Queue::new(block.context().clone(), block.size())?;
+                    let queue = autoqueue(&block)?;
+
                     block
                         .read(&queue)
                         .and_then(|buffer| buffer.to_slice())
@@ -251,7 +252,8 @@ where
 
                 let i_blocks = i_blocks.map(move |result| {
                     let block = result?;
-                    let queue = ha_ndarray::Queue::new(block.context().clone(), block.size())?;
+                    let queue = autoqueue(&block)?;
+
                     block
                         .read(&queue)
                         .and_then(|buffer| buffer.to_slice())
@@ -287,7 +289,7 @@ where
                         let _permit = &permit; // force this closure to capture (move/own) the permit
 
                         let block = result?;
-                        let queue = ha_ndarray::Queue::new(block.context().clone(), block.size())?;
+                        let queue = autoqueue(&block)?;
                         let buffer = block.read(&queue)?.to_slice()?.into_vec();
                         let buffer = buffer
                             .into_par_iter()
