@@ -339,6 +339,7 @@ where
             Self::Reshape(reshape) => reshape.read_permit(txn_id, range).await,
             Self::ResizeBlocks(resize) => resize.read_permit(txn_id, range).await,
             Self::Slice(slice) => slice.read_permit(txn_id, range).await,
+            Self::Sparse(sparse) => sparse.read_permit(txn_id, range).await,
             Self::Transpose(transpose) => transpose.read_permit(txn_id, range).await,
             Self::Unary(unary) => unary.read_permit(txn_id, range).await,
             Self::UnaryCast(unary) => unary.read_permit(txn_id, range).await,
@@ -2707,8 +2708,7 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
             .map(|dim| dim as usize)
             .collect();
 
-        let order = (0..self.ndim()).into_iter().collect();
-        let elements = self.source.clone().elements(txn_id, range, order).await?;
+        let elements = self.source.clone().elements(txn_id, range, Axes::default()).await?;
         let values = ValueStream::new(elements, Range::all(self.source.shape()), S::DType::zero());
         let block = values.try_collect().await?;
 
@@ -2720,7 +2720,7 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size());
 
         let range = Range::all(self.shape());
-        let order = (0..self.ndim()).into_iter().collect();
+        let order = Axes::default();
         let elements = self.source.elements(txn_id, range.clone(), order).await?;
         let values = ValueStream::new(elements, range, S::DType::zero());
         let blocks = values
