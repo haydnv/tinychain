@@ -2708,8 +2708,14 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
             .map(|dim| dim as usize)
             .collect();
 
-        let elements = self.source.clone().elements(txn_id, range, Axes::default()).await?;
+        let elements = self
+            .source
+            .clone()
+            .elements(txn_id, range, Axes::default())
+            .await?;
+
         let values = ValueStream::new(elements, Range::all(self.source.shape()), S::DType::zero());
+
         let block = values.try_collect().await?;
 
         ArrayBase::<Vec<S::DType>>::new(shape, block).map_err(TCError::from)

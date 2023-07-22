@@ -508,7 +508,11 @@ impl Shape {
     pub fn validate_axes(&self, axes: &[usize]) -> Result<(), TCError> {
         match axes.iter().max() {
             Some(max) if *max >= self.len() => {
-                Err(bad_request!("shape {:?} has no axis {}", self, max))
+                #[cfg(debug_assertions)]
+                panic!("shape {self:?} has no axis {max}");
+
+                #[cfg(not(debug_assertions))]
+                Err(bad_request!("shape {self:?} has no axis {max}"))
             }
             _ => Ok(()),
         }

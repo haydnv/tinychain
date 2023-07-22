@@ -2123,7 +2123,7 @@ where
         NDArrayRead<DType = S::DType> + NDArrayTransform + Into<Array<S::DType>>,
 {
     type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = Array<S::DType>;
+    type ValueBlock = ArrayBase<Vec<S::DType>>;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
 
@@ -2151,28 +2151,53 @@ where
 
         let range = range.normalize(self.shape());
         let coords = range.affected().map(|coord| coord.into_iter()).flatten();
-        let coords = futures::stream::iter(coords)
-            .chunks(coord_block_size)
-            .map(move |coords| ArrayBase::<Vec<u64>>::new(vec![coords.len() / ndim, ndim], coords));
+        let coords = futures::stream::iter(coords).chunks(coord_block_size);
 
-        if range.is_empty() || range == Range::all(self.shape()) {
-            let source_blocks = self.source.read_blocks(txn_id).await?;
-            let blocks = coords
-                .zip(source_blocks)
-                .map(|(coords, values)| Ok((coords?, values?.into())));
+        let source_blocks: Blocks<_, Array<Self::DType>> =
+            if range.is_empty() || range == Range::all(self.shape()) {
+                let source_blocks = self.source.read_blocks(txn_id).await?;
+                let blocks = coords
+                    .zip(source_blocks)
+                    .map(|(coords, values)| values.map(|values| (coords, values.into())));
 
-            Ok(Box::pin(blocks))
-        } else {
-            let source_blocks = DenseSlice::new(self.source, range)?
-                .read_blocks(txn_id)
-                .await?;
+                Box::pin(blocks)
+            } else {
+                let source_blocks = DenseSlice::new(self.source, range)?
+                    .read_blocks(txn_id)
+                    .await?;
 
-            let blocks = coords
-                .zip(source_blocks)
-                .map(|(coords, values)| Ok((coords?, values?.into())));
+                let blocks = coords
+                    .zip(source_blocks)
+                    .map(|(coords, values)| values.map(|values| (coords, values.into())));
 
-            Ok(Box::pin(blocks))
-        }
+                Box::pin(blocks)
+            };
+
+        let zero = Self::DType::zero();
+        let blocks = source_blocks.try_filter_map(move |(coords, values)| async move {
+            let queue = autoqueue(&values)?;
+            let values = values.read(&queue)?.to_slice()?;
+
+            let (coords, values) = coords
+                .into_par_iter()
+                .chunks(ndim)
+                .zip(values.as_ref().into_par_iter().copied())
+                .filter(|(coord, value)| value != &zero)
+                .map(|(coord, value)| (coord, value))
+                .unzip::<_, _, Vec<Vec<u64>>, Vec<Self::DType>>();
+
+            if values.is_empty() {
+                Ok(None)
+            } else {
+                let num_values = values.len();
+                let coords = coords.into_iter().flatten().collect();
+                let coords = ArrayBase::<Vec<u64>>::new(vec![num_values, ndim], coords)?;
+                let values = ArrayBase::<Vec<Self::DType>>::new(vec![num_values], values)?;
+                Ok(Some((coords, values)))
+            }
+        });
+
+        Ok(Box::pin(blocks))
     }
 
     async fn elements(
