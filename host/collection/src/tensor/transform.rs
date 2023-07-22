@@ -505,6 +505,43 @@ impl Slice {
 
         source_coord
     }
+
+    pub fn map_coord(&self, source_coord: Coord) -> Coord {
+        assert_eq!(source_coord.len(), self.source_shape.len());
+
+        let mut source_coord = source_coord.into_iter();
+        let mut coord = Coord::with_capacity(self.shape.len());
+
+        for axis_range in self.range.iter() {
+            let i = source_coord.next().expect("i");
+
+            match axis_range {
+                AxisRange::At(_) => {
+                    // no-op
+                }
+                AxisRange::In(range, step) => {
+                    let i = i - range.start;
+                    assert_eq!(i % step, 0);
+                    coord.push(i / step);
+                }
+                AxisRange::Of(indices) => {
+                    let i = indices
+                        .iter()
+                        .copied()
+                        .position(|idx| idx == i)
+                        .expect("index");
+
+                    coord.push(i as u64);
+                }
+            }
+        }
+
+        coord.extend(source_coord);
+
+        debug_assert_eq!(coord.len(), self.shape.len());
+
+        coord
+    }
 }
 
 #[derive(Clone)]

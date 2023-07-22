@@ -534,6 +534,7 @@ where
                 false
             };
 
+            // TODO: is there a way to structure this without calling unwrap so many times?
             if this.pending_left.is_some() && this.pending_right.is_some() {
                 let l_offset = this.pending_left.as_ref().unwrap().0;
                 let r_offset = this.pending_right.as_ref().unwrap().0;
@@ -541,7 +542,7 @@ where
                 match l_offset.cmp(&r_offset) {
                     Ordering::Equal => {
                         let (l_offset, l_value) = this.pending_left.take().unwrap();
-                        let (_r_offset, r_value) = this.pending_left.take().unwrap();
+                        let (_r_offset, r_value) = this.pending_right.take().unwrap();
                         break Some(Ok((l_offset, (l_value, r_value))));
                     }
                     Ordering::Less => {

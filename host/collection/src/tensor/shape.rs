@@ -514,18 +514,16 @@ impl Shape {
 
         let mut size = 1u64;
         for dim in self.0.iter().copied() {
-            let dim = if dim == 0 || dim > u32::MAX as u64 {
+            size = if dim == 0 || dim > u32::MAX as u64 {
                 Err(bad_request!("invalid dimension: {}", dim))
-            } else if let Some(dim) = size.checked_mul(dim) {
-                Ok(dim)
+            } else if let Some(size) = size.checked_mul(dim) {
+                Ok(size)
             } else {
                 Err(bad_request!(
                     "shape {:?} exceeds the maximum allowed size of 2^64",
                     self
                 ))
             }?;
-
-            size *= dim;
         }
 
         Ok(())

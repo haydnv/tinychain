@@ -543,7 +543,23 @@ where
     fn into_sparse(self) -> Self::Sparse {
         match self {
             Self::Bool(this) => SparseView::Bool(sparse_from(this.into_sparse())),
-            _ => todo!(),
+            Self::F32(this) => SparseView::F32(sparse_from(this.into_sparse())),
+            Self::F64(this) => SparseView::F64(sparse_from(this.into_sparse())),
+            Self::C32((this_re, this_im)) => SparseView::C32((
+                sparse_from(this_re.into_sparse()),
+                sparse_from(this_im.into_sparse()),
+            )),
+            Self::C64((this_re, this_im)) => SparseView::C64((
+                sparse_from(this_re.into_sparse()),
+                sparse_from(this_im.into_sparse()),
+            )),
+            Self::I16(this) => SparseView::I16(sparse_from(this.into_sparse())),
+            Self::I32(this) => SparseView::I32(sparse_from(this.into_sparse())),
+            Self::I64(this) => SparseView::I64(sparse_from(this.into_sparse())),
+            Self::U8(this) => SparseView::U8(sparse_from(this.into_sparse())),
+            Self::U16(this) => SparseView::U16(sparse_from(this.into_sparse())),
+            Self::U32(this) => SparseView::U32(sparse_from(this.into_sparse())),
+            Self::U64(this) => SparseView::U64(sparse_from(this.into_sparse())),
         }
     }
 }

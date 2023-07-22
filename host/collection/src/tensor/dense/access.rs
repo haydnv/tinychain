@@ -1852,20 +1852,25 @@ where
             0,
         );
 
-        let mut map_slice = map_coord
-            .into_iter()
-            .map(|i| ha_ndarray::AxisBound::At(i))
-            .collect::<Vec<_>>();
+        let source_blocks = if !self.map_axes.is_empty() {
+            let mut map_slice = map_coord
+                .into_iter()
+                .map(|i| ha_ndarray::AxisBound::At(i))
+                .collect::<Vec<_>>();
 
-        for x in self.map_axes.iter().copied() {
-            map_slice[x] = ha_ndarray::AxisBound::In(0, self.block_map.shape()[x], 1);
-        }
+            for x in self.map_axes.iter().copied() {
+                map_slice[x] = ha_ndarray::AxisBound::In(0, self.block_map.shape()[x], 1);
+            }
 
-        let queue = autoqueue(&self.block_map)?;
-        let block_map_slice = self.block_map.clone().slice(map_slice)?;
-        let source_blocks = block_map_slice.read(&queue)?.to_slice()?;
+            let queue = autoqueue(&self.block_map)?;
+            let block_map_slice = self.block_map.clone().slice(map_slice)?;
+            block_map_slice.read(&queue)?.to_slice()?.into_vec()
+        } else {
+            let block_id = self.block_map.read_value(&map_coord)?;
+            vec![block_id]
+        };
 
-        debug_assert_eq!(source_blocks.as_ref()[0], source_block_id);
+        debug_assert_eq!(source_blocks[0], source_block_id);
 
         let block = self
             .source
@@ -1878,7 +1883,7 @@ where
             })
             .await?;
 
-        futures::stream::iter(source_blocks.as_ref().iter().skip(1).copied())
+        futures::stream::iter(source_blocks.into_iter().skip(1))
             .map(|source_block_id| {
                 self.source
                     .read_block(txn_id, source_block_id)
@@ -2263,20 +2268,24 @@ impl<S: DenseInstance> DenseSlice<S> {
 
         let mut block_map_bounds = Vec::with_capacity(block_axis + 1);
         for axis_range in transform.range().iter().take(block_axis).cloned() {
-            let bound = axis_range.try_into()?;
+            let bound = ha_ndarray::AxisBound::try_from(axis_range)?;
             block_map_bounds.push(bound);
         }
 
         if transform.range().len() > block_axis {
             let stride = block_shape[0];
             let bound = match &transform.range()[block_axis] {
+                AxisRange::At(i) if block_map_bounds.iter().all(|b| b.is_index()) => {
+                    let i = (i / stride as u64) as usize;
+                    ha_ndarray::AxisBound::In(i, i + 1, 1)
+                }
                 AxisRange::At(i) => {
                     let i = (i / stride as u64) as usize;
                     ha_ndarray::AxisBound::At(i)
                 }
                 AxisRange::In(axis_range, _step) => {
                     let start = (axis_range.start / stride as u64) as usize;
-                    let stop = (axis_range.end / stride as u64) as usize;
+                    let stop = div_ceil(axis_range.end, stride as u64) as usize;
                     ha_ndarray::AxisBound::In(start, stop, 1)
                 }
                 AxisRange::Of(indices) => {

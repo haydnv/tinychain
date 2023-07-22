@@ -22,8 +22,8 @@ use crate::tensor::{autoqueue, offset_of, Coord, Shape, TensorInstance};
 use super::access::DenseAccess;
 use super::stream::BlockResize;
 use super::{
-    block_axis_for, block_map_for, block_shape_for, div_ceil, ideal_block_size_for, BlockStream,
-    DenseCacheFile, DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock,
+    block_axis_for, block_map_for, block_shape_for, div_ceil, ideal_block_size_for, BlockShape,
+    BlockStream, DenseCacheFile, DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock,
 };
 
 pub struct DenseFile<FE, T> {
@@ -285,7 +285,7 @@ where
         block_ctr: Ctr,
     ) -> TCResult<Self>
     where
-        Ctr: Fn(ha_ndarray::Context, ha_ndarray::Queue, usize) -> TCResult<Buffer<T>> + Copy,
+        Ctr: Fn(ha_ndarray::Context, ha_ndarray::Queue, BlockShape) -> TCResult<Buffer<T>> + Copy,
     {
         shape.validate()?;
 
@@ -299,16 +299,17 @@ where
 
         let mut blocks = futures::stream::iter(0..num_blocks as u64)
             .map(|block_id| {
-                let block_size = if (block_id + 1) * (block_size as u64) > size {
-                    (size - (block_id * block_size as u64)) as usize
-                } else {
-                    block_size
-                };
-
+                let mut block_shape = block_shape.clone();
                 let context = context.clone();
                 let queue = queue.clone();
+
                 async move {
-                    block_ctr(context, queue, block_size).map(|buffer| (block_id, buffer))
+                    if (block_id + 1) * (block_size as u64) > size {
+                        let block_size = (size - (block_id * block_size as u64)) as usize;
+                        block_shape[0] = block_size / block_shape.iter().skip(1).product::<usize>();
+                    }
+
+                    block_ctr(context, queue, block_shape).map(|buffer| (block_id, buffer))
                 }
             })
             .buffered(num_cpus::get());
@@ -345,9 +346,10 @@ where
         mean: f32,
         std: f32,
     ) -> TCResult<Self> {
-        Self::construct_with_op(dir, shape, |context, queue, block_size| {
+        Self::construct_with_op(dir, shape, |context, queue, block_shape| {
+            let block_size = block_shape.iter().product();
             let op = ha_ndarray::construct::RandomNormal::with_context(context, block_size)?;
-            let random = ArrayOp::new(vec![block_size], op)
+            let random = ArrayOp::new(block_shape, op)
                 .mul_scalar(std)?
                 .add_scalar(mean)?;
 
@@ -360,8 +362,8 @@ where
     }
 
     pub async fn random_uniform(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
-        Self::construct_with_op(dir, shape, |context, queue, block_size| {
-            let op = ha_ndarray::construct::RandomUniform::with_context(context, block_size)?;
+        Self::construct_with_op(dir, shape, |context, queue, block_shape| {
+            let op = ha_ndarray::construct::RandomUniform::with_context(context, block_shape)?;
 
             ha_ndarray::ops::Op::enqueue(&op, &queue)
                 .map(|buffer| buffer)
