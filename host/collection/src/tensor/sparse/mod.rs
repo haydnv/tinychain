@@ -230,19 +230,8 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
     where
         Self: Sized,
     {
-        if axes.is_empty() {
-            return Err(bad_request!("cannot transpose an empty set of axes"));
-        }
-
         let ndim = self.ndim();
-
-        let elided = (0..ndim).filter(|x| !axes.contains(x));
-
-        let mut order = Vec::with_capacity(ndim);
-        order.extend(axes.iter().copied());
-        order.extend(elided);
-
-        self.elements(txn_id, range, order)
+        self.elements(txn_id, range, axes.to_vec())
             .map_ok(|elements| stream::FilledAt::new(elements, axes, ndim))
             .await
     }
