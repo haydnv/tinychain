@@ -202,7 +202,7 @@ where
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
                 let tensors: Vec<Tensor<_, _>> = params.require(&TENSORS.into())?;
-                let axis: Value = params.or_default(&AXES.into())?;
+                let axis: Value = params.or_default(&label("axis").into())?;
                 params.expect_empty()?;
 
                 if tensors.is_empty() {
