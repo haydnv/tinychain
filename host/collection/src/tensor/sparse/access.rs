@@ -23,8 +23,8 @@ use crate::tensor::block::Block;
 use crate::tensor::dense::{DenseAccess, DenseCacheFile, DenseInstance, DenseSlice};
 use crate::tensor::transform::{Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
-    autoqueue, strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore, Shape,
-    TensorInstance, TensorPermitRead, TensorPermitWrite,
+    autoqueue, strides_for, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
+    TensorPermitRead, TensorPermitWrite,
 };
 
 use super::base::SparseBase;
@@ -608,7 +608,7 @@ where
         }
 
         self.shape.validate_range(&range)?;
-        debug_assert!(validate_order(&order, ndim));
+        self.shape.validate_axes(&order)?;
 
         let (outer_range, inner_range) = self.invert_range(range.clone());
         let outer_range = outer_range.normalize(&self.shape()[..(self.ndim() - self.inner.ndim())]);
@@ -769,7 +769,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
         mut order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         self.shape.validate_range(&range)?;
-        debug_assert!(validate_order(&order, self.ndim()));
+        self.shape.validate_axes(&order)?;
 
         let axis = self.axis;
         let ndim = self.shape.len();
@@ -2263,7 +2263,7 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         self.shape().validate_range(&range)?;
-        debug_assert!(validate_order(&order, self.ndim()));
+        self.shape().validate_axes(&order)?;
 
         let mut source_range = range;
         for x in self.transform.expand_axes().iter().rev().copied() {
@@ -2272,10 +2272,7 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
             }
         }
 
-        let mut source_order = order;
-        for x in self.transform.expand_axes().iter().rev().copied() {
-            source_order.remove(x);
-        }
+        let source_order = self.transform.invert_axes(order);
 
         let ndim = self.ndim();
         let axes = self.transform.expand_axes().to_vec();
@@ -2564,7 +2561,7 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         self.shape().validate_range(&range)?;
-        debug_assert!(validate_order(&order, self.ndim()));
+        self.shape().validate_axes(&order)?;
 
         let source_range = if range.is_empty() {
             Ok(range)
@@ -2697,7 +2694,7 @@ where
     }
 
     fn source_order(&self, order: Axes) -> Result<Axes, TCError> {
-        debug_assert!(validate_order(&order, self.ndim()));
+        self.shape().validate_axes(&order)?;
 
         let mut source_axes = Vec::with_capacity(self.ndim());
         for (x, bound) in self.transform.range().iter().enumerate() {
@@ -2966,7 +2963,7 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         self.shape().validate_range(&range)?;
-        debug_assert!(validate_order(&order, self.ndim()));
+        self.shape().validate_axes(&order)?;
 
         let range = range.normalize(self.shape());
         debug_assert_eq!(range.len(), self.ndim());

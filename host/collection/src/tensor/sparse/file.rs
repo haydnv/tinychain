@@ -16,7 +16,7 @@ use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberCollator, NumberType};
 use tcgeneric::{ThreadSafe, Tuple};
 
-use crate::tensor::{validate_order, Axes, Coord, Range, Shape, TensorInstance};
+use crate::tensor::{Axes, Coord, Range, Shape, TensorInstance};
 
 use super::access::SparseAccess;
 use super::schema::{IndexSchema, Schema};
@@ -145,7 +145,7 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         self.shape().validate_range(&range)?;
-        debug_assert!(validate_order(&order, self.ndim()));
+        self.shape().validate_axes(&order)?;
 
         let range = table_range(&range)?;
         let table = self.table.read().await;

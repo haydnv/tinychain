@@ -128,10 +128,17 @@ pub struct Expand {
 
 impl Expand {
     pub fn new(source_shape: Shape, mut expand: Axes) -> TCResult<Expand> {
-        source_shape.validate_axes(&expand)?;
-        expand.sort();
+        if expand.iter().max() > Some(&source_shape.len()) {
+            return Err(bad_request!(
+                "cannot expand axes {expand:?} of {source_shape:?}"
+            ));
+        }
 
-        let mut shape = source_shape.to_vec();
+        expand.sort();
+        expand.dedup();
+
+        let mut shape = Vec::with_capacity(source_shape.len() + expand.len());
+        shape.extend(source_shape.into_vec());
         for x in expand.iter().rev().copied() {
             shape.insert(x, 1);
         }
@@ -151,28 +158,36 @@ impl Expand {
         &self.shape
     }
 
+    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
+        axes.into_iter()
+            .filter_map(|x| {
+                if self.expand.contains(&x) {
+                    None
+                } else {
+                    Some(x - self.expand.iter().filter(|e| **e < x).count())
+                }
+            })
+            .collect()
+    }
+
     pub fn invert_range(&self, mut range: Range) -> Range {
-        assert_eq!(range.len(), self.shape.len());
+        for x in self.expand.iter().take(range.len()).rev().copied() {
+            let removed = range.remove(x);
+            if !removed.is_index() {
+                if x == range.len() {
+                    let bound = match range.pop().unwrap() {
+                        AxisRange::At(i) => AxisRange::In(i..i + 1, 1),
+                        other => other,
+                    };
 
-        for x in self.expand.iter().rev().copied() {
-            if x < range.len() {
-                let removed = range.remove(x);
-                if !removed.is_index() {
-                    if x == range.len() {
-                        let bound = match range.pop().unwrap() {
-                            AxisRange::At(i) => AxisRange::In(i..i + 1, 1),
-                            other => other,
-                        };
+                    range.push(bound);
+                } else {
+                    let bound = match range.remove(x) {
+                        AxisRange::At(i) => AxisRange::In(i..i + 1, 1),
+                        other => other,
+                    };
 
-                        range.push(bound);
-                    } else {
-                        let bound = match range.remove(x) {
-                            AxisRange::At(i) => AxisRange::In(i..i + 1, 1),
-                            other => other,
-                        };
-
-                        range.insert(x, bound);
-                    }
+                    range.insert(x, bound);
                 }
             }
         }

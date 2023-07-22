@@ -64,55 +64,30 @@ impl AxisRange {
             false
         }
     }
+
+    #[inline]
+    fn to_range(&self) -> std::ops::Range<u64> {
+        let start = match self {
+            Self::At(i) => *i,
+            Self::In(range, _step) => range.start,
+            Self::Of(indices) => *indices.iter().min().expect("min"),
+        };
+
+        let end = match self {
+            Self::At(i) => i + 1,
+            Self::In(range, _step) => range.end,
+            Self::Of(indices) => *indices.iter().max().expect("max"),
+        };
+
+        start..end
+    }
 }
 
 impl OverlapsRange<AxisRange, Collator<u64>> for AxisRange {
     fn overlaps(&self, other: &AxisRange, collator: &Collator<u64>) -> Overlap {
-        #[inline]
-        fn invert(overlap: Overlap) -> Overlap {
-            match overlap {
-                Overlap::Less => Overlap::Greater,
-                Overlap::Greater => Overlap::Less,
-
-                Overlap::WideLess => Overlap::Narrow,
-                Overlap::Wide => Overlap::Narrow,
-                Overlap::WideGreater => Overlap::Narrow,
-
-                Overlap::Equal => Overlap::Equal,
-
-                overlap => unreachable!("range overlaps index: {:?}", overlap),
-            }
-        }
-
-        if self == other {
-            return Overlap::Equal;
-        }
-
-        match self {
-            Self::At(this) => match other {
-                Self::At(that) => this.cmp(that).into(),
-                Self::In(that, _step) => invert(that.overlaps_value(this, collator)),
-                Self::Of(that) if that.is_empty() => Overlap::Wide,
-                Self::Of(that) => invert(to_range(that).overlaps_value(this, collator)),
-            },
-            Self::In(this, _step) => match other {
-                Self::At(that) => this.overlaps_value(that, collator),
-                Self::In(that, _step) => this.overlaps(that, collator),
-                Self::Of(that) if that.is_empty() => Overlap::Wide,
-                Self::Of(that) => this.overlaps(&to_range(that), collator),
-            },
-            Self::Of(this) if this.is_empty() => Overlap::Narrow,
-            Self::Of(this) => {
-                let this = to_range(this);
-
-                match other {
-                    Self::At(that) => this.overlaps_value(that, collator),
-                    Self::In(that, _step) => this.overlaps(that, collator),
-                    Self::Of(that) if that.is_empty() => Overlap::Wide,
-                    Self::Of(that) => this.overlaps(&to_range(that), collator),
-                }
-            }
-        }
+        let this = self.to_range();
+        let that = other.to_range();
+        this.overlaps(&that, collator)
     }
 }
 
@@ -532,7 +507,7 @@ impl Shape {
     /// Return an [`Error`] if any of the given axes is out of range.
     pub fn validate_axes(&self, axes: &[usize]) -> Result<(), TCError> {
         match axes.iter().max() {
-            Some(max) if *max > self.len() => {
+            Some(max) if *max >= self.len() => {
                 Err(bad_request!("shape {:?} has no axis {}", self, max))
             }
             _ => Ok(()),

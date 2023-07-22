@@ -2097,12 +2097,3 @@ fn strides_for(shape: &[u64], ndim: usize) -> Strides {
 
     zeros.chain(strides).collect()
 }
-
-#[inline]
-fn validate_order(order: &[usize], ndim: usize) -> bool {
-    if order.is_empty() {
-        true
-    } else {
-        order.iter().all(|x| x < &ndim)
-    }
-}
