@@ -814,7 +814,32 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
             ))
         }?;
 
-        if self.axis == self.ndim() - 1 {
+        if self.axis == 0 {
+            let dim = self.shape()[self.axis];
+            let source = self.source;
+            let elements = futures::stream::iter(0..dim)
+                .map(move |outer_i| {
+                    let source = source.clone();
+                    let source_range = source_range.clone();
+                    let source_order = source_order.to_vec();
+
+                    async move {
+                        let source_elements =
+                            source.elements(txn_id, source_range, source_order).await?;
+
+                        let elements = source_elements.map_ok(|(mut inner_coord, value)| {
+                            inner_coord[0] = outer_i;
+                            (inner_coord, value)
+                        });
+
+                        TCResult::Ok(elements)
+                    }
+                })
+                .buffered(num_cpus::get())
+                .try_flatten();
+
+            Ok(Box::pin(elements))
+        } else if self.axis == self.ndim() - 1 {
             let source_elements = self
                 .source
                 .elements(txn_id, source_range, source_order)
