@@ -536,11 +536,11 @@ impl Shape {
         if self.contains_coord(coord) {
             Ok(())
         } else {
-            Err(bad_request!(
-                "shape {:?} does not contain {:?}",
-                self,
-                coord
-            ))
+            #[cfg(debug_assertions)]
+            panic!("{self:?} does not contain {coord:?}");
+
+            #[cfg(not(debug_assertions))]
+            Err(bad_request!("{self:?} does not contain {coord:?}"))
         }
     }
 }

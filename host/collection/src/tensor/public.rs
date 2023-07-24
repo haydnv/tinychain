@@ -341,7 +341,7 @@ where
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, mut params| {
+        Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
                 let schema: Value = params.require(&label("schema").into())?;
                 let schema: Schema =

@@ -834,11 +834,14 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
 
             Ok(Box::pin(elements))
         } else {
+            let source = self.source;
+            let order = Axes::default();
             let axes = (0..axis).into_iter().collect();
             let inner_range = source_range.iter().skip(axis).cloned().collect::<Vec<_>>();
-
-            let source = self.source;
-            let filled = source.clone().filled_at(txn_id, source_range, axes).await?;
+            let filled = source
+                .clone()
+                .filled_at(txn_id, source_range, order, axes)
+                .await?;
 
             let elements = filled
                 .map(move |result| {
@@ -2182,7 +2185,7 @@ where
                 .into_par_iter()
                 .chunks(ndim)
                 .zip(values.as_ref().into_par_iter().copied())
-                .filter(|(coord, value)| value != &zero)
+                .filter(|(_coord, value)| value != &zero)
                 .map(|(coord, value)| (coord, value))
                 .unzip::<_, _, Vec<Vec<u64>>, Vec<Self::DType>>();
 
@@ -2488,12 +2491,16 @@ where
         self.transform.shape().validate_axes(&order)?;
 
         let source_range = self.transform.invert_range(range);
-        let source_axes = self.transform.invert_axes(order);
+        let source_order = self.transform.invert_axes(order);
+        let source_axes = (0..self.source.ndim())
+            .into_iter()
+            .filter(|x| !self.transform.axes().contains(x))
+            .collect();
 
         let filled_at = self
             .source
             .clone()
-            .filled_at(txn_id, source_range, source_axes)
+            .filled_at(txn_id, source_range, source_order, source_axes)
             .await?;
 
         let zero = T::zero();
@@ -2950,8 +2957,10 @@ pub struct SparseTranspose<S> {
     transform: Transpose,
 }
 
-impl<S: SparseInstance> SparseTranspose<S> {
+impl<S: SparseInstance + fmt::Debug> SparseTranspose<S> {
     pub fn new(source: S, permutation: Option<Axes>) -> TCResult<Self> {
+        log::debug!("SparseTranspose::new({source:?}, {permutation:?})");
+
         Transpose::new(source.shape().clone(), permutation)
             .map(|transform| Self { source, transform })
     }
@@ -2985,7 +2994,7 @@ where
         self,
         txn_id: TxnId,
         range: Range,
-        order: Axes,
+        mut order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         self.shape().validate_range(&range)?;
         self.shape().validate_axes(&order)?;
@@ -2993,12 +3002,15 @@ where
         let range = range.normalize(self.shape());
         debug_assert_eq!(range.len(), self.ndim());
 
-        let source_order = order
-            .into_iter()
-            .map(|x| self.transform.axes()[x])
-            .collect();
+        order.reserve(self.ndim());
+        for x in 0..self.ndim() {
+            if !order.contains(&x) {
+                order.push(x);
+            }
+        }
 
         let source_range = self.transform.invert_range(&range);
+        let source_order = self.transform.invert_axes(order);
 
         let source_blocks = self
             .source

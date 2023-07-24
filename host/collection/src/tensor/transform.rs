@@ -246,6 +246,10 @@ impl Reduce {
         })
     }
 
+    pub fn axes(&self) -> &[usize] {
+        &self.axes
+    }
+
     pub fn keepdims(&self) -> bool {
         self.shape.len() == self.source_shape.len()
     }
@@ -606,6 +610,10 @@ impl Transpose {
 
     pub fn shape(&self) -> &Shape {
         &self.shape
+    }
+
+    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
+        axes.into_iter().map(|x| self.permutation[x]).collect()
     }
 
     pub fn invert_range(&self, range: &Range) -> Range {

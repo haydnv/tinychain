@@ -418,6 +418,7 @@ pub struct FilledAt<S> {
 
 impl<S> FilledAt<S> {
     pub fn new(source: S, axes: Vec<usize>, ndim: usize) -> Self {
+        debug_assert!(!axes.is_empty());
         debug_assert!(!axes.iter().copied().any(|x| x >= ndim));
 
         Self {

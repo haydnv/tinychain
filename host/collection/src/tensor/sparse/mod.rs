@@ -55,10 +55,11 @@ mod reduce {
         Box::pin(async move {
             let _permit = accessor.read_permit(txn_id, Range::default()).await?;
 
-            let range = Range::all(accessor.shape());
             let axes = (0..accessor.ndim()).into_iter().collect();
-            let mut filled_at = accessor.filled_at(txn_id, Range::default(), axes).await?;
-            let mut affected = range.affected();
+            let mut affected = Range::all(accessor.shape()).affected();
+            let mut filled_at = accessor
+                .filled_at(txn_id, Range::default(), Axes::default(), axes)
+                .await?;
 
             while let Some(actual) = filled_at.try_next().await? {
                 if affected.next() != Some(actual) {
@@ -78,7 +79,9 @@ mod reduce {
             let _permit = accessor.read_permit(txn_id, Range::default()).await?;
 
             let axes = (0..accessor.ndim()).into_iter().collect();
-            let mut filled_at = accessor.filled_at(txn_id, Range::default(), axes).await?;
+            let mut filled_at = accessor
+                .filled_at(txn_id, Range::default(), Axes::default(), axes)
+                .await?;
 
             filled_at.try_next().map_ok(|r| r.is_some()).await
         })
@@ -225,13 +228,33 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
         self,
         txn_id: TxnId,
         range: Range,
+        mut order: Axes,
         axes: Axes,
     ) -> Result<stream::FilledAt<Elements<Self::DType>>, TCError>
     where
         Self: Sized,
     {
+        log::debug!("{:?} filled at {:?}...", self, axes);
+
+        if axes.is_empty() {
+            #[cfg(debug_assertions)]
+            panic!("cannot group an empty set of axes");
+
+            #[cfg(not(debug_assertions))]
+            return Err(bad_request!("cannot group an empty set of axes"));
+        }
+
+        order.extend(axes.iter().skip(order.len()).copied());
+        debug_assert!(!order.is_empty());
+
+        if !order.starts_with(&axes) {
+            return Err(bad_request!(
+                "cannot group axes {axes:?} by order {order:?}"
+            ));
+        }
+
         let ndim = self.ndim();
-        self.elements(txn_id, range, axes.to_vec())
+        self.elements(txn_id, range, order)
             .map_ok(|elements| stream::FilledAt::new(elements, axes, ndim))
             .await
     }
