@@ -827,7 +827,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
                         let source_elements =
                             source.elements(txn_id, source_range, source_order).await?;
 
-                        let elements = source_elements.map_ok(|(mut inner_coord, value)| {
+                        let elements = source_elements.map_ok(move |(mut inner_coord, value)| {
                             inner_coord[0] = outer_i;
                             (inner_coord, value)
                         });
@@ -872,7 +872,6 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
                 .map(move |result| {
                     let outer_coord = result?;
                     debug_assert_eq!(outer_coord.len(), axis);
-                    debug_assert_eq!(outer_coord.last(), Some(&0));
 
                     let inner_range = inner_range.to_vec();
                     let inner_order = inner_order.to_vec();
@@ -883,11 +882,13 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
                         .map(|i| AxisRange::At(i))
                         .collect();
 
+                    log::trace!("broadcast slice at {prefix:?} x{dim}");
+
                     let slice = SparseSlice::new(source.clone(), prefix)?;
 
                     let elements = futures::stream::iter(0..dim)
-                        .then(move |i| {
-                            let outer_coord = outer_coord[..axis - 1].to_vec();
+                        .map(move |i| {
+                            let outer_coord = outer_coord.to_vec();
                             let inner_range = inner_range.to_vec().into();
                             let inner_order = inner_order.to_vec();
                             let slice = slice.clone();
@@ -898,10 +899,13 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
 
                                 let elements =
                                     inner_elements.map_ok(move |(inner_coord, value)| {
+                                        log::trace!("outer coord is {outer_coord:?}, i is {i}, inner coord is {inner_coord:?}");
+
                                         let mut coord = Coord::with_capacity(ndim);
-                                        coord.copy_from_slice(&outer_coord);
-                                        coord.push(i);
+                                        coord.extend(outer_coord.iter().copied());
                                         coord.extend(inner_coord);
+
+                                        coord[axis] = i;
 
                                         (coord, value)
                                     });
@@ -909,6 +913,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
                                 Result::<_, TCError>::Ok(elements)
                             }
                         })
+                        .buffered(num_cpus::get())
                         .try_flatten();
 
                     Result::<_, TCError>::Ok(elements)
@@ -1137,6 +1142,8 @@ where
         value_op: fn(T, T) -> T,
     ) -> TCResult<Self> {
         if left.shape() == right.shape() {
+            log::debug!("SparseCombineLeft::new({left:?}, {right:?})");
+
             Ok(Self {
                 left,
                 right,
@@ -1145,9 +1152,7 @@ where
             })
         } else {
             Err(bad_request!(
-                "cannot combine {:?} and {:?} (wrong shape)",
-                left,
-                right
+                "cannot combine {left:?} and {right:?} (wrong shape)"
             ))
         }
     }
@@ -1174,7 +1179,7 @@ impl<L, R, T> SparseInstance for SparseCombineLeft<L, R, T>
 where
     L: SparseInstance<DType = T>,
     R: SparseInstance<DType = T>,
-    T: CDatatype + DType + PartialEq,
+    T: CDatatype + DType + PartialEq + fmt::Debug,
 {
     type CoordBlock = Array<u64>;
     type ValueBlock = Array<T>;
@@ -1197,6 +1202,7 @@ where
         let blocks = source_blocks
             .map(move |result| {
                 result.and_then(|(coords, (left, right))| {
+                    log::trace!("combine {left:?} and {right:?}");
                     (block_op)(left.into(), right.into()).map(|values| (coords, values))
                 })
             })
@@ -2319,16 +2325,16 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
         self.shape().validate_axes(&order)?;
 
         let mut source_range = range;
-        for x in self.transform.expand_axes().iter().rev().copied() {
+        for x in self.transform.expand_axes().iter().copied().rev() {
             if x < source_range.len() {
                 source_range.remove(x);
             }
         }
 
-        let source_order = self.transform.invert_axes(order);
-
         let ndim = self.ndim();
-        let axes = self.transform.expand_axes().to_vec();
+        let transform = self.transform;
+        let source_order = transform.invert_axes(order);
+
         debug_assert_eq!(self.source.ndim() + 1, ndim);
 
         let source_elements = self
@@ -2337,13 +2343,7 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
             .await?;
 
         let elements = source_elements.map_ok(move |(source_coord, value)| {
-            let mut coord = Coord::with_capacity(ndim);
-            coord.extend(source_coord);
-            for x in axes.iter().rev().copied() {
-                coord.insert(x, 0);
-            }
-
-            debug_assert_eq!(coord.len(), ndim);
+            let coord = transform.map_coord(source_coord);
             (coord, value)
         });
 
@@ -3882,7 +3882,7 @@ async fn merge_blocks_inner<L, R, T>(
 where
     L: SparseInstance<DType = T>,
     R: SparseInstance<DType = T>,
-    T: CDatatype,
+    T: CDatatype + fmt::Debug,
 {
     debug_assert_eq!(&shape, left.shape());
     debug_assert_eq!(&shape, right.shape());

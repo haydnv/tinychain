@@ -498,6 +498,7 @@ impl<L, R, T> Stream for InnerJoin<L, R, T>
 where
     L: Stream<Item = TCResult<(u64, T)>>,
     R: Stream<Item = TCResult<(u64, T)>>,
+    T: fmt::Debug,
 {
     type Item = TCResult<(u64, (T, T))>;
 
@@ -539,6 +540,8 @@ where
             if this.pending_left.is_some() && this.pending_right.is_some() {
                 let l_offset = this.pending_left.as_ref().unwrap().0;
                 let r_offset = this.pending_right.as_ref().unwrap().0;
+
+                log::trace!("inner join {:?} and {:?}?", l_offset, r_offset);
 
                 match l_offset.cmp(&r_offset) {
                     Ordering::Equal => {

@@ -205,6 +205,17 @@ impl Expand {
 
         coord
     }
+
+    pub fn map_coord(&self, mut coord: Coord) -> Coord {
+        debug_assert_eq!(coord.len(), self.shape.len() - self.expand.len());
+        coord.reserve(self.shape.len());
+
+        for x in self.expand.iter().rev().copied() {
+            coord.insert(x, 0);
+        }
+
+        coord
+    }
 }
 
 #[derive(Clone)]
