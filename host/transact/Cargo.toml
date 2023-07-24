@@ -16,7 +16,7 @@ async-hash = "0.5"
 async-trait = "0.1"
 destream = "0.7"
 futures = "0.3"
-freqfs = { path = "../../../freqfs", features = ["all"] }
+freqfs = { version = "~0.8.1", features = ["all"] }
 get-size = "0.1"
 get-size-derive = "0.1"
 num_cpus = "1.15"
