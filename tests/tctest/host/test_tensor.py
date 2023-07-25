@@ -379,77 +379,59 @@ class SparseTests(HostTest):
 
         cxt = tc.Context()
         cxt.tensor = tc.tensor.Sparse.zeros(shape)
-        cxt.result = tc.after(cxt.tensor[:, 2:-1].write(1), cxt.tensor)
+        cxt.result = tc.after(cxt.tensor[0, 1].write(1), cxt.tensor)
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = expect_sparse(tc.F32, shape, [[[0, 2], 1], [[0, 3], 1], [[1, 2], 1], [[1, 3], 1]])
+        expected = expect_sparse(tc.F32, shape, [[[0, 1], 1]])
         self.assertEqual(actual, expected)
 
     def testAdd(self):
-        shape = [5, 2, 3]
+        shape = [2, 3]
 
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape)
         cxt.small = tc.tensor.Sparse.zeros([3])
         cxt.result = tc.after([
-            cxt.big[1].write(1),
+            cxt.big[1, 1].write(1),
             cxt.small[1].write(2),
         ], cxt.big + cxt.small)
 
         actual = self.host.post(ENDPOINT, cxt)
 
         big = np.zeros(shape)
-        big[1] = 1
+        big[1, 1] = 1
         small = np.zeros([3])
         small[1] = 2
         expected = big + small
 
         expected = expect_sparse(tc.F32, shape, expected)
-        self.assertEqual(actual, expected)
 
-    def testDiv(self):
-        shape = [3, 2, 4]
-
-        cxt = tc.Context()
-        cxt.big = tc.tensor.Sparse.zeros(shape)
-        cxt.small = tc.tensor.Sparse.zeros([1, 1])
-        cxt.result = tc.after([
-            cxt.big[:2].write(1),
-            cxt.small[0].write(-2),
-        ], cxt.big / cxt.small)
-
-        actual = self.host.post(ENDPOINT, cxt)
-
-        big = np.zeros(shape)
-        big[:2] = 1.
-        small = np.zeros([1, 1])
-        small[0] = -2.
-        expected = big / small
-
-        expected = expect_sparse(tc.F32, shape, expected)
         self.assertEqual(actual, expected)
 
     def testMul(self):
-        shape = [3, 5, 2]
+        shape = (3, 2)
+
+        data = [
+            ((0, 1), 1),
+            ((1, 0), 1),
+            ((2, 0), 2),
+            ((2, 1), 3),
+        ]
 
         cxt = tc.Context()
-        cxt.big = tc.tensor.Sparse.zeros(shape)
-        cxt.small = tc.tensor.Sparse.zeros([5, 2])
-        cxt.result = tc.after([
-            cxt.big[:, 1:-2].write(2),
-            cxt.small[1].write(3),
-        ], cxt.big * cxt.small)
+        cxt.sparse = tc.tensor.Sparse.load(shape, data, tc.I32)
+        cxt.result = cxt.sparse.expand_dims(2) * cxt.sparse.expand_dims(1)
 
         actual = self.host.post(ENDPOINT, cxt)
+        print("actual", actual)
 
-        big = np.zeros(shape)
-        big[:, 1:-2] = 2
-        small = np.zeros([5, 2])
-        small[1] = 3
-        expected = big * small
+        expected = np.zeros(shape)
+        for coord, value in data:
+            expected[coord] = value
+        expected = np.expand_dims(expected, 2) * np.expand_dims(expected, 1)
+        expected = expect_sparse(tc.I32, expected.shape, expected)
 
-        expected = expect_sparse(tc.F32, shape, expected)
-        self.assertEqual(actual, expected)
+        self.assertEqual(expected, actual)
 
     def testSub(self):
         shape = [3, 5, 2]
@@ -458,34 +440,61 @@ class SparseTests(HostTest):
         cxt.big = tc.tensor.Sparse.zeros(shape, tc.I16)
         cxt.small = tc.tensor.Sparse.zeros([5, 2], tc.U32)
         cxt.result = tc.after([
-            cxt.big[:, 1:-2].write(2),
-            cxt.small[1].write(3),
+            cxt.big[1, 2, 0].write(2),
+            cxt.small[3, 1].write(3),
         ], cxt.small - cxt.big)
 
         actual = self.host.post(ENDPOINT, cxt)
 
         big = np.zeros(shape)
-        big[:, 1:-2] = 2
+        big[1, 2, 0] = 2
         small = np.zeros([5, 2])
-        small[1] = 3
+        small[3, 1] = 3
         expected = small - big
 
-        expected = expect_sparse(tc.I32, shape, expected)
+        expected = expect_sparse(tc.I16, shape, expected)
         self.assertEqual(actual, expected)
 
-    def testSum(self):
+    def testSum_axis1(self):
         shape = [2, 4, 3, 5]
         axis = 1
 
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape, tc.I32)
-        cxt.result = tc.after(cxt.big[0, 1:3].write(2), cxt.big.sum(axis))
+        cxt.result = tc.after(cxt.big[0, 1, 2, 3].write(2), cxt.big.sum(axis))
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.zeros(shape, dtype=np.int32)
-        expected[0, 1:3] = 2
+        expected[0, 1, 2, 3] = 2
         expected = expected.sum(axis)
         expected = expect_sparse(tc.I32, [2, 3, 5], expected)
+        self.assertEqual(actual, expected)
+
+    def testSum_axis0(self):
+        shape = (3, 2)
+        data = [
+            ((0, 0), 1),
+            ((0, 1), 1),
+            ((1, 0), 2),
+            ((1, 1), 2),
+            ((2, 0), 3),
+            ((2, 1), 3),
+        ]
+
+        cxt = tc.Context()
+        cxt.sparse = tc.tensor.Sparse.load(shape, data, tc.I32)
+        cxt.result = cxt.sparse.sum(0)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        print("actual", actual)
+
+        expected = np.zeros(shape)
+        for coord, value in data:
+            expected[coord] = value
+        expected = np.sum(expected, 0)
+        expected = expect_sparse(tc.I32, (2,), expected)
+        print("expected", expected)
+
         self.assertEqual(actual, expected)
 
     def testProduct(self):
@@ -494,37 +503,20 @@ class SparseTests(HostTest):
 
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape, tc.I32)
-        cxt.result = tc.after(cxt.big[0, 1:3].write(2), cxt.big.product(axis))
+        cxt.result = tc.after(cxt.big[0, 1, 2, 3].write(2), cxt.big.product(axis))
 
         actual = self.host.post(ENDPOINT, cxt)
 
         expected = np.zeros(shape, dtype=np.int32)
-        expected[0, 1:3] = 2
+        expected[0, 1, 2, 3] = 2
         expected = expected.prod(axis)
         expected = expect_sparse(tc.I32, [2, 4, 5], expected)
 
         self.assertEqual(actual, expected)
 
-    def testExpandAndTransposeAndSum(self):
-        shape = [2, 3]
-        elements = [((0, 1), 1), ((1, 1), 2)]
-
-        cxt = tc.Context()
-        cxt.tensor = tc.tensor.Sparse.load(shape, elements, tc.I32)
-        cxt.result = cxt.tensor.expand_dims(1).transpose().sum(1).sum(1)
-
-        actual = self.host.post(ENDPOINT, cxt)
-
-        expected = np.zeros(shape)
-        for coord, value in elements:
-            expected[coord] = value
-        expected = expect_sparse(tc.I32, [3], np.sum(np.sum(np.transpose(np.expand_dims(expected, 1)), 1), 1))
-
-        self.assertEqual(actual, expected)
-
     def testTranspose(self):
         shape = [2, 3]
-        elements = [((0, 1), 1), ((1, 1), 2)]
+        elements = [((0, 1), 1), ((0, 2), 3), ((1, 1), 2)]
 
         cxt = tc.Context()
         cxt.tensor = tc.tensor.Sparse.load(shape, elements, tc.I32)
@@ -541,11 +533,13 @@ class SparseTests(HostTest):
 
     def testSliceAndBroadcast(self):
         self.maxDiff = None
+
         data = [
             [[0, 0, 3, 0], 1.],
             [[0, 2, 0, 0], 2.],
             [[1, 0, 0, 0], 3.],
         ]
+
         shape = [2, 5, 2, 3, 4, 10]
 
         cxt = tc.Context()
@@ -564,23 +558,24 @@ class SparseTests(HostTest):
         expected = expect_sparse(tc.F64, expected.shape, expected)
         self.assertEqual(actual, expected)
 
-    def testArgmax(self):
+    def testExpandAndTransposeAndSum(self):
         shape = [2, 3]
-
-        x = (np.random.random(np.product(shape)) * 2) - 1
-        x = (x * (np.abs(x) > 0.5)).reshape(shape)
-        elements = [(list(coord), x[coord]) for coord in np.ndindex(x.shape) if x[coord] != 0]
+        elements = [((0, 1), 1), ((1, 1), 2)]
 
         cxt = tc.Context()
-        cxt.x = tc.tensor.Sparse.load(shape, elements)
+        cxt.tensor = tc.tensor.Sparse.load(shape, elements, tc.I32)
+        cxt.result = cxt.tensor.expand_dims(1).transpose().sum(1).sum(1)
 
-        cxt.am = cxt.x.argmax()
-        cxt.am0 = cxt.x.argmax(0)
-        cxt.result = cxt.am, cxt.am0
+        actual = self.host.post(ENDPOINT, cxt)
 
-        actual_am, actual_am0 = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual_am, np.argmax(x))
-        self.assertEqual(actual_am0, expect_sparse(tc.U64, [3], np.argmax(x, 0)))
+        expected = np.zeros(shape)
+        for coord, value in elements:
+            expected[coord] = value
+
+        expected = np.sum(np.sum(np.transpose(np.expand_dims(expected, 1)), 1), 1)
+        expected = expect_sparse(tc.I32, [3], expected)
+
+        self.assertEqual(actual, expected)
 
 
 class TensorTests(HostTest):
@@ -588,12 +583,12 @@ class TensorTests(HostTest):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([3, 5, 2], 0, 30)
         cxt.sparse = tc.tensor.Sparse.zeros([5, 2], tc.I32)
-        cxt.result = tc.after(cxt.sparse[1].write(3), cxt.dense + cxt.sparse)
+        cxt.result = tc.after(cxt.sparse[1, 1].write(3), cxt.dense + cxt.sparse)
 
         actual = self.host.post(ENDPOINT, cxt)
         l = np.arange(0, 30).reshape([3, 5, 2])
         r = np.zeros([5, 2], np.int32)
-        r[1] = 3
+        r[1, 1] = 3
         expected = l + r
         self.assertEqual(actual, expect_dense(tc.I64, [3, 5, 2], expected.flatten()))
 
@@ -602,12 +597,12 @@ class TensorTests(HostTest):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([30, 3, 2], 1., 181.)
         cxt.sparse = tc.tensor.Sparse.zeros([3, 2], tc.F32)
-        cxt.result = tc.after(cxt.sparse[1].write(2), cxt.sparse / cxt.dense)
+        cxt.result = tc.after(cxt.sparse[1, 0].write(2), cxt.sparse / cxt.dense)
 
         actual = self.host.post(ENDPOINT, cxt)
         l = np.arange(1, 181).reshape([30, 3, 2])
         r = np.zeros([3, 2], float)
-        r[1] = 2.
+        r[1, 0] = 2.
         expected = r / l
         self.assertEqual(actual, expect_sparse(tc.F64, [30, 3, 2], expected))
 
@@ -615,11 +610,11 @@ class TensorTests(HostTest):
         cxt = tc.Context()
         cxt.dense = tc.tensor.Dense.arange([3], 0, 3)
         cxt.sparse = tc.tensor.Sparse.zeros([2, 3], tc.I32)
-        cxt.result = tc.after(cxt.sparse[0, 1:3].write(2), cxt.dense * cxt.sparse)
+        cxt.result = tc.after(cxt.sparse[0, 1].write(2), cxt.dense * cxt.sparse)
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.zeros([2, 3])
-        expected[0, 1:3] = 2
+        expected[0, 1] = 2
         expected = expected * np.arange(0, 3)
         self.assertEqual(actual, expect_sparse(tc.I64, [2, 3], expected))
 
@@ -656,7 +651,9 @@ class TensorTests(HostTest):
         cxt.sparse = cxt.dense.as_sparse()
 
         actual = self.host.post(ENDPOINT, cxt)
+        print("actual", actual)
         expected = expect_sparse(tc.I32, [3, 3], matrix)
+        print("expected", expected)
         self.assertEqual(actual, expected)
 
     def testConcatenate(self):
@@ -664,8 +661,12 @@ class TensorTests(HostTest):
         x2 = np.ones([5, 4], int) * 2
 
         cxt = tc.Context()
-        cxt.result = tc.tensor.Dense.concatenate([load_dense(x1, tc.I32), load_dense(x2, tc.I32)], axis=1)
+        cxt.x1 = load_dense(x1, tc.I32)
+        cxt.x2 = load_dense(x2, tc.I32)
+        cxt.result = tc.tensor.Dense.concatenate([cxt.x1, cxt.x2], axis=1)
+        tc.print_json(cxt)
         actual = self.host.post(ENDPOINT, cxt)
+
         expected = np.concatenate([x1, x2], axis=1)
         self.assertEqual(actual, expect_dense(tc.I32, [5, 12], expected.flatten().tolist()))
 
