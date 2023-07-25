@@ -171,24 +171,29 @@ impl Expand {
     }
 
     pub fn invert_range(&self, mut range: Range) -> Range {
-        for x in self.expand.iter().take(range.len()).rev().copied() {
-            let removed = range.remove(x);
-            if !removed.is_index() {
-                if x == range.len() {
-                    let bound = match range.pop().unwrap() {
-                        AxisRange::At(i) => AxisRange::In(i..i + 1, 1),
-                        other => other,
-                    };
+        for x in self.expand.iter().copied().rev() {
+            let removed = if x < range.len() {
+                range.remove(x)
+            } else {
+                continue;
+            };
 
-                    range.push(bound);
-                } else {
-                    let bound = match range.remove(x) {
-                        AxisRange::At(i) => AxisRange::In(i..i + 1, 1),
-                        other => other,
-                    };
+            if removed.is_index() || range.is_empty() {
+                // no-op
+            } else if x == range.len() {
+                let bound = match range.pop().unwrap() {
+                    AxisRange::At(i) => AxisRange::In(i..i + 1, 1),
+                    other => other,
+                };
 
-                    range.insert(x, bound);
-                }
+                range.push(bound);
+            } else {
+                let bound = match range.remove(x) {
+                    AxisRange::At(i) => AxisRange::In(i..i + 1, 1),
+                    other => other,
+                };
+
+                range.insert(x, bound);
             }
         }
 

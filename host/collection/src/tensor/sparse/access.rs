@@ -1269,7 +1269,11 @@ where
 
 impl<L: fmt::Debug, R: fmt::Debug, T: CDatatype> fmt::Debug for SparseCombineLeft<L, R, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "inner join of {:?} and {:?}", self.left, self.right)
+        write!(
+            f,
+            "inner join (left combine) of {:?} and {:?}",
+            self.left, self.right
+        )
     }
 }
 

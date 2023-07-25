@@ -19,7 +19,7 @@ use tc_value::{
     Complex, ComplexType, DType, FloatType, IntType, Number, NumberClass, NumberCollator,
     NumberInstance, NumberType, UIntType, ValueType,
 };
-use tcgeneric::{Instance, ThreadSafe};
+use tcgeneric::{Instance, TCBoxTryStream, ThreadSafe};
 
 use super::block::Block;
 use super::complex::ComplexRead;
@@ -230,33 +230,53 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
         range: Range,
         mut order: Axes,
         axes: Axes,
-    ) -> Result<stream::FilledAt<Elements<Self::DType>>, TCError>
+    ) -> TCResult<TCBoxTryStream<'static, Coord>>
     where
         Self: Sized,
     {
         log::debug!("{:?} filled at {:?}...", self, axes);
+
+        self.shape().validate_axes(&axes)?;
+        self.shape().validate_axes(&order)?;
 
         if axes.is_empty() {
             #[cfg(debug_assertions)]
             panic!("cannot group an empty set of axes");
 
             #[cfg(not(debug_assertions))]
-            return Err(bad_request!("cannot group an empty set of axes"));
+            Err(bad_request!("cannot group an empty set of axes"))
+        } else if (0..self.ndim()).into_iter().all(|x| axes.contains(&x)) {
+            let elements = self.elements(txn_id, range, order).await?;
+            let filled_at = elements.map_ok(move |(coord, _value)| {
+                axes.iter().copied().map(|x| coord[x]).collect::<Coord>()
+            });
+
+            Ok(Box::pin(filled_at))
+        } else if axes.iter().zip(&order).all(|(x, o)| x == o) {
+            order.extend(axes.iter().copied());
+            order.dedup();
+
+            let ndim = self.ndim();
+
+            let filled_at = self
+                .elements(txn_id, range, order)
+                .map_ok(|elements| stream::FilledAt::new(elements, axes, ndim))
+                .await?;
+
+            Ok(Box::pin(filled_at))
+        } else {
+            #[cfg(debug_assertions)]
+            panic!(
+                "cannot group axes {axes:?} of {this:?} by order {order:?}",
+                this = self
+            );
+
+            #[cfg(not(debug_assertions))]
+            Err(bad_request!(
+                "cannot group axes {axes:?} of {this:?} by order {order:?}",
+                this = self
+            ))
         }
-
-        order.extend(axes.iter().skip(order.len()).copied());
-        debug_assert!(!order.is_empty());
-
-        if !order.starts_with(&axes) {
-            return Err(bad_request!(
-                "cannot group axes {axes:?} by order {order:?}"
-            ));
-        }
-
-        let ndim = self.ndim();
-        self.elements(txn_id, range, order)
-            .map_ok(|elements| stream::FilledAt::new(elements, axes, ndim))
-            .await
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError>;
