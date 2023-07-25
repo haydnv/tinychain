@@ -19,8 +19,8 @@ use crate::tensor::sparse::{sparse_from, Node};
 use crate::tensor::{
     autoqueue, Axes, Coord, Range, Shape, SparseView, TensorBoolean, TensorBooleanConst,
     TensorCast, TensorCompare, TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance,
-    TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce, TensorTransform,
-    TensorTrig, TensorUnary, TensorUnaryBoolean,
+    TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce,
+    TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{dense_from, DenseAccess, DenseCacheFile, DenseInstance, DenseTensor, DenseUnaryCast};
@@ -1105,6 +1105,73 @@ where
             ComplexMath::sub_const,
             TensorMathConst::sub_const
         )
+    }
+}
+
+impl<Txn, FE> TensorMatMul<Self> for DenseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type MatMul = Self;
+
+    fn matmul(self, other: Self) -> TCResult<Self::MatMul> {
+        assert_eq!(self.ndim(), other.ndim());
+
+        let left_matrix_size = self.shape().iter().rev().take(2).product::<u64>();
+        let right_matrix_size = other.shape().iter().rev().take(2).product::<u64>();
+
+        match (self, other) {
+            (this, that)
+                if (this.block_size() as u64) < left_matrix_size
+                    || (that.block_size() as u64) < right_matrix_size =>
+            {
+                let ndim = this.ndim();
+                let this = this.expand(vec![ndim])?;
+                let that = that.expand(vec![ndim - 1])?;
+                let product = this.mul(that)?;
+                product.sum(vec![ndim - 2], false)
+            }
+            (this, that)
+                if this.size() / (this.block_size() as u64)
+                    > that.size() / that.block_size() as u64 =>
+            {
+                let num_blocks = that.size() / that.block_size() as u64;
+                let block_size = (this.size() / num_blocks) as usize;
+                let this = this.resize_blocks(block_size);
+                this.matmul(that)
+            }
+            (this, that)
+                if this.size() / (this.block_size() as u64)
+                    < that.size() / that.block_size() as u64 =>
+            {
+                let num_blocks = this.size() / this.block_size() as u64;
+                let block_size = (that.size() / num_blocks) as usize;
+                let that = that.resize_blocks(block_size);
+                this.matmul(that)
+            }
+            (Self::Bool(this), Self::Bool(that)) => {
+                this.matmul(that).map(dense_from).map(Self::Bool)
+            }
+            (Self::C32(_), _) | (Self::C64(_), _) | (_, Self::C32(_)) | (_, Self::C64(_)) => {
+                Err(not_implemented!("complex matrix multiplication"))
+            }
+            (Self::F32(this), Self::F32(that)) => this.matmul(that).map(dense_from).map(Self::F32),
+            (Self::F64(this), Self::F64(that)) => this.matmul(that).map(dense_from).map(Self::F64),
+            (Self::I16(this), Self::I16(that)) => this.matmul(that).map(dense_from).map(Self::I16),
+            (Self::I32(this), Self::I32(that)) => this.matmul(that).map(dense_from).map(Self::I32),
+            (Self::I64(this), Self::I64(that)) => this.matmul(that).map(dense_from).map(Self::I64),
+            (Self::U8(this), Self::U8(that)) => this.matmul(that).map(dense_from).map(Self::U8),
+            (Self::U16(this), Self::U16(that)) => this.matmul(that).map(dense_from).map(Self::U16),
+            (Self::U32(this), Self::U32(that)) => this.matmul(that).map(dense_from).map(Self::U32),
+            (Self::U64(this), Self::U64(that)) => this.matmul(that).map(dense_from).map(Self::U64),
+            (this, that) => {
+                let dtype = Ord::max(this.dtype(), that.dtype());
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
+                this.matmul(that)
+            }
+        }
     }
 }
 

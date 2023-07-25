@@ -113,7 +113,7 @@ where
         let file = self.file.read().await;
         let block: &FileLock<State::FE> = file
             .get_file(PENDING)
-            .ok_or_else(|| unexpected!("BlockChain is missing its pending block"))?;
+            .ok_or_else(|| internal!("BlockChain is missing its pending block"))?;
 
         block.read_owned().map_err(TCError::from).await
     }
@@ -124,7 +124,7 @@ where
         let file = self.file.read().await;
         let block: &FileLock<State::FE> = file
             .get_file(PENDING)
-            .ok_or_else(|| unexpected!("BlockChain is missing its pending block"))?;
+            .ok_or_else(|| internal!("BlockChain is missing its pending block"))?;
 
         block.write_owned().map_err(TCError::from).await
     }
@@ -263,7 +263,7 @@ where
 
             let last_hash = dest.current_hash().to_vec();
             if &last_hash[..] != &source.current_hash()[..] {
-                return Err(unexpected!("{}", err_divergent(*latest)));
+                return Err(internal!("{}", err_divergent(*latest)));
             }
 
             last_hash
@@ -305,7 +305,7 @@ where
 
             last_hash = dest.current_hash().to_vec();
             if &last_hash[..] != &source.current_hash()[..] {
-                return Err(unexpected!("{}", err_divergent(block_id)));
+                return Err(internal!("{}", err_divergent(block_id)));
             }
         }
 
@@ -385,7 +385,7 @@ where
             if block.last_hash() == &last_hash {
                 last_hash = block.last_hash().clone();
             } else {
-                return Err(unexpected!(
+                return Err(internal!(
                     "block {} hash does not match previous block",
                     latest
                 ));
@@ -612,7 +612,7 @@ where
             .map(move |block_id| {
                 file.get_file(&block_id)
                     .cloned()
-                    .ok_or_else(|| unexpected!("missing chain block"))
+                    .ok_or_else(|| internal!("missing chain block"))
             })
             .and_then(|block| {
                 Box::pin(async move { block.read_owned().map_err(TCError::from).await })
@@ -807,7 +807,7 @@ where
                 let value = store.save_state(txn_id, value).await?;
                 parsed.push(Mutation::Put(key, value));
             } else {
-                return Err(unexpected!("unable to parse historical mutation {:?}", op,));
+                return Err(internal!("unable to parse historical mutation {:?}", op,));
             }
         }
 

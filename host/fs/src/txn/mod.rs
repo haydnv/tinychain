@@ -274,7 +274,7 @@ where
         }
 
         if let Some(leader) = self.leader(&cluster_path) {
-            Err(unexpected!(
+            Err(internal!(
                 "{} tried to claim leadership of {} but {} is already the leader",
                 cluster_path,
                 self.request.txn_id(),

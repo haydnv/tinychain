@@ -32,6 +32,7 @@ use super::{
     IDEAL_BLOCK_SIZE, IMAG, REAL,
 };
 
+use crate::tensor::TensorMatMul;
 pub use access::*;
 pub use view::*;
 
@@ -598,6 +599,21 @@ where
         );
 
         Ok(accessor.into())
+    }
+}
+
+impl<Txn, FE, L, R, T> TensorMatMul<DenseTensor<Txn, FE, R>> for DenseTensor<Txn, FE, L>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    L: DenseInstance<DType = T>,
+    R: DenseInstance<DType = T>,
+    T: CDatatype + DType,
+{
+    type MatMul = DenseTensor<Txn, FE, DenseMatMul<L, R>>;
+
+    fn matmul(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::MatMul> {
+        DenseMatMul::new(self.accessor, other.accessor).map(DenseTensor::from)
     }
 }
 

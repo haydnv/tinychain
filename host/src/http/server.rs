@@ -71,7 +71,7 @@ impl HTTPServer {
                 Ok(response) => Body::wrap_stream(response.chain(delimiter(b"\n"))),
                 Err(cause) => {
                     return Ok(transform_error(
-                        unexpected!("JSON encoding error").consume(cause),
+                        internal!("JSON encoding error").consume(cause),
                         Encoding::Json,
                     ))
                 }
@@ -79,13 +79,13 @@ impl HTTPServer {
             Encoding::Tbon => match tbon::en::encode(view) {
                 Ok(response) => {
                     let response =
-                        response.map_err(|cause| unexpected!("TBON encoding error").consume(cause));
+                        response.map_err(|cause| internal!("TBON encoding error").consume(cause));
 
                     Body::wrap_stream(response)
                 }
                 Err(cause) => {
                     return Ok(transform_error(
-                        unexpected!("TBON encoding error").consume(cause),
+                        internal!("TBON encoding error").consume(cause),
                         Encoding::Tbon,
                     ))
                 }

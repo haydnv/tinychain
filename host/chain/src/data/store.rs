@@ -160,11 +160,11 @@ where
         if let Scalar::Ref(tc_ref) = scalar {
             if let TCRef::Op(OpRef::Get((OpSubject::Ref(hash, classpath), schema))) = *tc_ref {
                 let class = CollectionType::from_path(&classpath)
-                    .ok_or_else(|| unexpected!("invalid Collection type: {}", classpath))?;
+                    .ok_or_else(|| internal!("invalid Collection type: {}", classpath))?;
 
                 Err(not_implemented!("resolve saved collection"))
             } else {
-                Err(unexpected!(
+                Err(internal!(
                     "invalid subject for historical Chain state {:?}",
                     tc_ref
                 ))

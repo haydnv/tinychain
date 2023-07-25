@@ -456,7 +456,7 @@ impl Persist<tc_fs::CacheBlock> for Dir<Class> {
                     }
                 }
                 tc_transact::fs::DirEntry::File(file) => {
-                    Err(unexpected!("invalid Class dir entry: {:?}", file))
+                    Err(internal!("invalid Class dir entry: {:?}", file))
                 }
             }?;
 
@@ -530,7 +530,7 @@ impl Persist<tc_fs::CacheBlock> for Dir<Service> {
 
             let entry = match entry {
                 tc_transact::fs::DirEntry::File(file) => {
-                    Err(unexpected!("invalid Service directory entry: {:?}", file))
+                    Err(internal!("invalid Service directory entry: {:?}", file))
                 }
                 tc_transact::fs::DirEntry::Dir(dir) => {
                     let is_service = dir.contains(txn_id, &super::service::SCHEMA.into()).await?;

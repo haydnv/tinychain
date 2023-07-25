@@ -201,10 +201,10 @@ impl ChainBlock {
     // TODO: delete
     pub async fn size(&self) -> TCResult<usize> {
         let encoded = tbon::en::encode(self)
-            .map_err(|cause| unexpected!("TBON encoding error").consume(cause))?;
+            .map_err(|cause| internal!("TBON encoding error").consume(cause))?;
 
         encoded
-            .map_err(|cause| unexpected!("TBON encoding error").consume(cause))
+            .map_err(|cause| internal!("TBON encoding error").consume(cause))
             .try_fold(0, |size, chunk| future::ready(Ok(size + chunk.len())))
             .await
     }

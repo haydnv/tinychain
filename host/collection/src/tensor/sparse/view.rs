@@ -22,8 +22,8 @@ use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
     autoqueue, strides_for, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst,
     TensorCast, TensorCompare, TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance,
-    TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce, TensorTransform,
-    TensorTrig, TensorUnary, TensorUnaryBoolean,
+    TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce,
+    TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
@@ -997,6 +997,23 @@ where
 
     fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
         Err(bad_request!("cannot subtract {} from {:?} because the result would not be sparse (consider converting to a dense tensor first)", other, self))
+    }
+}
+
+impl<Txn, FE> TensorMatMul<Self> for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
+    type MatMul = Self;
+
+    fn matmul(self, other: Self) -> TCResult<Self::MatMul> {
+        assert_eq!(self.ndim(), other.ndim());
+
+        let ndim = self.ndim();
+        let this = self.expand(vec![ndim])?;
+        let that = other.expand(vec![ndim - 1])?;
+        this.mul(that)?.sum(vec![ndim - 2], false)
     }
 }
 

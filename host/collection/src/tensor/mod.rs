@@ -387,6 +387,14 @@ pub trait TensorMathConst {
     fn sub_const(self, other: Number) -> TCResult<Self::Combine>;
 }
 
+/// [`Tensor`] matrix multiplication
+pub trait TensorMatMul<O> {
+    /// The type of [`Tensor`] returned by `matmul`
+    type MatMul: TensorInstance;
+
+    fn matmul(self, other: O) -> TCResult<Self::MatMul>;
+}
+
 /// [`Tensor`] read operations
 #[async_trait]
 pub trait TensorRead {
@@ -1381,6 +1389,36 @@ where
         match self {
             Self::Dense(this) => this.into_view().sub_const(other).map(Self::from),
             Self::Sparse(this) => this.into_view().sub_const(other).map(Self::from),
+        }
+    }
+}
+
+impl<Txn, FE> TensorMatMul<Self> for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type MatMul = Self;
+
+    fn matmul(self, other: Self) -> TCResult<Self::MatMul> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this.into_view().matmul(that.into_view()).map(Self::from),
+
+                Self::Sparse(that) => this
+                    .into_sparse()
+                    .into_view()
+                    .matmul(that.into_view())
+                    .map(Self::from),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .matmul(that.into_sparse().into_view())
+                    .map(Self::from),
+
+                Self::Sparse(that) => this.into_view().matmul(that.into_view()).map(Self::from),
+            },
         }
     }
 }

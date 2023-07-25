@@ -410,7 +410,7 @@ where
                 .collect::<TCResult<BTreeSet<Host>>>()?;
 
             if !replicas.contains(&self.schema.host) {
-                return Err(unexpected!(
+                return Err(internal!(
                     "failed to update {:?} with new replica {}",
                     self,
                     &self.schema.host,

@@ -279,14 +279,14 @@ impl From<io::Error> for TCError {
             io::ErrorKind::WouldBlock => {
                 conflict!("synchronous filesystem access failed").consume(cause)
             }
-            kind => unexpected!("host filesystem error: {:?}", kind).consume(cause),
+            kind => internal!("host filesystem error: {:?}", kind).consume(cause),
         }
     }
 }
 
 impl From<Infallible> for TCError {
     fn from(_: Infallible) -> Self {
-        unexpected!("an unanticipated error occurred--please file a bug report")
+        internal!("an unanticipated error occurred--please file a bug report")
     }
 }
 
@@ -370,7 +370,7 @@ macro_rules! timeout {
 
 /// A truly unexpected error, for which no handling behavior can be defined
 #[macro_export]
-macro_rules! unexpected {
+macro_rules! internal {
     ($($t:tt)*) => {{
         $crate::TCError::new($crate::ErrorKind::Internal, format!($($t)*))
     }}

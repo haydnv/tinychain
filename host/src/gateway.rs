@@ -128,7 +128,7 @@ impl Gateway {
             .inner
             .actor
             .sign_token(&token)
-            .map_err(|cause| unexpected!("signing error").consume(cause))?;
+            .map_err(|cause| internal!("signing error").consume(cause))?;
 
         let claims = token.claims();
 

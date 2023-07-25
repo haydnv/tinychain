@@ -162,6 +162,7 @@ pub enum DenseAccess<Txn, FE, T: CDatatype> {
     Cow(Box<DenseCow<FE, Self>>),
     Diagonal(Box<DenseDiagonal<Self>>),
     Expand(Box<DenseExpand<Self>>),
+    MatMul(Box<DenseMatMul<Self, Self>>),
     Reduce(Box<DenseReduce<Self, T>>),
     Reshape(Box<DenseReshape<Self>>),
     ResizeBlocks(Box<DenseResizeBlocks<Self>>),
@@ -186,6 +187,7 @@ impl<Txn, FE, T: CDatatype> Clone for DenseAccess<Txn, FE, T> {
             Self::Const(combine) => Self::Const(combine.clone()),
             Self::Cow(cow) => Self::Cow(cow.clone()),
             Self::Diagonal(diag) => Self::Diagonal(diag.clone()),
+            Self::MatMul(matmul) => Self::MatMul(matmul.clone()),
             Self::Expand(expand) => Self::Expand(expand.clone()),
             Self::Reduce(reduce) => Self::Reduce(reduce.clone()),
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
@@ -214,6 +216,7 @@ macro_rules! access_dispatch {
             DenseAccess::Cow($var) => $call,
             DenseAccess::Diagonal($var) => $call,
             DenseAccess::Expand($var) => $call,
+            DenseAccess::MatMul($var) => $call,
             DenseAccess::Reduce($var) => $call,
             DenseAccess::Reshape($var) => $call,
             DenseAccess::ResizeBlocks($var) => $call,
@@ -287,6 +290,9 @@ where
             Self::Expand(expand) => Ok(Box::pin(
                 expand.read_blocks(txn_id).await?.map_ok(Array::from),
             )),
+            Self::MatMul(matmul) => Ok(Box::pin(
+                matmul.read_blocks(txn_id).await?.map_ok(Array::from),
+            )),
             Self::Reduce(reduce) => reduce.read_blocks(txn_id).await,
             Self::Reshape(reshape) => Ok(Box::pin(
                 reshape.read_blocks(txn_id).await?.map_ok(Array::from),
@@ -335,6 +341,7 @@ where
             Self::Cow(cow) => cow.read_permit(txn_id, range).await,
             Self::Diagonal(diag) => diag.read_permit(txn_id, range).await,
             Self::Expand(expand) => expand.read_permit(txn_id, range).await,
+            Self::MatMul(matmul) => matmul.read_permit(txn_id, range).await,
             Self::Reduce(reduce) => reduce.read_permit(txn_id, range).await,
             Self::Reshape(reshape) => reshape.read_permit(txn_id, range).await,
             Self::ResizeBlocks(resize) => resize.read_permit(txn_id, range).await,
@@ -1613,6 +1620,180 @@ where
 impl<L: fmt::Debug, T: CDatatype> fmt::Debug for DenseConst<L, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "dual constant operation on {:?}", self.left)
+    }
+}
+
+#[derive(Clone)]
+pub struct DenseMatMul<L, R> {
+    left: L,
+    right: R,
+    shape: Shape,
+    per_block: usize,
+}
+
+impl<L, R> DenseMatMul<L, R>
+where
+    L: TensorInstance + fmt::Debug,
+    R: TensorInstance + fmt::Debug,
+{
+    pub fn new(left: L, right: R) -> TCResult<Self> {
+        left.shape().validate()?;
+        right.shape().validate()?;
+
+        let per_block_left =
+            (left.size() / left.shape().iter().rev().take(2).product::<u64>()) as usize;
+
+        let per_block_right =
+            (right.size() / right.shape().iter().rev().take(2).product::<u64>()) as usize;
+
+        if per_block_left != per_block_right {
+            // this is an internal error because this implementation detail should be invisible
+            // but it's better to error out here than enter undefined behavior later on
+            Err(internal!(
+                "cannot matrix multiply {left:?} with {right:?} due to different block sizes"
+            ))
+        } else if left.ndim() != right.ndim() {
+            Err(bad_request!("cannot matrix multiply {left:?} with {right:?} since they have different dimensions"))
+        } else if left.shape().last() != right.shape().iter().nth_back(1) {
+            Err(bad_request!(
+                "cannot matrix multiply {left:?} with {right:?} due to non-matching dimensions"
+            ))
+        } else {
+            let mut shape = Vec::with_capacity(left.ndim());
+            shape.extend_from_slice(&left.shape()[..left.ndim() - 1]);
+            shape.push(right.shape()[right.ndim() - 1]);
+
+            Ok(Self {
+                left,
+                right,
+                shape: shape.into(),
+                per_block: per_block_left,
+            })
+        }
+    }
+
+    #[inline]
+    fn block_op<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        left.matmul(right).map(Array::from).map_err(TCError::from)
+    }
+}
+
+impl<L, R> TensorInstance for DenseMatMul<L, R>
+where
+    L: TensorInstance,
+    R: TensorInstance,
+{
+    fn dtype(&self) -> NumberType {
+        self.left.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        &self.shape
+    }
+}
+
+#[async_trait]
+impl<L, R, T> DenseInstance for DenseMatMul<L, R>
+where
+    L: DenseInstance<DType = T> + Clone,
+    R: DenseInstance<DType = T> + Clone,
+    T: CDatatype + DType,
+{
+    type Block = Array<T>;
+    type DType = T;
+
+    fn block_size(&self) -> usize {
+        self.per_block * self.shape.iter().rev().take(2).product::<u64>() as usize
+    }
+
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        let (left, right) = try_join!(
+            self.left.read_block(txn_id, block_id),
+            self.right.read_block(txn_id, block_id),
+        )?;
+
+        Self::block_op(left.into(), right.into())
+    }
+
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        let num_blocks = self.size() / self.block_size() as u64;
+
+        let blocks = futures::stream::iter(0..num_blocks)
+            .map(move |block_id| {
+                let this = self.clone();
+                async move { this.read_block(txn_id, block_id).await }
+            })
+            .buffered(num_cpus::get());
+
+        Ok(Box::pin(blocks))
+    }
+
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        self.shape.validate_coord(&coord)?;
+
+        let mut right_range = Vec::with_capacity(coord.len());
+        right_range.extend(
+            coord
+                .iter()
+                .copied()
+                .map(AxisRange::At)
+                .take(self.ndim() - 2),
+        );
+        right_range.push(AxisRange::In(0..self.shape[self.ndim() - 2], 1));
+        right_range.push(AxisRange::At(coord[self.ndim() - 1]));
+        let right_range = Range::from(right_range);
+
+        let left_range = coord
+            .into_iter()
+            .take(self.ndim() - 1)
+            .map(AxisRange::At)
+            .collect::<Range>();
+
+        let coords = left_range.affected().zip(right_range.affected());
+
+        let mut sum = T::zero();
+        for (left_coord, right_coord) in coords {
+            let (left, right) = try_join!(
+                self.left.read_value(txn_id, left_coord),
+                self.right.read_value(txn_id, right_coord)
+            )?;
+
+            sum = sum + (left * right);
+        }
+
+        Ok(sum)
+    }
+}
+
+#[async_trait]
+impl<L: TensorPermitRead, R: TensorPermitRead> TensorPermitRead for DenseMatMul<L, R> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        let mut left = self.left.read_permit(txn_id, range.clone()).await?;
+        let right = self.right.read_permit(txn_id, range.clone()).await?;
+        left.extend(right);
+        Ok(left)
+    }
+}
+
+impl<Txn, FE, L, R, T> From<DenseMatMul<L, R>> for DenseAccess<Txn, FE, T>
+where
+    T: CDatatype,
+    L: Into<DenseAccess<Txn, FE, T>>,
+    R: Into<DenseAccess<Txn, FE, T>>,
+{
+    fn from(matmul: DenseMatMul<L, R>) -> Self {
+        Self::MatMul(Box::new(DenseMatMul {
+            left: matmul.left.into(),
+            right: matmul.right.into(),
+            shape: matmul.shape,
+            per_block: matmul.per_block,
+        }))
+    }
+}
+
+impl<L: fmt::Debug, R: fmt::Debug> fmt::Debug for DenseMatMul<L, R> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "matrix multiply {:?} with {:?}", self.left, self.right)
     }
 }
 
