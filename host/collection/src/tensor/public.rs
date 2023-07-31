@@ -21,9 +21,9 @@ use super::{
     broadcast, broadcast_shape, Axes, AxisRange, Dense, DenseBase, DenseCacheFile, DenseView, Node,
     Range, Schema, Shape, Sparse, SparseBase, SparseView, Tensor, TensorBoolean,
     TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst, TensorConvert,
-    TensorDiagonal, TensorInstance, TensorMath, TensorMathConst, TensorRead, TensorReduce,
-    TensorTransform, TensorTrig, TensorType, TensorUnary, TensorUnaryBoolean, TensorWrite,
-    TensorWriteDual,
+    TensorDiagonal, TensorInstance, TensorMatMul, TensorMath, TensorMathConst, TensorRead,
+    TensorReduce, TensorTransform, TensorTrig, TensorType, TensorUnary, TensorUnaryBoolean,
+    TensorWrite, TensorWriteDual,
 };
 
 const AXES: Label = label("axes");
@@ -1006,33 +1006,74 @@ where
     }
 }
 
-// struct MatMulHandler<Txn, FE> {
-//     tensor: Tensor<Txn, FE>,
-// }
-//
-// impl<Txn, FE> MatMulHandler<Txn, FE> {
-//     fn new<T: Into<Tensor<Txn, FE>>>(tensor: T) -> Self {
-//         Self {
-//             tensor: tensor.into(),
-//         }
-//     }
-// }
-//
-// impl<'a, State> Handler<'a, State> for MatMulHandler<State::Txn, State::FE> where State: StateInstance {
-//     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
-//     where
-//         'b: 'a,
-//     {
-//         Some(Box::new(|_txn, mut params| {
-//             Box::pin(async move {
-//                 let right: Tensor<_, _> = params.require(&RIGHT.into())?;
-//                 params.expect_empty()?;
-//
-//                 self.tensor.matmul(right).map_ok(Tensor::from).await
-//             })
-//         }))
-//     }
-// }
+struct MatMulHandler<Txn, FE> {
+    tensor: Tensor<Txn, FE>,
+}
+
+impl<Txn, FE> MatMulHandler<Txn, FE> {
+    fn new<T: Into<Tensor<Txn, FE>>>(tensor: T) -> Self {
+        Self {
+            tensor: tensor.into(),
+        }
+    }
+}
+
+impl<'a, State> Handler<'a, State> for MatMulHandler<State::Txn, State::FE>
+where
+    State: StateInstance + From<Tensor<State::Txn, State::FE>>,
+    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    Tensor<State::Txn, State::FE>: TryCastFrom<State>,
+{
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let right: Tensor<_, _> = params.require(&RIGHT.into())?;
+                params.expect_empty()?;
+
+                let ndim = Ord::max(self.tensor.ndim(), right.ndim());
+                let (left, right) = if ndim > 2 {
+                    if self.tensor.shape().iter().rev().take(2).zip(right.shape().iter().rev().take(2)).all(|(l, r)| l == r) {
+                        Ok((self.tensor, right))
+                    } else {
+                        let batch_shape = broadcast_shape(
+                            &self.tensor.shape()[..self.tensor.ndim() - 2],
+                            &right.shape()[..right.ndim() - 2],
+                        )?;
+
+                        let mut left_shape = Vec::with_capacity(ndim);
+                        left_shape.extend_from_slice(&batch_shape);
+                        left_shape.extend(self.tensor.shape().iter().rev().take(2).rev());
+                        let left = self.tensor.broadcast(left_shape.into())?;
+
+                        let mut right_shape = Vec::with_capacity(ndim);
+                        right_shape.extend(batch_shape.into_vec());
+                        right_shape.extend(right.shape().iter().rev().take(2).rev());
+                        let right = right.broadcast(right_shape.into())?;
+
+                        Ok((left, right))
+                    }
+                } else if self.tensor.ndim() < 2 {
+                    Err(bad_request!(
+                        "invalid left matrix multiplicand: {:?}",
+                        self.tensor
+                    ))
+                } else if right.ndim() < 2 {
+                    Err(bad_request!(
+                        "invalid right matrix multiplicand: {:?}",
+                        right
+                    ))
+                } else {
+                    Ok((self.tensor, right))
+                }?;
+
+                left.matmul(right).map(Tensor::from).map(State::from)
+            })
+        }))
+    }
+}
 
 struct NormHandler<State: StateInstance> {
     tensor: Tensor<State::Txn, State::FE>,
@@ -1597,7 +1638,7 @@ where
 
             // linear algebra
             "diagonal" => Some(Box::new(DiagonalHandler::from(tensor))),
-            // "matmul" => Some(Box::new(MatMulHandler::new(tensor))),
+            "matmul" => Some(Box::new(MatMulHandler::new(tensor))),
 
             // reduce ops
             "max" => Some(Box::new(ReduceHandler::new(

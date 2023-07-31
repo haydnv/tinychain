@@ -37,21 +37,6 @@ class LinearAlgebraTests(ClientTest):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, expect_dense(x, tc.I32))
 
-    def testMatmul(self):
-        l = np.random.random([3, 4])
-        r = np.random.random([4, 5])
-
-        cxt = tc.Context()
-        cxt.l = tc.tensor.Dense.load(l.shape, l.flatten().tolist(), tc.F32)
-        cxt.r = tc.tensor.Dense.load(r.shape, r.flatten().tolist(), tc.F32)
-        cxt.result = cxt.l @ cxt.r
-
-        expected = np.matmul(l, r)
-        actual = self.host.post(ENDPOINT, cxt)
-        actual = actual[tc.URI(tc.tensor.Dense)][1]
-
-        self.assertTrue(np.allclose(expected.flatten(), actual))
-
 
 def expect_dense(x, dtype):
     return {tc.URI(tc.tensor.Dense): [[list(x.shape), tc.URI(dtype)], x.flatten().tolist()]}

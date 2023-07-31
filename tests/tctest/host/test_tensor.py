@@ -206,6 +206,22 @@ class DenseTests(HostTest):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, [False, True, True, False, True])
 
+    def testMatMul(self):
+        l = np.arange(12).reshape((3, 4))
+        r = np.arange(20).reshape((4, 5))
+
+        cxt = tc.Context()
+        cxt.l = tc.tensor.Dense.load(l.shape, l.flatten().tolist(), tc.I32)
+        cxt.r = tc.tensor.Dense.load(r.shape, r.flatten().tolist(), tc.I32)
+        cxt.result = cxt.l @ cxt.r
+
+        expected = np.matmul(l, r)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        actual = actual[tc.URI(tc.tensor.Dense)][1]
+
+        self.assertTrue(np.allclose(expected.flatten(), actual))
+
     def testMean(self):
         shape = [2, 3, 4]
         axis = 1
