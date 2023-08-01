@@ -238,7 +238,10 @@ impl Serialize for Value {
         match self {
             Self::Bytes(bytes) => {
                 let mut map = serializer.serialize_map(Some(1))?;
-                map.serialize_entry(&self.class().path().to_string(), &STANDARD_NO_PAD.encode(&bytes))?;
+                map.serialize_entry(
+                    &self.class().path().to_string(),
+                    &STANDARD_NO_PAD.encode(&bytes),
+                )?;
                 map.end()
             }
             Self::Email(email) => {
@@ -458,6 +461,34 @@ impl TryFrom<Value> for bool {
     }
 }
 
+impl TryFrom<Value> for Id {
+    type Error = TCError;
+
+    fn try_from(value: Value) -> TCResult<Self> {
+        match value {
+            Value::Number(number) => number.to_string().parse().map_err(TCError::from),
+            Value::Id(id) => Ok(id),
+            Value::String(string) => string.parse().map_err(TCError::from),
+            other => Err(TCError::unexpected(other, "an Id")),
+        }
+    }
+}
+
+impl TryFrom<Value> for Map<Value> {
+    type Error = TCError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Tuple(tuple) => tuple
+                .into_iter()
+                .map(|item| -> TCResult<(Id, Value)> { item.try_into() })
+                .collect(),
+
+            other => Err(TCError::unexpected(other, "a Map")),
+        }
+    }
+}
+
 impl TryFrom<Value> for Number {
     type Error = TCError;
 
@@ -487,6 +518,24 @@ impl TryFrom<Value> for Tuple<Value> {
         match value {
             Value::Tuple(tuple) => Ok(tuple),
             other => Err(TCError::unexpected(other, "a Tuple")),
+        }
+    }
+}
+
+impl<T: TryFrom<Value>> TryFrom<Value> for (Id, T)
+where
+    TCError: From<T::Error>,
+{
+    type Error = TCError;
+
+    fn try_from(value: Value) -> TCResult<Self> {
+        match value {
+            Value::Tuple(mut tuple) if tuple.len() == 2 => {
+                let value = tuple.pop().expect("value");
+                let key = tuple.pop().expect("key");
+                Ok((Id::try_from(key)?, value.try_into()?))
+            }
+            other => Err(TCError::unexpected(other, "a map item")),
         }
     }
 }
@@ -994,7 +1043,8 @@ impl ValueVisitor {
         return match class {
             VT::Bytes => {
                 let encoded = map.next_value::<&str>()?;
-                STANDARD_NO_PAD.decode(encoded)
+                STANDARD_NO_PAD
+                    .decode(encoded)
                     .map(Value::Bytes)
                     .map_err(serde::de::Error::custom)
             }
