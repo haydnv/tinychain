@@ -1035,7 +1035,15 @@ where
 
                 let ndim = Ord::max(self.tensor.ndim(), right.ndim());
                 let (left, right) = if ndim > 2 {
-                    if self.tensor.shape().iter().rev().take(2).zip(right.shape().iter().rev().take(2)).all(|(l, r)| l == r) {
+                    if self
+                        .tensor
+                        .shape()
+                        .iter()
+                        .rev()
+                        .take(2)
+                        .zip(right.shape().iter().rev().take(2))
+                        .all(|(l, r)| l == r)
+                    {
                         Ok((self.tensor, right))
                     } else {
                         let batch_shape = broadcast_shape(

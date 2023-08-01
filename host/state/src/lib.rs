@@ -823,6 +823,23 @@ impl TryFrom<State> for Map<State> {
     }
 }
 
+impl TryFrom<State> for Map<Value> {
+    type Error = TCError;
+
+    fn try_from(state: State) -> TCResult<Map<Value>> {
+        match state {
+            State::Map(map) => map
+                .into_iter()
+                .map(|(id, state)| Value::try_from(state).map(|scalar| (id, scalar)))
+                .collect(),
+
+            State::Scalar(scalar) => scalar.try_into(),
+
+            other => Err(TCError::unexpected(other, "a Map")),
+        }
+    }
+}
+
 impl TryFrom<State> for Value {
     type Error = TCError;
 

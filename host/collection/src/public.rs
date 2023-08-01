@@ -1,10 +1,11 @@
 use safecast::{AsType, CastInto, TryCastFrom};
+use tc_error::TCError;
 use tc_scalar::Scalar;
 
 use tc_transact::fs;
 use tc_transact::public::{GetHandler, Handler, Route, StateInstance};
 use tc_value::{Number, NumberType, Value};
-use tcgeneric::{PathSegment, TCPath, ThreadSafe, Tuple};
+use tcgeneric::{Map, PathSegment, TCPath, ThreadSafe, Tuple};
 
 use super::btree::{BTree, BTreeFile, BTreeInstance, BTreeSchema, Node as BTreeNode};
 use super::table::{TableFile, TableInstance, TableSchema};
@@ -81,6 +82,7 @@ where
     State::Class: From<NumberType>,
     State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
     BTree<State::Txn, State::FE>: TryCastFrom<State>,
+    Map<Value>: TryFrom<State, Error = TCError>,
     Number: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Tuple<State>: TryCastFrom<State>,
@@ -123,6 +125,7 @@ where
     State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
     BTree<State::Txn, State::FE>: TryCastFrom<State>,
     Collection<State::Txn, State::FE>: From<BTree<State::Txn, State::FE>>,
+    Map<Value>: TryFrom<State, Error = TCError>,
     Number: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,

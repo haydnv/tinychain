@@ -668,6 +668,21 @@ impl TryFrom<Scalar> for Map<Scalar> {
     }
 }
 
+impl TryFrom<Scalar> for Map<Value> {
+    type Error = TCError;
+
+    fn try_from(scalar: Scalar) -> TCResult<Map<Value>> {
+        match scalar {
+            Scalar::Map(map) => map
+                .into_iter()
+                .map(|(id, scalar)| Value::try_from(scalar).map(|value| (id, value)))
+                .collect(),
+
+            other => Err(TCError::unexpected(other, "a Map")),
+        }
+    }
+}
+
 impl TryFrom<Scalar> for TCRef {
     type Error = TCError;
 

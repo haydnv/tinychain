@@ -26,7 +26,7 @@ class TableTests(HostTest):
         cxt = tc.Context()
         cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
-        cxt.delete = tc.after(cxt.inserts, cxt.table.delete_row(("one",)))
+        cxt.delete = tc.after(cxt.inserts, cxt.table.delete(("one",)))
         cxt.result = tc.after(cxt.delete, cxt.table.count())
 
         result = self.host.post(ENDPOINT, cxt)

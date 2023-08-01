@@ -3,13 +3,15 @@
 use std::fmt;
 
 use async_trait::async_trait;
+use futures::{TryFutureExt, TryStreamExt};
 use safecast::{as_type, AsType};
 
 use tc_error::*;
 use tc_transact::{Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{
-    path_label, Class, Id, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
+    path_label, Class, Id, Instance, Map, NativeClass, PathLabel, PathSegment, TCPathBuf,
+    ThreadSafe,
 };
 
 use super::btree::Node;
@@ -134,6 +136,14 @@ pub trait TableStream: TableInstance + Sized {
     /// Return the number of rows in this table.
     async fn count(self, txn_id: TxnId) -> TCResult<u64>;
 
+    /// Return `true` if this table contains zero rows.
+    async fn is_empty(self, txn_id: TxnId) -> TCResult<bool> {
+        let mut rows = self.rows(txn_id).await?;
+        rows.try_next()
+            .map_ok(|maybe_row| maybe_row.is_some())
+            .await
+    }
+
     /// Limit the number of rows returned by `rows`.
     fn limit(self, limit: u64) -> TCResult<Self::Limit>;
 
@@ -149,6 +159,16 @@ pub trait TableStream: TableInstance + Sized {
 pub trait TableWrite: TableInstance {
     /// Delete the given row from this table, if present.
     async fn delete(&self, txn_id: TxnId, key: Key) -> TCResult<()>;
+
+    /// Delete all rows in the given `range` from this table.
+    async fn truncate(&self, _txn_id: TxnId, _range: Range) -> TCResult<()> {
+        Err(not_implemented!("TableWrite::truncate"))
+    }
+
+    /// Update all rows in the given `range` to match the given `values`.
+    async fn update(&self, _txn_id: TxnId, _range: Range, _values: Map<Value>) -> TCResult<()> {
+        Err(not_implemented!("TableWrite::update"))
+    }
 
     /// Insert or update the given row.
     async fn upsert(&self, txn_id: TxnId, key: Key, values: Values) -> TCResult<()>;
