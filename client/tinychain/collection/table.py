@@ -130,7 +130,7 @@ class Table(Collection):
 
         return self.delete("")
 
-    def update(self, values):
+    def update(self, **values):
         """Update the rows of this table with the given `values`."""
 
         return self._put("", values)
@@ -144,7 +144,7 @@ class Table(Collection):
 
         return self._put("", key, values)
 
-    def where(self, bounds):
+    def where(self, **bounds):
         """
         Return a slice of this `Table` whose column values fall within the specified range.
 
@@ -161,7 +161,7 @@ class Table(Collection):
             def delete(self, key):
                 return RuntimeError(f"cannot delete the row at {key} from a slice {self} of a table {parent}")
 
-            def update(self, values):
+            def update(self, **values):
                 return parent._put("", [(col, bounds[col]) for col in bounds], values)
 
             def upsert(self, key, values):
