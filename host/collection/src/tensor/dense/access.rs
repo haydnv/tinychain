@@ -158,6 +158,7 @@ pub enum DenseAccess<Txn, FE, T: CDatatype> {
     CombineConst(Box<DenseCombineConst<Self, T>>),
     Compare(Box<DenseCompare<Txn, FE, T>>),
     CompareConst(Box<DenseCompareConst<Txn, FE, T>>),
+    Cond(Box<DenseCond<DenseAccess<Txn, FE, u8>, Self, Self>>),
     Const(Box<DenseConst<Self, T>>),
     Cow(Box<DenseCow<FE, Self>>),
     Diagonal(Box<DenseDiagonal<Self>>),
@@ -184,6 +185,7 @@ impl<Txn, FE, T: CDatatype> Clone for DenseAccess<Txn, FE, T> {
             Self::CombineConst(combine) => Self::CombineConst(combine.clone()),
             Self::Compare(compare) => Self::Compare(compare.clone()),
             Self::CompareConst(compare) => Self::CompareConst(compare.clone()),
+            Self::Cond(cond) => Self::Cond(cond.clone()),
             Self::Const(combine) => Self::Const(combine.clone()),
             Self::Cow(cow) => Self::Cow(cow.clone()),
             Self::Diagonal(diag) => Self::Diagonal(diag.clone()),
@@ -212,6 +214,7 @@ macro_rules! access_dispatch {
             DenseAccess::CombineConst($var) => $call,
             DenseAccess::Compare($var) => $call,
             DenseAccess::CompareConst($var) => $call,
+            DenseAccess::Cond($var) => $call,
             DenseAccess::Const($var) => $call,
             DenseAccess::Cow($var) => $call,
             DenseAccess::Diagonal($var) => $call,
@@ -282,6 +285,9 @@ where
             Self::CombineConst(combine) => combine.read_blocks(txn_id).await,
             Self::Compare(compare) => compare.read_blocks(txn_id).await,
             Self::CompareConst(compare) => compare.read_blocks(txn_id).await,
+            Self::Cond(cond) => Ok(Box::pin(
+                cond.read_blocks(txn_id).await?.map_ok(Array::from),
+            )),
             Self::Const(combine) => combine.read_blocks(txn_id).await,
             Self::Cow(cow) => cow.read_blocks(txn_id).await,
             Self::Diagonal(diag) => Ok(Box::pin(
@@ -337,6 +343,7 @@ where
             Self::CombineConst(combine) => combine.read_permit(txn_id, range).await,
             Self::Compare(compare) => compare.read_permit(txn_id, range).await,
             Self::CompareConst(compare) => compare.read_permit(txn_id, range).await,
+            Self::Cond(cond) => cond.read_permit(txn_id, range).await,
             Self::Const(combine) => combine.read_permit(txn_id, range).await,
             Self::Cow(cow) => cow.read_permit(txn_id, range).await,
             Self::Diagonal(diag) => diag.read_permit(txn_id, range).await,
@@ -1520,6 +1527,172 @@ impl<Txn, FE, T: CDatatype> From<DenseCompareConst<Txn, FE, T>> for DenseAccess<
 impl<Txn, FE, T: CDatatype> fmt::Debug for DenseCompareConst<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "compare {:?} with {:?}", self.left, self.right)
+    }
+}
+
+#[derive(Clone)]
+pub struct DenseCond<Cond, Then, OrElse> {
+    cond: Cond,
+    then: Then,
+    or_else: OrElse,
+}
+
+impl<Cond, Then, OrElse, T> DenseCond<Cond, Then, OrElse>
+where
+    Cond: DenseInstance<DType = u8> + fmt::Debug,
+    Then: DenseInstance<DType = T> + fmt::Debug,
+    OrElse: DenseInstance<DType = T> + fmt::Debug,
+    T: CDatatype,
+{
+    fn new(cond: Cond, then: Then, or_else: OrElse) -> TCResult<DenseCond<Cond, Then, OrElse>> {
+        if cond.dtype() == NumberType::Bool
+            && cond.shape() == then.shape()
+            && cond.shape() == or_else.shape()
+            && then.dtype() == or_else.dtype()
+            && cond.block_size() == then.block_size()
+            && cond.block_size() == or_else.block_size()
+        {
+            Ok(Self {
+                cond,
+                then,
+                or_else,
+            })
+        } else if cond.block_size() != then.block_size()
+            || cond.block_size() != or_else.block_size()
+        {
+            Err(internal!(
+                "cannot select blocks of size {cond} from blocks of size {then} and {or_else}",
+                cond = cond.block_size(),
+                then = then.block_size(),
+                or_else = or_else.block_size()
+            ))
+        } else {
+            Err(bad_request!(
+                "cannot select conditionally from {then:?} and {or_else:?} based on {cond:?}"
+            ))
+        }
+    }
+}
+
+impl<Cond, Then, OrElse> TensorInstance for DenseCond<Cond, Then, OrElse>
+where
+    Cond: TensorInstance,
+    Then: TensorInstance,
+    OrElse: TensorInstance,
+{
+    fn dtype(&self) -> NumberType {
+        debug_assert_eq!(self.then.dtype(), self.or_else.dtype());
+        self.then.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        debug_assert_eq!(self.cond.shape(), self.then.shape());
+        debug_assert_eq!(self.cond.shape(), self.or_else.shape());
+        self.cond.shape()
+    }
+}
+
+#[async_trait]
+impl<Cond, Then, OrElse, T> DenseInstance for DenseCond<Cond, Then, OrElse>
+where
+    Cond: DenseInstance<DType = u8> + Clone,
+    Then: DenseInstance<DType = T> + Clone,
+    OrElse: DenseInstance<DType = T> + Clone,
+    T: CDatatype + DType,
+{
+    type Block = ArrayOp<ha_ndarray::ops::GatherCond<Cond::Block, T, Then::Block, OrElse::Block>>;
+    type DType = T;
+
+    fn block_size(&self) -> usize {
+        self.cond.block_size()
+    }
+
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        let (cond, then, or_else) = try_join!(
+            self.cond.read_block(txn_id, block_id),
+            self.then.read_block(txn_id, block_id),
+            self.or_else.read_block(txn_id, block_id),
+        )?;
+
+        cond.cond(then, or_else).map_err(TCError::from)
+    }
+
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        let num_blocks = div_ceil(self.size(), self.block_size() as u64);
+        let blocks = futures::stream::iter(0..num_blocks)
+            .map(move |block_id| {
+                let this = self.clone();
+                async move { this.read_block(txn_id, block_id).await }
+            })
+            .buffered(num_cpus::get());
+
+        Ok(Box::pin(blocks))
+    }
+
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        let (cond, then, or_else) = try_join!(
+            self.cond.read_value(txn_id, coord.to_vec()),
+            self.then.read_value(txn_id, coord.to_vec()),
+            self.or_else.read_value(txn_id, coord)
+        )?;
+
+        if cond != 0 {
+            Ok(then)
+        } else {
+            Ok(or_else)
+        }
+    }
+}
+
+#[async_trait]
+impl<Cond, Then, OrElse> TensorPermitRead for DenseCond<Cond, Then, OrElse>
+where
+    Cond: TensorPermitRead,
+    Then: TensorPermitRead,
+    OrElse: TensorPermitRead,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        // always aquire these permits in-order to minimize the risk of a deadlock
+        let mut permit = self.cond.read_permit(txn_id, range.clone()).await?;
+
+        let then = self.then.read_permit(txn_id, range.clone()).await?;
+        permit.extend(then);
+
+        let or_else = self.or_else.read_permit(txn_id, range.clone()).await?;
+        permit.extend(or_else);
+
+        Ok(permit)
+    }
+}
+
+impl<Txn, FE, Cond, Then, OrElse, T> From<DenseCond<Cond, Then, OrElse>> for DenseAccess<Txn, FE, T>
+where
+    Cond: Into<DenseAccess<Txn, FE, u8>>,
+    Then: Into<DenseAccess<Txn, FE, T>>,
+    OrElse: Into<DenseAccess<Txn, FE, T>>,
+    T: CDatatype,
+{
+    fn from(cond: DenseCond<Cond, Then, OrElse>) -> Self {
+        Self::Cond(Box::new(DenseCond {
+            cond: cond.cond.into(),
+            then: cond.then.into(),
+            or_else: cond.or_else.into(),
+        }))
+    }
+}
+
+impl<Cond, Then, OrElse> fmt::Debug for DenseCond<Cond, Then, OrElse>
+where
+    Cond: fmt::Debug,
+    Then: fmt::Debug,
+    OrElse: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "read from {:?} or {:?} based on {:?}",
+            self.then, self.or_else, self.cond
+        )
     }
 }
 
