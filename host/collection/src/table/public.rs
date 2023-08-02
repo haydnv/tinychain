@@ -14,11 +14,12 @@ use tc_transact::fs::{Dir, Persist};
 use tc_transact::public::{
     DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route, StateInstance,
 };
-use tc_transact::{fs, Transaction};
-use tc_value::Value;
+use tc_transact::Transaction;
+use tc_value::{Value, ValueCollator};
 use tcgeneric::{label, Id, Map, PathSegment, ThreadSafe, Tuple};
 
-use crate::btree::Node;
+use crate::btree::{BTreeSchema, Node};
+use crate::table::TableUpdate;
 use crate::Collection;
 
 use super::{
@@ -29,8 +30,7 @@ use super::{
 impl<State> Route<State> for TableType
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
-    TableFile<State::Txn, State::FE>:
-        fs::Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
+    TableFile<State::Txn, State::FE>: Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
     Value: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
@@ -78,8 +78,7 @@ struct CreateHandler;
 impl<'a, State> Handler<'a, State> for CreateHandler
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
-    TableFile<State::Txn, State::FE>:
-        fs::Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
+    TableFile<State::Txn, State::FE>: Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -272,6 +271,39 @@ struct TableHandler<Txn, FE> {
     table: Table<Txn, FE>,
 }
 
+impl<Txn, FE> TableHandler<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe + Clone,
+{
+    async fn create_tmp(
+        &self,
+        txn: &Txn,
+    ) -> TCResult<b_tree::BTreeLock<BTreeSchema, ValueCollator, FE>> {
+        let (_, tmp) = {
+            let mut context = txn.context().write().await;
+            context.create_dir_unique()?
+        };
+
+        b_tree::BTreeLock::create(
+            self.table.schema().primary().clone(),
+            ValueCollator::default(),
+            tmp,
+        )
+        .map_err(TCError::from)
+    }
+
+    async fn truncate(self, txn: &Txn, range: Range) -> TCResult<()> {
+        let tmp = self.create_tmp(txn).await?;
+        self.table.truncate(*txn.id(), range, tmp).await
+    }
+
+    async fn update(self, txn: &Txn, range: Range, values: Map<Value>) -> TCResult<()> {
+        let tmp = self.create_tmp(txn).await?;
+        self.table.update(*txn.id(), range, values, tmp).await
+    }
+}
+
 impl<'a, State> Handler<'a, State> for TableHandler<State::Txn, State::FE>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Map<State>>,
@@ -313,16 +345,14 @@ where
             Box::pin(async move {
                 debug!("Table PUT {:?} <- {:?}", key, values);
 
-                let txn_id = *txn.id();
-
                 match KeyOrRange::try_from_value(&self.table, key)? {
                     KeyOrRange::All => {
                         let values = Map::<Value>::try_from(values)?;
-                        self.table.update(txn_id, Range::default(), values).await
+                        self.update(txn, Range::default(), values).await
                     }
                     KeyOrRange::Range(range) => {
                         let values = Map::<Value>::try_from(values)?;
-                        self.table.update(txn_id, range, values).await
+                        self.update(txn, range, values).await
                     }
                     KeyOrRange::Key(key) => {
                         let values = Tuple::<State>::try_cast_from(values, |s| {
@@ -372,9 +402,9 @@ where
                 let txn_id = *txn.id();
 
                 match KeyOrRange::try_from_value(&self.table, key)? {
-                    KeyOrRange::All => self.table.truncate(txn_id, Range::default()).await,
+                    KeyOrRange::All => self.truncate(txn, Range::default()).await,
                     KeyOrRange::Key(key) => self.table.delete(txn_id, key).await,
-                    KeyOrRange::Range(range) => self.table.truncate(txn_id, range).await,
+                    KeyOrRange::Range(range) => self.truncate(txn, range).await,
                 }
             })
         }))
@@ -519,8 +549,7 @@ pub struct Static;
 impl<State> Route<State> for Static
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
-    TableFile<State::Txn, State::FE>:
-        fs::Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
+    TableFile<State::Txn, State::FE>: Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
     Value: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
@@ -578,9 +607,8 @@ fn cast_into_range<T: TableInstance + fmt::Debug>(table: &T, scalar: Scalar) -> 
         return Ok(Range::default());
     }
 
-    let column_ranges = Map::<Value>::try_cast_from(scalar, |s| {
-        bad_request!("invalid selection bounds for {table:?}: {s:?}")
-    })?;
+    let column_ranges = Map::<Value>::try_from(scalar)
+        .map_err(|cause| bad_request!("invalid selection bounds for {table:?}").consume(cause))?;
 
     let columns = table.schema().primary().columns();
 

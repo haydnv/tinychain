@@ -4,7 +4,7 @@ use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use b_table::TableLock;
+use b_table::{Schema, TableLock};
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, DirWriteGuard};
@@ -16,9 +16,10 @@ use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Inner, Persist, Restore, VERSIONS};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
-use tcgeneric::{label, Id, Instance, Label, TCBoxTryStream, ThreadSafe};
+use tcgeneric::{label, Id, Instance, Label, Map, TCBoxTryStream, ThreadSafe};
 
-use crate::btree::{BTreeSchema as IndexSchema, Node};
+use crate::btree::{BTreeSchema as IndexSchema, BTreeSchema, Node};
+use crate::table::TableUpdate;
 
 use super::stream::Rows;
 use super::view::{Limited, Selection, TableSlice as Slice};
@@ -424,6 +425,110 @@ where
     async fn rows<'a>(self, txn_id: TxnId) -> TCResult<Rows<'a>> {
         self.into_stream(txn_id, Range::default(), vec![], false)
             .await
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> TableUpdate<FE> for TableFile<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
+    async fn truncate(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+        tmp: b_tree::BTreeLock<BTreeSchema, ValueCollator, FE>,
+    ) -> TCResult<()> {
+        debug!("truncate range {range:?}");
+
+        let _permit = self.semaphore.write(txn_id, range.clone()).await?;
+
+        let key_len = self.schema().key().len();
+
+        let mut rows = self.clone().into_rows(txn_id, range, vec![], false).await?;
+
+        let mut truncated = tmp.write().await;
+        while let Some(row) = rows.try_next().await? {
+            truncated.insert(row).await?;
+        }
+
+        let pending = {
+            let mut state = self.state.write().expect("state");
+            state.pending_version(txn_id, self.schema(), self.canon.collator().inner())?
+        };
+
+        let (mut inserts, mut deletes) = pending.write().await;
+
+        let truncated = truncated.downgrade();
+        let mut rows = truncated.keys(b_tree::Range::default(), false);
+
+        while let Some(mut row) = rows.try_next().await? {
+            let values = row.drain(key_len..).collect();
+            let key = row;
+
+            deletes.upsert(key.to_vec(), values).await?;
+            inserts.delete_row(key).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn update(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+        values: Map<Value>,
+        tmp: b_tree::BTreeLock<BTreeSchema, ValueCollator, FE>,
+    ) -> TCResult<()> {
+        debug!("update values to {values:?} in range {range:?}");
+
+        let value_columns = self.schema().values();
+        if values.keys().any(|name| !value_columns.contains(name)) {
+            return Err(bad_request!(
+                "cannot update values {value_columns:?} with {values:?}"
+            ));
+        }
+
+        let _permit = self.semaphore.write(txn_id, range.clone()).await?;
+
+        let key_len = self.schema().key().len();
+        let update_row = |mut row: Vec<Value>| {
+            for (i, name) in value_columns.iter().enumerate() {
+                if let Some(value) = values.get(name) {
+                    row[key_len + i] = value.clone();
+                }
+            }
+
+            row
+        };
+
+        let mut rows = self.clone().into_rows(txn_id, range, vec![], false).await?;
+
+        let mut updated = tmp.write().await;
+        while let Some(row) = rows.try_next().await? {
+            updated.insert(update_row(row)).await?;
+        }
+
+        let pending = {
+            let mut state = self.state.write().expect("state");
+            state.pending_version(txn_id, self.schema(), self.canon.collator().inner())?
+        };
+
+        let (mut inserts, mut deletes) = pending.write().await;
+
+        let updated = updated.downgrade();
+        let mut rows = updated.keys(b_tree::Range::default(), false);
+
+        while let Some(mut row) = rows.try_next().await? {
+            let values = row.drain(key_len..).collect();
+            let key = row;
+
+            deletes.delete_row(key.to_vec()).await?;
+            inserts.upsert(key, values).await?;
+        }
+
+        Ok(())
     }
 }
 

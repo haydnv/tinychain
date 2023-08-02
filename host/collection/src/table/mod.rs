@@ -8,7 +8,7 @@ use safecast::{as_type, AsType};
 
 use tc_error::*;
 use tc_transact::{Transaction, TxnId};
-use tc_value::Value;
+use tc_value::{Value, ValueCollator};
 use tcgeneric::{
     path_label, Class, Id, Instance, Map, NativeClass, PathLabel, PathSegment, TCPathBuf,
     ThreadSafe,
@@ -18,6 +18,7 @@ use super::btree::Node;
 
 pub use b_table::{IndexSchema, Schema};
 
+use crate::btree::BTreeSchema;
 pub use file::TableFile;
 pub use schema::TableSchema;
 pub use stream::Rows;
@@ -154,21 +155,35 @@ pub trait TableStream: TableInstance + Sized {
     async fn rows<'a>(self, txn_id: TxnId) -> TCResult<Rows<'a>>;
 }
 
+/// The [`Table`] update method
+#[async_trait]
+pub trait TableUpdate<FE>: TableInstance
+where
+    FE: AsType<Node> + ThreadSafe,
+{
+    /// Delete all rows in the given `range` from this table.
+    async fn truncate(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+        tmp: b_tree::BTreeLock<BTreeSchema, ValueCollator, FE>,
+    ) -> TCResult<()>;
+
+    /// Update all rows in `range` with the given `values`.
+    async fn update(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+        values: Map<Value>,
+        tmp: b_tree::BTreeLock<BTreeSchema, ValueCollator, FE>,
+    ) -> TCResult<()>;
+}
+
 /// [`Table`] write methods
 #[async_trait]
 pub trait TableWrite: TableInstance {
     /// Delete the given row from this table, if present.
     async fn delete(&self, txn_id: TxnId, key: Key) -> TCResult<()>;
-
-    /// Delete all rows in the given `range` from this table.
-    async fn truncate(&self, _txn_id: TxnId, _range: Range) -> TCResult<()> {
-        Err(not_implemented!("TableWrite::truncate"))
-    }
-
-    /// Update all rows in the given `range` to match the given `values`.
-    async fn update(&self, _txn_id: TxnId, _range: Range, _values: Map<Value>) -> TCResult<()> {
-        Err(not_implemented!("TableWrite::update"))
-    }
 
     /// Insert or update the given row.
     async fn upsert(&self, txn_id: TxnId, key: Key, values: Values) -> TCResult<()>;
@@ -335,6 +350,40 @@ where
             Self::Selection(selection) => selection.rows(txn_id).await,
             Self::Slice(slice) => slice.rows(txn_id).await,
             Self::Table(table) => table.rows(txn_id).await,
+        }
+    }
+}
+
+#[async_trait]
+impl<Txn, FE> TableUpdate<FE> for Table<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe,
+{
+    async fn truncate(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+        tmp: b_tree::BTreeLock<BTreeSchema, ValueCollator, FE>,
+    ) -> TCResult<()> {
+        if let Self::Table(table) = self {
+            table.truncate(txn_id, range, tmp).await
+        } else {
+            Err(bad_request!("{:?} does not support write operations", self))
+        }
+    }
+
+    async fn update(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+        values: Map<Value>,
+        tmp: b_tree::BTreeLock<BTreeSchema, ValueCollator, FE>,
+    ) -> TCResult<()> {
+        if let Self::Table(table) = self {
+            table.update(txn_id, range, values, tmp).await
+        } else {
+            Err(bad_request!("{:?} does not support write operations", self))
         }
     }
 }
