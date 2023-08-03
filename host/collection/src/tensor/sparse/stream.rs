@@ -309,6 +309,125 @@ where
 }
 
 #[pin_project]
+pub struct Select<Cond, Then, OrElse, T> {
+    #[pin]
+    cond: Fuse<Cond>,
+    #[pin]
+    then: Fuse<Then>,
+    #[pin]
+    or_else: Fuse<OrElse>,
+
+    pending_cond: Option<(u64, u8)>,
+    pending_then: Option<(u64, T)>,
+    pending_else: Option<(u64, T)>,
+}
+
+impl<Cond, Then, OrElse, T> Select<Cond, Then, OrElse, T>
+where
+    Cond: Stream,
+    Then: Stream,
+    OrElse: Stream,
+{
+    pub fn new(cond: Cond, then: Then, or_else: OrElse) -> Self {
+        Self {
+            cond: cond.fuse(),
+            then: then.fuse(),
+            or_else: or_else.fuse(),
+            pending_cond: None,
+            pending_then: None,
+            pending_else: None,
+        }
+    }
+}
+
+// Based on: https://github.com/rust-lang/futures-rs/blob/master/futures-util/src/stream/select.rs
+impl<Cond, Then, OrElse, T> Stream for Select<Cond, Then, OrElse, T>
+where
+    Cond: Stream<Item = TCResult<(u64, u8)>>,
+    Then: Stream<Item = TCResult<(u64, T)>>,
+    OrElse: Stream<Item = TCResult<(u64, T)>>,
+    T: CDatatype + fmt::Debug,
+{
+    type Item = TCResult<(u64, T)>;
+
+    fn poll_next(self: Pin<&mut Self>, cxt: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut this = self.project();
+
+        Poll::Ready(loop {
+            if !this.cond.is_done() && this.pending_cond.is_none() {
+                match ready!(this.cond.as_mut().try_poll_next(cxt)) {
+                    Some(Ok(value)) => *this.pending_cond = Some(value),
+                    Some(Err(cause)) => break Some(Err(cause)),
+                    None => {}
+                }
+            }
+
+            if !this.then.is_done() && this.pending_then.is_none() {
+                match ready!(this.then.as_mut().try_poll_next(cxt)) {
+                    Some(Ok(value)) => *this.pending_then = Some(value),
+                    Some(Err(cause)) => break Some(Err(cause)),
+                    None => {}
+                }
+            }
+
+            if !this.or_else.is_done() && this.pending_else.is_none() {
+                match ready!(this.or_else.as_mut().try_poll_next(cxt)) {
+                    Some(Ok(value)) => *this.pending_else = Some(value),
+                    Some(Err(cause)) => break Some(Err(cause)),
+                    None => {}
+                }
+            }
+
+            let cond = this.pending_cond.as_ref().map(|(offset, _)| offset);
+            let then = this.pending_then.as_ref().map(|(offset, _)| *offset);
+            let or_else = this.pending_else.as_ref().map(|(offset, _)| *offset);
+
+            match (cond, then, or_else) {
+                (Some(offset), _then, Some(else_offset)) if else_offset < *offset => {
+                    // the cond stream skipped over a filled false-value
+                    break this.pending_else.take().map(Ok);
+                }
+                (Some(offset), Some(then_offset), _else) => match offset.cmp(&then_offset) {
+                    Ordering::Less => {
+                        // consume this element in the cond stream
+                        *this.pending_cond = None
+                    }
+                    Ordering::Equal => {
+                        *this.pending_cond = None; // consume this element in the cond stream
+                        break this.pending_then.take().map(Ok); // consume this true-value
+                    }
+                    Ordering::Greater => {
+                        *this.pending_then = None; // consume a skipped true-value
+                    }
+                },
+                (Some(offset), None, Some(else_offset)) => match offset.cmp(&else_offset) {
+                    Ordering::Less => {
+                        // consume this element in the cond stream
+                        *this.pending_cond = None
+                    }
+                    Ordering::Equal => {
+                        *this.pending_cond = None; // consume this element in the cond stream
+                        *this.pending_else = None; // consume this false-value
+                    }
+                    Ordering::Greater => {
+                        // consume and return this false-value
+                        break this.pending_else.take().map(Ok);
+                    }
+                },
+                (None, _then, _else) => {
+                    // consume and return the next false-value, if any
+                    break this.pending_else.take().map(Ok);
+                }
+                (_cond, None, None) => {
+                    // there are no more values to return
+                    break None;
+                }
+            }
+        })
+    }
+}
+
+#[pin_project]
 pub struct TryDiff<L, R, T> {
     #[pin]
     left: Fuse<L>,
