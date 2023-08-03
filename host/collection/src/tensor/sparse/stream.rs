@@ -402,8 +402,7 @@ where
                 },
                 (Some(offset), None, Some(else_offset)) => match offset.cmp(&else_offset) {
                     Ordering::Less => {
-                        // consume this element in the cond stream
-                        *this.pending_cond = None
+                        *this.pending_cond = None; // consume this element in the cond stream
                     }
                     Ordering::Equal => {
                         *this.pending_cond = None; // consume this element in the cond stream
@@ -419,6 +418,9 @@ where
                     break this.pending_else.take().map(Ok);
                 }
                 (_cond, None, None) => {
+                    // consume this element in the cond stream in case poll is called again
+                    *this.pending_cond = None;
+
                     // there are no more values to return
                     break None;
                 }

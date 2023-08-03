@@ -291,12 +291,13 @@ pub enum SparseAccess<Txn, FE, T: CDatatype> {
     Table(SparseFile<FE, T>),
     Broadcast(Box<SparseBroadcast<Txn, FE, T>>),
     BroadcastAxis(Box<SparseBroadcastAxis<Self>>),
-    Compare(Box<SparseCompare<Txn, FE, T>>),
-    CompareConst(Box<SparseCompareConst<Txn, FE, T>>),
-    CompareLeft(Box<SparseCompareLeft<Txn, FE, T>>),
     Combine(Box<SparseCombine<Self, Self, T>>),
     CombineLeft(Box<SparseCombineLeft<Self, Self, T>>),
     CombineConst(Box<SparseCombineConst<Self, T>>),
+    Compare(Box<SparseCompare<Txn, FE, T>>),
+    CompareConst(Box<SparseCompareConst<Txn, FE, T>>),
+    CompareLeft(Box<SparseCompareLeft<Txn, FE, T>>),
+    Cond(Box<SparseCond<SparseAccess<Txn, FE, u8>, Self, Self>>),
     Cow(Box<SparseCow<FE, T, Self>>),
     Dense(Box<SparseDense<DenseAccess<Txn, FE, T>>>),
     Expand(Box<SparseExpand<Self>>),
@@ -322,6 +323,7 @@ impl<Txn, FE, T: CDatatype> Clone for SparseAccess<Txn, FE, T> {
             Self::Compare(compare) => Self::Compare(compare.clone()),
             Self::CompareConst(compare) => Self::CompareConst(compare.clone()),
             Self::CompareLeft(compare) => Self::CompareLeft(compare.clone()),
+            Self::Cond(cond) => Self::Cond(cond.clone()),
             Self::Cow(cow) => Self::Cow(cow.clone()),
             Self::Dense(dense) => Self::Dense(dense.clone()),
             Self::Expand(expand) => Self::Expand(expand.clone()),
@@ -349,6 +351,7 @@ macro_rules! access_dispatch {
             Self::Compare($var) => $call,
             Self::CompareConst($var) => $call,
             Self::CompareLeft($var) => $call,
+            Self::Cond($var) => $call,
             Self::Cow($var) => $call,
             Self::Dense($var) => $call,
             Self::Expand($var) => $call,
@@ -440,6 +443,7 @@ where
             Self::CombineConst(combine) => combine.read_permit(txn_id, range).await,
             Self::Compare(compare) => compare.read_permit(txn_id, range).await,
             Self::CompareLeft(compare) => compare.read_permit(txn_id, range).await,
+            Self::Cond(cond) => cond.read_permit(txn_id, range).await,
             Self::Dense(dense) => dense.read_permit(txn_id, range).await,
             Self::Expand(expand) => expand.read_permit(txn_id, range).await,
             Self::Reduce(reduce) => reduce.read_permit(txn_id, range).await,
@@ -1843,6 +1847,183 @@ impl<Txn, FE, T: CDatatype> fmt::Debug for SparseCompareConst<Txn, FE, T> {
     }
 }
 
+#[derive(Clone)]
+pub struct SparseCond<Cond, Then, OrElse> {
+    cond: Cond,
+    then: Then,
+    or_else: OrElse,
+}
+
+impl<Cond, Then, OrElse> SparseCond<Cond, Then, OrElse>
+where
+    Cond: TensorInstance + fmt::Debug,
+    Then: TensorInstance + fmt::Debug,
+    OrElse: TensorInstance + fmt::Debug,
+{
+    fn new(cond: Cond, then: Then, or_else: OrElse) -> TCResult<Self> {
+        if cond.dtype() == NumberType::Bool
+            && cond.shape() == then.shape()
+            && cond.shape() == or_else.shape()
+            && then.dtype() == or_else.dtype()
+        {
+            Ok(Self {
+                cond,
+                then,
+                or_else,
+            })
+        } else {
+            Err(bad_request!(
+                "cannot select from {then:?} and {or_else:?} based on {cond:?}"
+            ))
+        }
+    }
+}
+
+impl<Cond, Then, OrElse> TensorInstance for SparseCond<Cond, Then, OrElse>
+where
+    Cond: TensorInstance,
+    Then: TensorInstance,
+    OrElse: TensorInstance,
+{
+    fn dtype(&self) -> NumberType {
+        debug_assert_eq!(self.then.dtype(), self.or_else.dtype());
+        self.then.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        debug_assert_eq!(self.cond.shape(), self.then.shape());
+        debug_assert_eq!(self.cond.shape(), self.or_else.shape());
+        self.cond.shape()
+    }
+}
+
+#[async_trait]
+impl<Cond, Then, OrElse, T> SparseInstance for SparseCond<Cond, Then, OrElse>
+where
+    Cond: SparseInstance<DType = u8>,
+    Then: SparseInstance<DType = T>,
+    OrElse: SparseInstance<DType = T>,
+    T: CDatatype + DType + fmt::Debug,
+{
+    type CoordBlock = Array<u64>;
+    type ValueBlock = ArrayBase<Vec<T>>;
+    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type DType = T;
+
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
+        let shape = self.shape().to_vec();
+        let ndim = shape.len();
+
+        let strides = strides_for(&shape, ndim);
+        let strides = ArrayBase::<Arc<Vec<_>>>::new(vec![strides.len()], Arc::new(strides))?;
+
+        let (cond, then, or_else) = try_join!(
+            self.cond.blocks(txn_id, range.clone(), order.to_vec()),
+            self.then.blocks(txn_id, range.clone(), order.to_vec()),
+            self.or_else.blocks(txn_id, range, order)
+        )?;
+
+        let cond = offsets(strides.clone(), cond);
+        let then = offsets(strides.clone(), then);
+        let or_else = offsets(strides.clone(), or_else);
+
+        let elements = stream::Select::new(cond, then, or_else);
+        let offsets = stream::BlockOffsets::new(elements);
+
+        let dims = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], Arc::new(shape))?;
+        let blocks = offsets.map(move |result| {
+            let (offsets, values) = result?;
+            let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
+            Ok((coords, values))
+        });
+
+        Ok(Box::pin(blocks))
+    }
+
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
+        let ndim = self.ndim();
+        let blocks = self.blocks(txn_id, range, order).await?;
+        block_elements(blocks, ndim)
+    }
+
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
+        let (cond, then, or_else) = try_join!(
+            self.cond.read_value(txn_id, coord.to_vec()),
+            self.then.read_value(txn_id, coord.to_vec()),
+            self.or_else.read_value(txn_id, coord)
+        )?;
+
+        if cond != 0 {
+            Ok(then)
+        } else {
+            Ok(or_else)
+        }
+    }
+}
+
+#[async_trait]
+impl<Cond, Then, OrElse> TensorPermitRead for SparseCond<Cond, Then, OrElse>
+where
+    Cond: TensorPermitRead,
+    Then: TensorPermitRead,
+    OrElse: TensorPermitRead,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        // always acquire these locks in-order to reduce the risk of a deadlock
+        let mut permit = self.cond.read_permit(txn_id, range.clone()).await?;
+
+        let then = self.then.read_permit(txn_id, range.clone()).await?;
+        permit.extend(then);
+
+        let or_else = self.or_else.read_permit(txn_id, range).await?;
+        permit.extend(or_else);
+
+        Ok(permit)
+    }
+}
+
+impl<Txn, FE, Cond, Then, OrElse, T> From<SparseCond<Cond, Then, OrElse>>
+    for SparseAccess<Txn, FE, T>
+where
+    Cond: Into<SparseAccess<Txn, FE, u8>>,
+    Then: Into<SparseAccess<Txn, FE, T>>,
+    OrElse: Into<SparseAccess<Txn, FE, T>>,
+    T: CDatatype,
+{
+    fn from(cond: SparseCond<Cond, Then, OrElse>) -> Self {
+        Self::Cond(Box::new(SparseCond {
+            cond: cond.cond.into(),
+            then: cond.then.into(),
+            or_else: cond.or_else.into(),
+        }))
+    }
+}
+
+impl<Cond, Then, OrElse> fmt::Debug for SparseCond<Cond, Then, OrElse>
+where
+    Cond: fmt::Debug,
+    Then: fmt::Debug,
+    OrElse: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "select from {:?} and {:?} based on {:?}",
+            self.then, self.or_else, self.cond
+        )
+    }
+}
+
 pub struct SparseCow<FE, T, S> {
     source: S,
     filled: SparseFile<FE, T>,
@@ -1950,26 +2131,7 @@ where
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
         let blocks = self.blocks(txn_id, range, order).await?;
-        let elements = blocks
-            .map(move |result| {
-                let (coords, values) = result?;
-
-                let queue = autoqueue(&coords)?;
-                let coords = coords.read(&queue)?.to_slice()?;
-                let tuples = coords
-                    .as_ref()
-                    .into_par_iter()
-                    .copied()
-                    .chunks(ndim)
-                    .zip(values.into_inner());
-
-                let elements = futures::stream::iter(tuples.map(Ok).collect::<Vec<_>>());
-
-                TCResult::Ok(elements)
-            })
-            .try_flatten();
-
-        Ok(Box::pin(elements))
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
