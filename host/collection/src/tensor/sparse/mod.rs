@@ -27,9 +27,9 @@ use super::dense::{DenseAccess, DenseAccessCast, DenseCacheFile, DenseSparse, De
 
 use super::{
     Axes, AxisRange, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast,
-    TensorCompare, TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorMathConst,
-    TensorPermitRead, TensorRead, TensorReduce, TensorTransform, TensorType, TensorUnary,
-    TensorUnaryBoolean, TensorWrite, TensorWriteDual, IMAG, REAL,
+    TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorInstance, TensorMath,
+    TensorMathConst, TensorPermitRead, TensorRead, TensorReduce, TensorTransform, TensorType,
+    TensorUnary, TensorUnaryBoolean, TensorWrite, TensorWriteDual, IMAG, REAL,
 };
 
 pub use access::*;
@@ -441,6 +441,27 @@ where
 
     fn xor_const(self, other: Number) -> TCResult<Self::Combine> {
         Err(bad_request!("cannot call XOR {} on {:?} because the result would not be sparse (consider converting to a dense tensor first)", other, self))
+    }
+}
+
+impl<Txn, FE, Cond, Then, OrElse, T>
+    TensorCond<SparseTensor<Txn, FE, Then>, SparseTensor<Txn, FE, OrElse>>
+    for SparseTensor<Txn, FE, Cond>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    Cond: SparseInstance<DType = u8> + fmt::Debug,
+    Then: SparseInstance<DType = T> + fmt::Debug,
+    OrElse: SparseInstance<DType = T> + fmt::Debug,
+{
+    type Cond = SparseTensor<Txn, FE, SparseCond<Cond, Then, OrElse>>;
+
+    fn cond(
+        self,
+        then: SparseTensor<Txn, FE, Then>,
+        or_else: SparseTensor<Txn, FE, OrElse>,
+    ) -> TCResult<Self::Cond> {
+        SparseCond::new(self.accessor, then.accessor, or_else.accessor).map(SparseTensor::from)
     }
 }
 

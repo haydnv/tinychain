@@ -1544,7 +1544,7 @@ where
     OrElse: DenseInstance<DType = T> + fmt::Debug,
     T: CDatatype,
 {
-    fn new(cond: Cond, then: Then, or_else: OrElse) -> TCResult<DenseCond<Cond, Then, OrElse>> {
+    pub fn new(cond: Cond, then: Then, or_else: OrElse) -> TCResult<DenseCond<Cond, Then, OrElse>> {
         if cond.dtype() == NumberType::Bool
             && cond.shape() == then.shape()
             && cond.shape() == or_else.shape()

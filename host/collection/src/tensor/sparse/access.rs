@@ -1860,7 +1860,7 @@ where
     Then: TensorInstance + fmt::Debug,
     OrElse: TensorInstance + fmt::Debug,
 {
-    fn new(cond: Cond, then: Then, or_else: OrElse) -> TCResult<Self> {
+    pub fn new(cond: Cond, then: Then, or_else: OrElse) -> TCResult<Self> {
         if cond.dtype() == NumberType::Bool
             && cond.shape() == then.shape()
             && cond.shape() == or_else.shape()

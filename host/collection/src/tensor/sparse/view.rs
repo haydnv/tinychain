@@ -21,9 +21,9 @@ use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTr
 use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
     autoqueue, strides_for, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst,
-    TensorCast, TensorCompare, TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance,
-    TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce,
-    TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
+    TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal,
+    TensorInstance, TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead,
+    TensorReduce, TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
@@ -430,6 +430,97 @@ where
             NumberType::UInt(UIntType::U16) => view_dispatch_cast!(U16),
             NumberType::UInt(UIntType::U32) => view_dispatch_cast!(U32),
             NumberType::UInt(UIntType::U64) => view_dispatch_cast!(U64),
+        }
+    }
+}
+
+impl<Txn, FE> TensorCond<Self, Self> for SparseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Cond = Self;
+
+    fn cond(self, then: Self, or_else: Self) -> TCResult<Self::Cond> {
+        let this = if let Self::Bool(this) = self {
+            this
+        } else {
+            let this = TensorCast::cast_into(self, NumberType::Bool)?;
+            return this.cond(then, or_else);
+        };
+
+        match (then, or_else) {
+            (Self::Bool(then), Self::Bool(or_else)) => this
+                .cond(then, or_else)
+                .map(sparse_from)
+                .map(SparseView::Bool),
+
+            (Self::C32((then_re, then_im)), Self::C32((else_re, else_im))) => {
+                let re = this.clone().cond(then_re, else_re)?;
+                let im = this.cond(then_im, else_im)?;
+                Ok(SparseView::C32((sparse_from(re), sparse_from(im))))
+            }
+
+            (Self::C64((then_re, then_im)), Self::C64((else_re, else_im))) => {
+                let re = this.clone().cond(then_re, else_re)?;
+                let im = this.cond(then_im, else_im)?;
+                Ok(SparseView::C64((sparse_from(re), sparse_from(im))))
+            }
+
+            (Self::F32(then), Self::F32(or_else)) => this
+                .cond(then, or_else)
+                .map(sparse_from)
+                .map(SparseView::F32),
+
+            (Self::F64(then), Self::F64(or_else)) => this
+                .cond(then, or_else)
+                .map(sparse_from)
+                .map(SparseView::F64),
+
+            (Self::I16(then), Self::I16(or_else)) => this
+                .cond(then, or_else)
+                .map(sparse_from)
+                .map(SparseView::I16),
+
+            (Self::I32(then), Self::I32(or_else)) => this
+                .cond(then, or_else)
+                .map(sparse_from)
+                .map(SparseView::I32),
+
+            (Self::I64(then), Self::I64(or_else)) => this
+                .cond(then, or_else)
+                .map(sparse_from)
+                .map(SparseView::I64),
+
+            (Self::U8(then), Self::U8(or_else)) => this
+                .cond(then, or_else)
+                .map(sparse_from)
+                .map(SparseView::U8),
+
+            (Self::U16(then), Self::U16(or_else)) => this
+                .cond(then, or_else)
+                .map(sparse_from)
+                .map(SparseView::U16),
+
+            (Self::U32(then), Self::U32(or_else)) => this
+                .cond(then, or_else)
+                .map(sparse_from)
+                .map(SparseView::U32),
+
+            (Self::U64(then), Self::U64(or_else)) => this
+                .cond(then, or_else)
+                .map(sparse_from)
+                .map(SparseView::U64),
+
+            (then, or_else) if then.dtype() < or_else.dtype() => {
+                let then = TensorCast::cast_into(then, or_else.dtype())?;
+                SparseView::Bool(this).cond(then, or_else)
+            }
+
+            (then, or_else) => {
+                let or_else = TensorCast::cast_into(or_else, then.dtype())?;
+                SparseView::Bool(this).cond(then, or_else)
+            }
         }
     }
 }

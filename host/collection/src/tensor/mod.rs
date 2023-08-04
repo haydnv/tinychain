@@ -313,6 +313,15 @@ pub trait TensorCompareConst {
     fn ne_const(self, other: Number) -> TCResult<Self::Compare>;
 }
 
+/// Conditional logic for [`Tensor`]s
+pub trait TensorCond<Then, OrElse> {
+    /// The type of [`Tensor`] returned by `cond`
+    type Cond: TensorInstance;
+
+    /// Use this tensor as a condition to select elements from `then` or `or_else`.
+    fn cond(self, then: Then, or_else: OrElse) -> TCResult<Self::Cond>;
+}
+
 /// Methods to convert between a sparse an dense [`Tensor`]
 pub trait TensorConvert: ThreadSafe {
     /// A dense representation of this [`Tensor`]
@@ -596,8 +605,10 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for Dense<Txn, FE> {
     }
 }
 
-impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node> + Clone> TensorConvert
-    for Dense<Txn, FE>
+impl<Txn, FE> TensorConvert for Dense<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Dense = Self;
     type Sparse = Sparse<Txn, FE>;
@@ -1157,15 +1168,15 @@ where
 
     fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
         match self {
-            Self::Dense(this) => this.into_view().ge_const(other).map(Self::from),
-            Self::Sparse(this) => this.into_view().eq_const(other).map(Self::from),
+            Self::Dense(this) => this.into_view().lt_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().lt_const(other).map(Self::from),
         }
     }
 
     fn le_const(self, other: Number) -> TCResult<Self::Compare> {
         match self {
-            Self::Dense(this) => this.into_view().ge_const(other).map(Self::from),
-            Self::Sparse(this) => this.into_view().ge_const(other).map(Self::from),
+            Self::Dense(this) => this.into_view().le_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().le_const(other).map(Self::from),
         }
     }
 
@@ -1173,6 +1184,31 @@ where
         match self {
             Self::Dense(this) => this.into_view().ne_const(other).map(Self::from),
             Self::Sparse(this) => this.into_view().ne_const(other).map(Self::from),
+        }
+    }
+}
+
+impl<Txn, FE> TensorCond<Self, Self> for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Cond = Self;
+
+    fn cond(self, then: Self, or_else: Self) -> TCResult<Self::Cond> {
+        match (self, then, or_else) {
+            (Self::Dense(this), Self::Dense(then), Self::Dense(or_else)) => this
+                .into_view()
+                .cond(then.into_view(), or_else.into_view())
+                .map(Self::from),
+
+            (Self::Sparse(this), Self::Sparse(then), Self::Sparse(or_else)) => this
+                .into_view()
+                .cond(then.into_view(), or_else.into_view())
+                .map(Self::from),
+
+            (this, then, or_else) => Self::Dense(this.into_dense())
+                .cond(then.into_dense().into(), or_else.into_dense().into()),
         }
     }
 }

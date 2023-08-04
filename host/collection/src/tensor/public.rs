@@ -20,7 +20,7 @@ use tcgeneric::{label, Id, Label, PathSegment, TCBoxTryFuture, ThreadSafe, Tuple
 use super::{
     broadcast, broadcast_shape, Axes, AxisRange, Dense, DenseBase, DenseCacheFile, DenseView, Node,
     Range, Schema, Shape, Sparse, SparseBase, SparseView, Tensor, TensorBoolean,
-    TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst, TensorConvert,
+    TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert,
     TensorDiagonal, TensorInstance, TensorMatMul, TensorMath, TensorMathConst, TensorRead,
     TensorReduce, TensorTransform, TensorTrig, TensorType, TensorUnary, TensorUnaryBoolean,
     TensorWrite, TensorWriteDual,
@@ -854,6 +854,38 @@ where
     }
 }
 
+struct CondHandler<Txn, FE> {
+    tensor: Tensor<Txn, FE>,
+}
+
+impl<'a, State> Handler<'a, State> for CondHandler<State::Txn, State::FE>
+where
+    State: StateInstance + From<Tensor<State::Txn, State::FE>>,
+    State::FE: DenseCacheFile + AsType<Node>,
+    Tensor<State::Txn, State::FE>: TryCastFrom<State>,
+{
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let then = params.require(&label("then").into())?;
+                let or_else = params.require(&label("or_else").into())?;
+                params.expect_empty()?;
+
+                self.tensor.cond(then, or_else).map(State::from)
+            })
+        }))
+    }
+}
+
+impl<Txn, FE> From<Tensor<Txn, FE>> for CondHandler<Txn, FE> {
+    fn from(tensor: Tensor<Txn, FE>) -> Self {
+        Self { tensor }
+    }
+}
+
 struct DualHandler<Txn, FE> {
     tensor: Tensor<Txn, FE>,
     op: fn(Tensor<Txn, FE>, Tensor<Txn, FE>) -> TCResult<Tensor<Txn, FE>>,
@@ -1643,6 +1675,9 @@ where
                 TensorCompare::ne,
                 TensorCompareConst::ne_const,
             ))),
+
+            // conditional logic
+            "cond" => Some(Box::new(CondHandler::from(tensor))),
 
             // linear algebra
             "diagonal" => Some(Box::new(DiagonalHandler::from(tensor))),

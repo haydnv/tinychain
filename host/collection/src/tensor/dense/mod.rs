@@ -26,13 +26,12 @@ use super::complex::ComplexRead;
 use super::sparse::{Node, SparseDense, SparseTensor};
 use super::{
     Axes, Coord, Range, Schema, Shape, TensorBoolean, TensorBooleanConst, TensorCast,
-    TensorCompare, TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance, TensorMath,
-    TensorMathConst, TensorPermitRead, TensorPermitWrite, TensorRead, TensorReduce,
-    TensorTransform, TensorType, TensorUnary, TensorUnaryBoolean, TensorWrite, TensorWriteDual,
-    IDEAL_BLOCK_SIZE, IMAG, REAL,
+    TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal, TensorInstance,
+    TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorPermitWrite, TensorRead,
+    TensorReduce, TensorTransform, TensorType, TensorUnary, TensorUnaryBoolean, TensorWrite,
+    TensorWriteDual, IDEAL_BLOCK_SIZE, IMAG, REAL,
 };
 
-use crate::tensor::TensorMatMul;
 pub use access::*;
 pub use view::*;
 
@@ -395,6 +394,28 @@ where
             })
             .into(),
         )
+    }
+}
+
+impl<Txn, FE, Cond, Then, OrElse, T>
+    TensorCond<DenseTensor<Txn, FE, Then>, DenseTensor<Txn, FE, OrElse>>
+    for DenseTensor<Txn, FE, Cond>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    Cond: DenseInstance<DType = u8> + fmt::Debug,
+    Then: DenseInstance<DType = T> + fmt::Debug,
+    OrElse: DenseInstance<DType = T> + fmt::Debug,
+    T: CDatatype,
+{
+    type Cond = DenseTensor<Txn, FE, DenseCond<Cond, Then, OrElse>>;
+
+    fn cond(
+        self,
+        then: DenseTensor<Txn, FE, Then>,
+        or_else: DenseTensor<Txn, FE, OrElse>,
+    ) -> TCResult<Self::Cond> {
+        DenseCond::new(self.accessor, then.accessor, or_else.accessor).map(DenseTensor::from)
     }
 }
 

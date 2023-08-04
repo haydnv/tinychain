@@ -18,9 +18,9 @@ use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTr
 use crate::tensor::sparse::{sparse_from, Node};
 use crate::tensor::{
     autoqueue, Axes, Coord, Range, Shape, SparseView, TensorBoolean, TensorBooleanConst,
-    TensorCast, TensorCompare, TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance,
-    TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce,
-    TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
+    TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal,
+    TensorInstance, TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead,
+    TensorReduce, TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{dense_from, DenseAccess, DenseCacheFile, DenseInstance, DenseTensor, DenseUnaryCast};
@@ -525,6 +525,110 @@ where
             ComplexCompare::ne_const((this.0.into(), this.1.into()), other),
             { this.ne_const(other).map(dense_from).map(Self::Bool) }
         )
+    }
+}
+
+impl<Txn, FE> TensorCond<Self, Self> for DenseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Cond = Self;
+
+    fn cond(self, then: Self, or_else: Self) -> TCResult<Self::Cond> {
+        let block_size = [then.block_size(), or_else.block_size()]
+            .into_iter()
+            .fold(self.block_size(), Ord::max);
+
+        let this = if self.block_size() == block_size {
+            self
+        } else {
+            self.resize_blocks(block_size)
+        };
+
+        let then = if then.block_size() == block_size {
+            then
+        } else {
+            then.resize_blocks(block_size)
+        };
+
+        let or_else = if or_else.block_size() == block_size {
+            or_else
+        } else {
+            or_else.resize_blocks(block_size)
+        };
+
+        let this = if let Self::Bool(this) = this {
+            this
+        } else {
+            let this = TensorCast::cast_into(this, NumberType::Bool)?;
+            return this.cond(then, or_else);
+        };
+
+        match (then, or_else) {
+            (Self::Bool(then), Self::Bool(or_else)) => this
+                .cond(then, or_else)
+                .map(dense_from)
+                .map(DenseView::Bool),
+
+            (Self::C32((then_re, then_im)), Self::C32((else_re, else_im))) => {
+                let re = this.clone().cond(then_re, else_re)?;
+                let im = this.cond(then_im, else_im)?;
+                Ok(DenseView::C32((dense_from(re), dense_from(im))))
+            }
+
+            (Self::C64((then_re, then_im)), Self::C64((else_re, else_im))) => {
+                let re = this.clone().cond(then_re, else_re)?;
+                let im = this.cond(then_im, else_im)?;
+                Ok(DenseView::C64((dense_from(re), dense_from(im))))
+            }
+
+            (Self::F32(then), Self::F32(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::F32)
+            }
+
+            (Self::F64(then), Self::F64(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::F64)
+            }
+
+            (Self::I16(then), Self::I16(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::I16)
+            }
+
+            (Self::I32(then), Self::I32(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::I32)
+            }
+
+            (Self::I64(then), Self::I64(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::I64)
+            }
+
+            (Self::U8(then), Self::U8(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::U8)
+            }
+
+            (Self::U16(then), Self::U16(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::U16)
+            }
+
+            (Self::U32(then), Self::U32(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::U32)
+            }
+
+            (Self::U64(then), Self::U64(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::U64)
+            }
+
+            (then, or_else) if then.dtype() < or_else.dtype() => {
+                let then = TensorCast::cast_into(then, or_else.dtype())?;
+                DenseView::Bool(this).cond(then, or_else)
+            }
+
+            (then, or_else) => {
+                let or_else = TensorCast::cast_into(or_else, then.dtype())?;
+                DenseView::Bool(this).cond(then, or_else)
+            }
+        }
     }
 }
 
