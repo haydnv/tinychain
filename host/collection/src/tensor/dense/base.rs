@@ -598,9 +598,19 @@ impl<Txn, FE, T: CDatatype> From<DenseBase<Txn, FE, T>> for DenseAccess<Txn, FE,
     }
 }
 
-impl<Txn, FE, T> fmt::Debug for DenseBase<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for DenseBase<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "transactional dense tensor")
+        write!(
+            f,
+            "transactional dense tensor with shape {:?} and type {:?}",
+            self.shape(),
+            self.dtype()
+        )
     }
 }
 

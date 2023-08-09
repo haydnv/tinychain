@@ -41,32 +41,6 @@ class TensorTests(ClientTest):
 
         self.assertEqual(actual, expected)
 
-    def testWhere(self):
-        size = 5
-        x = np.random.random(size).astype(bool)
-        a = np.random.random(size)
-        b = np.random.random(size)
-        expected = np.where(x, a, b)
-
-        cxt = tc.Context()
-        cxt.x = load_dense(x, tc.Bool)
-        cxt.a = load_dense(a)
-        cxt.b = load_dense(b)
-        cxt.result = tc.tensor.where(cxt.x, cxt.a, cxt.b)
-
-        actual = self.host.post(ENDPOINT, cxt)
-        self.assertTrue(all_close(actual, expected))
-
-    def testRandomUniform(self):
-        minval = -1
-        maxval = 3
-
-        cxt = tc.Context()
-        cxt.x = tc.tensor.Dense.random_uniform([5, 1], minval, maxval)
-        cxt.result = (cxt.x >= -1).all().logical_and((cxt.x <= 3).all()).logical_and(cxt.x.mean() > 0)
-
-        self.assertTrue(self.host.post(ENDPOINT, cxt))
-
     def testTruncatedNormal(self):
         tolerance = 0.5
 

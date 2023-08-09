@@ -409,6 +409,30 @@ class Atanh(Trig):
         return gradients(self.subject, loss / (1 - self.subject**2))
 
 
+class Cond(Operator):
+    """A boolean condition"""
+
+    def __repr__(self):
+        then, or_else = self.args
+        return f"cond({self.subject}, {then}, {or_else})"
+
+    def forward(self):
+        from ..collection.tensor import NDArray
+        return NDArray.cond(self.subject, *self.args)
+
+    def backward(self, variable=None):
+        def _derivative_of(operand):
+            return derivative_of(operand, variable) if same_as(operand, variable) else operand
+
+        subject = _derivative_of(self.subject)
+        then = _derivative_of(self.args[0])
+        or_else = _derivative_of(self.args[1])
+        return subject.cond(then, or_else)
+
+    def gradients(self, loss):
+        return gradients(self.subject, loss)
+
+
 class Dual(Operator):
     """A differentiable operator with two arguments"""
 

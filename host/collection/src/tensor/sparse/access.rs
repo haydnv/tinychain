@@ -280,7 +280,11 @@ access_cast_from!(u16, U16);
 access_cast_from!(u32, U32);
 access_cast_from!(u64, U64);
 
-impl<Txn, FE> fmt::Debug for SparseAccessCast<Txn, FE> {
+impl<Txn, FE> fmt::Debug for SparseAccessCast<Txn, FE>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         access_cast_dispatch!(self, this, this.fmt(f))
     }
@@ -464,8 +468,8 @@ where
 #[async_trait]
 impl<Txn, FE, T> TensorPermitWrite for SparseAccess<Txn, FE, T>
 where
-    Txn: Send + Sync,
-    FE: Send + Sync,
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
     T: CDatatype + DType,
 {
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
@@ -481,7 +485,12 @@ where
     }
 }
 
-impl<Txn, FE, T: CDatatype + DType> fmt::Debug for SparseAccess<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for SparseAccess<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         access_dispatch!(self, this, this.fmt(f))
     }
@@ -695,7 +704,12 @@ impl<Txn, FE, T: CDatatype> From<SparseBroadcast<Txn, FE, T>> for SparseAccess<T
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for SparseBroadcast<Txn, FE, T> {
+impl<Txn, FE, T: CDatatype> fmt::Debug for SparseBroadcast<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "broadcasted sparse tensor with shape {:?}", self.shape)
     }
@@ -1119,7 +1133,7 @@ where
     }
 }
 
-impl<L: fmt::Debug, R: fmt::Debug, T: CDatatype> fmt::Debug for SparseCombine<L, R, T> {
+impl<L: fmt::Debug, R: fmt::Debug, T: CDatatype + DType> fmt::Debug for SparseCombine<L, R, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "outer join of {:?} and {:?}", self.left, self.right)
     }
@@ -1271,7 +1285,7 @@ where
     }
 }
 
-impl<L: fmt::Debug, R: fmt::Debug, T: CDatatype> fmt::Debug for SparseCombineLeft<L, R, T> {
+impl<L: fmt::Debug, R: fmt::Debug, T: CDatatype + DType> fmt::Debug for SparseCombineLeft<L, R, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -1401,7 +1415,7 @@ where
 impl<S, T> fmt::Debug for SparseCombineConst<S, T>
 where
     S: fmt::Debug,
-    T: CDatatype,
+    T: CDatatype + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} with a constant value", self.left)
@@ -1554,7 +1568,12 @@ impl<Txn, FE, T: CDatatype> From<SparseCompare<Txn, FE, T>> for SparseAccess<Txn
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for SparseCompare<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for SparseCompare<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} and {:?}", self.left, self.right)
     }
@@ -1706,7 +1725,12 @@ impl<Txn, FE, T: CDatatype> From<SparseCompareLeft<Txn, FE, T>> for SparseAccess
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for SparseCompareLeft<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for SparseCompareLeft<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} and {:?}", self.left, self.right)
     }
@@ -1841,7 +1865,12 @@ impl<Txn, FE, T: CDatatype> From<SparseCompareConst<Txn, FE, T>> for SparseAcces
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for SparseCompareConst<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for SparseCompareConst<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} with {:?}", self.left, self.right)
     }
@@ -2215,7 +2244,12 @@ where
     }
 }
 
-impl<FE, T, S: fmt::Debug> fmt::Debug for SparseCow<FE, T, S> {
+impl<FE, T, S> fmt::Debug for SparseCow<FE, T, S>
+where
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+    S: fmt::Debug,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "copy-on-write view of {:?}", self.source)
     }
@@ -2737,7 +2771,12 @@ where
     }
 }
 
-impl<Txn, FE, T: CDatatype + DType> fmt::Debug for SparseReduce<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for SparseReduce<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -3376,7 +3415,7 @@ where
     }
 }
 
-impl<S: fmt::Debug, T: CDatatype> fmt::Debug for SparseUnary<S, T> {
+impl<S: fmt::Debug, T: CDatatype + DType> fmt::Debug for SparseUnary<S, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "unary operation on {:?}", self.source)
     }
@@ -3777,7 +3816,12 @@ impl<Txn, FE, T: CDatatype> From<SparseUnaryCast<Txn, FE, T>> for SparseAccess<T
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for SparseUnaryCast<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for SparseUnaryCast<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "unary operation on {:?}", self.source)
     }
@@ -3913,7 +3957,11 @@ impl<Txn, FE, T: CDatatype> From<SparseVersion<FE, T>> for SparseAccess<Txn, FE,
     }
 }
 
-impl<FE, T> fmt::Debug for SparseVersion<FE, T> {
+impl<FE, T> fmt::Debug for SparseVersion<FE, T>
+where
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "transactional version of {:?}", self.file)
     }

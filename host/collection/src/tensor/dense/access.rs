@@ -144,7 +144,11 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> TensorPermitRead for DenseAccessCast<Txn, 
     }
 }
 
-impl<Txn, FE> fmt::Debug for DenseAccessCast<Txn, FE> {
+impl<Txn, FE> fmt::Debug for DenseAccessCast<Txn, FE>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         cast_dispatch!(self, this, this.fmt(f))
     }
@@ -370,8 +374,8 @@ where
 #[async_trait]
 impl<Txn, FE, T> TensorPermitWrite for DenseAccess<Txn, FE, T>
 where
-    Txn: Send + Sync,
-    FE: Send + Sync,
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
     T: CDatatype + DType,
 {
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
@@ -387,7 +391,12 @@ where
     }
 }
 
-impl<Txn, FE, T: CDatatype + DType> fmt::Debug for DenseAccess<Txn, FE, T> {
+impl<Txn, FE, T: CDatatype + DType> fmt::Debug for DenseAccess<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         access_dispatch!(self, this, this.fmt(f))
     }
@@ -771,7 +780,10 @@ where
     }
 }
 
-impl<FE, S: fmt::Debug> fmt::Debug for DenseCow<FE, S> {
+impl<FE, S: fmt::Debug> fmt::Debug for DenseCow<FE, S>
+where
+    FE: ThreadSafe,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "copy-on-write view of {:?}", self.source)
     }
@@ -1193,7 +1205,7 @@ impl<L, R, T> fmt::Debug for DenseCombine<L, R, T>
 where
     L: fmt::Debug,
     R: fmt::Debug,
-    T: CDatatype,
+    T: CDatatype + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} with {:?}", self.left, self.right)
@@ -1272,7 +1284,7 @@ where
     }
 }
 
-impl<S: fmt::Debug, T: CDatatype> fmt::Debug for DenseCombineConst<S, T> {
+impl<S: fmt::Debug, T: CDatatype + DType> fmt::Debug for DenseCombineConst<S, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} with a constant value", self.left)
     }
@@ -1408,7 +1420,12 @@ impl<Txn, FE, T: CDatatype> From<DenseCompare<Txn, FE, T>> for DenseAccess<Txn, 
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for DenseCompare<Txn, FE, T> {
+impl<Txn, FE, T: CDatatype> fmt::Debug for DenseCompare<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "compare {:?} with {:?}", self.left, self.right)
     }
@@ -1524,7 +1541,12 @@ impl<Txn, FE, T: CDatatype> From<DenseCompareConst<Txn, FE, T>> for DenseAccess<
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for DenseCompareConst<Txn, FE, T> {
+impl<Txn, FE, T: CDatatype> fmt::Debug for DenseCompareConst<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "compare {:?} with {:?}", self.left, self.right)
     }
@@ -1545,8 +1567,7 @@ where
     T: CDatatype,
 {
     pub fn new(cond: Cond, then: Then, or_else: OrElse) -> TCResult<DenseCond<Cond, Then, OrElse>> {
-        if cond.dtype() == NumberType::Bool
-            && cond.shape() == then.shape()
+        if cond.shape() == then.shape()
             && cond.shape() == or_else.shape()
             && then.dtype() == or_else.dtype()
             && cond.block_size() == then.block_size()
@@ -1790,7 +1811,7 @@ where
     }
 }
 
-impl<L: fmt::Debug, T: CDatatype> fmt::Debug for DenseConst<L, T> {
+impl<L: fmt::Debug, T: CDatatype + DType> fmt::Debug for DenseConst<L, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "dual constant operation on {:?}", self.left)
     }
@@ -2315,7 +2336,7 @@ where
     }
 }
 
-impl<S: fmt::Debug, T: CDatatype> fmt::Debug for DenseReduce<S, T> {
+impl<S: fmt::Debug, T: CDatatype + DType> fmt::Debug for DenseReduce<S, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -3422,7 +3443,7 @@ where
     }
 }
 
-impl<S: fmt::Debug, T: CDatatype> fmt::Debug for DenseUnary<S, T> {
+impl<S: fmt::Debug, T: CDatatype + DType> fmt::Debug for DenseUnary<S, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "unary transform of {:?}", self.source)
     }
@@ -3824,7 +3845,12 @@ impl<Txn, FE, T: CDatatype> From<DenseUnaryCast<Txn, FE, T>> for DenseAccess<Txn
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for DenseUnaryCast<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for DenseUnaryCast<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "unary transform/cast of {:?}", self.source)
     }
@@ -3952,7 +3978,11 @@ impl<Txn, FE, T: CDatatype> From<DenseVersion<FE, T>> for DenseAccess<Txn, FE, T
     }
 }
 
-impl<FE, T> fmt::Debug for DenseVersion<FE, T> {
+impl<FE, T> fmt::Debug for DenseVersion<FE, T>
+where
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "transactional version of {:?}", self.file)
     }

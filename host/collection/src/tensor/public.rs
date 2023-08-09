@@ -870,11 +870,18 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let then = params.require(&label("then").into())?;
-                let or_else = params.require(&label("or_else").into())?;
+                let then: Tensor<_, _> = params.require(&label("then").into())?;
+                let or_else: Tensor<_, _> = params.require(&label("or_else").into())?;
                 params.expect_empty()?;
 
-                self.tensor.cond(then, or_else).map(State::from)
+                let shape = broadcast_shape(self.tensor.shape(), then.shape())?;
+                let shape = broadcast_shape(&shape, or_else.shape())?;
+
+                let tensor = self.tensor.broadcast(shape.clone())?;
+                let then = then.broadcast(shape.clone())?;
+                let or_else = or_else.broadcast(shape)?;
+
+                tensor.cond(then, or_else).map(State::from)
             })
         }))
     }

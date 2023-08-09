@@ -122,33 +122,28 @@ class DenseTests(HostTest):
         self.assertEqual(actual, expected)
 
     def testNorm_matrix(self):
-        threshold = 0.0001
         shape = [2, 3, 4]
         matrices = np.arange(24).reshape(shape)
         expected = np.stack([np.linalg.norm(matrix) for matrix in matrices])
 
         cxt = tc.Context()
-        cxt.matrices = load_dense(matrices, tc.I32)
+        cxt.matrices = load_dense(matrices, tc.F32)
         cxt.actual = cxt.matrices.norm()
-        cxt.expected = load_dense(expected, tc.F32)
-        cxt.result = (cxt.actual, cxt.expected)
-        cxt.passed = (abs(cxt.actual - cxt.expected) < threshold).all()
 
-        self.assertTrue(self.host.post(ENDPOINT, cxt))
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertTrue(all_close(actual, expected))
 
     def testNorm_column(self):
-        threshold = 0.0001
         shape = [2, 3, 4]
         matrices = np.arange(24).reshape(shape)
         expected = np.stack([np.linalg.norm(matrix, axis=-1) for matrix in matrices])
 
         cxt = tc.Context()
-        cxt.matrices = load_dense(matrices, tc.I32)
+        cxt.matrices = load_dense(matrices, tc.F32)
         cxt.actual = cxt.matrices.norm(-1)
-        cxt.expected = load_dense(expected, tc.F32)
-        cxt.passed = (abs(cxt.actual - cxt.expected) < threshold).all()
 
-        self.assertTrue(self.host.post(ENDPOINT, cxt))
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertTrue(all_close(actual, expected))
 
     def testPow(self):
         cxt = tc.Context()
@@ -374,6 +369,33 @@ class DenseTests(HostTest):
 
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, expect_dense(tc.I64, dest, np.arange(24).tolist()))
+
+    def testCond(self):
+        size = 5
+        x = np.random.random(size).astype(bool)
+        a = np.random.random(size)
+        b = np.random.random(size)
+        expected = np.where(x, a, b)
+
+        cxt = tc.Context()
+        cxt.x = load_dense(x, tc.Bool)
+        cxt.a = load_dense(a)
+        cxt.b = load_dense(b)
+        cxt.result = cxt.x.cond(cxt.a, cxt.b)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertTrue(all_close(actual, expected))
+
+    def testRandomUniform(self):
+        minval = -1
+        maxval = 3
+
+        cxt = tc.Context()
+        cxt.x = tc.tensor.Dense.random_uniform([5, 1], minval, maxval)
+        cxt.result = (cxt.x >= -1).all().logical_and((cxt.x <= 3).all()).logical_and(cxt.x.mean() > 0)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertTrue(actual)
 
 
 class SparseTests(HostTest):
