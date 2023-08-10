@@ -4,7 +4,7 @@ use safecast::{AsType, CastFrom};
 
 use tc_error::*;
 use tc_transact::{Transaction, TxnId};
-use tc_value::{Float, Number, NumberClass, NumberInstance};
+use tc_value::{Complex, Float, Number, NumberClass, NumberInstance};
 
 use super::dense::{DenseBase, DenseCacheFile, DenseView};
 use super::sparse::{Node, SparseBase, SparseView};
@@ -67,14 +67,8 @@ pub(crate) trait ComplexUnary:
             .pow_const((0.5).into())
     }
 
-    fn exp(this: (Self, Self)) -> TCResult<(Self, Self)> {
-        let (_x, y) = this.clone();
-
-        let r = ComplexUnary::abs(this)?.exp()?;
-        let real = r.clone().mul(y.clone().cos()?)?;
-        let imag = r.mul(y.sin()?)?;
-
-        Ok((real, imag))
+    fn exp(_this: (Self, Self)) -> TCResult<(Self, Self)> {
+        Err(not_implemented!("complex exponentiation"))
     }
 
     fn ln(this: (Self, Self)) -> TCResult<(Self, Self)> {
@@ -267,6 +261,44 @@ pub(crate) trait ComplexMath: ComplexUnary + Clone {
         }
     }
 
+    fn add_real(this: (Self, Self), that: Self) -> TCResult<(Self, Self)> {
+        let (real, imag) = this;
+        let real = real.clone().add(that)?;
+        Ok((real, imag))
+    }
+
+    fn const_div(this: Number, that: (Self, Self)) -> TCResult<(Self, Self)> {
+        if let Number::Complex(this) = this {
+            let (a, b) = this.into();
+            let (c, d) = that;
+
+            let denom = c
+                .clone()
+                .pow_const(2.into())?
+                .add(d.clone().pow_const(2.into())?)?;
+
+            let real_num = c
+                .clone()
+                .mul_const(a.into())?
+                .add(d.clone().mul_const(b.into())?)?;
+
+            let imag_num = c.mul_const(b.into())?.sub(d.mul_const(a.into())?)?;
+
+            let real = real_num.div(denom.clone())?;
+            let imag = imag_num.div(denom)?;
+
+            Ok((real, imag))
+        } else {
+            let (real, imag) = that;
+
+            let num_re = real.clone().mul_const(this)?;
+            let num_im = imag.clone().mul_const(this)?;
+            let denom = real.pow_const(2.into())?.add(imag.pow_const(2.into())?)?;
+
+            ComplexMath::div_real((num_re, num_im), denom)
+        }
+    }
+
     fn div(this: (Self, Self), that: (Self, Self)) -> TCResult<(Self, Self)> {
         let (a, b) = this;
         let (c, d) = that;
@@ -282,6 +314,13 @@ pub(crate) trait ComplexMath: ComplexUnary + Clone {
         let real = real_num.div(denom.clone())?;
         let imag = imag_num.div(denom)?;
 
+        Ok((real, imag))
+    }
+
+    fn div_real(this: (Self, Self), that: Self) -> TCResult<(Self, Self)> {
+        let (real, imag) = this;
+        let real = real.div(that.clone())?;
+        let imag = imag.div(that)?;
         Ok((real, imag))
     }
 
@@ -306,6 +345,14 @@ pub(crate) trait ComplexMath: ComplexUnary + Clone {
             let imag = b.div_const(that)?;
             Ok((real, imag))
         }
+    }
+
+    fn real_div_const(this: Self, that: Complex) -> TCResult<(Self, Self)> {
+        let (real, imag) = that.into();
+        let num_re = this.clone().mul_const(real.into())?;
+        let num_im = this.mul_const((imag * (-1.).into()).into())?;
+        let denom = real.pow(2.into()) + imag.pow(2.into());
+        ComplexMath::div_const((num_re, num_im), denom.into())
     }
 
     fn log(this: (Self, Self), that: (Self, Self)) -> TCResult<(Self, Self)> {
@@ -342,6 +389,22 @@ pub(crate) trait ComplexMath: ComplexUnary + Clone {
             let imag = b.mul_const(that)?;
             Ok((real, imag))
         }
+    }
+
+    fn mul_real(this: (Self, Self), that: Self) -> TCResult<(Self, Self)> {
+        let (real, imag) = this;
+
+        let real = real.mul(that.clone())?;
+        let imag = imag.mul(that)?;
+
+        Ok((real, imag))
+    }
+
+    fn real_mul_const(this: Self, that: Complex) -> TCResult<(Self, Self)> {
+        let (real, imag) = that.into();
+        let real = this.clone().mul_const(real.into())?;
+        let imag = this.mul_const(imag.into())?;
+        Ok((real, imag))
     }
 
     fn pow(this: (Self, Self), that: Self) -> TCResult<(Self, Self)>
@@ -387,6 +450,12 @@ pub(crate) trait ComplexMath: ComplexUnary + Clone {
     fn sub(this: (Self, Self), that: (Self, Self)) -> TCResult<(Self, Self)> {
         let real = this.0.sub(that.0)?;
         let imag = this.1.sub(that.1)?;
+        Ok((real, imag))
+    }
+
+    fn sub_real(this: (Self, Self), that: Self) -> TCResult<(Self, Self)> {
+        let (real, imag) = this;
+        let real = real.sub(that)?;
         Ok((real, imag))
     }
 

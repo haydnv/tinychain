@@ -676,6 +676,8 @@ where
     type Cast = Self;
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
+        trace!("cast {:?} into {:?}", self, dtype);
+
         macro_rules! view_dispatch_cast {
             ($var:ident) => {
                 view_dispatch!(
@@ -839,10 +841,9 @@ where
                 ComplexMath::add((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C32((a, b)), Self::F32(that)) => {
-                let real = a.add(that.clone()).map(dense_from)?;
-                let imag = b.add(that).map(dense_from)?;
-                Ok(Self::C32((real, imag)))
+            (Self::C32((re, im)), Self::F32(that)) => {
+                ComplexMath::add_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
                 let that = TensorCast::cast_into(that, this.0.dtype())?;
@@ -852,10 +853,9 @@ where
                 ComplexMath::add((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C64((a, b)), Self::F64(that)) => {
-                let real = a.add(that.clone()).map(dense_from)?;
-                let imag = b.add(that).map(dense_from)?;
-                Ok(Self::C64((real, imag)))
+            (Self::C64((re, im)), Self::F64(that)) => {
+                ComplexMath::add_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
                 let that = TensorCast::cast_into(that, this.0.dtype())?;
@@ -981,26 +981,24 @@ where
                 ComplexMath::mul((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C32((a, b)), Self::F32(that)) => {
-                let real = a.mul(that.clone())?;
-                let imag = b.mul(that)?;
-                Ok(Self::C32((dense_from(real), dense_from(imag))))
+            (Self::C32((re, im)), Self::F32(that)) => {
+                ComplexMath::mul_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
-                let that = TensorCast::cast_into(that, this.0.dtype())?;
+                let that = TensorCast::cast_into(that, FloatType::F32.into())?;
                 Self::C32(this).mul(that)
             }
             (Self::C64((a, b)), Self::C64((c, d))) => {
                 ComplexMath::mul((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C64((a, b)), Self::F64(that)) => {
-                let real = a.mul(that.clone())?;
-                let imag = b.mul(that)?;
-                Ok(Self::C64((dense_from(real), dense_from(imag))))
+            (Self::C64((re, im)), Self::F64(that)) => {
+                ComplexMath::mul_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
-                let that = TensorCast::cast_into(that, this.0.dtype())?;
+                let that = TensorCast::cast_into(that, FloatType::F64.into())?;
                 Self::C64(this).mul(that)
             }
             (Self::F32(this), Self::F32(that)) => this.mul(that).map(dense_from).map(Self::F32),
@@ -1085,10 +1083,9 @@ where
                 ComplexMath::sub((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C32((a, b)), Self::F32(that)) => {
-                let real = a.sub(that.clone()).map(dense_from)?;
-                let imag = b.sub(that).map(dense_from)?;
-                Ok(Self::C32((real, imag)))
+            (Self::C32((re, im)), Self::F32(that)) => {
+                ComplexMath::sub_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
                 let that = TensorCast::cast_into(that, this.0.dtype())?;
@@ -1098,10 +1095,9 @@ where
                 ComplexMath::sub((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C64((a, b)), Self::F64(that)) => {
-                let real = a.sub(that.clone()).map(dense_from)?;
-                let imag = b.sub(that).map(dense_from)?;
-                Ok(Self::C64((real, imag)))
+            (Self::C64((re, im)), Self::F64(that)) => {
+                ComplexMath::sub_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
                 let that = TensorCast::cast_into(that, this.0.dtype())?;
@@ -1158,21 +1154,43 @@ where
     type Combine = Self;
 
     fn add_const(self, other: Number) -> TCResult<Self::Combine> {
-        math_const!(
-            self,
-            other,
-            ComplexMath::add_const,
-            TensorMathConst::add_const
-        )
+        match other {
+            Number::Complex(that) => match self {
+                Self::C32((re, im)) => ComplexMath::add_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                Self::C64((re, im)) => ComplexMath::add_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                this => Err(bad_request!("cannot add {:?} and {:?}", this, that)),
+            },
+            that => math_const!(
+                self,
+                that,
+                ComplexMath::add_const,
+                TensorMathConst::add_const
+            ),
+        }
     }
 
     fn div_const(self, other: Number) -> TCResult<Self::Combine> {
-        math_const!(
-            self,
-            other,
-            ComplexMath::div_const,
-            TensorMathConst::div_const
-        )
+        match other {
+            Number::Complex(that) => match self {
+                Self::C32((re, im)) => ComplexMath::div_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                Self::C64((re, im)) => ComplexMath::div_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                this => ComplexMath::real_div_const(this, that).and_then(Self::complex_from),
+            },
+            that => math_const!(
+                self,
+                that,
+                ComplexMath::div_const,
+                TensorMathConst::div_const
+            ),
+        }
     }
 
     fn log_const(self, base: Number) -> TCResult<Self::Combine> {
@@ -1185,12 +1203,23 @@ where
     }
 
     fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
-        math_const!(
-            self,
-            other,
-            ComplexMath::mul_const,
-            TensorMathConst::mul_const
-        )
+        match other {
+            Number::Complex(that) => match self {
+                Self::C32((re, im)) => ComplexMath::mul_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                Self::C64((re, im)) => ComplexMath::mul_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                this => ComplexMath::real_mul_const(this, that).and_then(Self::complex_from),
+            },
+            that => math_const!(
+                self,
+                that,
+                ComplexMath::mul_const,
+                TensorMathConst::mul_const
+            ),
+        }
     }
 
     fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
@@ -1203,12 +1232,23 @@ where
     }
 
     fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
-        math_const!(
-            self,
-            other,
-            ComplexMath::sub_const,
-            TensorMathConst::sub_const
-        )
+        match other {
+            Number::Complex(that) => match self {
+                Self::C32((re, im)) => ComplexMath::sub_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                Self::C64((re, im)) => ComplexMath::sub_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                this => Err(bad_request!("cannot subtract {:?} from {:?}", that, this)),
+            },
+            that => math_const!(
+                self,
+                that,
+                ComplexMath::sub_const,
+                TensorMathConst::sub_const
+            ),
+        }
     }
 }
 
@@ -1413,7 +1453,6 @@ where
     fn product(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
         match self {
             Self::Bool(this) => this.product(axes, keepdims).map(dense_from).map(Self::Bool),
-
             Self::C32(_) | Self::C64(_) => Err(not_implemented!("product of a complex tensor")),
             Self::F32(this) => this.product(axes, keepdims).map(dense_from).map(Self::F32),
             Self::F64(this) => this.product(axes, keepdims).map(dense_from).map(Self::F64),

@@ -1,11 +1,11 @@
 use std::fmt;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use destream::de;
 use futures::{Stream, TryStreamExt};
-use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype, NDArrayBoolean, NDArrayMath, NDArrayRead};
+use ha_ndarray::{Array, Buffer, CDatatype, NDArrayBoolean, NDArrayRead};
+use log::trace;
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
 
@@ -20,10 +20,10 @@ use tcgeneric::ThreadSafe;
 use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTrig, ComplexUnary};
 use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
-    autoqueue, strides_for, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst,
-    TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal,
-    TensorInstance, TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead,
-    TensorReduce, TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
+    autoqueue, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast,
+    TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal, TensorInstance,
+    TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce,
+    TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
@@ -140,13 +140,8 @@ where
     let (re, im) = tensors;
 
     debug_assert_eq!(re.shape(), im.shape());
-
-    let ndim = re.ndim();
     let shape = re.shape().clone();
-
-    let strides = strides_for(shape.as_slice(), shape.len());
-    let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
-    let dims = ArrayBase::<Arc<Vec<u64>>>::new(vec![shape.len()], Arc::new(shape.to_vec()))?;
+    let ndim = shape.len();
 
     let blocks = super::access::merge_blocks_outer(
         re.into_inner(),
@@ -159,43 +154,37 @@ where
     .await?;
 
     let elements = blocks
-        .map_ok(move |(offsets, (re, im))| {
-            let strides = strides.clone();
-            let dims = dims.clone();
+        .map_ok(move |(coords, (re, im))| async move {
+            let queue = autoqueue(&coords)?;
 
-            async move {
-                let coords = offsets.mul(strides)?.rem(dims)?;
-                let queue = autoqueue(&coords)?;
+            let coords = coords
+                .read(&queue)
+                .and_then(|buffer| buffer.to_slice())
+                .map(|slice| slice.into_vec())?;
 
-                let coords = coords
-                    .read(&queue)
-                    .and_then(|buffer| buffer.to_slice())
-                    .map(|slice| slice.into_vec())?;
+            let re = re
+                .read(&queue)
+                .and_then(|buffer| buffer.to_slice())
+                .map(|slice| slice.into_vec())?;
 
-                let re = re
-                    .read(&queue)
-                    .and_then(|buffer| buffer.to_slice())
-                    .map(|slice| slice.into_vec())?;
+            let im = im
+                .read(&queue)
+                .and_then(|buffer| buffer.to_slice())
+                .map(|slice| slice.into_vec())?;
 
-                let im = im
-                    .read(&queue)
-                    .and_then(|buffer| buffer.to_slice())
-                    .map(|slice| slice.into_vec())?;
+            let values = re
+                .into_par_iter()
+                .zip(im)
+                .map(|(r, i)| Number::Complex((r, i).into()));
 
-                let values = re
-                    .into_par_iter()
-                    .zip(im)
-                    .map(|(r, i)| Number::Complex((r, i).into()));
+            let elements = coords
+                .into_par_iter()
+                .chunks(ndim)
+                .zip(values)
+                .map(Ok)
+                .collect::<Vec<TCResult<_>>>();
 
-                let elements = coords
-                    .into_par_iter()
-                    .chunks(ndim)
-                    .zip(values)
-                    .map(Ok)
-                    .collect::<Vec<TCResult<_>>>();
-
-                TCResult::Ok(futures::stream::iter(elements))
-            }
+            TCResult::Ok(futures::stream::iter(elements))
         })
         .try_buffered(num_cpus::get())
         .try_flatten();
@@ -324,6 +313,8 @@ where
     type Cast = Self;
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
+        trace!("cast {:?} into {:?}", self, dtype);
+
         macro_rules! view_dispatch_cast {
             ($var:ident) => {
                 view_dispatch!(
@@ -768,26 +759,24 @@ where
                 ComplexMath::add((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C32((a, b)), Self::F32(that)) => {
-                let real = a.add(that.clone()).map(sparse_from)?;
-                let imag = b.add(that).map(sparse_from)?;
-                Ok(Self::C32((real, imag)))
+            (Self::C32((re, im)), Self::F32(that)) => {
+                ComplexMath::add_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
-                let that = TensorCast::cast_into(that, this.0.dtype())?;
+                let that = TensorCast::cast_into(that, FloatType::F32.into())?;
                 Self::C32(this).add(that)
             }
             (Self::C64((a, b)), Self::C64((c, d))) => {
                 ComplexMath::add((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C64((a, b)), Self::F64(that)) => {
-                let real = a.add(that.clone()).map(sparse_from)?;
-                let imag = b.add(that).map(sparse_from)?;
-                Ok(Self::C64((real, imag)))
+            (Self::C64((re, im)), Self::F64(that)) => {
+                ComplexMath::add_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
-                let that = TensorCast::cast_into(that, this.0.dtype())?;
+                let that = TensorCast::cast_into(that, FloatType::F64.into())?;
                 Self::C64(this).add(that)
             }
             (Self::F32(this), Self::F32(that)) => this.add(that).map(sparse_from).map(Self::F32),
@@ -816,10 +805,9 @@ where
                 ComplexMath::div((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C32((a, b)), Self::F32(that)) => {
-                let real = a.div(that.clone())?;
-                let imag = b.div(that)?;
-                Ok(Self::C32((sparse_from(real), sparse_from(imag))))
+            (Self::C32((re, im)), Self::F32(that)) => {
+                ComplexMath::div_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
                 let that = TensorCast::cast_into(that, this.0.dtype())?;
@@ -829,10 +817,9 @@ where
                 ComplexMath::div((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C64((a, b)), Self::F64(that)) => {
-                let real = a.div(that.clone())?;
-                let imag = b.div(that)?;
-                Ok(Self::C64((sparse_from(real), sparse_from(imag))))
+            (Self::C64((re, im)), Self::F64(that)) => {
+                ComplexMath::div_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
                 let that = TensorCast::cast_into(that, this.0.dtype())?;
@@ -886,10 +873,9 @@ where
                 ComplexMath::mul((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C32((a, b)), Self::F32(that)) => {
-                let real = a.mul(that.clone())?;
-                let imag = b.mul(that)?;
-                Ok(Self::C32((sparse_from(real), sparse_from(imag))))
+            (Self::C32((re, im)), Self::F32(that)) => {
+                ComplexMath::mul_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
                 let that = TensorCast::cast_into(that, this.0.dtype())?;
@@ -899,10 +885,9 @@ where
                 ComplexMath::mul((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C64((a, b)), Self::F64(that)) => {
-                let real = a.mul(that.clone())?;
-                let imag = b.mul(that)?;
-                Ok(Self::C64((sparse_from(real), sparse_from(imag))))
+            (Self::C64((re, im)), Self::F64(that)) => {
+                ComplexMath::mul_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
                 let that = TensorCast::cast_into(that, this.0.dtype())?;

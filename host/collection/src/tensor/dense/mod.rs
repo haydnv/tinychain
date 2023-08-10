@@ -579,11 +579,9 @@ where
     }
 
     fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
-        let n = other.cast_into();
-
         let accessor = DenseConst::new(
             self.accessor,
-            n,
+            other.cast_into(),
             |block, n| block.mul_scalar(n).map(Array::from).map_err(TCError::from),
             |l, r| l * r,
         );

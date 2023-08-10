@@ -1395,7 +1395,6 @@ where
     fn div_const(self, other: Number) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(this) => this.into_view().div_const(other).map(Self::from),
-
             Self::Sparse(this) => this.into_view().div_const(other).map(Self::from),
         }
     }
