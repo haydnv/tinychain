@@ -22,7 +22,7 @@ class LinearAlgebraTests(ClientTest):
         actual = self.host.post(ENDPOINT, cxt)
         self.assertEqual(actual, expect_dense(expected, tc.I32))
 
-    def testSetDiagonal(self):
+    def testWithDiagonal(self):
         size = 3
         shape = [size, size]
         x = np.arange(0, size**2).reshape(shape)
@@ -31,7 +31,7 @@ class LinearAlgebraTests(ClientTest):
         cxt = tc.Context()
         cxt.x = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.I32)
         cxt.diag = tc.tensor.Dense.load([size], diag, tc.I32)
-        cxt.result = tc.after(tc.math.linalg.set_diagonal(cxt.x, cxt.diag), cxt.x)
+        cxt.result = tc.math.linalg.with_diagonal(cxt.x, cxt.diag)
 
         x[range(size), range(size)] = diag
         actual = self.host.post(ENDPOINT, cxt)
@@ -39,7 +39,12 @@ class LinearAlgebraTests(ClientTest):
 
 
 def expect_dense(x, dtype):
-    return {tc.URI(tc.tensor.Dense): [[list(x.shape), tc.URI(dtype)], x.flatten().tolist()]}
+    return {
+        str(tc.URI(tc.tensor.Dense)): [
+            [str(tc.URI(dtype)), list(x.shape)],
+            x.flatten().tolist(),
+        ]
+    }
 
 
 def load_np(as_json: t.Dict[str, t.Any], dtype=np.float32) -> np.ndarray:

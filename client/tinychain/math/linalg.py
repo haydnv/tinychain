@@ -26,13 +26,11 @@ def diagonal(tensor):
     return rtype(form=op)
 
 
-def set_diagonal(matrix, diag):
-    """Set the diagonal of the given `matrix` to `diag`."""
+def with_diagonal(matrix, diag):
+    """Construct a view of the given `matrix` with the diagonal set to `diag`."""
 
-    eye = Sparse.eye(matrix.shape[0])
-    zero_diag = matrix - (matrix * eye)  # don't use eye.logical_not in case the matrix is sparse
-    new_diag = eye * diag.expand_dims()
-    return matrix.write(zero_diag + new_diag)
+    eye = Sparse.eye(matrix.shape[-2])
+    return eye.cond(diag, matrix)
 
 
 # TODO: replace this helper class with a `typing.TypedDict`

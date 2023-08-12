@@ -11,7 +11,7 @@ use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 use ha_ndarray::*;
-use log::debug;
+use log::{debug, trace};
 use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
@@ -1629,6 +1629,13 @@ where
     }
 
     async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        trace!(
+            "read block {block_id} conditionally from {:?} and {:?} based on {:?}",
+            self.then,
+            self.or_else,
+            self.cond
+        );
+
         let (cond, then, or_else) = try_join!(
             self.cond.read_block(txn_id, block_id),
             self.then.read_block(txn_id, block_id),
@@ -2507,9 +2514,10 @@ impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
         let start = block_id * block_size;
         let stop = start + block_size;
 
-        let source_block_id_start = start / block_size;
-        let source_block_id_stop = div_ceil(stop, block_size);
+        let source_block_id_start = start / source_block_size;
+        let source_block_id_stop = div_ceil(stop, source_block_size);
         let num_source_blocks = source_block_id_stop - source_block_id_start;
+        assert_ne!(num_source_blocks, 0);
 
         let mut source_buffers = futures::stream::iter(source_block_id_start..source_block_id_stop)
             .map(|block_id| self.source.read_block(txn_id, block_id))
@@ -2532,7 +2540,7 @@ impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
             let source_buffer = source_buffer.expect("source buffer");
 
             let start = (start % source_block_size) as usize;
-            let stop = Ord::min(start + self.block_size, buffer.len());
+            let stop = Ord::min(start + self.block_size, source_buffer.len());
             buffer.extend_from_slice(&source_buffer[start..stop]);
         }
 
@@ -2545,11 +2553,15 @@ impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
         }
 
         if let Some(source_buffer) = source_buffers.try_next().await? {
-            let stop = (stop % source_block_size) as usize;
+            let stop = (stop - ((source_block_id_stop - 1) * source_block_size)) as usize;
             buffer.extend_from_slice(&source_buffer[0..stop]);
         }
 
-        block_shape[0] = buffer.len() / block_shape.iter().skip(1).product::<usize>();
+        if stop > self.size() {
+            let trailing_size = block_shape.iter().skip(1).product::<usize>();
+            debug_assert_eq!(buffer.len() % trailing_size, 0);
+            block_shape[0] = buffer.len() / trailing_size;
+        }
 
         ArrayBase::<Vec<Self::DType>>::new(block_shape, buffer).map_err(TCError::from)
     }
@@ -3018,8 +3030,9 @@ pub struct DenseSparse<S> {
     block_size: usize,
 }
 
-impl<S: SparseInstance> From<S> for DenseSparse<S> {
+impl<S: SparseInstance + fmt::Debug> From<S> for DenseSparse<S> {
     fn from(source: S) -> Self {
+        debug_assert!(source.shape().validate().is_ok());
         let (block_size, _) = ideal_block_size_for(source.shape());
         Self { source, block_size }
     }
@@ -3045,55 +3058,60 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
     }
 
     async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
-        let start = block_id * self.block_size() as u64;
-        let stop = if (start + self.block_size() as u64) < self.size() {
-            start + self.block_size() as u64
-        } else {
-            self.size()
-        };
+        trace!("read block {block_id} of {self:?}");
 
-        let ndim = self.ndim();
-        let strides = self
+        let block_size = self.block_size as u64;
+        let offset = block_id * block_size;
+        let block_axis = block_axis_for(self.shape(), self.block_size);
+        let mut block_shape = block_shape_for(block_axis, self.shape(), self.block_size());
+
+        if offset + block_size > self.size() {
+            let last_block_size = (self.size() % block_size) as usize;
+            block_shape[0] = last_block_size / block_shape.iter().skip(1).product::<usize>();
+        }
+
+        let range = self
             .shape()
             .iter()
             .copied()
             .enumerate()
             .map(|(x, dim)| {
-                if dim == 1 {
+                let i = if dim == 1 {
                     0
                 } else {
-                    self.shape().iter().rev().take(ndim - 1 - x).product()
-                }
+                    let stride = self
+                        .shape()
+                        .iter()
+                        .rev()
+                        .take(self.ndim() - 1 - x)
+                        .product::<u64>();
+
+                    (offset / stride) % dim
+                };
+
+                AxisRange::At(i)
             })
-            .collect::<Vec<u64>>();
+            .take(block_axis)
+            .chain(
+                block_shape
+                    .iter()
+                    .copied()
+                    .map(|dim| AxisRange::In(0..(dim as u64), 1)),
+            )
+            .collect::<Range>();
 
-        let start = coord_of(start, &strides, self.shape(), 0);
-        let stop = coord_of(stop, &strides, self.shape(), 0);
-
-        let range: Range = start
-            .into_iter()
-            .zip(stop)
-            .map(|(from, to)| AxisRange::In(from..to, 1))
-            .collect();
-
-        let shape = range
-            .shape()
-            .into_vec()
-            .into_iter()
-            .map(|dim| dim as usize)
-            .collect();
+        debug_assert_eq!(range.len(), self.ndim());
 
         let elements = self
             .source
             .clone()
-            .elements(txn_id, range, Axes::default())
+            .elements(txn_id, range.clone(), Axes::default())
             .await?;
 
-        let values = ValueStream::new(elements, Range::all(self.source.shape()), S::DType::zero());
-
+        let values = ValueStream::new(elements, range, S::DType::zero());
         let block = values.try_collect().await?;
 
-        ArrayBase::<Vec<S::DType>>::new(shape, block).map_err(TCError::from)
+        ArrayBase::<Vec<S::DType>>::new(block_shape, block).map_err(TCError::from)
     }
 
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {

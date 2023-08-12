@@ -17,8 +17,8 @@ opencl = ["ha-ndarray/opencl"]
 [dependencies]
 async-hash = "0.5"
 async-trait = "0.1"
-b-table = { version = "0.1", features = ["all"] }
-b-tree = { version = "0.2", features = ["all"] }
+b-table = { path = "../../../b-table", features = ["all"] }
+b-tree = { path = "../../../b-tree", features = ["all"] }
 collate = { version = "0.3", features = ["stream"] }
 destream = "0.7"
 ds-ext = "0.1"

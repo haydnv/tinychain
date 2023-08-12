@@ -2070,6 +2070,9 @@ fn ideal_block_size_for(shape: &[u64]) -> (usize, usize) {
     let size = shape.iter().product::<u64>();
     let ndim = shape.len();
 
+    assert_ne!(ndim, 0);
+    assert_ne!(size, 0);
+
     if size < (2 * ideal) {
         (size as usize, 1)
     } else if ndim == 1 && size % ideal == 0 {
