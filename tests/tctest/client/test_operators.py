@@ -52,7 +52,7 @@ class ChainRuleTests(ClientTest):
         cxt.result = tc.math.derivative_of(cxt.f_g_x)
 
         x = np.array([1])
-        expected = 6 * x * math.e**(3 * x**2 + 2)
+        expected = 6 * x * math.e ** (3 * x**2 + 2)
         actual = self.host.post(ENDPOINT, cxt)
 
         self.assertTrue(np.allclose(load_np(actual), expected))
@@ -73,7 +73,7 @@ class ChainRuleTests(ClientTest):
         cxt = tc.Context()
         cxt.t = tc.ml.Variable.ones([1])
         cxt.x = cxt.t**2
-        cxt.y = 2*cxt.t
+        cxt.y = 2 * cxt.t
         cxt.z = (cxt.x**2 * cxt.y) - cxt.y**2
         cxt.result = tc.math.derivative_of(cxt.z)
 
@@ -105,8 +105,10 @@ class OperatorTests(ClientTest):
 
     def testAdd(self):
         y_torch = self.x_torch + self.w1_torch + self.b1_torch
-        y2_torch = y_torch+self.w2_torch + self.b2_torch
-        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=ones_like_torch(y2_torch))
+        y2_torch = y_torch + self.w2_torch + self.b2_torch
+        w1_torch_grad = grad_torch(
+            y2_torch, self.w1_torch, grad_outputs=ones_like_torch(y2_torch)
+        )
 
         cxt = tc.Context()
         cxt.y_tc = self.x_tc + self.w1_tc + self.b1_tc
@@ -118,33 +120,40 @@ class OperatorTests(ClientTest):
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testAdd2ndDerivative(self):
-        y_torch = (self.x_torch + self.w1_torch)**2 + self.b1_torch
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = (self.x_torch + self.w1_torch) ** 2 + self.b1_torch
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
-        y_tc = (self.x_tc + self.w1_tc)**2 + self.b1_tc
+        y_tc = (self.x_tc + self.w1_tc) ** 2 + self.b1_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
 
     def testSub(self):
-        y_torch = self.x_torch-self.w1_torch + self.b1_torch
-        y2_torch = y_torch-self.w2_torch + self.b2_torch
-        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=ones_like_torch(y2_torch))
+        y_torch = self.x_torch - self.w1_torch + self.b1_torch
+        y2_torch = y_torch - self.w2_torch + self.b2_torch
+        w1_torch_grad = grad_torch(
+            y2_torch, self.w1_torch, grad_outputs=ones_like_torch(y2_torch)
+        )
 
         cxt = tc.Context()
         cxt.y_tc = self.x_tc - self.w1_tc + self.b1_tc
@@ -156,25 +165,30 @@ class OperatorTests(ClientTest):
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testSub2ndDerivative(self):
-        y_torch = (self.x_torch - self.w1_torch)**2 + self.b1_torch
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = (self.x_torch - self.w1_torch) ** 2 + self.b1_torch
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
-        y_tc = (self.x_tc - self.w1_tc)**2 + self.b1_tc
+        y_tc = (self.x_tc - self.w1_tc) ** 2 + self.b1_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -187,7 +201,9 @@ class OperatorTests(ClientTest):
 
         y_torch = self.x_torch / w1_torch + self.b1_torch
         y2_torch = y_torch / w2_torch + self.b2_torch
-        w1_torch_grad = grad_torch(y2_torch, w1_torch, grad_outputs=ones_like_torch(y2_torch))
+        w1_torch_grad = grad_torch(
+            y2_torch, w1_torch, grad_outputs=ones_like_torch(y2_torch)
+        )
 
         w1_tc = tc.ml.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
         w2_tc = tc.ml.Variable.load(w2.shape, w2.flatten().tolist(), tc.F32)
@@ -204,26 +220,31 @@ class OperatorTests(ClientTest):
     def testDiv2ndDerivative(self):
         w1 = np.random.rand(2, 2) + 1
         self.w1_torch = torch.tensor(w1, dtype=torch.float, requires_grad=True)
-        y_torch = self.x_torch/self.w1_torch + self.b1_torch
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = self.x_torch / self.w1_torch + self.b1_torch
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         self.w1_tc = tc.ml.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
-        y_tc = self.x_tc/self.w1_tc + self.b1_tc
+        y_tc = self.x_tc / self.w1_tc + self.b1_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -231,7 +252,9 @@ class OperatorTests(ClientTest):
     def testPow1stDerivative(self):
         y_torch = self.x_torch**self.w1_torch + self.b1_torch
         y2_torch = y_torch**self.w2_torch + self.b2_torch
-        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=ones_like_torch(y2_torch))
+        w1_torch_grad = grad_torch(
+            y2_torch, self.w1_torch, grad_outputs=ones_like_torch(y2_torch)
+        )
 
         cxt = tc.Context()
         cxt.y_tc = self.x_tc**self.w1_tc + self.b1_tc
@@ -244,26 +267,31 @@ class OperatorTests(ClientTest):
 
     def testPow2ndDerivative(self):
         y_torch = self.x_torch**self.w1_torch + self.b1_torch
-        y2_torch = (y_torch**self.w2_torch + self.b2_torch)**5
-        dy_dw1_torch = grad_torch(y2_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y2_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y2_torch = (y_torch**self.w2_torch + self.b2_torch) ** 5
+        dy_dw1_torch = grad_torch(
+            y2_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y2_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         y_tc = self.x_tc**self.w1_tc + self.b1_tc
-        y_2tc = (y_tc**self.w2_tc + self.b2_tc)**5
+        y_2tc = (y_tc**self.w2_tc + self.b2_tc) ** 5
         _dy_dw1_tc = grad_tc(y_2tc, ones_like_tc(y_2tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -271,7 +299,9 @@ class OperatorTests(ClientTest):
     def testMul(self):
         y_torch = self.x_torch * self.w1_torch + self.b1_torch
         y2_torch = y_torch * self.w2_torch + self.b2_torch
-        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=ones_like_torch(y2_torch))
+        w1_torch_grad = grad_torch(
+            y2_torch, self.w1_torch, grad_outputs=ones_like_torch(y2_torch)
+        )
 
         cxt = tc.Context()
         cxt.y_tc = self.x_tc * self.w1_tc + self.b1_tc
@@ -283,39 +313,48 @@ class OperatorTests(ClientTest):
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testMul2ndDerivative(self):
-        y_torch = self.x_torch*self.w1_torch + self.b1_torch
-        y2_torch = (y_torch*self.w2_torch + self.b2_torch) * self.x_torch * self.w1_torch
-        dy_dw1_torch = grad_torch(y2_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y2_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = self.x_torch * self.w1_torch + self.b1_torch
+        y2_torch = (
+            (y_torch * self.w2_torch + self.b2_torch) * self.x_torch * self.w1_torch
+        )
+        dy_dw1_torch = grad_torch(
+            y2_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y2_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
-        y_tc = self.x_tc*self.w1_tc + self.b1_tc
-        y_2tc = (y_tc*self.w2_tc + self.b2_tc) * self.x_tc * self.w1_tc
+        y_tc = self.x_tc * self.w1_tc + self.b1_tc
+        y_2tc = (y_tc * self.w2_tc + self.b2_tc) * self.x_tc * self.w1_tc
         _dy_dw1_tc = grad_tc(y_2tc, ones_like_tc(y_2tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
 
     def testMatMul(self):
-        y_torch = self.x_torch@self.w1_torch + self.b1_torch
-        y2_torch = y_torch@self.w2_torch + self.b2_torch
-        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=ones_like_torch(y2_torch))
+        y_torch = self.x_torch @ self.w1_torch + self.b1_torch
+        y2_torch = y_torch @ self.w2_torch + self.b2_torch
+        w1_torch_grad = grad_torch(
+            y2_torch, self.w1_torch, grad_outputs=ones_like_torch(y2_torch)
+        )
 
         cxt = tc.Context()
-        cxt.y_tc = self.x_tc@self.w1_tc + self.b1_tc
-        cxt.y_2tc = cxt.y_tc@self.w2_tc + self.b2_tc
+        cxt.y_tc = self.x_tc @ self.w1_tc + self.b1_tc
+        cxt.y_2tc = cxt.y_tc @ self.w2_tc + self.b2_tc
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
         w1_tc_grad = self.host.post(ENDPOINT, cxt)
@@ -323,27 +362,33 @@ class OperatorTests(ClientTest):
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testMatMul2ndDerivative(self):
-        y_torch = self.x_torch@self.w1_torch**2 + self.b1_torch
-        y2_torch = (y_torch@self.w2_torch + self.b2_torch)**2
-        dy_dw1_torch = grad_torch(y2_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y2_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = self.x_torch @ self.w1_torch**2 + self.b1_torch
+        y2_torch = (y_torch @ self.w2_torch + self.b2_torch) ** 2
+
+        dy_dw1_torch = grad_torch(
+            y2_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y2_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
-        y_tc = self.x_tc@self.w1_tc**2 + self.b1_tc
-        y_2tc = (y_tc@self.w2_tc + self.b2_tc)**2
+        y_tc = self.x_tc @ self.w1_tc**2 + self.b1_tc
+        y_2tc = (y_tc @ self.w2_tc + self.b2_tc) ** 2
         _dy_dw1_tc = grad_tc(y_2tc, ones_like_tc(y_2tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -351,11 +396,13 @@ class OperatorTests(ClientTest):
     def testExp(self):
         w_torch = self.w1_torch.exp()
         y_torch = self.x_torch * w_torch
-        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch))
+        w1_torch_grad = grad_torch(
+            y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch)
+        )
 
         cxt = tc.Context()
         cxt.w_tc = self.w1_tc.exp()
-        cxt.y_tc = self.x_tc*cxt.w_tc
+        cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
         w1_tc_grad = self.host.post(ENDPOINT, cxt)
@@ -364,28 +411,33 @@ class OperatorTests(ClientTest):
 
     def testExp2ndDerivative(self):
         w_torch = self.w1_torch.exp()
-        y_torch = self.x_torch*w_torch
+        y_torch = self.x_torch * w_torch
         y2_torch = (y_torch * self.w1_torch).exp()
-        dy_dw1_torch = grad_torch(y2_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y2_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        dy_dw1_torch = grad_torch(
+            y2_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y2_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         w_tc = self.w1_tc.exp()
-        y_tc = self.x_tc*w_tc
+        y_tc = self.x_tc * w_tc
         y_2tc = (y_tc * self.w1_tc).exp()
         _dy_dw1_tc = grad_tc(y_2tc, ones_like_tc(y_2tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -393,7 +445,9 @@ class OperatorTests(ClientTest):
     def testLog(self):
         w_torch = self.w1_torch.log()
         y_torch = self.x_torch * w_torch
-        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch))
+        w1_torch_grad = grad_torch(
+            y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch)
+        )
 
         cxt = tc.Context()
         cxt.w_tc = self.w1_tc.log()
@@ -406,28 +460,33 @@ class OperatorTests(ClientTest):
 
     def testLog2ndDerivative(self):
         w_torch = self.w1_torch.log()
-        y_torch = self.x_torch*w_torch
+        y_torch = self.x_torch * w_torch
         y2_torch = (y_torch * self.w1_torch).log()
-        dy_dw1_torch = grad_torch(y2_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y2_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        dy_dw1_torch = grad_torch(
+            y2_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y2_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         w_tc = self.w1_tc.log()
-        y_tc = self.x_tc*w_tc
+        y_tc = self.x_tc * w_tc
         y_2tc = (y_tc * self.w1_tc).log()
         _dy_dw1_tc = grad_tc(y_2tc, ones_like_tc(y_2tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -435,7 +494,9 @@ class OperatorTests(ClientTest):
     def testSin(self):
         w_torch = self.w1_torch.sin()
         y_torch = self.x_torch * w_torch
-        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch))
+        w1_torch_grad = grad_torch(
+            y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch)
+        )
 
         cxt = tc.Context()
         cxt.w_tc = self.w1_tc.sin()
@@ -448,26 +509,31 @@ class OperatorTests(ClientTest):
 
     def testSin2ndDerivative(self):
         w_torch = self.w1_torch.sin()
-        y_torch = self.x_torch*w_torch
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = self.x_torch * w_torch
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         w_tc = self.w1_tc.sin()
-        y_tc = self.x_tc*w_tc
+        y_tc = self.x_tc * w_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -475,7 +541,9 @@ class OperatorTests(ClientTest):
     def testCos(self):
         w_torch = self.w1_torch.cos()
         y_torch = self.x_torch * w_torch
-        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch))
+        w1_torch_grad = grad_torch(
+            y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch)
+        )
 
         cxt = tc.Context()
         cxt.w_tc = self.w1_tc.cos()
@@ -488,26 +556,31 @@ class OperatorTests(ClientTest):
 
     def testCos2ndDerivative(self):
         w_torch = self.w1_torch.cos()
-        y_torch = self.x_torch*w_torch
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = self.x_torch * w_torch
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         w_tc = self.w1_tc.cos()
-        y_tc = self.x_tc*w_tc
+        y_tc = self.x_tc * w_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -515,7 +588,9 @@ class OperatorTests(ClientTest):
     def testAsin(self):
         w_torch = self.w1_torch.asin()
         y_torch = self.x_torch * w_torch
-        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch))
+        w1_torch_grad = grad_torch(
+            y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch)
+        )
 
         cxt = tc.Context()
         cxt.w_tc = self.w1_tc.asin()
@@ -528,26 +603,31 @@ class OperatorTests(ClientTest):
 
     def testAsin2ndDerivative(self):
         w_torch = self.w1_torch.asin()
-        y_torch = self.x_torch*w_torch
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = self.x_torch * w_torch
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         w_tc = self.w1_tc.asin()
-        y_tc = self.x_tc*w_tc
+        y_tc = self.x_tc * w_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -555,7 +635,9 @@ class OperatorTests(ClientTest):
     def testAcos(self):
         w_torch = self.w1_torch.acos()
         y_torch = self.x_torch * w_torch
-        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch))
+        w1_torch_grad = grad_torch(
+            y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch)
+        )
 
         cxt = tc.Context()
         cxt.w_tc = self.w1_tc.acos()
@@ -568,26 +650,31 @@ class OperatorTests(ClientTest):
 
     def testAcos2ndDerivative(self):
         w_torch = self.w1_torch.acos()
-        y_torch = self.x_torch*w_torch
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = self.x_torch * w_torch
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         w_tc = self.w1_tc.acos()
-        y_tc = self.x_tc*w_tc
+        y_tc = self.x_tc * w_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -595,7 +682,9 @@ class OperatorTests(ClientTest):
     def testSinh(self):
         w_torch = self.w1_torch.sinh()
         y_torch = self.x_torch * w_torch
-        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch))
+        w1_torch_grad = grad_torch(
+            y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch)
+        )
 
         cxt = tc.Context()
         cxt.w_tc = self.w1_tc.sinh()
@@ -605,29 +694,34 @@ class OperatorTests(ClientTest):
         w1_tc_grad = self.host.post(ENDPOINT, cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
-    
+
     def testSinh2ndDerivative(self):
         w_torch = self.w1_torch.sinh()
-        y_torch = self.x_torch*w_torch
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = self.x_torch * w_torch
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         w_tc = self.w1_tc.sinh()
-        y_tc = self.x_tc*w_tc
+        y_tc = self.x_tc * w_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -635,7 +729,9 @@ class OperatorTests(ClientTest):
     def testCosh(self):
         w_torch = self.w1_torch.cosh()
         y_torch = self.x_torch * w_torch
-        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch))
+        w1_torch_grad = grad_torch(
+            y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch)
+        )
 
         cxt = tc.Context()
         cxt.w_tc = self.w1_tc.cosh()
@@ -648,26 +744,31 @@ class OperatorTests(ClientTest):
 
     def testCosh2ndDerivative(self):
         w_torch = self.w1_torch.cosh()
-        y_torch = self.x_torch*w_torch
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = self.x_torch * w_torch
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         w_tc = self.w1_tc.cosh()
-        y_tc = self.x_tc*w_tc
+        y_tc = self.x_tc * w_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -675,7 +776,9 @@ class OperatorTests(ClientTest):
     def testAsinh(self):
         w_torch = self.w1_torch.asinh()
         y_torch = self.x_torch * w_torch
-        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch))
+        w1_torch_grad = grad_torch(
+            y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch)
+        )
 
         cxt = tc.Context()
         cxt.w_tc = self.w1_tc.asinh()
@@ -685,41 +788,48 @@ class OperatorTests(ClientTest):
         w1_tc_grad = self.host.post(ENDPOINT, cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
-    
+
     def testAsinh2ndDerivative(self):
         w_torch = self.w1_torch.asinh()
-        y_torch = self.x_torch*w_torch
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = self.x_torch * w_torch
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         w_tc = self.w1_tc.asinh()
-        y_tc = self.x_tc*w_tc
+        y_tc = self.x_tc * w_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
 
     def testAcosh(self):
-        w1 = np.random.rand(2, 2)*10 + 1.1
+        w1 = np.random.rand(2, 2) * 10 + 1.1
         x = np.random.rand(2, 2) + 1
 
         w1_torch = torch.tensor(w1, dtype=torch.float, requires_grad=True)
         x_torch = torch.tensor(x, dtype=torch.float)
         y_torch = (x_torch * w1_torch).acosh()
-        w1_torch_grad = grad_torch(y_torch, w1_torch, grad_outputs=torch.ones_like(y_torch))
+        w1_torch_grad = grad_torch(
+            y_torch, w1_torch, grad_outputs=torch.ones_like(y_torch)
+        )
 
         cxt = tc.Context()
         cxt.w1_tc = tc.ml.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
@@ -730,33 +840,38 @@ class OperatorTests(ClientTest):
         w1_tc_grad = self.host.post(ENDPOINT, cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
-    
+
     def testAcosh2ndDerivative(self):
-        w1 = np.random.rand(2, 2)*10 + 1.1
+        w1 = np.random.rand(2, 2) * 10 + 1.1
         x = np.random.rand(2, 2) + 1
         self.w1_torch = torch.tensor(w1, dtype=torch.float, requires_grad=True)
         self.x_torch = torch.tensor(x, dtype=torch.float)
-        y_torch = (self.x_torch*self.w1_torch).acosh()
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = (self.x_torch * self.w1_torch).acosh()
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         self.w1_tc = tc.ml.Variable.load(w1.shape, w1.flatten().tolist(), tc.F32)
         self.x_tc = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.F32)
-        y_tc = (self.x_tc*self.w1_tc).acosh()
+        y_tc = (self.x_tc * self.w1_tc).acosh()
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -764,7 +879,9 @@ class OperatorTests(ClientTest):
     def testTan(self):
         w_torch = self.w1_torch.tan()
         y_torch = self.x_torch * w_torch
-        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch))
+        w1_torch_grad = grad_torch(
+            y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch)
+        )
 
         cxt = tc.Context()
         cxt.w_tc = self.w1_tc.tan()
@@ -777,26 +894,31 @@ class OperatorTests(ClientTest):
 
     def testTan2ndDerivative(self):
         w_torch = self.w1_torch.tan()
-        y_torch = self.x_torch*w_torch
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = self.x_torch * w_torch
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         w_tc = self.w1_tc.tan()
-        y_tc = self.x_tc*w_tc
+        y_tc = self.x_tc * w_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -804,7 +926,9 @@ class OperatorTests(ClientTest):
     def testTanh(self):
         w_torch = self.w1_torch.tanh()
         y_torch = self.x_torch * w_torch
-        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch))
+        w1_torch_grad = grad_torch(
+            y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch)
+        )
 
         cxt = tc.Context()
         cxt.w_tc = self.w1_tc.tanh()
@@ -817,26 +941,31 @@ class OperatorTests(ClientTest):
 
     def testTanh2ndDerivative(self):
         w_torch = self.w1_torch.tanh()
-        y_torch = self.x_torch*w_torch
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = self.x_torch * w_torch
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         w_tc = self.w1_tc.tanh()
-        y_tc = self.x_tc*w_tc
+        y_tc = self.x_tc * w_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -844,7 +973,9 @@ class OperatorTests(ClientTest):
     def testAtan(self):
         w_torch = self.w1_torch.atan()
         y_torch = self.x_torch * w_torch
-        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch))
+        w1_torch_grad = grad_torch(
+            y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch)
+        )
 
         cxt = tc.Context()
         cxt.w_tc = self.w1_tc.atan()
@@ -857,26 +988,31 @@ class OperatorTests(ClientTest):
 
     def testAtan2ndDerivative(self):
         w_torch = self.w1_torch.atan()
-        y_torch = self.x_torch*w_torch
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = self.x_torch * w_torch
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         w_tc = self.w1_tc.atan()
-        y_tc = self.x_tc*w_tc
+        y_tc = self.x_tc * w_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
@@ -884,7 +1020,9 @@ class OperatorTests(ClientTest):
     def testAtanh(self):
         w_torch = (self.w1_torch).atanh()
         y_torch = self.x_torch * w_torch
-        w1_torch_grad = grad_torch(y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch))
+        w1_torch_grad = grad_torch(
+            y_torch, self.w1_torch, grad_outputs=ones_like_torch(y_torch)
+        )
 
         cxt = tc.Context()
         cxt.w_tc = self.w1_tc.atanh()
@@ -897,26 +1035,31 @@ class OperatorTests(ClientTest):
 
     def testAtanh2ndDerivative(self):
         w_torch = self.w1_torch.atanh()
-        y_torch = self.x_torch*w_torch
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = self.x_torch * w_torch
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         w_tc = self.w1_tc.atanh()
-        y_tc = self.x_tc*w_tc
+        y_tc = self.x_tc * w_tc
         _dy_dw1_tc = grad_tc(y_tc, ones_like_tc(y_tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc, 0.01)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc, 0.01)
@@ -924,7 +1067,9 @@ class OperatorTests(ClientTest):
     def testMultipleFunctions(self):
         y_torch = self.x_torch @ self.w1_torch + self.w1_torch
         y2_torch = y_torch @ self.w2_torch + self.b2_torch + torch.exp(y_torch)
-        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=ones_like_torch(y2_torch))
+        w1_torch_grad = grad_torch(
+            y2_torch, self.w1_torch, grad_outputs=ones_like_torch(y2_torch)
+        )
 
         cxt = tc.Context()
         cxt.y_tc = self.x_tc @ self.w1_tc + self.w1_tc
@@ -936,51 +1081,76 @@ class OperatorTests(ClientTest):
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testDerivative(self):
-        y_torch = self.x_torch @ self.w1_torch + self.b1_torch + torch.exp(self.w1_torch)
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch))[0]
+        y_torch = (
+            self.x_torch @ self.w1_torch + self.b1_torch + torch.exp(self.w1_torch)
+        )
+
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=ones_like_torch(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
         cxt.y_tc = self.x_tc @ self.w1_tc + self.b1_tc + self.w1_tc.exp()
         cxt._dy_dw1_tc = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
-        cxt._d2y_dw2_tc = grad_tc(cxt._dy_dw1_tc, ones_like_tc(cxt._dy_dw1_tc), self.w1_tc)
-        cxt.result = {'the_first_derivative': cxt._dy_dw1_tc, 'the_second_derivative': cxt._d2y_dw2_tc}
+        cxt._d2y_dw2_tc = grad_tc(
+            cxt._dy_dw1_tc, ones_like_tc(cxt._dy_dw1_tc), self.w1_tc
+        )
+
+        cxt.result = {
+            "the_first_derivative": cxt._dy_dw1_tc,
+            "the_second_derivative": cxt._d2y_dw2_tc,
+        }
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
 
     # TODO: test the second derivative of a slice
     def testSlice(self):
-        y_torch = (self.x_torch @ self.w1_torch + self.b1_torch + torch.exp(self.w1_torch)) * 12
-        dy_dw1_torch = grad_torch(y_torch,
-                            self.w1_torch,
-                            grad_outputs=ones_like_torch(y_torch),
-                            create_graph=True,
-                            retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch[..., 1],
-                              self.w1_torch,
-                              grad_outputs=ones_like_torch(dy_dw1_torch[..., 1]))[0]
+        y_torch = (
+            self.x_torch @ self.w1_torch + self.b1_torch + torch.exp(self.w1_torch)
+        ) * 12
+
+        dy_dw1_torch = grad_torch(
+            y_torch,
+            self.w1_torch,
+            grad_outputs=ones_like_torch(y_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch[..., 1],
+            self.w1_torch,
+            grad_outputs=ones_like_torch(dy_dw1_torch[..., 1]),
+        )[0]
 
         cxt = tc.Context()
         cxt.y_tc = (self.x_tc @ self.w1_tc + self.b1_tc + self.w1_tc.exp()) * 12
         cxt._dy_dw1_tc = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
         cxt.__dy_dw1_tc = cxt._dy_dw1_tc[:, 1]
-        cxt._d2y_dw2_tc = grad_tc(cxt.__dy_dw1_tc, ones_like_tc(cxt.__dy_dw1_tc), self.w1_tc)
-        cxt.result = {'the_first_derivative': cxt._dy_dw1_tc, 'the_second_derivative': cxt._d2y_dw2_tc}
+        cxt._d2y_dw2_tc = grad_tc(
+            cxt.__dy_dw1_tc, ones_like_tc(cxt.__dy_dw1_tc), self.w1_tc
+        )
+        cxt.result = {
+            "the_first_derivative": cxt._dy_dw1_tc,
+            "the_second_derivative": cxt._d2y_dw2_tc,
+        }
 
         result = self.host.post(ENDPOINT, cxt)
 
-        dy_dw1_tc = result['the_first_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
         # d2y_dw2_tc = result['the_second_derivative']
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
@@ -990,7 +1160,10 @@ class OperatorTests(ClientTest):
         y_torch = torch.cat([self.w1_torch, self.b1_torch])
 
         torch_grad = grad_torch(
-            y_torch, [self.w1_torch, self.b1_torch], grad_outputs=torch.ones_like(y_torch))
+            y_torch,
+            [self.w1_torch, self.b1_torch],
+            grad_outputs=torch.ones_like(y_torch),
+        )
 
         cxt = tc.Context()
         cxt.y_tc = tc.tensor.Dense.concatenate([self.w1_tc, self.b1_tc])
@@ -1014,7 +1187,7 @@ class OperatorTests(ClientTest):
         cxt = tc.Context()
         cxt.mu = tc.ml.Variable.load(shape=[1], data=[3])
         cxt.x = tc.tensor.Dense.arange([n], 0, n)
-        cxt.f_x = ((cxt.x - cxt.mu)**2).sum()
+        cxt.f_x = ((cxt.x - cxt.mu) ** 2).sum()
         cxt.d_f_x = derivative_of(cxt.f_x)
         cxt.d2_f_x = derivative_of(cxt.d_f_x)
         cxt.result = cxt.d_f_x, cxt.d2_f_x
@@ -1027,52 +1200,65 @@ class OperatorTests(ClientTest):
         self.assertEqual(actual_d2, expected_d2)
 
     def testSum_gradient(self):
-        y_torch = (self.x_torch @ torch.exp(self.w1_torch) + self.b1_torch)**2
-        y2_torch = torch.sum(y_torch, 0)**0.5
-        w1_torch_grad = grad_torch(y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch))
+        y_torch = (self.x_torch @ torch.exp(self.w1_torch) + self.b1_torch) ** 2
+        y2_torch = torch.sum(y_torch, 0) ** 0.5
+        w1_torch_grad = grad_torch(
+            y2_torch, self.w1_torch, grad_outputs=torch.ones_like(y2_torch)
+        )
 
         cxt = tc.Context()
-        cxt.y_tc = (self.x_tc @ self.w1_tc.exp() + self.b1_tc)**2
-        cxt.y_2tc = cxt.y_tc.sum(0)**0.5
+        cxt.y_tc = (self.x_tc @ self.w1_tc.exp() + self.b1_tc) ** 2
+        cxt.y_2tc = cxt.y_tc.sum(0) ** 0.5
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
         w1_tc_grad = self.host.post(ENDPOINT, cxt)
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testSum2ndDerivative(self):
-        y_torch = (self.x_torch @ self.w1_torch + self.b1_torch)**2
-        y2_torch = torch.sum(y_torch, 0)**0.5
-        dy_dw1_torch = grad_torch(y2_torch,
-                                  self.w1_torch,
-                                  grad_outputs=torch.ones_like(y2_torch),
-                                  create_graph=True,
-                                  retain_graph=True)[0]
-        d2y_dw12_torch = grad_torch(dy_dw1_torch,
-                                    self.w1_torch,
-                                    grad_outputs=torch.ones_like(dy_dw1_torch))[0]
+        y_torch = (self.x_torch @ self.w1_torch + self.b1_torch) ** 2
+        y2_torch = torch.sum(y_torch, 0) ** 0.5
+        dy_dw1_torch = grad_torch(
+            y2_torch,
+            self.w1_torch,
+            grad_outputs=torch.ones_like(y2_torch),
+            create_graph=True,
+            retain_graph=True,
+        )[0]
+
+        d2y_dw12_torch = grad_torch(
+            dy_dw1_torch, self.w1_torch, grad_outputs=torch.ones_like(dy_dw1_torch)
+        )[0]
 
         cxt = tc.Context()
-        y_tc = (self.x_tc @ self.w1_tc + self.b1_tc)**2
-        y_2tc = y_tc.sum(0)**0.5
+        y_tc = (self.x_tc @ self.w1_tc + self.b1_tc) ** 2
+        y_2tc = y_tc.sum(0) ** 0.5
         _dy_dw1_tc = grad_tc(y_2tc, ones_like_tc(y_2tc), self.w1_tc)
         _d2y_dw2_tc = grad_tc(_dy_dw1_tc, ones_like_tc(_dy_dw1_tc), self.w1_tc)
-        cxt.map = tc.Map({'the_first_derivative': _dy_dw1_tc, 'the_second_derivative': _d2y_dw2_tc})
+        cxt.map = tc.Map(
+            {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
+        )
 
         result = self.host.post(ENDPOINT, cxt)
-        dy_dw1_tc = result['the_first_derivative']
-        d2y_dw2_tc = result['the_second_derivative']
+        dy_dw1_tc = result["the_first_derivative"]
+        d2y_dw2_tc = result["the_second_derivative"]
 
         self.assertAllClose(dy_dw1_torch, dy_dw1_tc)
         self.assertAllClose(d2y_dw12_torch, d2y_dw2_tc)
 
     def assertAllClose(self, tensor_torch, tensor_tc, threshold=0.0001):
-        self.assertTrue((abs(load_np(tensor_tc) - [t.detach().numpy() for t in tensor_torch]) < threshold).all())
+        self.assertTrue(
+            (
+                abs(load_np(tensor_tc) - [t.detach().numpy() for t in tensor_torch])
+                < threshold
+            ).all()
+        )
 
 
 def load_np(as_json, dtype=float):
-    shape = as_json[TENSOR_URI][0][0]
+    shape = as_json[TENSOR_URI][0][1]
     ndarray = np.array(as_json[TENSOR_URI][1], dtype)
     return ndarray.reshape(shape)
+
 
 if __name__ == "__main__":
     unittest.main()
