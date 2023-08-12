@@ -1,5 +1,6 @@
 //! A generic map whose keys are [`Id`]s
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
@@ -7,7 +8,6 @@ use std::ops::{Deref, DerefMut};
 use async_trait::async_trait;
 use destream::de::{Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
-use ds_ext::OrdHashMap;
 use get_size::GetSize;
 use get_size_derive::*;
 use safecast::*;
@@ -20,14 +20,14 @@ use super::{Id, Tuple};
 /// A generic map whose keys are [`Id`]s, based on [`OrdHashMap`]
 #[derive(Clone, GetSize)]
 pub struct Map<T> {
-    inner: OrdHashMap<Id, T>,
+    inner: BTreeMap<Id, T>,
 }
 
 impl<T> Map<T> {
     /// Construct a new [`Map`].
     pub fn new() -> Self {
         Self {
-            inner: OrdHashMap::new(),
+            inner: BTreeMap::new(),
         }
     }
 
@@ -51,8 +51,8 @@ impl<T> Map<T> {
         }
     }
 
-    /// Retrieve this [`Map`]'s underlying [`OrdHashMap`].
-    pub fn into_inner(self) -> OrdHashMap<Id, T> {
+    /// Retrieve this [`Map`]'s underlying [`BTreeMap`].
+    pub fn into_inner(self) -> BTreeMap<Id, T> {
         self.inner
     }
 
@@ -102,7 +102,7 @@ impl<T> Map<T> {
 
 impl<T> Default for Map<T> {
     fn default() -> Map<T> {
-        OrdHashMap::new().into()
+        BTreeMap::new().into()
     }
 }
 
@@ -114,14 +114,14 @@ impl<T: PartialEq> PartialEq for Map<T> {
 
 impl<T: PartialEq + Eq> Eq for Map<T> {}
 
-impl<T> AsRef<OrdHashMap<Id, T>> for Map<T> {
-    fn as_ref(&self) -> &OrdHashMap<Id, T> {
+impl<T> AsRef<BTreeMap<Id, T>> for Map<T> {
+    fn as_ref(&self) -> &BTreeMap<Id, T> {
         &self.inner
     }
 }
 
 impl<T> Deref for Map<T> {
-    type Target = OrdHashMap<Id, T>;
+    type Target = BTreeMap<Id, T>;
 
     fn deref(&'_ self) -> &'_ Self::Target {
         &self.inner
@@ -144,7 +144,7 @@ impl<T> Extend<(Id, T)> for Map<T> {
 
 impl<T> IntoIterator for Map<T> {
     type Item = (Id, T);
-    type IntoIter = <OrdHashMap<Id, T> as IntoIterator>::IntoIter;
+    type IntoIter = <BTreeMap<Id, T> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.inner.into_iter()
@@ -153,7 +153,7 @@ impl<T> IntoIterator for Map<T> {
 
 impl<'a, T> IntoIterator for &'a Map<T> {
     type Item = (&'a Id, &'a T);
-    type IntoIter = ds_ext::map::Iter<'a, Id, T>;
+    type IntoIter = <&'a BTreeMap<Id, T> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.inner.iter()
@@ -165,16 +165,18 @@ where
     T: CastFrom<F>,
 {
     fn from_iter<I: IntoIterator<Item = (Id, F)>>(iter: I) -> Self {
-        let mut inner = OrdHashMap::new();
+        let mut inner = BTreeMap::new();
+
         for (id, f) in iter {
             inner.insert(id, f.cast_into());
         }
+
         Map { inner }
     }
 }
 
-impl<T> From<OrdHashMap<Id, T>> for Map<T> {
-    fn from(inner: OrdHashMap<Id, T>) -> Self {
+impl<T> From<BTreeMap<Id, T>> for Map<T> {
+    fn from(inner: BTreeMap<Id, T>) -> Self {
         Map { inner }
     }
 }
@@ -188,7 +190,7 @@ where
     }
 
     fn opt_cast_from(tuple: Tuple<F>) -> Option<Self> {
-        let mut inner = OrdHashMap::<Id, T>::new();
+        let mut inner = BTreeMap::<Id, T>::new();
 
         for f in tuple.into_iter() {
             if let Some((id, t)) = f.opt_cast_into() {
@@ -210,7 +212,7 @@ where
     type Context = T::Context;
 
     async fn from_stream<D: Decoder>(context: T::Context, d: &mut D) -> Result<Self, D::Error> {
-        let inner = OrdHashMap::<Id, T>::from_stream(context, d).await?;
+        let inner = BTreeMap::<Id, T>::from_stream(context, d).await?;
         Ok(Self { inner })
     }
 }
@@ -229,7 +231,7 @@ impl<'en, T: ToStream<'en> + 'en> ToStream<'en> for Map<T> {
 
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for Map<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        OrdHashMap::deserialize(deserializer).map(|inner| Self { inner })
+        BTreeMap::deserialize(deserializer).map(|inner| Self { inner })
     }
 }
 
@@ -239,13 +241,13 @@ impl<T: Serialize> Serialize for Map<T> {
     }
 }
 
-impl<F, T: TryCastFrom<F>> TryCastFrom<Map<F>> for OrdHashMap<Id, T> {
+impl<F, T: TryCastFrom<F>> TryCastFrom<Map<F>> for BTreeMap<Id, T> {
     fn can_cast_from(map: &Map<F>) -> bool {
         map.values().all(|f| T::can_cast_from(f))
     }
 
     fn opt_cast_from(source: Map<F>) -> Option<Self> {
-        let mut map = OrdHashMap::new();
+        let mut map = BTreeMap::new();
 
         for (id, f) in source.into_iter() {
             if let Some(t) = T::opt_cast_from(f) {
