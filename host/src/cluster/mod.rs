@@ -104,6 +104,19 @@ impl Schema {
     }
 }
 
+impl fmt::Debug for Schema {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self.lead {
+            None => write!(f, "cluster at {}{}", self.host, self.path),
+            Some(lead) => write!(
+                f,
+                "replica at {} of cluster at {}{}",
+                self.host, lead, self.path
+            ),
+        }
+    }
+}
+
 /// The data structure responsible for maintaining consensus per-transaction across the network.
 #[derive(Clone)]
 pub struct Cluster<T> {
@@ -534,21 +547,25 @@ where
 }
 
 #[async_trait]
-impl<T: fs::Persist<tc_fs::CacheBlock, Txn = Txn>> fs::Persist<tc_fs::CacheBlock>
-    for Cluster<BlockChain<T>>
+impl<T> fs::Persist<tc_fs::CacheBlock> for Cluster<BlockChain<T>>
 where
+    T: fs::Persist<tc_fs::CacheBlock, Txn = Txn>,
     BlockChain<T>: fs::Persist<tc_fs::CacheBlock, Schema = (), Txn = Txn>,
 {
     type Txn = Txn;
     type Schema = Schema;
 
     async fn create(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
+        debug!("create cluster with schema {schema:?}");
+
         BlockChain::create(txn_id, (), store)
             .map_ok(|state| Self::with_state(schema, state))
             .await
     }
 
     async fn load(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
+        debug!("load cluster with schema {schema:?}");
+
         BlockChain::load(txn_id, (), store)
             .map_ok(|state| Self::with_state(schema, state))
             .await
@@ -560,21 +577,25 @@ where
 }
 
 #[async_trait]
-impl<T: fs::Persist<tc_fs::CacheBlock, Txn = Txn>> fs::Persist<tc_fs::CacheBlock>
-    for Cluster<Dir<T>>
+impl<T> fs::Persist<tc_fs::CacheBlock> for Cluster<Dir<T>>
 where
+    T: fs::Persist<tc_fs::CacheBlock, Txn = Txn>,
     Dir<T>: fs::Persist<tc_fs::CacheBlock, Schema = Schema, Txn = Txn>,
 {
     type Txn = Txn;
     type Schema = Schema;
 
     async fn create(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
+        debug!("create cluster dir with schema {schema:?}");
+
         Dir::create(txn_id, schema.clone(), store)
             .map_ok(|state| Self::with_state(schema, state))
             .await
     }
 
     async fn load(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
+        debug!("load cluster dir with schema {schema:?}");
+
         Dir::load(txn_id, schema.clone(), store)
             .map_ok(|state| Self::with_state(schema, state))
             .await

@@ -25,7 +25,7 @@ use crate::txn::Txn;
 
 use super::DirItem;
 
-const LIB: Label = label("lib");
+pub(super) const LIB: Label = label("lib");
 
 /// A version of a [`Library`]
 #[derive(Clone, GetSize)]

@@ -30,6 +30,33 @@ pub enum DirEntry<FE, B> {
     File(File<FE, B>),
 }
 
+impl<FE, B> DirEntry<FE, B> {
+    /// Return `true` if this [`DirEntry`] is a [`Dir`].
+    pub fn is_dir(&self) -> bool {
+        match self {
+            Self::Dir(_) => true,
+            Self::File(_) => false,
+        }
+    }
+
+    /// Return `true` if this [`DirEntry`] is a [`File`].
+    pub fn is_file(&self) -> bool {
+        match self {
+            Self::Dir(_) => false,
+            Self::File(_) => true,
+        }
+    }
+}
+
+impl<FE, B> fmt::Debug for DirEntry<FE, B> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Dir(dir) => dir.fmt(f),
+            Self::File(file) => file.fmt(f),
+        }
+    }
+}
+
 /// A transactional directory
 pub struct Dir<FE> {
     inner: txfs::Dir<TxnId, FE>,
@@ -144,8 +171,8 @@ impl<FE: ThreadSafe + Clone> Dir<FE> {
         self.inner.is_empty(txn_id).map_err(TCError::from).await
     }
 
-    /// Iterate over the [`DirEntry`]s in this [`Dir`] at `txn_id`.
-    pub async fn iter<B>(
+    /// Construct a [`Stream`] of the [`DirEntry`]s in this [`Dir`] at `txn_id`.
+    pub async fn entries<B>(
         &self,
         txn_id: TxnId,
     ) -> TCResult<impl Stream<Item = TCResult<(Key, DirEntry<FE, B>)>> + Unpin + Send + '_> {
