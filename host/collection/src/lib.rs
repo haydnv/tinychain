@@ -108,7 +108,7 @@ where
     Txn: Transaction<FE>,
     FE: AsType<btree::Node> + ThreadSafe,
 {
-    fn schema(&self) -> Schema {
+    pub fn schema(&self) -> Schema {
         match self {
             Self::BTree(btree) => btree.schema().clone().into(),
             Self::Table(table) => table.schema().clone().into(),

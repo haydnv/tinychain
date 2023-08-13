@@ -61,7 +61,7 @@ where
                         debug!("Chain::put {} <- {:?}", key, value);
 
                         self.chain
-                            .append_put(*txn.id(), key.clone(), value.clone())
+                            .append_put(txn, key.clone(), value.clone())
                             .await?;
 
                         put_handler(txn, key, value).await
