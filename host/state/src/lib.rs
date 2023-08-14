@@ -76,7 +76,7 @@ impl NativeClass for StateType {
                 match path[1].as_str() {
                     "collection" => CollectionType::from_path(path).map(Self::Collection),
                     "chain" => ChainType::from_path(path).map(Self::Chain),
-                    "public" => ObjectType::from_path(path).map(Self::Object),
+                    "object" => ObjectType::from_path(path).map(Self::Object),
                     "scalar" => ScalarType::from_path(path).map(Self::Scalar),
                     _ => None,
                 }
