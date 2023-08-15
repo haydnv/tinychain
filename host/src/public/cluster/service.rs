@@ -1,6 +1,7 @@
 use log::{debug, trace};
 use safecast::TryCastFrom;
 
+use tc_chain::CHAIN;
 use tc_error::*;
 use tc_scalar::{OpRef, OpRefType, Scalar, Subject, TCRef};
 use tc_state::object::public::method::route_attr;
@@ -143,6 +144,14 @@ impl<'a> Handler<'a, State> for ServiceHandler<'a> {
 
                 let number = self.path[0].as_str().parse()?;
                 let version = self.service.get_version(*txn.id(), &number).await?;
+                let path = &self.path[1..];
+
+                if path.len() == 2 && path[1] == CHAIN {
+                    if let Some(service::Attr::Chain(chain)) = version.get_attribute(&path[0]) {
+                        return Ok(State::Chain(chain.clone()));
+                    }
+                }
+
                 version.get(txn, &self.path[1..], key).await
             })
         }))
