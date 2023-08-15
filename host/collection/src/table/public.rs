@@ -310,7 +310,7 @@ where
     State::FE: AsType<Node> + ThreadSafe,
     Map<Value>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
-    Tuple<State>: TryCastFrom<State>,
+    Tuple<State>: TryFrom<State, Error = TCError>,
     Value: TryCastFrom<State>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
@@ -341,23 +341,25 @@ where
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, key, values| {
+        Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                debug!("Table PUT {:?} <- {:?}", key, values);
+                debug!("Table PUT {:?} <- {:?}", key, value);
 
                 match KeyOrRange::try_from_value(&self.table, key)? {
                     KeyOrRange::All => {
-                        let values = Map::<Value>::try_from(values)?;
+                        let values = Map::<Value>::try_from(value)?;
                         self.update(txn, Range::default(), values).await
                     }
                     KeyOrRange::Range(range) => {
-                        let values = Map::<Value>::try_from(values)?;
+                        let values = Map::<Value>::try_from(value)?;
                         self.update(txn, range, values).await
                     }
                     KeyOrRange::Key(key) => {
-                        let values = Tuple::<State>::try_cast_from(values, |s| {
-                            TCError::unexpected(s, "a Tuple of Values for a Table row")
-                        })?;
+                        let values = if value.is_tuple() {
+                            Tuple::<State>::try_from(value)?
+                        } else {
+                            Tuple::<State>::from(vec![value])
+                        };
 
                         let values = values
                             .into_iter()
@@ -483,7 +485,7 @@ where
     State::FE: AsType<Node> + ThreadSafe,
     Map<Value>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
-    Tuple<State>: TryCastFrom<State>,
+    Tuple<State>: TryFrom<State, Error = TCError>,
     Value: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
@@ -497,7 +499,7 @@ where
     State::FE: AsType<Node> + ThreadSafe,
     Map<Value>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
-    Tuple<State>: TryCastFrom<State>,
+    Tuple<State>: TryFrom<State, Error = TCError>,
     Value: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
@@ -522,7 +524,7 @@ where
         + From<<T as TableOrder>::OrderBy>
         + From<<T as TableStream>::Selection>
         + From<<T as TableSlice>::Slice>,
-    Tuple<State>: TryCastFrom<State>,
+    Tuple<State>: TryFrom<State, Error = TCError>,
     Value: TryCastFrom<State>,
 {
     if path.is_empty() {

@@ -674,9 +674,12 @@ impl TryFrom<Scalar> for Map<Scalar> {
     fn try_from(scalar: Scalar) -> TCResult<Map<Scalar>> {
         match scalar {
             Scalar::Map(map) => Ok(map),
-            Scalar::Tuple(tuple) => tuple.into_iter().map(|item| -> TCResult<(Id, Scalar)> {
-                item.try_into()
-            }).collect(),
+
+            Scalar::Tuple(tuple) => tuple
+                .into_iter()
+                .map(|item| -> TCResult<(Id, Scalar)> { item.try_into() })
+                .collect(),
+
             other => Err(TCError::unexpected(other, "a Map")),
         }
     }
@@ -696,14 +699,34 @@ impl TryFrom<Scalar> for Map<Value> {
 
             Scalar::Tuple(tuple) => tuple
                 .into_iter()
-                .map(|item| -> TCResult<(Id, Value)> {
-                    item.try_into()
-                })
+                .map(|item| -> TCResult<(Id, Value)> { item.try_into() })
                 .collect(),
 
             Scalar::Value(value) => value.try_into(),
 
             other => Err(TCError::unexpected(other, "a Map")),
+        }
+    }
+}
+
+impl TryFrom<Scalar> for Tuple<Scalar> {
+    type Error = TCError;
+
+    fn try_from(scalar: Scalar) -> Result<Self, Self::Error> {
+        match scalar {
+            Scalar::Map(map) => Ok(map
+                .into_iter()
+                .map(|(id, scalar)| Scalar::Tuple(vec![Scalar::from(id), scalar].into()))
+                .collect()),
+
+            Scalar::Tuple(tuple) => Ok(tuple),
+
+            Scalar::Value(value) => {
+                let tuple = Tuple::<Value>::try_from(value)?;
+                Ok(tuple.into_iter().map(Scalar::Value).collect())
+            }
+
+            other => Err(TCError::unexpected(other, "a Tuple")),
         }
     }
 }

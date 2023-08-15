@@ -85,7 +85,7 @@ where
     Map<Value>: TryFrom<State, Error = TCError>,
     Number: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
-    Tuple<State>: TryCastFrom<State>,
+    Tuple<State>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
     Value: TryCastFrom<State>,
     bool: TryCastFrom<State>,
@@ -129,7 +129,7 @@ where
     Number: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
-    Tuple<State>: TryCastFrom<State>,
+    Tuple<State>: TryFrom<State, Error = TCError>,
     Value: TryCastFrom<State>,
     bool: TryCastFrom<State>,
 {
