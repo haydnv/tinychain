@@ -48,12 +48,12 @@ pub trait Recover<FE> {
 
 /// Methods common to any instance of a [`Chain`], such as a [`SyncChain`].
 #[async_trait]
-pub trait ChainInstance<State, T> {
+pub trait ChainInstance<State: StateInstance, T> {
     /// Append the given DELETE op to the latest block in this `Chain`.
     async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()>;
 
     /// Append the given PUT op to the latest block in this `Chain`.
-    async fn append_put(&self, txn_id: TxnId, key: Value, value: State) -> TCResult<()>;
+    async fn append_put(&self, txn: &State::Txn, key: Value, value: State) -> TCResult<()>;
 
     /// Borrow the subject of this [`Chain`].
     fn subject(&self) -> &T;
@@ -149,10 +149,10 @@ where
         }
     }
 
-    async fn append_put(&self, txn_id: TxnId, key: Value, value: State) -> TCResult<()> {
+    async fn append_put(&self, txn: &State::Txn, key: Value, value: State) -> TCResult<()> {
         match self {
-            Self::Block(chain) => chain.append_put(txn_id, key, value).await,
-            Self::Sync(chain) => chain.append_put(txn_id, key, value).await,
+            Self::Block(chain) => chain.append_put(txn, key, value).await,
+            Self::Sync(chain) => chain.append_put(txn, key, value).await,
         }
     }
 

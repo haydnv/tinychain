@@ -78,7 +78,7 @@ impl TxnServer {
 
             result
         })
-        .map_err(|e| unexpected!("failed to schedule graceful shutdown: {}", e))
+        .map_err(|e| internal!("failed to schedule graceful shutdown: {}", e))
         .await?
     }
 

@@ -437,8 +437,8 @@ impl Persist<tc_fs::CacheBlock> for Dir<Class> {
 
         let mut loaded = BTreeMap::new();
 
-        let mut contents = dir.iter::<InstanceClass>(txn_id).await?;
-        while let Some((name, entry)) = contents.try_next().await? {
+        let mut entries = dir.entries::<InstanceClass>(txn_id).await?;
+        while let Some((name, entry)) = entries.try_next().await? {
             let schema = schema.extend((*name).clone());
 
             let entry = match entry {
@@ -456,14 +456,14 @@ impl Persist<tc_fs::CacheBlock> for Dir<Class> {
                     }
                 }
                 tc_transact::fs::DirEntry::File(file) => {
-                    Err(unexpected!("invalid Class dir entry: {:?}", file))
+                    Err(internal!("invalid Class dir entry: {:?}", file))
                 }
             }?;
 
             loaded.insert((*name).clone(), entry);
         }
 
-        std::mem::drop(contents);
+        std::mem::drop(entries); // needed because `entries` borrows `dir`
 
         Self::with_contents(txn_id, schema, dir, loaded)
     }
@@ -503,7 +503,55 @@ impl Persist<tc_fs::CacheBlock> for Dir<Library> {
         // }
         //
         // Self::with_contents(txn_id, schema, dir, contents)
-        todo!()
+
+        let mut contents = BTreeMap::new();
+
+        let mut entries = dir.entries::<Library>(txn_id).await?;
+
+        while let Some((name, entry)) = entries.try_next().await? {
+            // first, test if this is a directory or a library entry
+            // if it's a library entry, it will contain exactly one file called "lib"
+            // otherwise, load it as a directory
+
+            let dir = match entry {
+                tc_fs::DirEntry::Dir(dir) => dir,
+                tc_fs::DirEntry::File(file) => {
+                    return Err(internal!(
+                        "tried to load a library file {name}: {file:?} as a cluster directory"
+                    ));
+                }
+            };
+
+            let is_lib = {
+                let mut is_lib = !dir.is_empty(txn_id).await?;
+
+                let mut entries = dir.entries::<Library>(txn_id).await?;
+                while let Some((name, entry)) = entries.try_next().await? {
+                    if &*name == &*super::library::LIB && entry.is_file() {
+                        is_lib = true;
+                    } else {
+                        is_lib = false;
+                    }
+                }
+
+                is_lib
+            };
+
+            let name = Id::clone(&*name);
+            let schema = schema.extend(name.clone());
+
+            if is_lib {
+                let item = Cluster::<BlockChain<Library>>::load(txn_id, schema, dir).await?;
+                contents.insert(name, DirEntry::Item(item));
+            } else {
+                let dir = Cluster::load(txn_id, schema, dir).await?;
+                contents.insert(name, DirEntry::Dir(dir));
+            }
+        }
+
+        std::mem::drop(entries); // needed because `entries` borrows `dir`
+
+        Self::with_contents(txn_id, schema, dir, contents)
     }
 
     fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
@@ -523,14 +571,14 @@ impl Persist<tc_fs::CacheBlock> for Dir<Service> {
     async fn load(txn_id: TxnId, schema: Self::Schema, dir: tc_fs::Dir) -> TCResult<Self> {
         let mut loaded = BTreeMap::new();
 
-        let mut contents = dir.iter::<InstanceClass>(txn_id).await?;
+        let mut contents = dir.entries::<InstanceClass>(txn_id).await?;
 
         while let Some((name, entry)) = contents.try_next().await? {
             let schema = schema.extend((*name).clone());
 
             let entry = match entry {
                 tc_transact::fs::DirEntry::File(file) => {
-                    Err(unexpected!("invalid Service directory entry: {:?}", file))
+                    Err(internal!("invalid Service directory entry: {:?}", file))
                 }
                 tc_transact::fs::DirEntry::Dir(dir) => {
                     let is_service = dir.contains(txn_id, &super::service::SCHEMA.into()).await?;

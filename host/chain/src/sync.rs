@@ -105,16 +105,16 @@ where
         Ok(())
     }
 
-    async fn append_put(&self, txn_id: TxnId, key: Value, value: State) -> TCResult<()> {
+    async fn append_put(&self, txn: &State::Txn, key: Value, value: State) -> TCResult<()> {
         debug!("SyncChain::append_put {} <- {:?}", key, value);
 
         let value = StoreEntry::try_from_state(value)?;
-        let value = self.store.save_state(txn_id, value).await?;
+        let value = self.store.save_state(txn, value).await?;
 
         debug!("locking pending transaction log block...");
         let mut block: FileWriteGuard<ChainBlock> = self.pending.write().await?;
 
-        block.append_put(txn_id, key, value);
+        block.append_put(*txn.id(), key, value);
 
         debug!("locked pending transaction log block");
         Ok(())

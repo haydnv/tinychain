@@ -8,14 +8,14 @@ use std::marker::PhantomData;
 
 use tc_collection::btree::Node as BTreeNode;
 use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
-use tc_collection::CollectionView;
-use tc_collection::{Collection, CollectionType};
+use tc_collection::{Collection, CollectionBase, CollectionType, CollectionView};
 use tc_error::*;
 use tc_scalar::{OpRef, Scalar, TCRef};
 use tc_transact::fs;
 use tc_transact::public::StateInstance;
 use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
-use tcgeneric::{Id, NativeClass, ThreadSafe};
+use tc_value::Value;
+use tcgeneric::{Id, Instance, NativeClass, ThreadSafe};
 
 pub enum StoreEntry<Txn, FE> {
     Collection(Collection<Txn, FE>),
@@ -160,11 +160,11 @@ where
         if let Scalar::Ref(tc_ref) = scalar {
             if let TCRef::Op(OpRef::Get((OpSubject::Ref(hash, classpath), schema))) = *tc_ref {
                 let class = CollectionType::from_path(&classpath)
-                    .ok_or_else(|| unexpected!("invalid Collection type: {}", classpath))?;
+                    .ok_or_else(|| internal!("invalid Collection type: {}", classpath))?;
 
                 Err(not_implemented!("resolve saved collection"))
             } else {
-                Err(unexpected!(
+                Err(internal!(
                     "invalid subject for historical Chain state {:?}",
                     tc_ref
                 ))
@@ -180,10 +180,31 @@ where
     FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
     Txn: Transaction<FE>,
 {
-    pub async fn save_state(&self, txn_id: TxnId, state: StoreEntry<Txn, FE>) -> TCResult<Scalar> {
+    pub async fn save_state(&self, txn: &Txn, state: StoreEntry<Txn, FE>) -> TCResult<Scalar> {
         debug!("chain data store saving state {:?}...", state);
-        let hash = (&state).hash(txn_id).map_ok(Id::from).await?;
-        Err(not_implemented!("save chain value entry"))
+
+        match state {
+            StoreEntry::Collection(collection) => {
+                let classpath = collection.class().path();
+                let schema = collection.schema();
+
+                let txn_id = *txn.id();
+                let hash = collection.clone().hash(txn_id).map_ok(Id::from).await?;
+
+                if !self.dir.contains(txn_id, &hash).await? {
+                    let store = self.dir.create_dir(txn_id, hash.clone()).await?;
+                    let _copy: CollectionBase<_, _> =
+                        fs::CopyFrom::copy_from(txn, store, collection).await?;
+                }
+
+                Ok(OpRef::Get((
+                    (hash.into(), classpath).into(),
+                    Value::cast_from(schema).into(),
+                ))
+                .into())
+            }
+            StoreEntry::Scalar(scalar) => Ok(scalar),
+        }
     }
 }
 

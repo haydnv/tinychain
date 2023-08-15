@@ -198,9 +198,9 @@ where
 
             // comparison
             "gt" => Box::new(Dual::new(move |other| Ok((*self > other).into()))),
-            "gte" => Box::new(Dual::new(move |other| Ok((*self >= other).into()))),
+            "ge" => Box::new(Dual::new(move |other| Ok((*self >= other).into()))),
             "lt" => Box::new(Dual::new(move |other| Ok((*self < other).into()))),
-            "lte" => Box::new(Dual::new(move |other| Ok((*self <= other).into()))),
+            "le" => Box::new(Dual::new(move |other| Ok((*self <= other).into()))),
             "not" => Box::new(Unary::new("not", move || self.not())),
             "or" => Box::new(Dual::new(move |other| Ok(self.or(other)))),
             "xor" => Box::new(Dual::new(move |other| Ok(self.xor(other)))),

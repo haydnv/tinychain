@@ -76,7 +76,7 @@ impl NativeClass for StateType {
                 match path[1].as_str() {
                     "collection" => CollectionType::from_path(path).map(Self::Collection),
                     "chain" => ChainType::from_path(path).map(Self::Chain),
-                    "public" => ObjectType::from_path(path).map(Self::Object),
+                    "object" => ObjectType::from_path(path).map(Self::Object),
                     "scalar" => ScalarType::from_path(path).map(Self::Scalar),
                     _ => None,
                 }
@@ -755,6 +755,17 @@ impl TryFrom<State> for bool {
     }
 }
 
+impl TryFrom<State> for Id {
+    type Error = TCError;
+
+    fn try_from(state: State) -> TCResult<Id> {
+        match state {
+            State::Scalar(scalar) => scalar.try_into(),
+            other => Err(TCError::unexpected(other, "an Id")),
+        }
+    }
+}
+
 impl TryFrom<State> for Collection {
     type Error = TCError;
 
@@ -802,6 +813,11 @@ impl TryFrom<State> for Map<Scalar> {
 
             State::Scalar(Scalar::Map(map)) => Ok(map),
 
+            State::Tuple(tuple) => tuple
+                .into_iter()
+                .map(|item| -> TCResult<(Id, Scalar)> { item.try_into() })
+                .collect(),
+
             other => Err(TCError::unexpected(other, "a Map")),
         }
     }
@@ -813,12 +829,59 @@ impl TryFrom<State> for Map<State> {
     fn try_from(state: State) -> TCResult<Map<State>> {
         match state {
             State::Map(map) => Ok(map),
+
             State::Scalar(Scalar::Map(map)) => Ok(map
                 .into_iter()
                 .map(|(id, scalar)| (id, State::Scalar(scalar)))
                 .collect()),
 
+            State::Tuple(tuple) => tuple
+                .into_iter()
+                .map(|item| -> TCResult<(Id, State)> { item.try_into() })
+                .collect(),
+
             other => Err(TCError::unexpected(other, "a Map")),
+        }
+    }
+}
+
+impl TryFrom<State> for Map<Value> {
+    type Error = TCError;
+
+    fn try_from(state: State) -> TCResult<Map<Value>> {
+        match state {
+            State::Map(map) => map
+                .into_iter()
+                .map(|(id, state)| Value::try_from(state).map(|scalar| (id, scalar)))
+                .collect(),
+
+            State::Scalar(scalar) => scalar.try_into(),
+
+            State::Tuple(tuple) => tuple
+                .into_iter()
+                .map(|item| -> TCResult<(Id, Value)> { item.try_into() })
+                .collect(),
+
+            other => Err(TCError::unexpected(other, "a Map")),
+        }
+    }
+}
+
+impl<T: TryFrom<State> + TryFrom<Scalar>> TryFrom<State> for (Id, T)
+where
+    TCError: From<<T as TryFrom<State>>::Error> + From<<T as TryFrom<Scalar>>::Error>,
+{
+    type Error = TCError;
+
+    fn try_from(state: State) -> TCResult<Self> {
+        match state {
+            State::Scalar(scalar) => scalar.try_into().map_err(TCError::from),
+            State::Tuple(mut tuple) if tuple.len() == 2 => {
+                let value = tuple.pop().expect("value");
+                let key = tuple.pop().expect("key");
+                Ok((key.try_into()?, value.try_into()?))
+            }
+            other => Err(TCError::unexpected(other, "a map item")),
         }
     }
 }

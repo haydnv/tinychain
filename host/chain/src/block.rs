@@ -66,8 +66,8 @@ where
         self.history.append_delete(txn_id, key).await
     }
 
-    async fn append_put(&self, txn_id: TxnId, key: Value, value: State) -> TCResult<()> {
-        self.history.append_put(txn_id, key, value).await
+    async fn append_put(&self, txn: &State::Txn, key: Value, value: State) -> TCResult<()> {
+        self.history.append_put(txn, key, value).await
     }
 
     fn subject(&self) -> &T {

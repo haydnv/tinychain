@@ -2,7 +2,7 @@ use std::fmt;
 
 use async_hash::{Digest, Hash, Output};
 use destream::en;
-use safecast::as_type;
+use safecast::{as_type, CastFrom, CastInto};
 
 use tc_error::*;
 use tc_value::Value;
@@ -81,6 +81,17 @@ impl<'en> en::IntoStream<'en> for Schema {
                 map.encode_entry(TensorType::Dense.path(), (schema,))?;
                 map.end()
             }
+        }
+    }
+}
+
+impl CastFrom<Schema> for Value {
+    fn cast_from(schema: Schema) -> Self {
+        match schema {
+            Schema::BTree(schema) => schema.cast_into(),
+            Schema::Table(schema) => schema.cast_into(),
+            Schema::Dense(schema) => schema.cast_into(),
+            Schema::Sparse(schema) => schema.cast_into(),
         }
     }
 }

@@ -84,13 +84,6 @@ pub enum Subject {
 }
 
 impl Subject {
-    // pub fn as_class(&self) -> Option<StateType> {
-    //     match self {
-    //         Self::Link(link) => StateType::from_path(link.path()),
-    //         _ => None,
-    //     }
-    // }
-
     fn dereference_self(self, path: &TCPathBuf) -> Self {
         match self {
             Self::Ref(id_ref, suffix) if id_ref.id() == &SELF => {

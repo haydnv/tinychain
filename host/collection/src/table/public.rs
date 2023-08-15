@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::convert::TryFrom;
+use std::fmt;
 use std::ops::Bound;
 
 use b_table::{IndexSchema, Schema};
@@ -11,23 +14,23 @@ use tc_transact::fs::{Dir, Persist};
 use tc_transact::public::{
     DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route, StateInstance,
 };
-use tc_transact::{fs, Transaction};
-use tc_value::Value;
+use tc_transact::Transaction;
+use tc_value::{Value, ValueCollator};
 use tcgeneric::{label, Id, Map, PathSegment, ThreadSafe, Tuple};
 
-use crate::btree::Node;
+use crate::btree::{BTreeSchema, Node};
+use crate::table::TableUpdate;
 use crate::Collection;
 
 use super::{
     ColumnRange, Key, Range, Table, TableFile, TableInstance, TableOrder, TableRead, TableSchema,
-    TableSlice, TableStream, TableType, TableWrite,
+    TableSlice, TableStream, TableType, TableWrite, Values,
 };
 
 impl<State> Route<State> for TableType
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
-    TableFile<State::Txn, State::FE>:
-        fs::Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
+    TableFile<State::Txn, State::FE>: Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
     Value: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
@@ -55,7 +58,7 @@ where
                 let schema: Value = params.require(&label("schema").into())?;
                 let _schema = TableSchema::try_cast_from_value(schema)?;
 
-                // let _source: TCStream = params.require(&label("source").into())?;
+                // let _source = params.require(&label("source").into())?;
                 // params.expect_empty()?;
                 //
                 // let _store = {
@@ -64,7 +67,7 @@ where
                 //     Dir::load(*txn.id(), dir).await?
                 // };
 
-                Err(not_implemented!("copy a Table from a Stream"))
+                Err(not_implemented!("copy a Table"))
             })
         }))
     }
@@ -75,8 +78,7 @@ struct CreateHandler;
 impl<'a, State> Handler<'a, State> for CreateHandler
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
-    TableFile<State::Txn, State::FE>:
-        fs::Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
+    TableFile<State::Txn, State::FE>: Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -102,13 +104,14 @@ where
     }
 }
 
-struct ContainsHandler<'a, T> {
-    table: &'a T,
+struct ContainsHandler<Txn, FE> {
+    table: Table<Txn, FE>,
 }
 
-impl<'a, State, T: TableRead + 'a> Handler<'a, State> for ContainsHandler<'a, T>
+impl<'a, State> Handler<'a, State> for ContainsHandler<State::Txn, State::FE>
 where
     State: StateInstance,
+    State::FE: AsType<Node> + ThreadSafe,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -116,16 +119,30 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let key = try_into_key(key)?;
-                let row = self.table.read(*txn.id(), key).await?;
-                Ok(Value::from(row.is_some()).into())
+                let filled = match KeyOrRange::try_from_value(&self.table, key)? {
+                    KeyOrRange::All => {
+                        let empty = self.table.is_empty(*txn.id()).await?;
+                        !empty
+                    }
+                    KeyOrRange::Key(key) => {
+                        let row = self.table.read(*txn.id(), key).await?;
+                        row.is_some()
+                    }
+                    KeyOrRange::Range(bounds) => {
+                        let slice = self.table.slice(bounds.into())?;
+                        let empty = slice.is_empty(*txn.id()).await?;
+                        !empty
+                    }
+                };
+
+                Ok(Value::from(filled).into())
             })
         }))
     }
 }
 
-impl<'a, T> From<&'a T> for ContainsHandler<'a, T> {
-    fn from(table: &'a T) -> Self {
+impl<Txn, FE> From<Table<Txn, FE>> for ContainsHandler<Txn, FE> {
+    fn from(table: Table<Txn, FE>) -> Self {
         Self { table }
     }
 }
@@ -137,7 +154,7 @@ struct CountHandler<T> {
 impl<'a, State, T> Handler<'a, State> for CountHandler<T>
 where
     State: StateInstance + From<u64>,
-    T: TableSlice + TableStream + 'a,
+    T: TableRead + TableSlice + TableStream + fmt::Debug + 'a,
     T::Slice: TableStream,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
@@ -146,13 +163,19 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                if key.is_none() {
-                    self.table.count(*txn.id()).map_ok(State::from).await
-                } else {
-                    let bounds = cast_into_bounds(Scalar::Value(key))?;
-                    let slice = self.table.slice(bounds)?;
-                    slice.count(*txn.id()).map_ok(State::from).await
-                }
+                let count = match KeyOrRange::try_from_value(&self.table, key)? {
+                    KeyOrRange::All => self.table.count(*txn.id()).await?,
+                    KeyOrRange::Key(key) => match self.table.read(*txn.id(), key).await? {
+                        Some(_row) => 1,
+                        None => 0,
+                    },
+                    KeyOrRange::Range(range) => {
+                        let slice = self.table.slice(range)?;
+                        slice.count(*txn.id()).await?
+                    }
+                };
+
+                Ok(State::from(count))
             })
         }))
     }
@@ -244,16 +267,49 @@ impl<T> From<T> for OrderHandler<T> {
     }
 }
 
-struct TableHandler<'a, T> {
-    table: &'a T,
+struct TableHandler<Txn, FE> {
+    table: Table<Txn, FE>,
 }
 
-impl<'a, State, T> Handler<'a, State> for TableHandler<'a, T>
+impl<Txn, FE> TableHandler<Txn, FE>
 where
-    State: StateInstance + From<Collection<State::Txn, State::FE>>,
-    T: TableRead + TableSlice + TableWrite + Clone + 'a,
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe + Clone,
+{
+    async fn create_tmp(
+        &self,
+        txn: &Txn,
+    ) -> TCResult<b_tree::BTreeLock<BTreeSchema, ValueCollator, FE>> {
+        let (_, tmp) = {
+            let mut context = txn.context().write().await;
+            context.create_dir_unique()?
+        };
+
+        b_tree::BTreeLock::create(
+            self.table.schema().primary().clone(),
+            ValueCollator::default(),
+            tmp,
+        )
+        .map_err(TCError::from)
+    }
+
+    async fn truncate(self, txn: &Txn, range: Range) -> TCResult<()> {
+        let tmp = self.create_tmp(txn).await?;
+        self.table.truncate(*txn.id(), range, tmp).await
+    }
+
+    async fn update(self, txn: &Txn, range: Range, values: Map<Value>) -> TCResult<()> {
+        let tmp = self.create_tmp(txn).await?;
+        self.table.update(*txn.id(), range, values, tmp).await
+    }
+}
+
+impl<'a, State> Handler<'a, State> for TableHandler<State::Txn, State::FE>
+where
+    State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Map<State>>,
+    State::FE: AsType<Node> + ThreadSafe,
+    Map<Value>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
-    Table<State::Txn, State::FE>: From<T> + From<T::Slice>,
     Tuple<State>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
 {
@@ -263,16 +319,19 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                if key.is_some() {
-                    let key = try_into_key(key)?;
-
-                    self.table
-                        .read(*txn.id(), key)
-                        .map_ok(Value::from)
-                        .map_ok(State::from)
-                        .await
-                } else {
-                    Ok(Collection::Table(self.table.clone().into()).into())
+                match KeyOrRange::try_from_value(&self.table, key)? {
+                    KeyOrRange::All => Ok(State::from(Collection::Table(self.table.into()))),
+                    KeyOrRange::Range(range) => {
+                        let slice = self.table.slice(range)?;
+                        Ok(State::from(Collection::Table(slice.into())))
+                    }
+                    KeyOrRange::Key(key) => {
+                        self.table
+                            .read(*txn.id(), key)
+                            .map_ok(Value::from)
+                            .map_ok(State::from)
+                            .await
+                    }
                 }
             })
         }))
@@ -286,25 +345,29 @@ where
             Box::pin(async move {
                 debug!("Table PUT {:?} <- {:?}", key, values);
 
-                let key = try_into_key(key)?;
+                match KeyOrRange::try_from_value(&self.table, key)? {
+                    KeyOrRange::All => {
+                        let values = Map::<Value>::try_from(values)?;
+                        self.update(txn, Range::default(), values).await
+                    }
+                    KeyOrRange::Range(range) => {
+                        let values = Map::<Value>::try_from(values)?;
+                        self.update(txn, range, values).await
+                    }
+                    KeyOrRange::Key(key) => {
+                        let values = Tuple::<State>::try_cast_from(values, |s| {
+                            TCError::unexpected(s, "a Tuple of Values for a Table row")
+                        })?;
 
-                if values.is_map() {
-                    Err(not_implemented!("update an existing table row"))
-                } else if values.is_tuple() {
-                    let values = Tuple::<State>::try_cast_from(values, |s| {
-                        TCError::unexpected(s, "a Tuple of Values for a Table row")
-                    })?;
+                        let values = values
+                            .into_iter()
+                            .map(|state| {
+                                state.try_cast_into(|s| TCError::unexpected(s, "a column value"))
+                            })
+                            .collect::<TCResult<Values>>()?;
 
-                    let values = values
-                        .into_iter()
-                        .map(|state| {
-                            state.try_cast_into(|s| TCError::unexpected(s, "a column value"))
-                        })
-                        .collect::<TCResult<Vec<Value>>>()?;
-
-                    self.table.upsert(*txn.id(), key, values).await
-                } else {
-                    Err(TCError::unexpected(values, "a Table row"))
+                        self.table.upsert(*txn.id(), key, values).await
+                    }
                 }
             })
         }))
@@ -314,13 +377,15 @@ where
     where
         'b: 'a,
     {
-        Some(Box::new(|_txn, mut params| {
+        Some(Box::new(|_txn, params| {
             Box::pin(async move {
-                let bounds: Scalar = params.require(&label("bounds").into())?;
-                let bounds = cast_into_bounds(bounds)?;
+                let range = State::from(params)
+                    .try_cast_into(|s| bad_request!("invalid table selector: {s:?}"))?;
+
+                let range = cast_into_range(&self.table, range)?;
+
                 self.table
-                    .clone()
-                    .slice(bounds)
+                    .slice(range)
                     .map(|slice| Table::from(slice))
                     .map(Collection::Table)
                     .map(State::from)
@@ -334,10 +399,21 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let key = try_into_key(key)?;
-                self.table.delete(*txn.id(), key).await
+                let txn_id = *txn.id();
+
+                match KeyOrRange::try_from_value(&self.table, key)? {
+                    KeyOrRange::All => self.truncate(txn, Range::default()).await,
+                    KeyOrRange::Key(key) => self.table.delete(txn_id, key).await,
+                    KeyOrRange::Range(range) => self.truncate(txn, range).await,
+                }
             })
         }))
+    }
+}
+
+impl<Txn, FE> From<Table<Txn, FE>> for TableHandler<Txn, FE> {
+    fn from(table: Table<Txn, FE>) -> Self {
+        Self { table }
     }
 }
 
@@ -401,16 +477,11 @@ impl<T> From<T> for SelectHandler<T> {
     }
 }
 
-impl<'a, T> From<&'a T> for TableHandler<'a, T> {
-    fn from(table: &'a T) -> Self {
-        Self { table }
-    }
-}
-
 impl<State> Route<State> for Table<State::Txn, State::FE>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<u64>,
     State::FE: AsType<Node> + ThreadSafe,
+    Map<Value>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
     Tuple<State>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -424,6 +495,7 @@ impl<State> Route<State> for TableFile<State::Txn, State::FE>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<u64>,
     State::FE: AsType<Node> + ThreadSafe,
+    Map<Value>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
     Tuple<State>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -441,8 +513,9 @@ fn route<'a, State, T>(
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<u64>,
     State::FE: AsType<Node> + ThreadSafe,
-    T: TableRead + TableOrder + TableSlice + TableStream + TableWrite + Clone,
+    T: TableRead + TableOrder + TableSlice + TableStream + TableWrite + Clone + fmt::Debug,
     <T as TableSlice>::Slice: TableStream,
+    Map<Value>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
     Table<State::Txn, State::FE>: From<T>
         + From<<T as TableStream>::Limit>
@@ -453,11 +526,11 @@ where
     Value: TryCastFrom<State>,
 {
     if path.is_empty() {
-        Some(Box::new(TableHandler::from(table)))
+        Some(Box::new(TableHandler::from(Table::from(table.clone()))))
     } else if path.len() == 1 {
         match path[0].as_str() {
             "columns" => Some(Box::new(SchemaHandler::new(table, column_schema))),
-            "contains" => Some(Box::new(ContainsHandler::from(table))),
+            "contains" => Some(Box::new(ContainsHandler::from(Table::from(table.clone())))),
             "count" => Some(Box::new(CountHandler::from(table.clone()))),
             "key_columns" => Some(Box::new(SchemaHandler::new(table, key_columns))),
             "key_names" => Some(Box::new(SchemaHandler::new(table, key_names))),
@@ -476,8 +549,7 @@ pub struct Static;
 impl<State> Route<State> for Static
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
-    TableFile<State::Txn, State::FE>:
-        fs::Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
+    TableFile<State::Txn, State::FE>: Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
     Value: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
@@ -491,35 +563,71 @@ where
     }
 }
 
+enum KeyOrRange {
+    All,
+    Key(Key),
+    Range(Range),
+}
+
+impl KeyOrRange {
+    #[inline]
+    fn try_from_value<T>(table: &T, value: Value) -> TCResult<Self>
+    where
+        T: TableInstance + fmt::Debug,
+    {
+        match value {
+            Value::None => Ok(Self::All),
+            Value::Tuple(tuple) if tuple.is_empty() => Ok(Self::All),
+            Value::Tuple(tuple)
+                if tuple.iter().all(|value| match value {
+                    Value::Tuple(tuple) if tuple.len() == 2 => {
+                        let columns = table.schema().primary().columns();
+                        match &tuple[0] {
+                            Value::Id(name) => columns.contains(name),
+                            Value::String(name) => columns.iter().any(|column| name == column),
+                            _ => false,
+                        }
+                    }
+                    _ => false,
+                }) =>
+            {
+                cast_into_range(table, Scalar::Value(Value::Tuple(tuple))).map(Self::Range)
+            }
+            Value::Tuple(key) if key.len() == table.schema().key().len() => {
+                Ok(Self::Key(key.into_inner()))
+            }
+            value => Err(bad_request!("invalid table selector: {value:?}")),
+        }
+    }
+}
+
 #[inline]
-fn cast_into_bounds(scalar: Scalar) -> TCResult<Range> {
+fn cast_into_range<T: TableInstance + fmt::Debug>(table: &T, scalar: Scalar) -> TCResult<Range> {
     if scalar.is_none() {
         return Ok(Range::default());
     }
 
-    let column_ranges = Map::<Scalar>::try_from(scalar)?;
+    let column_ranges = Map::<Value>::try_from(scalar)
+        .map_err(|cause| bad_request!("invalid selection bounds for {table:?}").consume(cause))?;
+
+    let columns = table.schema().primary().columns();
 
     column_ranges
         .into_iter()
-        .map(|(name, range)| {
-            if range.matches::<(Bound<Value>, Bound<Value>)>() {
-                let (start, end) = range.opt_cast_into().expect("column range");
-                Ok((name, ColumnRange::In((start, end))))
-            } else if range.matches::<Value>() {
-                let value = range.opt_cast_into().expect("column value");
-                Ok((name, ColumnRange::Eq(value)))
+        .map(|(col_name, value)| {
+            if !columns.contains(&col_name) {
+                Err(TCError::not_found(&col_name))
+            } else if value.matches::<(Bound<Value>, Bound<Value>)>() {
+                Ok((col_name, ColumnRange::In(value.opt_cast_into().unwrap())))
             } else {
-                Err(bad_request!("{:?} is not a valid column range", range))
+                Ok((col_name, ColumnRange::Eq(value)))
             }
         })
-        .collect()
+        .collect::<TCResult<HashMap<Id, ColumnRange>>>()
+        .map(Range::from)
 }
 
 #[inline]
-fn try_into_key(key: Value) -> TCResult<Key> {
-    key.try_cast_into(|v| TCError::unexpected(v, "a Table key"))
-}
-
 fn column_schema<T: TableInstance>(table: &T) -> Value {
     let columns = table
         .schema()
@@ -533,6 +641,7 @@ fn column_schema<T: TableInstance>(table: &T) -> Value {
     Value::Tuple(columns)
 }
 
+#[inline]
 fn key_columns<T: TableInstance>(table: &T) -> Value {
     let key = table
         .schema()
@@ -545,6 +654,7 @@ fn key_columns<T: TableInstance>(table: &T) -> Value {
     Value::Tuple(key)
 }
 
+#[inline]
 fn key_names<T: TableInstance>(table: &T) -> Value {
     let key = table
         .schema()

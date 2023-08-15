@@ -12,16 +12,16 @@ keywords = ["chain", "collection", "object", "scalar", "generic"]
 categories = ["data-structures"]
 
 [dependencies]
-async-hash = { path = "../../../async-hash" }
+async-hash = "0.5"
 async-trait = "0.1"
 bytes = "1.4"
-destream = { path = "../../../destream" }
+destream = "0.7"
 futures = "0.3"
 get-size = "0.1"
 get-size-derive = "0.1"
-log = { version = "0.4" }
+log = "0.4"
 num_cpus = "1.13"
-safecast = { path = "../../../safecast" }
+safecast = "0.2"
 tc-chain = { path = "../chain" }
 tc-collection = { path = "../collection" }
 tc-error = { path = "../error" }

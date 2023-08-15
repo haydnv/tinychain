@@ -23,7 +23,7 @@ mod class;
 mod instance;
 pub mod public;
 
-const PREFIX: PathLabel = path_label(&["state", "public"]);
+const PREFIX: PathLabel = path_label(&["state", "object"]);
 
 /// The type of a user-defined [`Object`].
 #[derive(Copy, Clone, Eq, PartialEq)]

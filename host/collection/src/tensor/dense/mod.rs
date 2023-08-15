@@ -10,13 +10,14 @@ use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::{join, try_join};
 use ha_ndarray::*;
+use log::debug;
 use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
 use tc_transact::{fs, Transact, Transaction, TxnId};
 use tc_value::{
-    Complex, ComplexType, DType, FloatType, IntType, Number, NumberCollator, NumberInstance,
-    NumberType, UIntType, ValueType,
+    Complex, ComplexType, DType, Float, FloatType, Int, IntType, Number, NumberCollator,
+    NumberInstance, NumberType, UInt, UIntType, ValueType,
 };
 use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
 
@@ -25,10 +26,10 @@ use super::complex::ComplexRead;
 use super::sparse::{Node, SparseDense, SparseTensor};
 use super::{
     Axes, Coord, Range, Schema, Shape, TensorBoolean, TensorBooleanConst, TensorCast,
-    TensorCompare, TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance, TensorMath,
-    TensorMathConst, TensorPermitRead, TensorPermitWrite, TensorRead, TensorReduce,
-    TensorTransform, TensorType, TensorUnary, TensorUnaryBoolean, TensorWrite, TensorWriteDual,
-    IDEAL_BLOCK_SIZE, IMAG, REAL,
+    TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal, TensorInstance,
+    TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorPermitWrite, TensorRead,
+    TensorReduce, TensorTransform, TensorType, TensorUnary, TensorUnaryBoolean, TensorWrite,
+    TensorWriteDual, IDEAL_BLOCK_SIZE, IMAG, REAL,
 };
 
 pub use access::*;
@@ -160,6 +161,22 @@ impl<Txn, FE, T: CDatatype> DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>> {
     pub fn from_access<A: Into<DenseAccess<Txn, FE, T>>>(accessor: A) -> Self {
         Self {
             accessor: accessor.into(),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<Txn, FE, A> DenseTensor<Txn, FE, A>
+where
+    A: DenseInstance,
+{
+    fn block_size(&self) -> usize {
+        self.accessor.block_size()
+    }
+
+    fn resize_blocks(self, block_size: usize) -> DenseTensor<Txn, FE, DenseResizeBlocks<A>> {
+        DenseTensor {
+            accessor: DenseResizeBlocks::new(self.accessor, block_size),
             phantom: PhantomData,
         }
     }
@@ -380,6 +397,28 @@ where
     }
 }
 
+impl<Txn, FE, Cond, Then, OrElse, T>
+    TensorCond<DenseTensor<Txn, FE, Then>, DenseTensor<Txn, FE, OrElse>>
+    for DenseTensor<Txn, FE, Cond>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    Cond: DenseInstance<DType = u8> + fmt::Debug,
+    Then: DenseInstance<DType = T> + fmt::Debug,
+    OrElse: DenseInstance<DType = T> + fmt::Debug,
+    T: CDatatype,
+{
+    type Cond = DenseTensor<Txn, FE, DenseCond<Cond, Then, OrElse>>;
+
+    fn cond(
+        self,
+        then: DenseTensor<Txn, FE, Then>,
+        or_else: DenseTensor<Txn, FE, OrElse>,
+    ) -> TCResult<Self::Cond> {
+        DenseCond::new(self.accessor, then.accessor, or_else.accessor).map(DenseTensor::from)
+    }
+}
+
 impl<Txn, FE, A> TensorConvert for DenseTensor<Txn, FE, A>
 where
     Txn: ThreadSafe,
@@ -540,11 +579,9 @@ where
     }
 
     fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
-        let n = other.cast_into();
-
         let accessor = DenseConst::new(
             self.accessor,
-            n,
+            other.cast_into(),
             |block, n| block.mul_scalar(n).map(Array::from).map_err(TCError::from),
             |l, r| l * r,
         );
@@ -581,6 +618,21 @@ where
         );
 
         Ok(accessor.into())
+    }
+}
+
+impl<Txn, FE, L, R, T> TensorMatMul<DenseTensor<Txn, FE, R>> for DenseTensor<Txn, FE, L>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    L: DenseInstance<DType = T>,
+    R: DenseInstance<DType = T>,
+    T: CDatatype + DType,
+{
+    type MatMul = DenseTensor<Txn, FE, DenseMatMul<L, R>>;
+
+    fn matmul(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::MatMul> {
+        DenseMatMul::new(self.accessor, other.accessor).map(DenseTensor::from)
     }
 }
 
@@ -653,7 +705,7 @@ where
         let collator = NumberCollator::default();
 
         let max = blocks
-            .map(|result| result.and_then(|block| block.max().map_err(TCError::from)))
+            .map(|result| result.and_then(|block| block.max_all().map_err(TCError::from)))
             .map_ok(Number::from)
             .try_fold(Number::from(A::DType::min()), |max, block_max| {
                 let max = match collator.cmp(&max, &block_max) {
@@ -678,7 +730,7 @@ where
         let collator = NumberCollator::default();
 
         let min = blocks
-            .map(|result| result.and_then(|block| block.min().map_err(TCError::from)))
+            .map(|result| result.and_then(|block| block.min_all().map_err(TCError::from)))
             .map_ok(Number::from)
             .try_fold(Number::from(A::DType::max()), |min, block_min| {
                 let max = match collator.cmp(&min, &block_min) {
@@ -704,7 +756,7 @@ where
             let blocks = self.accessor.read_blocks(txn_id).await?;
 
             let product = blocks
-                .map(|result| result.and_then(|block| block.product().map_err(TCError::from)))
+                .map(|result| result.and_then(|block| block.product_all().map_err(TCError::from)))
                 .try_fold(A::DType::one(), |product, block_product| {
                     future::ready(Ok(product * block_product))
                 })
@@ -725,7 +777,7 @@ where
         let blocks = self.accessor.read_blocks(txn_id).await?;
 
         let sum = blocks
-            .map(|result| result.and_then(|block| block.sum().map_err(TCError::from)))
+            .map(|result| result.and_then(|block| block.sum_all().map_err(TCError::from)))
             .try_fold(A::DType::zero(), |sum, block_sum| {
                 future::ready(Ok(sum + block_sum))
             })
@@ -855,6 +907,281 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for DenseBase<Txn, FE> {
 
     fn class(&self) -> Self::Class {
         TensorType::Dense
+    }
+}
+
+impl<Txn, FE> DenseBase<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + Clone,
+{
+    pub async fn constant(
+        store: fs::Dir<FE>,
+        txn_id: TxnId,
+        shape: Shape,
+        value: Number,
+    ) -> TCResult<Self> {
+        match value {
+            Number::Bool(n) => {
+                base::DenseBase::constant(store, shape, if n.into() { 1u8 } else { 0 })
+                    .map_ok(Self::Bool)
+                    .await
+            }
+            Number::Complex(Complex::C32(n)) => {
+                let shape_clone = shape.clone();
+                let store_clone = store.clone();
+                let re = store_clone
+                    .create_dir(txn_id, REAL.into())
+                    .and_then(|store| base::DenseBase::constant(store, shape_clone, n.re));
+
+                let im = store
+                    .create_dir(txn_id, IMAG.into())
+                    .and_then(|store| base::DenseBase::constant(store, shape, n.im));
+
+                try_join!(re, im).map(Self::C32)
+            }
+            Number::Complex(Complex::C64(n)) => {
+                let shape_clone = shape.clone();
+                let store_clone = store.clone();
+                let re = store_clone
+                    .create_dir(txn_id, REAL.into())
+                    .and_then(|store| base::DenseBase::constant(store, shape_clone, n.re));
+
+                let im = store
+                    .create_dir(txn_id, IMAG.into())
+                    .and_then(|store| base::DenseBase::constant(store, shape, n.im));
+
+                try_join!(re, im).map(Self::C64)
+            }
+            Number::Float(Float::F32(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::F32)
+                    .await
+            }
+            Number::Float(Float::F64(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::F64)
+                    .await
+            }
+            Number::Int(Int::I16(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::I16)
+                    .await
+            }
+            Number::Int(Int::I32(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::I32)
+                    .await
+            }
+            Number::Int(Int::I64(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::I64)
+                    .await
+            }
+            Number::UInt(UInt::U8(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::U8)
+                    .await
+            }
+            Number::UInt(UInt::U16(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::U16)
+                    .await
+            }
+            Number::UInt(UInt::U32(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::U32)
+                    .await
+            }
+            Number::UInt(UInt::U64(n)) => {
+                base::DenseBase::constant(store, shape, n)
+                    .map_ok(Self::U64)
+                    .await
+            }
+            other => Err(bad_request!("unsupported data type: {:?}", other.class())),
+        }
+    }
+
+    pub async fn from_values(
+        store: fs::Dir<FE>,
+        txn_id: TxnId,
+        shape: Shape,
+        dtype: NumberType,
+        values: Vec<Number>,
+    ) -> TCResult<Self> {
+        match dtype {
+            NumberType::Bool => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::Bool)
+                    .await
+            }
+            NumberType::Complex(ct) => {
+                let mut re = Vec::with_capacity(values.len());
+                let mut im = Vec::with_capacity(values.len());
+                for n in values {
+                    let (r, i) = Complex::cast_from(n).into();
+                    re.push(Number::Float(r));
+                    im.push(Number::Float(i));
+                }
+
+                let (store_re, store_im) = try_join!(
+                    store.create_dir(txn_id, REAL.into()),
+                    store.create_dir(txn_id, IMAG.into())
+                )?;
+
+                match ct {
+                    ComplexType::Complex | ComplexType::C32 => {
+                        let (re, im) = try_join!(
+                            base::DenseBase::from_values(store_re, shape.clone(), re),
+                            base::DenseBase::from_values(store_im, shape, im)
+                        )?;
+
+                        Ok(Self::C32((re, im)))
+                    }
+                    ComplexType::C64 => {
+                        let (re, im) = try_join!(
+                            base::DenseBase::from_values(store_re, shape.clone(), re),
+                            base::DenseBase::from_values(store_im, shape, im)
+                        )?;
+
+                        Ok(Self::C64((re, im)))
+                    }
+                }
+            }
+            NumberType::Number
+            | NumberType::Float(FloatType::Float)
+            | NumberType::Float(FloatType::F32) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::F32)
+                    .await
+            }
+            NumberType::Float(FloatType::F64) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::F64)
+                    .await
+            }
+            NumberType::Int(IntType::I16) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::F32)
+                    .await
+            }
+            NumberType::Int(IntType::Int) | NumberType::Int(IntType::I32) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::I32)
+                    .await
+            }
+            NumberType::Int(IntType::I64) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::I64)
+                    .await
+            }
+            NumberType::UInt(UIntType::U8) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::U8)
+                    .await
+            }
+            NumberType::UInt(UIntType::U16) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::U16)
+                    .await
+            }
+            NumberType::UInt(UIntType::UInt) | NumberType::UInt(UIntType::U32) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::U32)
+                    .await
+            }
+            NumberType::UInt(UIntType::U64) => {
+                base::DenseBase::from_values(store, shape, values)
+                    .map_ok(Self::U64)
+                    .await
+            }
+            other => Err(bad_request!("cannot construct a range of type {other:?}")),
+        }
+    }
+
+    pub async fn range(
+        store: fs::Dir<FE>,
+        shape: Shape,
+        start: Number,
+        stop: Number,
+    ) -> TCResult<Self> {
+        let dtype = Ord::max(start.class(), stop.class());
+
+        match dtype {
+            NumberType::Bool => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::Bool)
+                    .await
+            }
+            NumberType::Complex(_) => Err(not_implemented!(
+                "construct a range of complex numbers [{start}..{stop})"
+            )),
+            NumberType::Number
+            | NumberType::Float(FloatType::Float)
+            | NumberType::Float(FloatType::F32) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::F32)
+                    .await
+            }
+            NumberType::Float(FloatType::F64) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::F64)
+                    .await
+            }
+            NumberType::Int(IntType::I16) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::I32)
+                    .await
+            }
+            NumberType::Int(IntType::Int) | NumberType::Int(IntType::I32) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::I32)
+                    .await
+            }
+            NumberType::Int(IntType::I64) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::I64)
+                    .await
+            }
+            NumberType::UInt(UIntType::U8) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::U8)
+                    .await
+            }
+            NumberType::UInt(UIntType::U16) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::U16)
+                    .await
+            }
+            NumberType::UInt(UIntType::UInt) | NumberType::UInt(UIntType::U32) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::U32)
+                    .await
+            }
+            NumberType::UInt(UIntType::U64) => {
+                base::DenseBase::range(store, shape, start.cast_into(), stop.cast_into())
+                    .map_ok(Self::U64)
+                    .await
+            }
+            other => Err(bad_request!("cannot construct a range of type {other:?}")),
+        }
+    }
+
+    pub async fn random_normal(
+        store: fs::Dir<FE>,
+        shape: Shape,
+        mean: f32,
+        std: f32,
+    ) -> TCResult<Self> {
+        base::DenseBase::random_normal(store, shape, mean, std)
+            .map_ok(Self::F32)
+            .await
+    }
+
+    pub async fn random_uniform(store: fs::Dir<FE>, shape: Shape) -> TCResult<Self> {
+        base::DenseBase::random_uniform(store, shape)
+            .map_ok(Self::F32)
+            .await
     }
 }
 
@@ -1078,7 +1405,7 @@ where
             {
                 // always acquire these permits in-order to avoid the risk of a deadlock
                 let _write_permit = this.write_permit(txn_id, range.clone()).await?;
-                let _read_permit = that.accessor.read_permit(txn_id, range.clone()).await?;
+                let _read_permit = that.accessor.read_permit(txn_id, Range::default()).await?;
 
                 if range.is_empty() || range == Range::all(this.shape()) {
                     let guard = this.write().await;
@@ -1631,38 +1958,75 @@ where
 
 #[inline]
 fn block_axis_for(shape: &[u64], block_size: usize) -> usize {
+    let block_size = block_size as u64;
+
     debug_assert!(!shape.is_empty());
-    debug_assert!(shape.iter().copied().all(|dim| dim > 0));
-    debug_assert!(shape.iter().product::<u64>() >= block_size as u64);
+    debug_assert!(shape.iter().product::<u64>() >= block_size);
 
-    let mut block_ndim = 1;
-    let mut size = 1;
-    for dim in shape.iter().rev() {
-        size *= dim;
-
-        if size > block_size as u64 {
+    let mut block_axis = shape.len() - 1;
+    let mut trailing_size = shape[block_axis];
+    for x in (0..(shape.len() - 1)).rev() {
+        let size_from = trailing_size * shape[x];
+        if size_from > block_size {
             break;
         } else {
-            block_ndim += 1;
+            block_axis = x;
+            trailing_size = size_from;
         }
     }
 
-    shape.len() - block_ndim
+    block_axis
+}
+
+#[inline]
+fn block_map_for(
+    num_blocks: u64,
+    shape: &[u64],
+    block_shape: &[usize],
+) -> TCResult<ArrayBase<Vec<u64>>> {
+    debug!("construct a block map for {shape:?} with block shape {block_shape:?}");
+
+    debug_assert!(shape.len() >= block_shape.len());
+
+    let block_axis = shape.len() - block_shape.len();
+    let mut block_map_shape = BlockShape::with_capacity(block_axis + 1);
+    block_map_shape.extend(
+        shape
+            .iter()
+            .take(block_axis)
+            .copied()
+            .map(|dim| dim as usize),
+    );
+
+    block_map_shape.push(div_ceil(shape[block_axis], block_shape[0] as u64) as usize);
+
+    ArrayBase::<Vec<_>>::new(
+        block_map_shape,
+        (0..num_blocks as u64).into_iter().collect(),
+    )
+    .map_err(TCError::from)
 }
 
 #[inline]
 fn block_shape_for(axis: usize, shape: &[u64], block_size: usize) -> BlockShape {
+    debug_assert!(!shape.is_empty());
+
     if axis == shape.len() - 1 {
         vec![block_size]
     } else {
-        let axis_dim = (shape.iter().skip(axis).product::<u64>() / block_size as u64) as usize;
-        debug_assert_eq!(block_size % axis_dim, 0);
+        let mut block_shape = shape[axis..]
+            .iter()
+            .copied()
+            .map(|dim| dim as usize)
+            .collect::<Vec<usize>>();
 
-        let mut block_shape = BlockShape::with_capacity(shape.len() - axis + 1);
-        block_shape.push(axis_dim);
-        block_shape.extend(shape.iter().skip(axis).copied().map(|dim| dim as usize));
+        let trailing_size = block_shape.iter().skip(1).product::<usize>();
 
-        debug_assert!(!block_shape.is_empty());
+        block_shape[0] = if block_size % trailing_size == 0 {
+            block_size / trailing_size
+        } else {
+            (block_size / trailing_size) + 1
+        };
 
         block_shape
     }
@@ -1705,6 +2069,9 @@ fn ideal_block_size_for(shape: &[u64]) -> (usize, usize) {
     let ideal = IDEAL_BLOCK_SIZE as u64;
     let size = shape.iter().product::<u64>();
     let ndim = shape.len();
+
+    assert_ne!(ndim, 0);
+    assert_ne!(size, 0);
 
     if size < (2 * ideal) {
         (size as usize, 1)

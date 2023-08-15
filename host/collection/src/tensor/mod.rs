@@ -1,6 +1,6 @@
+/// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
 use std::marker::PhantomData;
 use std::ops::{Div, Rem};
-/// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
 use std::{fmt, iter};
 
 use async_hash::{Digest, Hash, Output};
@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use collate::Collator;
 use destream::{de, en};
 use futures::TryFutureExt;
+use ha_ndarray::{NDArray, Queue};
 use safecast::{AsType, CastFrom, CastInto, TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -15,8 +16,8 @@ use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::{fs, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Number, NumberType, Value, ValueType};
 use tcgeneric::{
-    label, path_label, Class, Instance, Label, NativeClass, PathLabel, PathSegment, TCPathBuf,
-    ThreadSafe,
+    label, path_label, Class, ClassVisitor, Instance, Label, NativeClass, PathLabel, PathSegment,
+    TCPathBuf, ThreadSafe,
 };
 
 pub use dense::{Buffer, DenseBase, DenseCacheFile, DenseView};
@@ -30,17 +31,13 @@ pub mod public;
 pub mod shape;
 pub mod sparse;
 mod transform;
-pub(crate) mod view;
+pub(super) mod view;
 
 const REAL: Label = label("re");
 const IMAG: Label = label("im");
 
 const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
-#[cfg(debug_assertions)]
-const IDEAL_BLOCK_SIZE: usize = 24;
-
-#[cfg(not(debug_assertions))]
 const IDEAL_BLOCK_SIZE: usize = 65_536;
 
 pub type Axes = Vec<usize>;
@@ -54,8 +51,8 @@ type Semaphore = tc_transact::lock::Semaphore<Collator<u64>, Range>;
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct Schema {
-    dtype: NumberType,
-    shape: Shape,
+    pub dtype: NumberType,
+    pub shape: Shape,
 }
 
 impl From<(NumberType, Shape)> for Schema {
@@ -68,7 +65,7 @@ impl From<(NumberType, Shape)> for Schema {
 impl TryCastFrom<Value> for Schema {
     fn can_cast_from(value: &Value) -> bool {
         match value {
-            Value::Tuple(tuple) => TryCastInto::<(Vec<u64>, TCPathBuf)>::can_cast_into(tuple),
+            Value::Tuple(tuple) => TryCastInto::<(TCPathBuf, Vec<u64>)>::can_cast_into(tuple),
             _ => false,
         }
     }
@@ -76,7 +73,7 @@ impl TryCastFrom<Value> for Schema {
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
             Value::Tuple(tuple) => {
-                let (shape, dtype): (Vec<u64>, TCPathBuf) = tuple.opt_cast_into()?;
+                let (dtype, shape): (TCPathBuf, Vec<u64>) = tuple.opt_cast_into()?;
                 let shape = Shape::from(shape);
                 let dtype = ValueType::from_path(&dtype)?;
                 match dtype {
@@ -182,6 +179,15 @@ impl NativeClass for TensorType {
             Self::Dense => "dense",
             Self::Sparse => "sparse",
         }))
+    }
+}
+
+#[async_trait]
+impl de::FromStream for TensorType {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_any(ClassVisitor::default()).await
     }
 }
 
@@ -307,6 +313,15 @@ pub trait TensorCompareConst {
     fn ne_const(self, other: Number) -> TCResult<Self::Compare>;
 }
 
+/// Conditional logic for [`Tensor`]s
+pub trait TensorCond<Then, OrElse> {
+    /// The type of [`Tensor`] returned by `cond`
+    type Cond: TensorInstance;
+
+    /// Use this tensor as a condition to select elements from `then` or `or_else`.
+    fn cond(self, then: Then, or_else: OrElse) -> TCResult<Self::Cond>;
+}
+
 /// Methods to convert between a sparse an dense [`Tensor`]
 pub trait TensorConvert: ThreadSafe {
     /// A dense representation of this [`Tensor`]
@@ -379,6 +394,14 @@ pub trait TensorMathConst {
 
     /// Subtract `other` from `self`.
     fn sub_const(self, other: Number) -> TCResult<Self::Combine>;
+}
+
+/// [`Tensor`] matrix multiplication
+pub trait TensorMatMul<O> {
+    /// The type of [`Tensor`] returned by `matmul`
+    type MatMul: TensorInstance;
+
+    fn matmul(self, other: O) -> TCResult<Self::MatMul>;
 }
 
 /// [`Tensor`] read operations
@@ -582,8 +605,10 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for Dense<Txn, FE> {
     }
 }
 
-impl<Txn: Transaction<FE>, FE: DenseCacheFile + AsType<Node> + Clone> TensorConvert
-    for Dense<Txn, FE>
+impl<Txn, FE> TensorConvert for Dense<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
 {
     type Dense = Self;
     type Sparse = Sparse<Txn, FE>;
@@ -1143,15 +1168,15 @@ where
 
     fn lt_const(self, other: Number) -> TCResult<Self::Compare> {
         match self {
-            Self::Dense(this) => this.into_view().ge_const(other).map(Self::from),
-            Self::Sparse(this) => this.into_view().eq_const(other).map(Self::from),
+            Self::Dense(this) => this.into_view().lt_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().lt_const(other).map(Self::from),
         }
     }
 
     fn le_const(self, other: Number) -> TCResult<Self::Compare> {
         match self {
-            Self::Dense(this) => this.into_view().ge_const(other).map(Self::from),
-            Self::Sparse(this) => this.into_view().ge_const(other).map(Self::from),
+            Self::Dense(this) => this.into_view().le_const(other).map(Self::from),
+            Self::Sparse(this) => this.into_view().le_const(other).map(Self::from),
         }
     }
 
@@ -1159,6 +1184,31 @@ where
         match self {
             Self::Dense(this) => this.into_view().ne_const(other).map(Self::from),
             Self::Sparse(this) => this.into_view().ne_const(other).map(Self::from),
+        }
+    }
+}
+
+impl<Txn, FE> TensorCond<Self, Self> for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Cond = Self;
+
+    fn cond(self, then: Self, or_else: Self) -> TCResult<Self::Cond> {
+        match (self, then, or_else) {
+            (Self::Dense(this), Self::Dense(then), Self::Dense(or_else)) => this
+                .into_view()
+                .cond(then.into_view(), or_else.into_view())
+                .map(Self::from),
+
+            (Self::Sparse(this), Self::Sparse(then), Self::Sparse(or_else)) => this
+                .into_view()
+                .cond(then.into_view(), or_else.into_view())
+                .map(Self::from),
+
+            (this, then, or_else) => Self::Dense(this.into_dense())
+                .cond(then.into_dense().into(), or_else.into_dense().into()),
         }
     }
 }
@@ -1345,7 +1395,6 @@ where
     fn div_const(self, other: Number) -> TCResult<Self::Combine> {
         match self {
             Self::Dense(this) => this.into_view().div_const(other).map(Self::from),
-
             Self::Sparse(this) => this.into_view().div_const(other).map(Self::from),
         }
     }
@@ -1375,6 +1424,36 @@ where
         match self {
             Self::Dense(this) => this.into_view().sub_const(other).map(Self::from),
             Self::Sparse(this) => this.into_view().sub_const(other).map(Self::from),
+        }
+    }
+}
+
+impl<Txn, FE> TensorMatMul<Self> for Tensor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type MatMul = Self;
+
+    fn matmul(self, other: Self) -> TCResult<Self::MatMul> {
+        match self {
+            Self::Dense(this) => match other {
+                Self::Dense(that) => this.into_view().matmul(that.into_view()).map(Self::from),
+
+                Self::Sparse(that) => this
+                    .into_sparse()
+                    .into_view()
+                    .matmul(that.into_view())
+                    .map(Self::from),
+            },
+            Self::Sparse(this) => match other {
+                Self::Dense(that) => this
+                    .into_view()
+                    .matmul(that.into_sparse().into_view())
+                    .map(Self::from),
+
+                Self::Sparse(that) => this.into_view().matmul(that.into_view()).map(Self::from),
+            },
         }
     }
 }
@@ -1672,7 +1751,10 @@ where
     async fn write(self, txn_id: TxnId, range: Range, value: Self) -> TCResult<()> {
         match self {
             Self::Dense(this) => this.write(txn_id, range, value.into_dense()).await,
-            Self::Sparse(this) => this.write(txn_id, range, value.into_sparse()).await,
+            Self::Sparse(this) => match value {
+                Self::Sparse(value) => this.write(txn_id, range, value).await,
+                Self::Dense(value) => Err(bad_request!("cannot write {value:?} to {this:?}")),
+            },
         }
     }
 }
@@ -1971,10 +2053,8 @@ where
     }
 
     async fn visit_map<A: de::MapAccess>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let class = map.next_key::<TCPathBuf>(()).await?;
+        let class = map.next_key::<TensorType>(()).await?;
         let class = class.ok_or_else(|| de::Error::invalid_length(0, Self::expecting()))?;
-        let class = TensorType::from_path(&class)
-            .ok_or_else(|| de::Error::invalid_type(class, "a tensor type (dense or sparse)"))?;
 
         match class {
             TensorType::Dense => map.next_value(self.txn).map_ok(TensorBase::Dense).await,
@@ -1986,8 +2066,8 @@ where
 /// Broadcast the given `left` and `right` tensors into their [`broadcast_shape`].
 pub fn broadcast<L, R>(left: L, right: R) -> TCResult<(L::Broadcast, R::Broadcast)>
 where
-    L: TensorInstance + TensorTransform,
-    R: TensorInstance + TensorTransform,
+    L: TensorInstance + TensorTransform + fmt::Debug,
+    R: TensorInstance + TensorTransform + fmt::Debug,
 {
     let broadcast_shape = broadcast_shape(left.shape(), right.shape())?;
 
@@ -2035,15 +2115,27 @@ pub fn broadcast_shape(left: &[u64], right: &[u64]) -> TCResult<Shape> {
 }
 
 #[inline]
-fn coord_of<T: Copy + Div<Output = T> + Rem<Output = T>>(
+fn autoqueue<A: NDArray>(array: &A) -> Result<Queue, ha_ndarray::Error> {
+    Queue::new(array.context().clone(), array.size())
+}
+
+#[inline]
+fn coord_of<T: Copy + Div<Output = T> + Rem<Output = T> + PartialEq>(
     offset: T,
     strides: &[T],
     shape: &[T],
+    zero: T,
 ) -> Vec<T> {
     strides
         .iter()
         .copied()
-        .map(|stride| offset / stride)
+        .map(|stride| {
+            if stride == zero {
+                zero
+            } else {
+                offset / stride
+            }
+        })
         .zip(shape.iter().copied())
         .map(|(axis_offset, dim)| axis_offset % dim)
         .collect()
@@ -2063,11 +2155,6 @@ fn offset_of(coord: Coord, shape: &[u64]) -> u64 {
 }
 
 #[inline]
-fn size_hint(size: u64) -> usize {
-    size.try_into().ok().unwrap_or_else(|| usize::MAX)
-}
-
-#[inline]
 fn strides_for(shape: &[u64], ndim: usize) -> Strides {
     debug_assert!(ndim >= shape.len());
 
@@ -2082,13 +2169,4 @@ fn strides_for(shape: &[u64], ndim: usize) -> Strides {
     });
 
     zeros.chain(strides).collect()
-}
-
-#[inline]
-fn validate_order(order: &[usize], ndim: usize) -> bool {
-    if order.is_empty() {
-        true
-    } else {
-        order.len() == ndim && order.iter().all(|x| x < &ndim)
-    }
 }

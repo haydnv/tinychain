@@ -84,6 +84,10 @@ where
             version = Version::create(version, delta.filled.clone(), delta.zeros.clone()).into();
         }
 
+        if let Some(delta) = self.pending.get(&txn_id) {
+            version = Version::create(version, delta.filled.clone(), delta.zeros.clone()).into();
+        }
+
         Ok(version)
     }
 
@@ -654,9 +658,19 @@ impl<Txn, FE, T: CDatatype> From<SparseBase<Txn, FE, T>> for SparseAccess<Txn, F
     }
 }
 
-impl<Txn, FE, T> fmt::Debug for SparseBase<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for SparseBase<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "transactional sparse tensor")
+        write!(
+            f,
+            "transactional sparse tensor with shape {:?} and type {:?}",
+            self.shape(),
+            self.dtype()
+        )
     }
 }
 

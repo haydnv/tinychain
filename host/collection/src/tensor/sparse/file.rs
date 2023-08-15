@@ -3,8 +3,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use b_table::b_tree::Collator;
-use b_table::{TableLock, TableWriteGuard};
+use b_table::{Collator, TableLock, TableWriteGuard};
 use destream::de;
 use freqfs::DirLock;
 use futures::future::TryFutureExt;
@@ -17,7 +16,7 @@ use tc_transact::TxnId;
 use tc_value::{DType, Number, NumberCollator, NumberType};
 use tcgeneric::{ThreadSafe, Tuple};
 
-use crate::tensor::{validate_order, Axes, Coord, Range, Shape, TensorInstance};
+use crate::tensor::{Axes, Coord, Range, Shape, TensorInstance};
 
 use super::access::SparseAccess;
 use super::schema::{IndexSchema, Schema};
@@ -146,11 +145,12 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         self.shape().validate_range(&range)?;
-        debug_assert!(validate_order(&order, self.ndim()));
+        self.shape().validate_axes(&order)?;
 
         let range = table_range(&range)?;
-        let rows = self.table.rows(range, &order, false).await?;
-        let elements = rows.map_ok(|row| unwrap_row(row)).map_err(TCError::from);
+        let table = self.table.read().await;
+        let rows = table.rows(range, &order, false, None)?;
+        let elements = rows.map_ok(unwrap_row).map_err(TCError::from);
         Ok(Box::pin(elements))
     }
 
@@ -159,7 +159,7 @@ where
 
         let key = coord.into_iter().map(Number::from).collect();
         let table = self.table.read().await;
-        if let Some(mut row) = table.get(&key).await? {
+        if let Some(mut row) = table.get_row(key).await? {
             let value = row.pop().expect("value");
             Ok(value.cast_into())
         } else {
@@ -238,7 +238,9 @@ where
         if range == Range::default() || range == Range::all(&self.shape) {
             self.table.truncate().map_err(TCError::from).await
         } else {
-            Err(not_implemented!("delete {range:?}"))
+            let range = table_range(&range)?;
+            self.table.delete_range(range).await?;
+            Ok(())
         }
     }
 
@@ -275,7 +277,7 @@ where
         let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
 
         if value == T::zero() {
-            self.table.delete(&coord).await?;
+            self.table.delete_row(coord).await?;
         } else {
             self.table.upsert(coord, vec![value.into()]).await?;
         }

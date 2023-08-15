@@ -17,14 +17,14 @@ use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{DType, Number, NumberType};
-use tcgeneric::ThreadSafe;
+use tcgeneric::{TCBoxTryFuture, ThreadSafe};
 
 use crate::tensor::block::Block;
 use crate::tensor::dense::{DenseAccess, DenseCacheFile, DenseInstance, DenseSlice};
 use crate::tensor::transform::{Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
-    size_hint, strides_for, validate_order, Axes, AxisRange, Coord, Range, Semaphore, Shape,
-    TensorInstance, TensorPermitRead, TensorPermitWrite,
+    autoqueue, strides_for, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
+    TensorPermitRead, TensorPermitWrite,
 };
 
 use super::base::SparseBase;
@@ -52,20 +52,20 @@ pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
         FE: AsType<Node> + ThreadSafe,
         Number: CastInto<T>,
     {
-        let mut zeros = zeros
-            .into_table()
-            .rows(b_table::Range::default(), &[], false)
-            .await?;
+        let mut zeros = {
+            let table = zeros.into_table().read().await;
+            table.into_rows()
+        };
 
         while let Some(row) = zeros.try_next().await? {
             let (coord, zero) = unwrap_row(row);
             self.write_value(txn_id, coord, zero).await?;
         }
 
-        let mut filled = filled
-            .into_table()
-            .rows(b_table::Range::default(), &[], false)
-            .await?;
+        let mut filled = {
+            let table = filled.into_table().read().await;
+            table.into_rows()
+        };
 
         while let Some(row) = filled.try_next().await? {
             let (coord, value) = unwrap_row(row);
@@ -280,7 +280,11 @@ access_cast_from!(u16, U16);
 access_cast_from!(u32, U32);
 access_cast_from!(u64, U64);
 
-impl<Txn, FE> fmt::Debug for SparseAccessCast<Txn, FE> {
+impl<Txn, FE> fmt::Debug for SparseAccessCast<Txn, FE>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         access_cast_dispatch!(self, this, this.fmt(f))
     }
@@ -291,16 +295,17 @@ pub enum SparseAccess<Txn, FE, T: CDatatype> {
     Table(SparseFile<FE, T>),
     Broadcast(Box<SparseBroadcast<Txn, FE, T>>),
     BroadcastAxis(Box<SparseBroadcastAxis<Self>>),
-    Compare(Box<SparseCompare<Txn, FE, T>>),
-    CompareConst(Box<SparseCompareConst<Txn, FE, T>>),
-    CompareLeft(Box<SparseCompareLeft<Txn, FE, T>>),
     Combine(Box<SparseCombine<Self, Self, T>>),
     CombineLeft(Box<SparseCombineLeft<Self, Self, T>>),
     CombineConst(Box<SparseCombineConst<Self, T>>),
+    Compare(Box<SparseCompare<Txn, FE, T>>),
+    CompareConst(Box<SparseCompareConst<Txn, FE, T>>),
+    CompareLeft(Box<SparseCompareLeft<Txn, FE, T>>),
+    Cond(Box<SparseCond<SparseAccess<Txn, FE, u8>, Self, Self>>),
     Cow(Box<SparseCow<FE, T, Self>>),
     Dense(Box<SparseDense<DenseAccess<Txn, FE, T>>>),
     Expand(Box<SparseExpand<Self>>),
-    Reduce(Box<SparseReduce<Self, T>>),
+    Reduce(Box<SparseReduce<Txn, FE, T>>),
     Reshape(Box<SparseReshape<Self>>),
     Slice(Box<SparseSlice<Self>>),
     Transpose(Box<SparseTranspose<Self>>),
@@ -322,6 +327,7 @@ impl<Txn, FE, T: CDatatype> Clone for SparseAccess<Txn, FE, T> {
             Self::Compare(compare) => Self::Compare(compare.clone()),
             Self::CompareConst(compare) => Self::CompareConst(compare.clone()),
             Self::CompareLeft(compare) => Self::CompareLeft(compare.clone()),
+            Self::Cond(cond) => Self::Cond(cond.clone()),
             Self::Cow(cow) => Self::Cow(cow.clone()),
             Self::Dense(dense) => Self::Dense(dense.clone()),
             Self::Expand(expand) => Self::Expand(expand.clone()),
@@ -349,6 +355,7 @@ macro_rules! access_dispatch {
             Self::Compare($var) => $call,
             Self::CompareConst($var) => $call,
             Self::CompareLeft($var) => $call,
+            Self::Cond($var) => $call,
             Self::Cow($var) => $call,
             Self::Dense($var) => $call,
             Self::Expand($var) => $call,
@@ -431,6 +438,7 @@ where
 {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         match self {
+            Self::Base(base) => base.read_permit(txn_id, range).await,
             Self::Broadcast(broadcast) => broadcast.read_permit(txn_id, range).await,
             Self::BroadcastAxis(broadcast) => broadcast.read_permit(txn_id, range).await,
             Self::Cow(cow) => cow.read_permit(txn_id, range).await,
@@ -439,6 +447,7 @@ where
             Self::CombineConst(combine) => combine.read_permit(txn_id, range).await,
             Self::Compare(compare) => compare.read_permit(txn_id, range).await,
             Self::CompareLeft(compare) => compare.read_permit(txn_id, range).await,
+            Self::Cond(cond) => cond.read_permit(txn_id, range).await,
             Self::Dense(dense) => dense.read_permit(txn_id, range).await,
             Self::Expand(expand) => expand.read_permit(txn_id, range).await,
             Self::Reduce(reduce) => reduce.read_permit(txn_id, range).await,
@@ -459,8 +468,8 @@ where
 #[async_trait]
 impl<Txn, FE, T> TensorPermitWrite for SparseAccess<Txn, FE, T>
 where
-    Txn: Send + Sync,
-    FE: Send + Sync,
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
     T: CDatatype + DType,
 {
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
@@ -476,7 +485,12 @@ where
     }
 }
 
-impl<Txn, FE, T: CDatatype + DType> fmt::Debug for SparseAccess<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for SparseAccess<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         access_dispatch!(self, this, this.fmt(f))
     }
@@ -507,6 +521,8 @@ where
         S: TensorInstance + Into<SparseAccess<Txn, FE, T>>,
     {
         let source_shape = source.shape().to_vec();
+        log::debug!("SparseBroadcast::new {source_shape:?} into {shape:?}");
+
         let mut inner = source.into();
 
         let axes = (0..source_shape.len()).into_iter().rev();
@@ -532,6 +548,18 @@ where
         }
 
         Ok(Self { shape, inner })
+    }
+
+    fn invert_range(&self, mut range: Range) -> (Range, Range) {
+        let offset = self.ndim() - self.inner.ndim();
+
+        let inner_range = if range.len() > offset {
+            range.drain(offset..).collect()
+        } else {
+            Range::default()
+        };
+
+        (range, inner_range)
     }
 }
 
@@ -578,23 +606,25 @@ where
     async fn elements(
         self,
         txn_id: TxnId,
-        mut range: Range,
+        range: Range,
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
+        log::debug!("stream elements in range {range:?} with order {order:?}");
+
         let ndim = self.ndim();
         let offset = ndim - self.inner.ndim();
 
         if offset == 0 {
             return self.inner.elements(txn_id, range, order).await;
+        } else {
+            log::trace!("there are {offset} outer dimensions to broadcast");
         }
 
         self.shape.validate_range(&range)?;
-        debug_assert!(validate_order(&order, ndim));
+        self.shape.validate_axes(&order)?;
 
-        let mut inner_range = Vec::with_capacity(self.inner.ndim());
-        while range.len() > offset {
-            inner_range.push(range.pop().expect("bound"));
-        }
+        let (outer_range, inner_range) = self.invert_range(range.clone());
+        let outer_range = outer_range.normalize(&self.shape()[..(self.ndim() - self.inner.ndim())]);
 
         let inner_order = if order
             .iter()
@@ -610,11 +640,15 @@ where
             ))
         }?;
 
-        let outer = range.into_iter().multi_cartesian_product();
+        log::trace!("constructing the cartesian product of outer broadcast {outer_range:?}...");
+
+        let outer = outer_range.into_iter().multi_cartesian_product();
 
         let inner = self.inner;
         let elements = futures::stream::iter(outer)
             .then(move |outer_coord| {
+                log::trace!("outer coord is {outer_coord:?}");
+
                 let inner = inner.clone();
                 let inner_range = inner_range.to_vec();
                 let inner_order = inner_order.to_vec();
@@ -625,6 +659,8 @@ where
                         .await?;
 
                     let elements = inner_elements.map_ok(move |(inner_coord, value)| {
+                        log::trace!("inner coord is {inner_coord:?}, value is {value:?}");
+
                         let mut coord = Vec::with_capacity(ndim);
                         coord.extend_from_slice(&outer_coord);
                         coord.extend(inner_coord);
@@ -651,21 +687,14 @@ where
 #[async_trait]
 impl<Txn, FE, T> TensorPermitRead for SparseBroadcast<Txn, FE, T>
 where
-    T: CDatatype,
-    SparseAccess<Txn, FE, T>: TensorPermitRead,
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
 {
-    async fn read_permit(
-        &self,
-        txn_id: TxnId,
-        mut range: Range,
-    ) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.shape.validate_range(&range)?;
-
-        while range.len() > self.shape.len() {
-            range.remove(0);
-        }
-
-        self.inner.read_permit(txn_id, range).await
+        let (_outer_range, inner_range) = self.invert_range(range);
+        self.inner.read_permit(txn_id, inner_range).await
     }
 }
 
@@ -675,7 +704,12 @@ impl<Txn, FE, T: CDatatype> From<SparseBroadcast<Txn, FE, T>> for SparseAccess<T
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for SparseBroadcast<Txn, FE, T> {
+impl<Txn, FE, T: CDatatype> fmt::Debug for SparseBroadcast<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "broadcasted sparse tensor with shape {:?}", self.shape)
     }
@@ -691,6 +725,8 @@ pub struct SparseBroadcastAxis<S> {
 
 impl<S: TensorInstance + fmt::Debug> SparseBroadcastAxis<S> {
     fn new(source: S, axis: usize, dim: u64) -> TCResult<Self> {
+        log::debug!("SparseBroadcastAxis::new: broadcast axis {axis} of {source:?} into {dim}");
+
         let shape = if axis < source.ndim() {
             let mut shape = source.shape().to_vec();
             if shape[axis] == 1 {
@@ -751,7 +787,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
         mut order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         self.shape.validate_range(&range)?;
-        debug_assert!(validate_order(&order, self.ndim()));
+        self.shape.validate_axes(&order)?;
 
         let axis = self.axis;
         let ndim = self.shape.len();
@@ -796,7 +832,32 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
             ))
         }?;
 
-        if self.axis == self.ndim() - 1 {
+        if self.axis == 0 {
+            let dim = self.shape()[self.axis];
+            let source = self.source;
+            let elements = futures::stream::iter(0..dim)
+                .map(move |outer_i| {
+                    let source = source.clone();
+                    let source_range = source_range.clone();
+                    let source_order = source_order.to_vec();
+
+                    async move {
+                        let source_elements =
+                            source.elements(txn_id, source_range, source_order).await?;
+
+                        let elements = source_elements.map_ok(move |(mut inner_coord, value)| {
+                            inner_coord[0] = outer_i;
+                            (inner_coord, value)
+                        });
+
+                        TCResult::Ok(elements)
+                    }
+                })
+                .buffered(num_cpus::get())
+                .try_flatten();
+
+            Ok(Box::pin(elements))
+        } else if self.axis == self.ndim() - 1 {
             let source_elements = self
                 .source
                 .elements(txn_id, source_range, source_order)
@@ -816,17 +877,19 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
 
             Ok(Box::pin(elements))
         } else {
+            let source = self.source;
+            let order = Axes::default();
             let axes = (0..axis).into_iter().collect();
             let inner_range = source_range.iter().skip(axis).cloned().collect::<Vec<_>>();
-
-            let source = self.source;
-            let filled = source.clone().filled_at(txn_id, source_range, axes).await?;
+            let filled = source
+                .clone()
+                .filled_at(txn_id, source_range, order, axes)
+                .await?;
 
             let elements = filled
                 .map(move |result| {
                     let outer_coord = result?;
                     debug_assert_eq!(outer_coord.len(), axis);
-                    debug_assert_eq!(outer_coord.last(), Some(&0));
 
                     let inner_range = inner_range.to_vec();
                     let inner_order = inner_order.to_vec();
@@ -837,11 +900,13 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
                         .map(|i| AxisRange::At(i))
                         .collect();
 
+                    log::trace!("broadcast slice at {prefix:?} x{dim}");
+
                     let slice = SparseSlice::new(source.clone(), prefix)?;
 
                     let elements = futures::stream::iter(0..dim)
-                        .then(move |i| {
-                            let outer_coord = outer_coord[..axis - 1].to_vec();
+                        .map(move |i| {
+                            let outer_coord = outer_coord.to_vec();
                             let inner_range = inner_range.to_vec().into();
                             let inner_order = inner_order.to_vec();
                             let slice = slice.clone();
@@ -852,10 +917,13 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
 
                                 let elements =
                                     inner_elements.map_ok(move |(inner_coord, value)| {
+                                        log::trace!("outer coord is {outer_coord:?}, i is {i}, inner coord is {inner_coord:?}");
+
                                         let mut coord = Coord::with_capacity(ndim);
-                                        coord.copy_from_slice(&outer_coord);
-                                        coord.push(i);
+                                        coord.extend(outer_coord.iter().copied());
                                         coord.extend(inner_coord);
+
+                                        coord[axis] = i;
 
                                         (coord, value)
                                     });
@@ -863,6 +931,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
                                 Result::<_, TCError>::Ok(elements)
                             }
                         })
+                        .buffered(num_cpus::get())
                         .try_flatten();
 
                     Result::<_, TCError>::Ok(elements)
@@ -938,6 +1007,8 @@ where
         block_op: fn(Array<T>, Array<T>) -> TCResult<Array<T>>,
         value_op: fn(T, T) -> T,
     ) -> TCResult<Self> {
+        log::debug!("SparseCombine::new({left:?}, {right:?})");
+
         if left.shape() == right.shape() {
             Ok(Self {
                 left,
@@ -976,7 +1047,7 @@ impl<L, R, T> SparseInstance for SparseCombine<L, R, T>
 where
     L: SparseInstance<DType = T>,
     R: SparseInstance<DType = T>,
-    T: CDatatype + DType + PartialEq,
+    T: CDatatype + DType + PartialEq + fmt::Debug,
 {
     type CoordBlock = Array<u64>;
     type ValueBlock = Array<T>;
@@ -990,8 +1061,6 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let block_op = self.block_op;
         let shape = self.shape().clone();
@@ -1004,10 +1073,9 @@ where
                     (block_op)(left.into(), right.into()).map(|values| (coords, values))
                 })
             })
-            .try_filter_map(move |(coords, values)| {
-                let queue = queue.clone();
-                async move { filter_zeros(&queue, coords, values, ndim) }
-            });
+            .try_filter_map(
+                move |(coords, values)| async move { filter_zeros(coords, values, ndim) },
+            );
 
         Ok(Box::pin(blocks))
     }
@@ -1019,9 +1087,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1066,7 +1133,7 @@ where
     }
 }
 
-impl<L: fmt::Debug, R: fmt::Debug, T: CDatatype> fmt::Debug for SparseCombine<L, R, T> {
+impl<L: fmt::Debug, R: fmt::Debug, T: CDatatype + DType> fmt::Debug for SparseCombine<L, R, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "outer join of {:?} and {:?}", self.left, self.right)
     }
@@ -1093,6 +1160,8 @@ where
         value_op: fn(T, T) -> T,
     ) -> TCResult<Self> {
         if left.shape() == right.shape() {
+            log::debug!("SparseCombineLeft::new({left:?}, {right:?})");
+
             Ok(Self {
                 left,
                 right,
@@ -1101,9 +1170,7 @@ where
             })
         } else {
             Err(bad_request!(
-                "cannot combine {:?} and {:?} (wrong shape)",
-                left,
-                right
+                "cannot combine {left:?} and {right:?} (wrong shape)"
             ))
         }
     }
@@ -1130,7 +1197,7 @@ impl<L, R, T> SparseInstance for SparseCombineLeft<L, R, T>
 where
     L: SparseInstance<DType = T>,
     R: SparseInstance<DType = T>,
-    T: CDatatype + DType + PartialEq,
+    T: CDatatype + DType + PartialEq + fmt::Debug,
 {
     type CoordBlock = Array<u64>;
     type ValueBlock = Array<T>;
@@ -1144,8 +1211,6 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let block_op = self.block_op;
         let shape = self.shape().clone();
@@ -1155,13 +1220,13 @@ where
         let blocks = source_blocks
             .map(move |result| {
                 result.and_then(|(coords, (left, right))| {
+                    log::trace!("combine {left:?} and {right:?}");
                     (block_op)(left.into(), right.into()).map(|values| (coords, values))
                 })
             })
-            .try_filter_map(move |(coords, values)| {
-                let queue = queue.clone();
-                async move { filter_zeros(&queue, coords, values, ndim) }
-            });
+            .try_filter_map(
+                move |(coords, values)| async move { filter_zeros(coords, values, ndim) },
+            );
 
         Ok(Box::pin(blocks))
     }
@@ -1173,9 +1238,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1221,9 +1285,13 @@ where
     }
 }
 
-impl<L: fmt::Debug, R: fmt::Debug, T: CDatatype> fmt::Debug for SparseCombineLeft<L, R, T> {
+impl<L: fmt::Debug, R: fmt::Debug, T: CDatatype + DType> fmt::Debug for SparseCombineLeft<L, R, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "inner join of {:?} and {:?}", self.left, self.right)
+        write!(
+            f,
+            "inner join (left combine) of {:?} and {:?}",
+            self.left, self.right
+        )
     }
 }
 
@@ -1283,8 +1351,6 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let left_blocks = self.left.blocks(txn_id, range, order).await?;
 
@@ -1294,9 +1360,8 @@ where
                 let values = (self.block_op)(values.into(), self.right)?;
                 Ok((coords, values))
             })
-            .try_filter_map(move |(coords, values)| {
-                let queue = queue.clone();
-                async move { filter_zeros(&queue, coords.into(), values, ndim) }
+            .try_filter_map(move |(coords, values)| async move {
+                filter_zeros(coords.into(), values, ndim)
             });
 
         Ok(Box::pin(blocks))
@@ -1309,9 +1374,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1351,7 +1415,7 @@ where
 impl<S, T> fmt::Debug for SparseCombineConst<S, T>
 where
     S: fmt::Debug,
-    T: CDatatype,
+    T: CDatatype + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} with a constant value", self.left)
@@ -1442,8 +1506,6 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let source_blocks = self
             .left
@@ -1456,10 +1518,9 @@ where
                 let values = (self.block_op)(left, right)?;
                 Ok((coords, values))
             })
-            .try_filter_map(move |(coords, values)| {
-                let queue = queue.clone();
-                async move { filter_zeros(&queue, coords, values, ndim) }
-            });
+            .try_filter_map(
+                move |(coords, values)| async move { filter_zeros(coords, values, ndim) },
+            );
 
         Ok(Box::pin(blocks))
     }
@@ -1471,9 +1532,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1508,7 +1568,12 @@ impl<Txn, FE, T: CDatatype> From<SparseCompare<Txn, FE, T>> for SparseAccess<Txn
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for SparseCompare<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for SparseCompare<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} and {:?}", self.left, self.right)
     }
@@ -1598,8 +1663,6 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let source_blocks = self
             .left
@@ -1612,10 +1675,9 @@ where
                 let values = (self.block_op)(left, right)?;
                 Ok((coords, values))
             })
-            .try_filter_map(move |(coords, values)| {
-                let queue = queue.clone();
-                async move { filter_zeros(&queue, coords, values, ndim) }
-            });
+            .try_filter_map(
+                move |(coords, values)| async move { filter_zeros(coords, values, ndim) },
+            );
 
         Ok(Box::pin(blocks))
     }
@@ -1627,9 +1689,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1664,7 +1725,12 @@ impl<Txn, FE, T: CDatatype> From<SparseCompareLeft<Txn, FE, T>> for SparseAccess
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for SparseCompareLeft<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for SparseCompareLeft<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} and {:?}", self.left, self.right)
     }
@@ -1742,8 +1808,6 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         let ndim = self.ndim();
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
 
         let left_blocks = self.left.blocks(txn_id, range, order).await?;
         let blocks = left_blocks
@@ -1752,10 +1816,9 @@ where
                     (self.block_op)(block, self.right).map(|values| (coords, values))
                 })
             })
-            .try_filter_map(move |(coords, values)| {
-                let queue = queue.clone();
-                async move { filter_zeros(&queue, coords, values, ndim) }
-            });
+            .try_filter_map(
+                move |(coords, values)| async move { filter_zeros(coords, values, ndim) },
+            );
 
         Ok(Box::pin(blocks))
     }
@@ -1802,9 +1865,191 @@ impl<Txn, FE, T: CDatatype> From<SparseCompareConst<Txn, FE, T>> for SparseAcces
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for SparseCompareConst<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for SparseCompareConst<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} with {:?}", self.left, self.right)
+    }
+}
+
+#[derive(Clone)]
+pub struct SparseCond<Cond, Then, OrElse> {
+    cond: Cond,
+    then: Then,
+    or_else: OrElse,
+}
+
+impl<Cond, Then, OrElse> SparseCond<Cond, Then, OrElse>
+where
+    Cond: TensorInstance + fmt::Debug,
+    Then: TensorInstance + fmt::Debug,
+    OrElse: TensorInstance + fmt::Debug,
+{
+    pub fn new(cond: Cond, then: Then, or_else: OrElse) -> TCResult<Self> {
+        if cond.dtype() == NumberType::Bool
+            && cond.shape() == then.shape()
+            && cond.shape() == or_else.shape()
+            && then.dtype() == or_else.dtype()
+        {
+            Ok(Self {
+                cond,
+                then,
+                or_else,
+            })
+        } else {
+            Err(bad_request!(
+                "cannot select from {then:?} and {or_else:?} based on {cond:?}"
+            ))
+        }
+    }
+}
+
+impl<Cond, Then, OrElse> TensorInstance for SparseCond<Cond, Then, OrElse>
+where
+    Cond: TensorInstance,
+    Then: TensorInstance,
+    OrElse: TensorInstance,
+{
+    fn dtype(&self) -> NumberType {
+        debug_assert_eq!(self.then.dtype(), self.or_else.dtype());
+        self.then.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        debug_assert_eq!(self.cond.shape(), self.then.shape());
+        debug_assert_eq!(self.cond.shape(), self.or_else.shape());
+        self.cond.shape()
+    }
+}
+
+#[async_trait]
+impl<Cond, Then, OrElse, T> SparseInstance for SparseCond<Cond, Then, OrElse>
+where
+    Cond: SparseInstance<DType = u8>,
+    Then: SparseInstance<DType = T>,
+    OrElse: SparseInstance<DType = T>,
+    T: CDatatype + DType + fmt::Debug,
+{
+    type CoordBlock = Array<u64>;
+    type ValueBlock = ArrayBase<Vec<T>>;
+    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type DType = T;
+
+    async fn blocks(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Self::Blocks, TCError> {
+        let shape = self.shape().to_vec();
+        let ndim = shape.len();
+
+        let strides = strides_for(&shape, ndim);
+        let strides = ArrayBase::<Arc<Vec<_>>>::new(vec![strides.len()], Arc::new(strides))?;
+
+        let (cond, then, or_else) = try_join!(
+            self.cond.blocks(txn_id, range.clone(), order.to_vec()),
+            self.then.blocks(txn_id, range.clone(), order.to_vec()),
+            self.or_else.blocks(txn_id, range, order)
+        )?;
+
+        let cond = offsets(strides.clone(), cond);
+        let then = offsets(strides.clone(), then);
+        let or_else = offsets(strides.clone(), or_else);
+
+        let elements = stream::Select::new(cond, then, or_else);
+        let offsets = stream::BlockOffsets::new(elements);
+
+        let dims = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], Arc::new(shape))?;
+        let blocks = offsets.map(move |result| {
+            let (offsets, values) = result?;
+            let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
+            Ok((coords, values))
+        });
+
+        Ok(Box::pin(blocks))
+    }
+
+    async fn elements(
+        self,
+        txn_id: TxnId,
+        range: Range,
+        order: Axes,
+    ) -> Result<Elements<Self::DType>, TCError> {
+        let ndim = self.ndim();
+        let blocks = self.blocks(txn_id, range, order).await?;
+        block_elements(blocks, ndim)
+    }
+
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
+        let (cond, then, or_else) = try_join!(
+            self.cond.read_value(txn_id, coord.to_vec()),
+            self.then.read_value(txn_id, coord.to_vec()),
+            self.or_else.read_value(txn_id, coord)
+        )?;
+
+        if cond != 0 {
+            Ok(then)
+        } else {
+            Ok(or_else)
+        }
+    }
+}
+
+#[async_trait]
+impl<Cond, Then, OrElse> TensorPermitRead for SparseCond<Cond, Then, OrElse>
+where
+    Cond: TensorPermitRead,
+    Then: TensorPermitRead,
+    OrElse: TensorPermitRead,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        // always acquire these locks in-order to reduce the risk of a deadlock
+        let mut permit = self.cond.read_permit(txn_id, range.clone()).await?;
+
+        let then = self.then.read_permit(txn_id, range.clone()).await?;
+        permit.extend(then);
+
+        let or_else = self.or_else.read_permit(txn_id, range).await?;
+        permit.extend(or_else);
+
+        Ok(permit)
+    }
+}
+
+impl<Txn, FE, Cond, Then, OrElse, T> From<SparseCond<Cond, Then, OrElse>>
+    for SparseAccess<Txn, FE, T>
+where
+    Cond: Into<SparseAccess<Txn, FE, u8>>,
+    Then: Into<SparseAccess<Txn, FE, T>>,
+    OrElse: Into<SparseAccess<Txn, FE, T>>,
+    T: CDatatype,
+{
+    fn from(cond: SparseCond<Cond, Then, OrElse>) -> Self {
+        Self::Cond(Box::new(SparseCond {
+            cond: cond.cond.into(),
+            then: cond.then.into(),
+            or_else: cond.or_else.into(),
+        }))
+    }
+}
+
+impl<Cond, Then, OrElse> fmt::Debug for SparseCond<Cond, Then, OrElse>
+where
+    Cond: fmt::Debug,
+    Then: fmt::Debug,
+    OrElse: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "select from {:?} and {:?} based on {:?}",
+            self.then, self.or_else, self.cond
+        )
     }
 }
 
@@ -1861,7 +2106,7 @@ where
     S: SparseInstance<DType = T>,
     Number: CastInto<T>,
 {
-    type CoordBlock = ArrayBase<Vec<u64>>;
+    type CoordBlock = Array<u64>;
     type ValueBlock = ArrayBase<Vec<T>>;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
@@ -1872,18 +2117,13 @@ where
         range: Range,
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
+        log::debug!("SparseCow::blocks in range {range:?} with order {order:?}");
+
         let shape = self.source.shape().to_vec();
         let ndim = shape.len();
 
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context.clone(), size_hint(self.size()))?;
-
         let strides = strides_for(&shape, ndim);
-        let strides = ArrayBase::<Arc<Vec<_>>>::with_context(
-            context.clone(),
-            vec![strides.len()],
-            Arc::new(strides),
-        )?;
+        let strides = ArrayBase::<Arc<Vec<_>>>::new(vec![strides.len()], Arc::new(strides))?;
 
         let (source_blocks, filled_blocks, zero_blocks) = try_join!(
             self.source.blocks(txn_id, range.clone(), order.to_vec()),
@@ -1891,27 +2131,20 @@ where
             self.zeros.blocks(txn_id, range, order)
         )?;
 
-        let source_elements = offsets(queue.clone(), strides.clone(), source_blocks);
-        let filled_elements = offsets(queue.clone(), strides.clone(), filled_blocks);
-        let zero_elements = offsets(queue, strides.clone(), zero_blocks);
+        let source_elements = offsets(strides.clone(), source_blocks);
+        let filled_elements = offsets(strides.clone(), filled_blocks);
+        let zero_elements = offsets(strides.clone(), zero_blocks);
 
         let elements = stream::TryDiff::new(source_elements, zero_elements);
         let elements = stream::TryMerge::new(elements, filled_elements);
         let offsets = stream::BlockOffsets::new(elements);
 
-        let dims = ArrayBase::<Arc<Vec<_>>>::with_context(context, vec![ndim], Arc::new(shape))?;
+        let dims = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], Arc::new(shape))?;
         let blocks = offsets.map(move |result| {
             let (offsets, values) = result?;
+            log::trace!("block has {} values", values.size());
 
-            let num_offsets = offsets.size();
-            let block_shape = vec![num_offsets, ndim];
-            let coords = offsets
-                .expand_dims(vec![1])?
-                .broadcast(block_shape.to_vec())?
-                .mul(strides.clone().broadcast(block_shape.to_vec())?)?
-                .rem(dims.clone().broadcast(block_shape)?)?;
-
-            let coords = ArrayBase::<Vec<_>>::copy(&coords)?;
+            let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
 
             Ok((coords, values))
         });
@@ -1927,19 +2160,7 @@ where
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
         let blocks = self.blocks(txn_id, range, order).await?;
-        let elements = blocks
-            .map_ok(move |(coords, values)| {
-                let tuples = coords
-                    .into_inner()
-                    .into_par_iter()
-                    .chunks(ndim)
-                    .zip(values.into_inner());
-
-                futures::stream::iter(tuples.map(Ok).collect::<Vec<_>>())
-            })
-            .try_flatten();
-
-        Ok(Box::pin(elements))
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -1956,7 +2177,7 @@ where
 
         {
             let filled = self.filled.table().read().await;
-            if let Some(mut row) = filled.get(&key).await? {
+            if let Some(mut row) = filled.get_row(key).await? {
                 let value = row.pop().expect("value");
                 return Ok(value.cast_into());
             }
@@ -2023,7 +2244,12 @@ where
     }
 }
 
-impl<FE, T, S: fmt::Debug> fmt::Debug for SparseCow<FE, T, S> {
+impl<FE, T, S> fmt::Debug for SparseCow<FE, T, S>
+where
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+    S: fmt::Debug,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "copy-on-write view of {:?}", self.source)
     }
@@ -2131,7 +2357,7 @@ where
         NDArrayRead<DType = S::DType> + NDArrayTransform + Into<Array<S::DType>>,
 {
     type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = Array<S::DType>;
+    type ValueBlock = ArrayBase<Vec<S::DType>>;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
 
@@ -2159,28 +2385,53 @@ where
 
         let range = range.normalize(self.shape());
         let coords = range.affected().map(|coord| coord.into_iter()).flatten();
-        let coords = futures::stream::iter(coords)
-            .chunks(coord_block_size)
-            .map(move |coords| ArrayBase::<Vec<u64>>::new(vec![coords.len() / ndim, ndim], coords));
+        let coords = futures::stream::iter(coords).chunks(coord_block_size);
 
-        if range.is_empty() || range == Range::all(self.shape()) {
-            let source_blocks = self.source.read_blocks(txn_id).await?;
-            let blocks = coords
-                .zip(source_blocks)
-                .map(|(coords, values)| Ok((coords?, values?.into())));
+        let source_blocks: Blocks<_, Array<Self::DType>> =
+            if range.is_empty() || range == Range::all(self.shape()) {
+                let source_blocks = self.source.read_blocks(txn_id).await?;
+                let blocks = coords
+                    .zip(source_blocks)
+                    .map(|(coords, values)| values.map(|values| (coords, values.into())));
 
-            Ok(Box::pin(blocks))
-        } else {
-            let source_blocks = DenseSlice::new(self.source, range)?
-                .read_blocks(txn_id)
-                .await?;
+                Box::pin(blocks)
+            } else {
+                let source_blocks = DenseSlice::new(self.source, range)?
+                    .read_blocks(txn_id)
+                    .await?;
 
-            let blocks = coords
-                .zip(source_blocks)
-                .map(|(coords, values)| Ok((coords?, values?.into())));
+                let blocks = coords
+                    .zip(source_blocks)
+                    .map(|(coords, values)| values.map(|values| (coords, values.into())));
 
-            Ok(Box::pin(blocks))
-        }
+                Box::pin(blocks)
+            };
+
+        let zero = Self::DType::zero();
+        let blocks = source_blocks.try_filter_map(move |(coords, values)| async move {
+            let queue = autoqueue(&values)?;
+            let values = values.read(&queue)?.to_slice()?;
+
+            let (coords, values) = coords
+                .into_par_iter()
+                .chunks(ndim)
+                .zip(values.as_ref().into_par_iter().copied())
+                .filter(|(_coord, value)| value != &zero)
+                .map(|(coord, value)| (coord, value))
+                .unzip::<_, _, Vec<Vec<u64>>, Vec<Self::DType>>();
+
+            if values.is_empty() {
+                Ok(None)
+            } else {
+                let num_values = values.len();
+                let coords = coords.into_iter().flatten().collect();
+                let coords = ArrayBase::<Vec<u64>>::new(vec![num_values, ndim], coords)?;
+                let values = ArrayBase::<Vec<Self::DType>>::new(vec![num_values], values)?;
+                Ok(Some((coords, values)))
+            }
+        });
+
+        Ok(Box::pin(blocks))
     }
 
     async fn elements(
@@ -2190,9 +2441,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -2272,22 +2522,19 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         self.shape().validate_range(&range)?;
-        debug_assert!(validate_order(&order, self.ndim()));
+        self.shape().validate_axes(&order)?;
 
         let mut source_range = range;
-        for x in self.transform.expand_axes().iter().rev().copied() {
+        for x in self.transform.expand_axes().iter().copied().rev() {
             if x < source_range.len() {
                 source_range.remove(x);
             }
         }
 
-        let mut source_order = order;
-        for x in self.transform.expand_axes().iter().rev().copied() {
-            source_order.remove(x);
-        }
-
         let ndim = self.ndim();
-        let axes = self.transform.expand_axes().to_vec();
+        let transform = self.transform;
+        let source_order = transform.invert_axes(order);
+
         debug_assert_eq!(self.source.ndim() + 1, ndim);
 
         let source_elements = self
@@ -2296,13 +2543,7 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
             .await?;
 
         let elements = source_elements.map_ok(move |(source_coord, value)| {
-            let mut coord = Coord::with_capacity(ndim);
-            coord.extend(source_coord);
-            for x in axes.iter().rev().copied() {
-                coord.insert(x, 0);
-            }
-
-            debug_assert_eq!(coord.len(), ndim);
+            let coord = transform.map_coord(source_coord);
             (coord, value)
         });
 
@@ -2349,60 +2590,78 @@ impl<S: fmt::Debug> fmt::Debug for SparseExpand<S> {
     }
 }
 
-#[derive(Clone)]
-pub struct SparseReduce<S, T: CDatatype> {
-    source: S,
+pub struct SparseReduce<Txn, FE, T: CDatatype> {
+    reductor: fn(TxnId, SparseSlice<SparseAccess<Txn, FE, T>>) -> TCBoxTryFuture<'static, T>,
+    source: SparseAccess<Txn, FE, T>,
     transform: Arc<Reduce>,
-    id: T,
-    op: fn(Array<T>) -> TCResult<T>,
-    value_op: fn(T, T) -> T,
 }
 
-impl<S, T> SparseReduce<S, T>
+impl<Txn, FE, T: CDatatype> Clone for SparseReduce<Txn, FE, T> {
+    fn clone(&self) -> Self {
+        SparseReduce {
+            reductor: self.reductor,
+            source: self.source.clone(),
+            transform: self.transform.clone(),
+        }
+    }
+}
+
+impl<Txn, FE, T> SparseReduce<Txn, FE, T>
 where
-    S: SparseInstance<DType = T> + Clone,
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
     T: CDatatype + DType,
 {
-    pub fn new(
+    pub fn new<S>(
         source: S,
-        id: T,
-        axes: Axes,
+        mut axes: Axes,
         keepdims: bool,
-        op: fn(Array<T>) -> TCResult<T>,
-        value_op: fn(T, T) -> T,
-    ) -> TCResult<Self> {
+        reductor: fn(TxnId, SparseSlice<SparseAccess<Txn, FE, T>>) -> TCBoxTryFuture<'static, T>,
+    ) -> TCResult<Self>
+    where
+        SparseAccess<Txn, FE, T>: From<S>,
+    {
+        axes.sort();
+        axes.dedup();
+
+        let source = SparseAccess::from(source);
+
+        log::debug!("SparseReduce::new axes {axes:?} of {source:?}");
+
         Reduce::new(source.shape().clone(), axes, keepdims)
             .map(Arc::new)
             .map(|transform| Self {
+                reductor,
                 source,
                 transform,
-                id,
-                op,
-                value_op,
             })
-    }
-
-    async fn reduce_element(&self, txn_id: TxnId, coord: Coord) -> TCResult<(Coord, T)> {
-        let source_range = self.transform.invert_coord(&coord);
-        let slice = SparseSlice::new(self.source.clone(), source_range.into())?;
-        let blocks = slice
-            .blocks(txn_id, Range::default(), Axes::default())
-            .await?;
-
-        let reduced = blocks
-            .try_fold(self.id, |reduced, (_coords, values)| async move {
-                let value = (self.op)(values.into())?;
-                Ok((self.value_op)(reduced, value))
-            })
-            .await?;
-
-        Ok((coord, reduced))
     }
 }
 
-impl<S, T> TensorInstance for SparseReduce<S, T>
+impl<Txn, FE, T> SparseReduce<Txn, FE, T>
 where
-    S: ThreadSafe,
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
+    T: CDatatype + DType,
+{
+    async fn reduce_element(&self, txn_id: TxnId, coord: Coord) -> TCResult<(Coord, T)>
+    where
+        T: fmt::Debug,
+    {
+        self.shape().validate_coord(&coord)?;
+
+        let source_range = self.transform.invert_coord(&coord);
+        let slice = SparseSlice::new(self.source.clone(), source_range.into())?;
+        (self.reductor)(txn_id, slice)
+            .map_ok(|reduced| (coord, reduced))
+            .await
+    }
+}
+
+impl<Txn, FE, T> TensorInstance for SparseReduce<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
     T: CDatatype + DType,
 {
     fn dtype(&self) -> NumberType {
@@ -2415,15 +2674,18 @@ where
 }
 
 #[async_trait]
-impl<S, T> SparseInstance for SparseReduce<S, T>
+impl<Txn, FE, T> SparseInstance for SparseReduce<Txn, FE, T>
 where
-    S: SparseInstance<DType = T> + Clone,
-    T: CDatatype + DType,
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
+    T: CDatatype + DType + fmt::Debug,
+    Buffer<T>: de::FromStream<Context = ()>,
+    Number: From<T> + CastInto<T>,
 {
     type CoordBlock = ArrayBase<Vec<u64>>;
     type ValueBlock = ArrayBase<Vec<T>>;
     type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
-    type DType = S::DType;
+    type DType = T;
 
     async fn blocks(
         self,
@@ -2440,26 +2702,41 @@ where
         self,
         txn_id: TxnId,
         range: Range,
-        order: Axes,
+        mut order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
+        order.reserve(self.ndim() - order.len());
+
+        for x in 0..self.ndim() {
+            if !order.contains(&x) {
+                order.push(x);
+            }
+        }
+
         self.transform.shape().validate_range(&range)?;
         self.transform.shape().validate_axes(&order)?;
 
         let source_range = self.transform.invert_range(range);
-        let source_axes = self.transform.invert_axes(order);
+        let source_order = self.transform.invert_axes(order);
+        let source_axes = (0..self.source.ndim())
+            .into_iter()
+            .filter(|x| !self.transform.axes().contains(x))
+            .collect();
+
         let filled_at = self
             .source
             .clone()
-            .filled_at(txn_id, source_range, source_axes)
+            .filled_at(txn_id, source_range, source_order, source_axes)
             .await?;
 
+        let zero = T::zero();
         let elements = filled_at
             .map(move |result| {
                 let coord = result?;
                 let this = self.clone();
                 Ok(async move { this.reduce_element(txn_id, coord).await })
             })
-            .try_buffered(num_cpus::get());
+            .try_buffered(num_cpus::get())
+            .try_filter(move |(_coord, value)| futures::future::ready(*value != zero));
 
         Ok(Box::pin(elements))
     }
@@ -2472,10 +2749,11 @@ where
 }
 
 #[async_trait]
-impl<S, T> TensorPermitRead for SparseReduce<S, T>
+impl<Txn, FE, T> TensorPermitRead for SparseReduce<Txn, FE, T>
 where
-    S: TensorPermitRead,
-    T: CDatatype,
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
 {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.transform.shape().validate_range(&range)?;
@@ -2484,23 +2762,21 @@ where
     }
 }
 
-impl<Txn, FE, S, T> From<SparseReduce<S, T>> for SparseAccess<Txn, FE, T>
+impl<Txn, FE, T> From<SparseReduce<Txn, FE, T>> for SparseAccess<Txn, FE, T>
 where
-    S: Into<SparseAccess<Txn, FE, T>>,
     T: CDatatype,
 {
-    fn from(reduce: SparseReduce<S, T>) -> Self {
-        Self::Reduce(Box::new(SparseReduce {
-            source: reduce.source.into(),
-            transform: reduce.transform,
-            id: reduce.id,
-            op: reduce.op,
-            value_op: reduce.value_op,
-        }))
+    fn from(reduce: SparseReduce<Txn, FE, T>) -> Self {
+        Self::Reduce(Box::new(reduce))
     }
 }
 
-impl<S: fmt::Debug, T: CDatatype> fmt::Debug for SparseReduce<S, T> {
+impl<Txn, FE, T> fmt::Debug for SparseReduce<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -2535,7 +2811,7 @@ impl<S: TensorInstance> TensorInstance for SparseReshape<S> {
 
 #[async_trait]
 impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
-    type CoordBlock = ArrayBase<Vec<u64>>;
+    type CoordBlock = Array<u64>;
     type ValueBlock = S::ValueBlock;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
@@ -2547,7 +2823,7 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         self.shape().validate_range(&range)?;
-        debug_assert!(validate_order(&order, self.ndim()));
+        self.shape().validate_axes(&order)?;
 
         let source_range = if range.is_empty() {
             Ok(range)
@@ -2575,14 +2851,15 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
             .source
             .blocks(txn_id, source_range, source_order)
             .await?;
+
         let source_strides = Arc::new(self.transform.source_strides().to_vec());
         let source_strides = ArrayBase::<Arc<Vec<_>>>::new(vec![source_ndim], source_strides)?;
 
         let ndim = self.transform.shape().len();
         let strides = Arc::new(self.transform.strides().to_vec());
         let strides = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], strides)?;
-        let shape = Arc::new(self.transform.shape().to_vec());
-        let shape = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], shape)?;
+        let dims = Arc::new(self.transform.shape().to_vec());
+        let dims = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], dims)?;
 
         let blocks = source_blocks.map(move |result| {
             let (source_coords, values) = result?;
@@ -2595,18 +2872,9 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
                 .broadcast(vec![values.size(), source_ndim])?;
 
             let offsets = source_coords.mul(source_strides)?;
-            let offsets = offsets.sum_axis(1, false)?;
+            let offsets = offsets.sum(vec![1], false)?;
 
-            let broadcast = vec![offsets.size(), ndim];
-            let strides = strides.clone().broadcast(broadcast.to_vec())?;
-            let offsets = offsets
-                .expand_dims(vec![1])?
-                .broadcast(broadcast.to_vec())?;
-
-            let dims = shape.clone().expand_dims(vec![0])?.broadcast(broadcast)?;
-            let coords = (offsets / strides) % dims;
-
-            let coords = ArrayBase::<Vec<_>>::copy(&coords)?;
+            let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
 
             Result::<_, TCError>::Ok((coords, values))
         });
@@ -2621,29 +2889,8 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, size_hint(self.size()))?;
-
         let blocks = self.blocks(txn_id, range, order).await?;
-
-        let elements = blocks
-            .map(move |result| {
-                let (coords, values) = result?;
-                let coords = coords.into_inner();
-                let values = values.read(&queue)?.to_slice()?;
-                let tuples = coords
-                    .into_par_iter()
-                    .chunks(ndim)
-                    .zip(values.as_ref().into_par_iter().copied())
-                    .map(Ok)
-                    .collect::<Vec<_>>();
-
-                Result::<_, TCError>::Ok(futures::stream::iter(tuples))
-            })
-            .try_flatten();
-
-        Ok(Box::pin(elements))
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -2703,11 +2950,13 @@ where
     S: TensorInstance + fmt::Debug,
 {
     pub fn new(source: S, range: Range) -> TCResult<Self> {
+        log::debug!("SparseSlice::new range {range:?} of {source:?}");
+
         Slice::new(source.shape().clone(), range).map(|transform| Self { source, transform })
     }
 
     fn source_order(&self, order: Axes) -> Result<Axes, TCError> {
-        debug_assert!(validate_order(&order, self.ndim()));
+        self.shape().validate_axes(&order)?;
 
         let mut source_axes = Vec::with_capacity(self.ndim());
         for (x, bound) in self.transform.range().iter().enumerate() {
@@ -2738,9 +2987,9 @@ impl<S> SparseInstance for SparseSlice<S>
 where
     S: SparseInstance,
 {
-    type CoordBlock = S::CoordBlock;
+    type CoordBlock = ArrayBase<Vec<u64>>;
     type ValueBlock = S::ValueBlock;
-    type Blocks = S::Blocks;
+    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
 
     async fn blocks(
@@ -2750,11 +2999,44 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         self.shape().validate_range(&range)?;
+        self.shape().validate_axes(&order)?;
 
         let source_order = self.source_order(order)?;
-        let source_range = self.transform.invert_range(range);
 
-        self.source.blocks(txn_id, source_range, source_order).await
+        let source_range = self.transform.invert_range(range);
+        let source_blocks = self
+            .source
+            .blocks(txn_id, source_range, source_order)
+            .await?;
+
+        let transform = self.transform;
+        let ndim = transform.shape().len();
+        let source_ndim = transform.source_shape().len();
+
+        let blocks = source_blocks.map(move |result| {
+            let (source_coords, values) = result?;
+
+            debug_assert_eq!(source_coords.shape(), [values.size(), source_ndim]);
+
+            let queue = autoqueue(&source_coords)?;
+            let source_coords = source_coords.read(&queue)?;
+
+            let coords = source_coords
+                .to_slice()?
+                .as_ref()
+                .par_iter()
+                .copied()
+                .chunks(source_ndim)
+                .map(|source_coord| transform.map_coord(source_coord))
+                .flatten()
+                .collect();
+
+            let coords = ArrayBase::<Vec<u64>>::new(vec![values.size(), ndim], coords)?;
+
+            Ok((coords, values))
+        });
+
+        Ok(Box::pin(blocks))
     }
 
     async fn elements(
@@ -2764,13 +3046,22 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         self.shape().validate_range(&range)?;
+        self.shape().validate_axes(&order)?;
 
         let source_order = self.source_order(order)?;
-        let source_range = self.transform.invert_range(range);
 
-        self.source
+        let transform = self.transform;
+        let source_range = transform.invert_range(range);
+
+        let source_elements = self
+            .source
             .elements(txn_id, source_range, source_order)
-            .await
+            .await?;
+
+        let elements =
+            source_elements.map_ok(move |(coord, value)| (transform.map_coord(coord), value));
+
+        Ok(Box::pin(elements))
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -2896,8 +3187,10 @@ pub struct SparseTranspose<S> {
     transform: Transpose,
 }
 
-impl<S: SparseInstance> SparseTranspose<S> {
+impl<S: SparseInstance + fmt::Debug> SparseTranspose<S> {
     pub fn new(source: S, permutation: Option<Axes>) -> TCResult<Self> {
+        log::debug!("SparseTranspose::new({source:?}, {permutation:?})");
+
         Transpose::new(source.shape().clone(), permutation)
             .map(|transform| Self { source, transform })
     }
@@ -2922,7 +3215,7 @@ where
     S: SparseInstance,
     <S::CoordBlock as NDArrayTransform>::Transpose: NDArrayRead<DType = u64> + Into<Array<u64>>,
 {
-    type CoordBlock = <S::CoordBlock as NDArrayTransform>::Transpose;
+    type CoordBlock = ArrayBase<Vec<u64>>;
     type ValueBlock = S::ValueBlock;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
@@ -2931,30 +3224,47 @@ where
         self,
         txn_id: TxnId,
         range: Range,
-        order: Axes,
+        mut order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         self.shape().validate_range(&range)?;
-        debug_assert!(validate_order(&order, self.ndim()));
+        self.shape().validate_axes(&order)?;
 
         let range = range.normalize(self.shape());
         debug_assert_eq!(range.len(), self.ndim());
 
-        let source_order = order
-            .into_iter()
-            .map(|x| self.transform.axes()[x])
-            .collect();
+        order.reserve(self.ndim());
+        for x in 0..self.ndim() {
+            if !order.contains(&x) {
+                order.push(x);
+            }
+        }
 
         let source_range = self.transform.invert_range(&range);
+        let source_order = self.transform.invert_axes(order);
 
         let source_blocks = self
             .source
             .blocks(txn_id, source_range, source_order)
             .await?;
 
-        let permutation = self.transform.axes().to_vec();
+        let transform = self.transform;
         let blocks = source_blocks.map(move |result| {
             let (source_coords, values) = result?;
-            let coords = source_coords.transpose(Some(permutation.to_vec()))?;
+
+            let queue = autoqueue(&source_coords)?;
+            let source_coords = source_coords.read(&queue)?.to_slice()?;
+
+            let ndim = transform.shape().len();
+            let coords = source_coords
+                .into_vec()
+                .into_par_iter()
+                .chunks(ndim)
+                .map(|source_coord| transform.invert_coord(source_coord))
+                .flatten()
+                .collect();
+
+            let coords = ArrayBase::<Vec<u64>>::new(vec![values.size(), ndim], coords)?;
+
             Ok((coords, values))
         });
 
@@ -2968,9 +3278,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -3073,9 +3382,8 @@ impl<S: SparseInstance<DType = T>, T: CDatatype + DType> SparseInstance for Spar
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -3107,7 +3415,7 @@ where
     }
 }
 
-impl<S: fmt::Debug, T: CDatatype> fmt::Debug for SparseUnary<S, T> {
+impl<S: fmt::Debug, T: CDatatype + DType> fmt::Debug for SparseUnary<S, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "unary operation on {:?}", self.source)
     }
@@ -3477,9 +3785,8 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         let ndim = self.ndim();
-        let size = self.size();
         let blocks = self.blocks(txn_id, range, order).await?;
-        block_elements(blocks, ndim, size)
+        block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
@@ -3509,7 +3816,12 @@ impl<Txn, FE, T: CDatatype> From<SparseUnaryCast<Txn, FE, T>> for SparseAccess<T
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for SparseUnaryCast<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for SparseUnaryCast<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "unary operation on {:?}", self.source)
     }
@@ -3645,7 +3957,11 @@ impl<Txn, FE, T: CDatatype> From<SparseVersion<FE, T>> for SparseAccess<Txn, FE,
     }
 }
 
-impl<FE, T> fmt::Debug for SparseVersion<FE, T> {
+impl<FE, T> fmt::Debug for SparseVersion<FE, T>
+where
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "transactional version of {:?}", self.file)
     }
@@ -3655,16 +3971,17 @@ impl<FE, T> fmt::Debug for SparseVersion<FE, T> {
 fn block_elements<T: CDatatype, C: NDArrayRead<DType = u64>, V: NDArrayRead<DType = T>>(
     blocks: impl Stream<Item = TCResult<(C, V)>> + Send + 'static,
     ndim: usize,
-    size: u64,
 ) -> TCResult<Elements<T>> {
-    let context = ha_ndarray::Context::default()?;
-    let queue = ha_ndarray::Queue::new(context, size_hint(size))?;
-
     let elements = blocks
         .map(move |result| {
             let (coords, values) = result?;
+
+            let queue = autoqueue(&coords)?;
             let coords = coords.read(&queue)?.to_slice()?;
+
+            let queue = autoqueue(&values)?;
             let values = values.read(&queue)?.to_slice()?;
+
             let tuples = coords
                 .as_ref()
                 .into_par_iter()
@@ -3683,12 +4000,11 @@ fn block_elements<T: CDatatype, C: NDArrayRead<DType = u64>, V: NDArrayRead<DTyp
 
 #[inline]
 fn offsets<C, V, T>(
-    queue: ha_ndarray::Queue,
     strides: ArrayBase<Arc<Vec<u64>>>,
     blocks: impl Stream<Item = Result<(C, V), TCError>> + Send + 'static,
 ) -> impl Stream<Item = Result<(u64, T), TCError>> + Send
 where
-    C: NDArrayRead<DType = u64> + NDArrayMath,
+    C: NDArrayRead<DType = u64> + NDArrayMath + 'static,
     V: NDArrayRead<DType = T>,
     T: CDatatype,
 {
@@ -3696,10 +4012,12 @@ where
         .map(move |result| {
             let (coords, values) = result?;
 
+            let queue = autoqueue(&coords)?;
             let strides = strides.clone().broadcast(coords.shape().to_vec())?;
-            let offsets = coords.mul(strides)?.sum_axis(0, false)?;
+            let offsets = coords.mul(strides)?.sum(vec![1], false)?;
             let offsets = offsets.read(&queue)?.to_slice()?.into_vec();
 
+            let queue = autoqueue(&values)?;
             let values = values.read(&queue)?.to_slice()?.into_vec();
 
             debug_assert_eq!(offsets.len(), values.len());
@@ -3718,7 +4036,6 @@ where
 
 #[inline]
 fn filter_zeros<T: CDatatype>(
-    queue: &Queue,
     coords: Array<u64>,
     values: Array<T>,
     ndim: usize,
@@ -3730,7 +4047,8 @@ fn filter_zeros<T: CDatatype>(
     if values.all()? {
         Ok(Some((coords, values.into())))
     } else {
-        let coord_slice = coords.read(queue)?.to_slice()?;
+        let queue = autoqueue(&coords)?;
+        let coord_slice = coords.read(&queue)?.to_slice()?;
         let value_slice = values.into_inner();
         debug_assert_eq!(coord_slice.len() % ndim, 0);
 
@@ -3778,32 +4096,29 @@ async fn merge_blocks_inner<L, R, T>(
 where
     L: SparseInstance<DType = T>,
     R: SparseInstance<DType = T>,
-    T: CDatatype,
+    T: CDatatype + fmt::Debug,
 {
     debug_assert_eq!(&shape, left.shape());
     debug_assert_eq!(&shape, right.shape());
 
-    let size = shape.as_slice().iter().product();
     let strides = strides_for(&shape, shape.len());
     let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
-    let shape = ArrayBase::<Arc<Vec<u64>>>::new(vec![shape.len()], Arc::new(shape.to_vec()))?;
+    let dims = ArrayBase::<Arc<Vec<u64>>>::new(vec![shape.len()], Arc::new(shape.to_vec()))?;
 
     let (left_blocks, right_blocks) = try_join!(
         left.blocks(txn_id, range.clone(), order.to_vec()),
         right.blocks(txn_id, range, order)
     )?;
 
-    let context = ha_ndarray::Context::default()?;
-    let queue = ha_ndarray::Queue::new(context.clone(), size_hint(size))?;
-
-    let left = offsets(queue.clone(), strides.clone(), left_blocks);
-    let right = offsets(queue.clone(), strides.clone(), right_blocks);
+    let left = offsets(strides.clone(), left_blocks);
+    let right = offsets(strides.clone(), right_blocks);
 
     let elements = stream::InnerJoin::new(left, right);
     let blocks = stream::BlockOffsetsDual::new(elements);
-    let coord_blocks = blocks.map_ok(move |(offsets, values)| {
-        let coords = (offsets * strides.clone()) % shape.clone();
-        (coords.into(), values)
+    let coord_blocks = blocks.map(move |result| {
+        let (offsets, values) = result?;
+        let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
+        Ok((coords, values))
     });
 
     Ok(coord_blocks)
@@ -3822,33 +4137,50 @@ pub(super) async fn merge_blocks_outer<L, R, T>(
 where
     L: SparseInstance<DType = T>,
     R: SparseInstance<DType = T>,
-    T: CDatatype,
+    T: CDatatype + fmt::Debug,
 {
     debug_assert_eq!(&shape, left.shape());
     debug_assert_eq!(&shape, right.shape());
 
-    let size = shape.as_slice().iter().product();
-    let strides = strides_for(&shape, shape.len());
-    let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
-    let shape = ArrayBase::<Arc<Vec<u64>>>::new(vec![shape.len()], Arc::new(shape.to_vec()))?;
+    let ndim = shape.len();
+    let strides = strides_for(&shape, ndim);
+    let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![ndim], Arc::new(strides))?;
+    let dims = ArrayBase::<Arc<Vec<u64>>>::new(vec![ndim], Arc::new(shape.to_vec()))?;
 
     let (left_blocks, right_blocks) = try_join!(
         left.blocks(txn_id, range.clone(), order.to_vec()),
         right.blocks(txn_id, range, order)
     )?;
 
-    let context = ha_ndarray::Context::default()?;
-    let queue = ha_ndarray::Queue::new(context.clone(), size_hint(size))?;
-
-    let left = offsets(queue.clone(), strides.clone(), left_blocks);
-    let right = offsets(queue.clone(), strides.clone(), right_blocks);
+    let left = offsets(strides.clone(), left_blocks);
+    let right = offsets(strides.clone(), right_blocks);
 
     let elements = stream::OuterJoin::new(left, right, T::zero());
     let blocks = stream::BlockOffsetsDual::new(elements);
-    let coord_blocks = blocks.map_ok(move |(offsets, values)| {
-        let coords = (offsets * strides.clone()) % shape.clone();
-        (coords.into(), values)
+    let coord_blocks = blocks.map(move |result| {
+        let (offsets, values) = result?;
+        let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
+        Ok((coords, values))
     });
 
     Ok(coord_blocks)
+}
+
+#[inline]
+fn offsets_to_coords(
+    offsets: Array<u64>,
+    strides: ArrayBase<Arc<Vec<u64>>>,
+    dims: ArrayBase<Arc<Vec<u64>>>,
+) -> TCResult<Array<u64>> {
+    let ndim = dims.size();
+    let num_offsets = offsets.size();
+    let block_shape = vec![num_offsets, ndim];
+
+    offsets
+        .expand_dims(vec![1])?
+        .broadcast(block_shape.to_vec())?
+        .checked_div(strides.broadcast(block_shape.to_vec())?)?
+        .rem(dims.broadcast(block_shape)?)
+        .map(Array::from)
+        .map_err(TCError::from)
 }

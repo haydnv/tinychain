@@ -6,7 +6,6 @@ use std::convert::Infallible;
 use std::{fmt, io};
 
 use destream::en;
-use pathlink::ParseError;
 
 /// A result of type `T`, or a [`TCError`]
 pub type TCResult<T> = Result<T, TCError>;
@@ -179,6 +178,10 @@ impl TCError {
 
     /// Error to indicate that the requested resource does not exist at the specified location
     pub fn not_found<I: fmt::Display>(locator: I) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("not found: {locator}");
+
+        #[cfg(not(debug_assertions))]
         Self::new(ErrorKind::NotFound, locator)
     }
 
@@ -212,8 +215,8 @@ impl TCError {
 
 impl std::error::Error for TCError {}
 
-impl From<ParseError> for TCError {
-    fn from(err: ParseError) -> Self {
+impl From<pathlink::ParseError> for TCError {
+    fn from(err: pathlink::ParseError) -> Self {
         Self {
             kind: ErrorKind::BadRequest,
             data: err.into(),
@@ -221,9 +224,12 @@ impl From<ParseError> for TCError {
     }
 }
 
-#[cfg(feature = "ha-ndarray")]
 impl From<ha_ndarray::Error> for TCError {
     fn from(err: ha_ndarray::Error) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("array math error: {err}");
+
+        #[cfg(not(debug_assertions))]
         Self {
             kind: ErrorKind::Internal,
             data: err.to_string().into(),
@@ -250,6 +256,14 @@ impl From<txfs::Error> for TCError {
     }
 }
 
+#[cfg(debug_assertions)]
+impl From<io::Error> for TCError {
+    fn from(cause: io::Error) -> Self {
+        panic!("IO error: {cause}");
+    }
+}
+
+#[cfg(not(debug_assertions))]
 impl From<io::Error> for TCError {
     fn from(cause: io::Error) -> Self {
         match cause.kind() {
@@ -269,14 +283,14 @@ impl From<io::Error> for TCError {
             io::ErrorKind::WouldBlock => {
                 conflict!("synchronous filesystem access failed").consume(cause)
             }
-            kind => unexpected!("host filesystem error: {:?}", kind).consume(cause),
+            kind => internal!("host filesystem error: {:?}", kind).consume(cause),
         }
     }
 }
 
 impl From<Infallible> for TCError {
     fn from(_: Infallible) -> Self {
-        unexpected!("an unanticipated error occurred--please file a bug report")
+        internal!("an unanticipated error occurred--please file a bug report")
     }
 }
 
@@ -360,7 +374,7 @@ macro_rules! timeout {
 
 /// A truly unexpected error, for which no handling behavior can be defined
 #[macro_export]
-macro_rules! unexpected {
+macro_rules! internal {
     ($($t:tt)*) => {{
         $crate::TCError::new($crate::ErrorKind::Internal, format!($($t)*))
     }}

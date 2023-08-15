@@ -20,13 +20,13 @@ use tcgeneric::{label, Id, Label, PathSegment, TCBoxTryFuture, ThreadSafe, Tuple
 use super::{
     broadcast, broadcast_shape, Axes, AxisRange, Dense, DenseBase, DenseCacheFile, DenseView, Node,
     Range, Schema, Shape, Sparse, SparseBase, SparseView, Tensor, TensorBoolean,
-    TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst, TensorConvert,
-    TensorDiagonal, TensorInstance, TensorMath, TensorMathConst, TensorRead, TensorReduce,
-    TensorTransform, TensorTrig, TensorType, TensorUnary, TensorUnaryBoolean, TensorWrite,
-    TensorWriteDual,
+    TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert,
+    TensorDiagonal, TensorInstance, TensorMatMul, TensorMath, TensorMathConst, TensorRead,
+    TensorReduce, TensorTransform, TensorTrig, TensorType, TensorUnary, TensorUnaryBoolean,
+    TensorWrite, TensorWriteDual,
 };
 
-const AXIS: Label = label("axis");
+const AXES: Label = label("axes");
 const KEEPDIMS: Label = label("keepdims");
 const RIGHT: Label = label("r");
 const TENSOR: Label = label("tensor");
@@ -202,7 +202,7 @@ where
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
                 let tensors: Vec<Tensor<_, _>> = params.require(&TENSORS.into())?;
-                let axis: Value = params.or_default(&AXIS.into())?;
+                let axis: Value = params.or_default(&label("axis").into())?;
                 params.expect_empty()?;
 
                 if tensors.is_empty() {
@@ -240,6 +240,7 @@ struct ConstantHandler;
 impl<'a, State> Handler<'a, State> for ConstantHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
+    State::FE: DenseCacheFile + Clone,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -251,11 +252,10 @@ where
                     key.try_cast_into(|v| TCError::unexpected(v, "a Tensor schema"))?;
 
                 let shape = Shape::from(shape);
-                // constant(&txn, shape, value)
-                //     .map_ok(Tensor::from)
-                //     .map_ok(State::from)
-                //     .await
-                Err(not_implemented!("create dense tensor"))
+                constant::<State>(&txn, shape, value)
+                    .map_ok(Tensor::from)
+                    .map_ok(State::from)
+                    .await
             })
         }))
     }
@@ -314,7 +314,7 @@ where
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, mut params| {
+        Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
                 let schema: Value = params.require(&label("schema").into())?;
                 let schema =
@@ -341,7 +341,7 @@ where
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, mut params| {
+        Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
                 let schema: Value = params.require(&label("schema").into())?;
                 let schema: Schema =
@@ -390,6 +390,7 @@ struct CreateHandler {
 impl<'a, State> Handler<'a, State> for CreateHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
+    State::FE: DenseCacheFile + AsType<Node> + Clone,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -397,14 +398,12 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let _schema: Schema =
+                let schema: Schema =
                     key.try_cast_into(|v| TCError::unexpected(v, "a Tensor schema"))?;
 
-                // create_tensor(self.class, schema, txn)
-                //     .map_ok(State::from)
-                //     .await
-
-                Err(not_implemented!("create tensor"))
+                create_tensor::<State>(self.class, schema, txn)
+                    .map_ok(State::from)
+                    .await
             })
         }))
     }
@@ -417,6 +416,7 @@ struct LoadHandler {
 impl<'a, State> Handler<'a, State> for LoadHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
+    State::FE: DenseCacheFile + AsType<Node> + Clone,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -424,8 +424,10 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
+                debug!("load a new tensor from {key}");
+
                 let (schema, elements): (Value, Value) =
-                    key.try_cast_into(|v| TCError::unexpected(v, "a Tensor schema"))?;
+                    key.try_cast_into(|v| TCError::unexpected(v, "a Tensor schema and elements"))?;
 
                 let txn_id = *txn.id();
 
@@ -434,10 +436,8 @@ where
                         .opt_cast_into()
                         .expect("tensor coordinate elements");
 
-                    let schema = if schema.matches::<Scalar>() {
-                        schema.opt_cast_into().expect("load tensor schema")
-                    } else if schema.matches::<Shape>() {
-                        let shape = schema.opt_cast_into().expect("load tensor shape");
+                    let schema = if schema.matches::<Shape>() {
+                        let shape = Shape::opt_cast_from(schema).expect("shape");
                         let dtype = if elements.is_empty() {
                             NumberType::Float(FloatType::F32)
                         } else {
@@ -446,20 +446,21 @@ where
 
                         Schema { shape, dtype }
                     } else {
-                        return Err(TCError::unexpected(schema, "a Tensor schema"));
+                        Schema::try_cast_from(schema, |v| {
+                            bad_request!("invalid Tensor schema: {v:?}")
+                        })?
                     };
 
                     let class = self.class.unwrap_or(TensorType::Sparse);
-                    // let tensor = create_tensor(class, schema, txn).await?;
-                    //
-                    // stream::iter(elements)
-                    //     .map(|(coord, value)| tensor.write_value_at(txn_id, coord, value))
-                    //     .buffer_unordered(num_cpus::get())
-                    //     .try_fold((), |(), ()| future::ready(Ok(())))
-                    //     .await?;
-                    //
-                    // Ok(State::from(tensor))
-                    Err(not_implemented!("load sparse tensor"))
+                    let tensor = create_tensor::<State>(class, schema, txn).await?;
+
+                    stream::iter(elements)
+                        .map(|(coord, value)| tensor.write_value_at(txn_id, coord, value))
+                        .buffer_unordered(num_cpus::get())
+                        .try_fold((), |(), ()| future::ready(Ok(())))
+                        .await?;
+
+                    Ok(State::from(tensor))
                 } else if elements.matches::<Vec<Number>>() {
                     let elements: Vec<Number> = elements.opt_cast_into().expect("tensor elements");
                     if elements.is_empty() {
@@ -495,15 +496,14 @@ where
                         ));
                     }
 
-                    // let txn_id = *txn.id();
-                    // let file = create_file(txn).await?;
-                    // let elements = stream::iter(elements).map(Ok);
-                    // DenseTensorFile::from_values(file, txn_id, schema.shape, schema.dtype, elements)
-                    //     .map_ok(Dense::from)
-                    //     .map_ok(Tensor::from)
-                    //     .map_ok(State::from)
-                    //     .await
-                    Err(not_implemented!("load dense tensor"))
+                    let txn_id = *txn.id();
+                    let store = create_dir(txn).await?;
+
+                    DenseBase::from_values(store, txn_id, schema.shape, schema.dtype, elements)
+                        .map_ok(Dense::Base)
+                        .map_ok(Tensor::from)
+                        .map_ok(State::from)
+                        .await
                 } else {
                     Err(bad_request!("tensor elements must be a Tuple of Numbers or a Tuple of (Coord, Number) pairs, not {}", elements))
                 }
@@ -560,10 +560,9 @@ where
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, key| {
+        Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 key.expect_none()?;
-
                 self.tensor.diagonal().map(Tensor::from).map(State::from)
             })
         }))
@@ -612,98 +611,100 @@ impl<T> From<T> for ExpandHandler<T> {
     }
 }
 
-// struct RandomNormalHandler;
-//
-// impl<'a, State> Handler<'a, State> for RandomNormalHandler where State: StateInstance {
-//     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
-//     where
-//         'b: 'a,
-//     {
-//         Some(Box::new(|txn, key| {
-//             Box::pin(async move {
-//                 let shape = key.try_cast_into(|v| TCError::unexpected(v, "a Tensor shape"))?;
-//
-//                 let file = create_file(&txn).await?;
-//
-//                 let tensor = DenseBase::random_normal(
-//                     file,
-//                     *txn.id(),
-//                     shape,
-//                     FloatType::F64,
-//                     MEAN.into(),
-//                     STD.into(),
-//                 )
-//                 .map_ok(Dense::Base)
-//                 .map_ok(Tensor::Dense)
-//                 .await?;
-//
-//                 Ok(State::from(tensor))
-//             })
-//         }))
-//     }
-//
-//     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
-//     where
-//         'b: 'a,
-//     {
-//         Some(Box::new(|txn, mut params| {
-//             Box::pin(async move {
-//                 let shape: Value = params.require(&label("shape").into())?;
-//                 let shape: Shape =
-//                     shape.try_cast_into(|v| TCError::unexpected(v, "a Tensor shape"))?;
-//
-//                 let mean = params.option(&label("mean").into(), || MEAN.into())?;
-//                 let std = params.option(&label("std").into(), || STD.into())?;
-//                 params.expect_empty()?;
-//
-//                 let file = create_file(&txn).await?;
-//
-//                 let tensor = DenseBase::random_normal(
-//                     file,
-//                     *txn.id(),
-//                     shape.into(),
-//                     FloatType::F64,
-//                     mean,
-//                     std,
-//                 )
-//                 .map_ok(Dense::Base)
-//                 .map_ok(Tensor::Dense)
-//                 .await?;
-//
-//                 Ok(State::from(tensor))
-//             })
-//         }))
-//     }
-// }
-//
-// struct RandomUniformHandler;
-//
-// impl<'a, State> Handler<'a, State> for RandomUniformHandler where State: StateInstance {
-//     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
-//     where
-//         'b: 'a,
-//     {
-//         Some(Box::new(|txn, key| {
-//             Box::pin(async move {
-//                 let shape = key.try_cast_into(|v| TCError::unexpected(v, "a Tensor shape"))?;
-//
-//                 let file = create_file(&txn).await?;
-//
-//                 let tensor = DenseBase::random_uniform(file, *txn.id(), shape, FloatType::F64)
-//                     .map(Dense::Base)
-//                     .map(Tensor::from)?;
-//
-//                 Ok(State::from(tensor))
-//             })
-//         }))
-//     }
-// }
+struct RandomNormalHandler;
+
+impl<'a, State> Handler<'a, State> for RandomNormalHandler
+where
+    State: StateInstance + From<Tensor<State::Txn, State::FE>>,
+    State::FE: DenseCacheFile + Clone,
+    Number: TryCastFrom<State>,
+    Value: TryCastFrom<State>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let shape = key.try_cast_into(|v| TCError::unexpected(v, "a Tensor shape"))?;
+
+                let store = create_dir(txn).await?;
+
+                let tensor = DenseBase::random_normal(store, shape, 0., 1.)
+                    .map_ok(Dense::Base)
+                    .map_ok(Tensor::Dense)
+                    .await?;
+
+                Ok(State::from(tensor))
+            })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let shape: Value = params.require(&label("shape").into())?;
+                let shape: Shape =
+                    shape.try_cast_into(|v| TCError::unexpected(v, "a Tensor shape"))?;
+
+                let mean: Number = params.option(&label("mean").into(), || MEAN.into())?;
+                let std: Number = params.option(&label("std").into(), || STD.into())?;
+                params.expect_empty()?;
+
+                let store = create_dir(txn).await?;
+
+                let tensor = DenseBase::random_normal(
+                    store,
+                    shape.into(),
+                    mean.cast_into(),
+                    std.cast_into(),
+                )
+                .map_ok(Dense::Base)
+                .map_ok(Tensor::Dense)
+                .await?;
+
+                Ok(State::from(tensor))
+            })
+        }))
+    }
+}
+
+struct RandomUniformHandler;
+
+impl<'a, State> Handler<'a, State> for RandomUniformHandler
+where
+    State: StateInstance + From<Tensor<State::Txn, State::FE>>,
+    State::FE: DenseCacheFile + Clone,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                let shape = key.try_cast_into(|v| TCError::unexpected(v, "a Tensor shape"))?;
+
+                let store = create_dir(txn).await?;
+
+                DenseBase::random_uniform(store, shape)
+                    .map_ok(Dense::Base)
+                    .map_ok(Tensor::from)
+                    .map_ok(State::from)
+                    .await
+            })
+        }))
+    }
+}
 
 struct RangeHandler;
 
 impl<'a, State> Handler<'a, State> for RangeHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
+    State::FE: DenseCacheFile + Clone,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -712,17 +713,19 @@ where
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.matches::<(Vec<u64>, Number, Number)>() {
-                    // let (shape, start, stop): (Vec<u64>, Number, Number) =
-                    //     key.opt_cast_into().unwrap();
-                    //
-                    // let dir = create_dir(&txn).await?;
+                    let (shape, start, stop): (Vec<u64>, Number, Number) =
+                        key.opt_cast_into().expect("range parameters");
 
-                    // DenseBase::range(dir, *txn.id(), shape, start, stop)
-                    //     .map_ok(Dense::Base)
-                    //     .map_ok(Tensor::Dense)
-                    //     .map_ok(State::from)
-                    //     .await
-                    Err(not_implemented!("dense tensor range constructor"))
+                    let shape = Shape::from(shape);
+                    shape.validate()?;
+
+                    let dir = create_dir(txn).await?;
+
+                    DenseBase::range(dir, shape, start, stop)
+                        .map_ok(Dense::Base)
+                        .map_ok(Tensor::Dense)
+                        .map_ok(State::from)
+                        .await
                 } else {
                     Err(TCError::unexpected(key, "a Tensor schema"))
                 }
@@ -807,6 +810,7 @@ where
     State::FE: DenseCacheFile + AsType<Node> + Clone,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Vec<Tensor<State::Txn, State::FE>>: TryCastFrom<State>,
+    Number: TryCastFrom<State>,
     Value: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
@@ -822,7 +826,7 @@ where
                     "constant" => Some(Box::new(ConstantHandler)),
                     "load" => Some(Box::new(LoadHandler { class: Some(*self) })),
                     "range" => Some(Box::new(RangeHandler)),
-                    // "random" if path.len() == 1 => Some(Box::new(RandomUniformHandler)),
+                    "random" if path.len() == 1 => Some(Box::new(RandomUniformHandler)),
                     _ => None,
                 },
                 Self::Sparse => match path[0].as_str() {
@@ -836,8 +840,8 @@ where
             match self {
                 Self::Dense => match path[0].as_str() {
                     "random" => match path[1].as_str() {
-                        // "normal" => Some(Box::new(RandomNormalHandler)),
-                        // "uniform" => Some(Box::new(RandomUniformHandler)),
+                        "normal" => Some(Box::new(RandomNormalHandler)),
+                        "uniform" => Some(Box::new(RandomUniformHandler)),
                         _ => None,
                     },
                     _ => None,
@@ -850,11 +854,49 @@ where
     }
 }
 
+struct CondHandler<Txn, FE> {
+    tensor: Tensor<Txn, FE>,
+}
+
+impl<'a, State> Handler<'a, State> for CondHandler<State::Txn, State::FE>
+where
+    State: StateInstance + From<Tensor<State::Txn, State::FE>>,
+    State::FE: DenseCacheFile + AsType<Node>,
+    Tensor<State::Txn, State::FE>: TryCastFrom<State>,
+{
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let then: Tensor<_, _> = params.require(&label("then").into())?;
+                let or_else: Tensor<_, _> = params.require(&label("or_else").into())?;
+                params.expect_empty()?;
+
+                let shape = broadcast_shape(self.tensor.shape(), then.shape())?;
+                let shape = broadcast_shape(&shape, or_else.shape())?;
+
+                let tensor = self.tensor.broadcast(shape.clone())?;
+                let then = then.broadcast(shape.clone())?;
+                let or_else = or_else.broadcast(shape)?;
+
+                tensor.cond(then, or_else).map(State::from)
+            })
+        }))
+    }
+}
+
+impl<Txn, FE> From<Tensor<Txn, FE>> for CondHandler<Txn, FE> {
+    fn from(tensor: Tensor<Txn, FE>) -> Self {
+        Self { tensor }
+    }
+}
+
 struct DualHandler<Txn, FE> {
     tensor: Tensor<Txn, FE>,
     op: fn(Tensor<Txn, FE>, Tensor<Txn, FE>) -> TCResult<Tensor<Txn, FE>>,
     op_const: fn(Tensor<Txn, FE>, Number) -> TCResult<Tensor<Txn, FE>>,
-    op_name: &'static str,
 }
 
 impl<Txn, FE> DualHandler<Txn, FE> {
@@ -862,7 +904,6 @@ impl<Txn, FE> DualHandler<Txn, FE> {
         tensor: T,
         op: fn(Tensor<Txn, FE>, Tensor<Txn, FE>) -> TCResult<Tensor<Txn, FE>>,
         op_const: fn(Tensor<Txn, FE>, Number) -> TCResult<Tensor<Txn, FE>>,
-        op_name: &'static str,
     ) -> Self
     where
         Tensor<Txn, FE>: From<T>,
@@ -871,7 +912,6 @@ impl<Txn, FE> DualHandler<Txn, FE> {
             tensor: tensor.into(),
             op,
             op_const,
-            op_name,
         }
     }
 }
@@ -961,7 +1001,7 @@ where
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, r| {
+        Some(Box::new(|_txn, r| {
             Box::pin(async move {
                 self.tensor.shape().validate()?;
 
@@ -987,23 +1027,16 @@ where
                 params.expect_empty()?;
 
                 let l = self.tensor;
-                l.shape().validate()?;
 
                 let log = if r.matches::<Tensor<_, _>>() {
                     let base = Tensor::<_, _>::opt_cast_from(r).expect("tensor");
-                    base.shape().validate()?;
-
-                    if l.shape() == base.shape() {
-                        l.log(base)
-                    } else {
-                        let (l, base) = broadcast(l, base)?;
-                        l.log(base)
-                    }
+                    let (l, base) = broadcast(l, base)?;
+                    l.log(base)
                 } else if r.matches::<Number>() {
-                    let base = Number::opt_cast_from(r).expect("numeric constant");
+                    let base = Number::opt_cast_from(r).expect("numeric bases");
                     l.log_const(base)
                 } else {
-                    Err(bad_request!("a Tensor or Number"))
+                    Err(bad_request!("a Tensor or Number, not {r:?}"))
                 }?;
 
                 Ok(State::from(log))
@@ -1012,33 +1045,82 @@ where
     }
 }
 
-// struct MatMulHandler<Txn, FE> {
-//     tensor: Tensor<Txn, FE>,
-// }
-//
-// impl<Txn, FE> MatMulHandler<Txn, FE> {
-//     fn new<T: Into<Tensor<Txn, FE>>>(tensor: T) -> Self {
-//         Self {
-//             tensor: tensor.into(),
-//         }
-//     }
-// }
-//
-// impl<'a, State> Handler<'a, State> for MatMulHandler<State::Txn, State::FE> where State: StateInstance {
-//     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
-//     where
-//         'b: 'a,
-//     {
-//         Some(Box::new(|_txn, mut params| {
-//             Box::pin(async move {
-//                 let right: Tensor<_, _> = params.require(&RIGHT.into())?;
-//                 params.expect_empty()?;
-//
-//                 self.tensor.matmul(right).map_ok(Tensor::from).await
-//             })
-//         }))
-//     }
-// }
+struct MatMulHandler<Txn, FE> {
+    tensor: Tensor<Txn, FE>,
+}
+
+impl<Txn, FE> MatMulHandler<Txn, FE> {
+    fn new<T: Into<Tensor<Txn, FE>>>(tensor: T) -> Self {
+        Self {
+            tensor: tensor.into(),
+        }
+    }
+}
+
+impl<'a, State> Handler<'a, State> for MatMulHandler<State::Txn, State::FE>
+where
+    State: StateInstance + From<Tensor<State::Txn, State::FE>>,
+    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    Tensor<State::Txn, State::FE>: TryCastFrom<State>,
+{
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, mut params| {
+            Box::pin(async move {
+                let right: Tensor<_, _> = params.require(&RIGHT.into())?;
+                params.expect_empty()?;
+
+                let ndim = Ord::max(self.tensor.ndim(), right.ndim());
+                let (left, right) = if ndim > 2 {
+                    if self
+                        .tensor
+                        .shape()
+                        .iter()
+                        .rev()
+                        .take(2)
+                        .zip(right.shape().iter().rev().take(2))
+                        .all(|(l, r)| l == r)
+                    {
+                        Ok((self.tensor, right))
+                    } else {
+                        let batch_shape = broadcast_shape(
+                            &self.tensor.shape()[..self.tensor.ndim() - 2],
+                            &right.shape()[..right.ndim() - 2],
+                        )?;
+
+                        let mut left_shape = Vec::with_capacity(ndim);
+                        left_shape.extend_from_slice(&batch_shape);
+                        left_shape.extend(self.tensor.shape().iter().rev().take(2).rev());
+                        let left = self.tensor.broadcast(left_shape.into())?;
+
+                        let mut right_shape = Vec::with_capacity(ndim);
+                        right_shape.extend(batch_shape.into_vec());
+                        right_shape.extend(right.shape().iter().rev().take(2).rev());
+                        let right = right.broadcast(right_shape.into())?;
+
+                        Ok((left, right))
+                    }
+                } else if self.tensor.ndim() < 2 {
+                    Err(bad_request!(
+                        "invalid left matrix multiplicand: {:?}",
+                        self.tensor
+                    ))
+                } else if right.ndim() < 2 {
+                    Err(bad_request!(
+                        "invalid right matrix multiplicand: {:?}",
+                        right
+                    ))
+                } else {
+                    Ok((self.tensor, right))
+                }?;
+
+                left.matmul(right).map(Tensor::from).map(State::from)
+            })
+        }))
+    }
+}
 
 struct NormHandler<State: StateInstance> {
     tensor: Tensor<State::Txn, State::FE>,
@@ -1116,8 +1198,8 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let axis = if params.contains_key::<Id>(&AXIS.into()) {
-                    let axis = params.require(&AXIS.into())?;
+                let axis = if params.contains_key::<Id>(&AXES.into()) {
+                    let axis = params.require(&AXES.into())?;
                     cast_axis(axis, self.tensor.ndim()).map(Some)?
                 } else {
                     None
@@ -1197,13 +1279,13 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let axis = if key.is_none() {
+                let axes = if key.is_none() {
                     None
                 } else {
                     cast_axes(key, self.tensor.ndim()).map(Some)?
                 };
 
-                self.call(*txn.id(), axis, false).await
+                self.call(*txn.id(), axes, false).await
             })
         }))
     }
@@ -1214,8 +1296,8 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let axis = if params.contains_key::<Id>(&AXIS.into()) {
-                    let axes = params.require(&AXIS.into())?;
+                let axis = if params.contains_key::<Id>(&AXES.into()) {
+                    let axes = params.require(&AXES.into())?;
                     cast_axes(axes, self.tensor.ndim()).map(Some)?
                 } else {
                     None
@@ -1237,6 +1319,7 @@ struct TensorHandler<T> {
 impl<'a, State, T: 'a> Handler<'a, State> for TensorHandler<T>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
+    State::FE: DenseCacheFile + AsType<Node>,
     T: TensorInstance
         + TensorRead
         + TensorWrite
@@ -1255,7 +1338,7 @@ where
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 debug!("GET Tensor: {}", key);
-                let range = cast_range(self.tensor.shape(), key)?;
+                let range = cast_range(self.tensor.shape(), Scalar::Value(key))?;
 
                 if range.size() == 0 {
                     return Err(bad_request!(
@@ -1301,20 +1384,11 @@ impl<T> From<T> for TensorHandler<T> {
 struct UnaryHandler<Txn, FE> {
     tensor: Tensor<Txn, FE>,
     op: fn(Tensor<Txn, FE>) -> TCResult<Tensor<Txn, FE>>,
-    op_name: &'static str,
 }
 
 impl<Txn, FE> UnaryHandler<Txn, FE> {
-    fn new(
-        tensor: Tensor<Txn, FE>,
-        op: fn(Tensor<Txn, FE>) -> TCResult<Tensor<Txn, FE>>,
-        op_name: &'static str,
-    ) -> Self {
-        Self {
-            tensor,
-            op,
-            op_name,
-        }
+    fn new(tensor: Tensor<Txn, FE>, op: fn(Tensor<Txn, FE>) -> TCResult<Tensor<Txn, FE>>) -> Self {
+        Self { tensor, op }
     }
 }
 
@@ -1347,20 +1421,11 @@ where
 struct UnaryHandlerAsync<Txn, FE, F> {
     tensor: Tensor<Txn, FE>,
     op: fn(Tensor<Txn, FE>, TxnId) -> F,
-    op_name: &'static str,
 }
 
 impl<'a, Txn, FE, F> UnaryHandlerAsync<Txn, FE, F> {
-    fn new(
-        tensor: Tensor<Txn, FE>,
-        op: fn(Tensor<Txn, FE>, TxnId) -> F,
-        op_name: &'static str,
-    ) -> Self {
-        Self {
-            tensor,
-            op,
-            op_name,
-        }
+    fn new(tensor: Tensor<Txn, FE>, op: fn(Tensor<Txn, FE>, TxnId) -> F) -> Self {
+        Self { tensor, op }
     }
 }
 
@@ -1546,32 +1611,27 @@ where
                 tensor,
                 TensorMath::add,
                 TensorMathConst::add_const,
-                "add",
             ))),
             "div" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorMath::div,
                 TensorMathConst::div_const,
-                "div",
             ))),
             "log" => Some(Box::new(LogHandler::new(tensor))),
             "mul" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorMath::mul,
                 TensorMathConst::mul_const,
-                "mul",
             ))),
             "pow" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorMath::pow,
                 TensorMathConst::pow_const,
-                "pow",
             ))),
             "sub" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorMath::sub,
                 TensorMathConst::sub_const,
-                "sub",
             ))),
 
             // boolean ops
@@ -1579,19 +1639,16 @@ where
                 tensor,
                 TensorBoolean::and,
                 TensorBooleanConst::and_const,
-                "and",
             ))),
             "or" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorBoolean::or,
                 TensorBooleanConst::or_const,
-                "or",
             ))),
             "xor" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorBoolean::xor,
                 TensorBooleanConst::xor_const,
-                "xor",
             ))),
 
             // comparison ops
@@ -1599,72 +1656,61 @@ where
                 tensor,
                 TensorCompare::eq,
                 TensorCompareConst::eq_const,
-                "eq",
             ))),
             "gt" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorCompare::gt,
                 TensorCompareConst::gt_const,
-                "gt",
             ))),
             "ge" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorCompare::ge,
                 TensorCompareConst::ge_const,
-                "ge",
             ))),
             "lt" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorCompare::lt,
                 TensorCompareConst::lt_const,
-                "lt",
             ))),
             "le" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorCompare::le,
                 TensorCompareConst::le_const,
-                "le",
             ))),
             "ne" => Some(Box::new(DualHandler::new(
                 tensor,
                 TensorCompare::ne,
                 TensorCompareConst::ne_const,
-                "ne",
             ))),
+
+            // conditional logic
+            "cond" => Some(Box::new(CondHandler::from(tensor))),
 
             // linear algebra
             "diagonal" => Some(Box::new(DiagonalHandler::from(tensor))),
-            // "matmul" => Some(Box::new(MatMulHandler::new(tensor))),
+            "matmul" => Some(Box::new(MatMulHandler::new(tensor))),
 
             // reduce ops
-            "max" => {
-                return Some(Box::new(ReduceHandler::new(
-                    tensor,
-                    TensorReduce::max,
-                    TensorReduce::max_all,
-                )))
-            }
-            "min" => {
-                return Some(Box::new(ReduceHandler::new(
-                    tensor,
-                    TensorReduce::min,
-                    TensorReduce::min_all,
-                )))
-            }
-            "product" => {
-                return Some(Box::new(ReduceHandler::new(
-                    tensor,
-                    TensorReduce::product,
-                    TensorReduce::product_all,
-                )))
-            }
-            "sum" => {
-                return Some(Box::new(ReduceHandler::new(
-                    tensor,
-                    TensorReduce::sum,
-                    TensorReduce::sum_all,
-                )))
-            }
+            "max" => Some(Box::new(ReduceHandler::new(
+                tensor,
+                TensorReduce::max,
+                TensorReduce::max_all,
+            ))),
+            "min" => Some(Box::new(ReduceHandler::new(
+                tensor,
+                TensorReduce::min,
+                TensorReduce::min_all,
+            ))),
+            "product" => Some(Box::new(ReduceHandler::new(
+                tensor,
+                TensorReduce::product,
+                TensorReduce::product_all,
+            ))),
+            "sum" => Some(Box::new(ReduceHandler::new(
+                tensor,
+                TensorReduce::sum,
+                TensorReduce::sum_all,
+            ))),
 
             // transforms
             "broadcast" => Some(Box::new(BroadcastHandler::from(tensor))),
@@ -1674,84 +1720,36 @@ where
             "transpose" => Some(Box::new(TransposeHandler::from(tensor))),
 
             // trigonometry
-            "asin" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::asin,
-                "asin",
-            ))),
-            "sin" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::sin,
-                "sin",
-            ))),
-            "sinh" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::sinh,
-                "sinh",
-            ))),
+            "asin" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::asin))),
+            "sin" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::sin))),
+            "sinh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::sinh))),
 
-            "acos" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::acos,
-                "acos",
-            ))),
-            "cos" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::cos,
-                "cos",
-            ))),
-            "cosh" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::cosh,
-                "cosh",
-            ))),
+            "acos" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::acos))),
+            "cos" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::cos))),
+            "cosh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::cosh))),
 
-            "atan" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::atan,
-                "atan",
-            ))),
-            "tan" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::tan,
-                "tan",
-            ))),
-            "tanh" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorTrig::tanh,
-                "tanh",
-            ))),
+            "atan" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::atan))),
+            "tan" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::tan))),
+            "tanh" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorTrig::tanh))),
 
             // unary ops
-            "abs" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorUnary::abs,
-                "abs",
-            ))),
+            "abs" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::abs))),
             "all" => Some(Box::new(UnaryHandlerAsync::new(
                 tensor.into(),
                 TensorReduce::all,
-                "all",
             ))),
             "any" => Some(Box::new(UnaryHandlerAsync::new(
                 tensor.into(),
                 TensorReduce::any,
-                "any",
             ))),
-            "exp" => Some(Box::new(UnaryHandler::new(
-                tensor.into(),
-                TensorUnary::exp,
-                "exp",
-            ))),
+            "exp" => Some(Box::new(UnaryHandler::new(tensor.into(), TensorUnary::exp))),
             "not" => Some(Box::new(UnaryHandler::new(
                 tensor.into(),
                 TensorUnaryBoolean::not,
-                "not",
             ))),
             "round" => Some(Box::new(UnaryHandler::new(
                 tensor.into(),
                 TensorUnary::round,
-                "round",
             ))),
 
             // views
@@ -1783,6 +1781,7 @@ impl<State> Route<State> for Static
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
     State::FE: DenseCacheFile + AsType<Node> + Clone,
+    Number: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
     Vec<Tensor<State::Txn, State::FE>>: TryCastFrom<State>,
@@ -1809,10 +1808,12 @@ async fn constant<State>(
 ) -> TCResult<Dense<State::Txn, State::FE>>
 where
     State: StateInstance,
+    State::FE: DenseCacheFile + Clone,
 {
-    // let file = create_file(txn).await?;
-    // DenseBase::constant(file, *txn.id(), shape, value).map_ok(Dense::Base).await
-    Err(not_implemented!("create dense tensor"))
+    let store = create_dir(txn).await?;
+    DenseBase::constant(store, *txn.id(), shape, value)
+        .map_ok(Dense::Base)
+        .await
 }
 
 async fn create_sparse<State>(
@@ -1821,34 +1822,49 @@ async fn create_sparse<State>(
 ) -> TCResult<Sparse<State::Txn, State::FE>>
 where
     State: StateInstance,
+    State::FE: AsType<Node> + ThreadSafe + Clone,
 {
-    // let store = txn.context().create_store_unique(*txn.id()).await?;
-    // SparseBase::create(*txn.id(), (schema.dtype, schema.shape.into()), store)
-    //     .map_ok(Sparse::Base)
-    //     .await
-    Err(not_implemented!("create sparse tensor"))
+    let dtype = schema.dtype;
+    let schema = crate::tensor::sparse::Schema::new(schema.shape);
+    let store = create_dir(txn).await?;
+    tc_transact::fs::Persist::create(*txn.id(), (dtype, schema), store)
+        .map_ok(Sparse::Base)
+        .await
 }
 
 async fn write<State, T>(tensor: T, txn_id: TxnId, key: Value, value: State) -> TCResult<()>
 where
     State: StateInstance,
+    State::FE: DenseCacheFile + AsType<Node>,
     T: TensorInstance
         + TensorWrite
         + TensorWriteDual<Tensor<State::Txn, State::FE>>
         + TensorTransform
         + Clone,
     Number: TryCastFrom<State>,
-    Tensor<State::Txn, State::FE>: TensorInstance + TryCastFrom<State>,
+    Tensor<State::Txn, State::FE>: TensorInstance
+        + TensorTransform<Broadcast = Tensor<State::Txn, State::FE>>
+        + TryCastFrom<State>,
 {
     debug!("write {value:?} to {key}");
-    let range = cast_range(tensor.shape(), key)?;
+    let range = cast_range(tensor.shape(), Scalar::Value(key))?;
 
     if value.matches::<Tensor<_, _>>() {
         let value = Tensor::<_, _>::opt_cast_from(value).expect("tensor");
+        let value = {
+            let range = range.clone().normalize(tensor.shape());
+            value.broadcast(range.shape())?
+        };
+
         tensor.write(txn_id, range, value).await
     } else if value.matches::<Number>() {
         let value = Number::opt_cast_from(value).expect("element");
-        tensor.write_value(txn_id, range, value).await
+
+        if let Some(coord) = range.as_coord(tensor.shape()) {
+            tensor.write_value_at(txn_id, coord, value).await
+        } else {
+            tensor.write_value(txn_id, range, value).await
+        }
     } else {
         Err(bad_request!("cannot write {value:?} to a Tensor"))
     }
@@ -1864,31 +1880,26 @@ where
     fs::Dir::load(*txn.id(), dir).await
 }
 
-// async fn create_tensor<Txn, FE>(class: TensorType, schema: Schema, txn: &Txn) -> TCResult<Tensor<Txn, FE>> where Txn: Transaction<FE> {
-//     match class {
-//         TensorType::Dense => {
-//             constant(txn, schema.shape, schema.dtype.zero())
-//                 .map_ok(Tensor::from)
-//                 .await
-//         }
-//         TensorType::Sparse => create_sparse(txn, schema).map_ok(Tensor::from).await,
-//     }
-// }
-
-fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
-    let bound = i64::try_cast_from(bound, |v| TCError::unexpected(v, "an axis bound"))?;
-    if bound.abs() as u64 > dim {
-        return Err(bad_request!(
-            "index {} is out of bounds for dimension {}",
-            bound,
-            dim
-        ));
-    }
-
-    if bound < 0 {
-        Ok(dim - bound.abs() as u64)
-    } else {
-        Ok(bound as u64)
+async fn create_tensor<State>(
+    class: TensorType,
+    schema: Schema,
+    txn: &State::Txn,
+) -> TCResult<Tensor<State::Txn, State::FE>>
+where
+    State: StateInstance,
+    State::FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    match class {
+        TensorType::Dense => {
+            constant::<State>(txn, schema.shape, schema.dtype.zero())
+                .map_ok(Tensor::from)
+                .await
+        }
+        TensorType::Sparse => {
+            create_sparse::<State>(txn, schema)
+                .map_ok(Tensor::from)
+                .await
+        }
     }
 }
 
@@ -1897,7 +1908,7 @@ fn cast_axes(axes: Value, ndim: usize) -> TCResult<Axes> {
 
     match axes {
         Value::Number(x) => cast_axis(Value::Number(x), ndim).map(|x| vec![x]),
-        Value::Tuple(tuple) => {
+        Value::Tuple(tuple) if !tuple.is_empty() => {
             let mut axes = Axes::with_capacity(tuple.len());
             for value in tuple {
                 let x = cast_axis(value, ndim)?;
@@ -1928,12 +1939,20 @@ fn cast_axis_range<R: RangeBounds<Value> + fmt::Debug>(dim: u64, range: R) -> TC
 
     let start = match range.start_bound() {
         Bound::Unbounded => 0,
+        Bound::Included(start) if start.is_none() => 0,
+        Bound::Excluded(start) if start.is_none() => 1,
         Bound::Included(start) => cast_bound(dim, start.clone())?,
         Bound::Excluded(start) => cast_bound(dim, start.clone())? + 1,
     };
 
     let end = match range.end_bound() {
         Bound::Unbounded => dim,
+        Bound::Included(end) if end.is_none() => {
+            return Err(bad_request!(
+                "index {dim} is out of bounds for dimension {dim}"
+            ))
+        }
+        Bound::Excluded(end) if end.is_none() => dim,
         Bound::Included(end) => cast_bound(dim, end.clone())? + 1,
         Bound::Excluded(end) => cast_bound(dim, end.clone())?,
     };
@@ -1948,27 +1967,39 @@ fn cast_axis_range<R: RangeBounds<Value> + fmt::Debug>(dim: u64, range: R) -> TC
     }
 }
 
-pub fn cast_range(shape: &Shape, value: Value) -> TCResult<Range> {
-    debug!("tensor bounds from {value} (shape is {shape:?})");
+fn cast_bound(dim: u64, bound: Value) -> TCResult<u64> {
+    let bound = i64::try_cast_from(bound, |v| TCError::unexpected(v, "an axis bound"))?;
 
-    match value {
-        Value::None => Ok(Range::all(shape)),
-        Value::Number(i) => {
+    if (bound.abs() as u64) <= dim {
+        if bound < 0 {
+            Ok(dim - bound.abs() as u64)
+        } else {
+            Ok(bound as u64)
+        }
+    } else {
+        Err(bad_request!(
+            "index {} is out of bounds for dimension {}",
+            bound,
+            dim
+        ))
+    }
+}
+
+pub fn cast_range(shape: &Shape, scalar: Scalar) -> TCResult<Range> {
+    match scalar {
+        Scalar::Value(Value::Number(i)) => {
             let bound = cast_bound(shape[0], i.into())?;
             Ok(Range::from(vec![bound]))
         }
-        // Value::Tuple(range) if range.matches::<(Bound<u64>, Bound<u64>)>() => {
-        //     if shape.is_empty() {
-        //         return Err(bad_request!(
-        //             "empty Tensor has no valid bounds, but the requested range is {}",
-        //             range,
-        //         ));
-        //     }
-        //
-        //     let range = range.opt_cast_into().unwrap();
-        //     Ok(Range::from(vec![cast_axis_range(shape[0], range)?]))
-        // }
-        Value::Tuple(bounds) => {
+        range if range.matches::<(Bound<Value>, Bound<Value>)>() => {
+            let range: (Bound<Value>, Bound<Value>) = range.opt_cast_into().expect("range");
+            Ok(Range::from(vec![cast_axis_range(shape[0], range)?]))
+        }
+        scalar if scalar.is_tuple() => {
+            let bounds = Tuple::<Scalar>::try_cast_from(scalar, |s| {
+                bad_request!("invalid tensor bounds: {s:?}")
+            })?;
+
             if bounds.len() > shape.len() {
                 return Err(bad_request!(
                     "tensor of shape {:?} does not support bounds with {} axes",
@@ -1979,20 +2010,29 @@ pub fn cast_range(shape: &Shape, value: Value) -> TCResult<Range> {
 
             let mut axis_bounds = Vec::with_capacity(shape.len());
 
-            for (axis, bound) in bounds.into_inner().into_iter().enumerate() {
+            for (axis, bound) in bounds.into_iter().enumerate() {
                 debug!(
-                    "bound for axis {} with dimension {} is {}",
-                    axis, shape[axis], bound
+                    "bound for axis {axis} with dimension {dim} is {bound:?}",
+                    dim = shape[axis],
                 );
 
                 let axis_range = if bound.is_none() {
                     AxisRange::all(shape[axis])
                 } else if bound.matches::<Vec<u64>>() {
-                    bound.opt_cast_into().map(AxisRange::Of).unwrap()
-                } else if let Value::Number(value) = bound {
-                    cast_bound(shape[axis], value.into()).map(AxisRange::At)?
+                    bound
+                        .opt_cast_into()
+                        .map(AxisRange::Of)
+                        .expect("axis range")
+                } else if bound.matches::<(Bound<Value>, Bound<Value>)>() {
+                    let bound: (Bound<Value>, Bound<Value>) =
+                        bound.opt_cast_into().expect("axis range");
+
+                    cast_axis_range(shape[axis], bound)?
+                } else if bound.matches::<Number>() {
+                    let bound = Number::opt_cast_from(bound).expect("axis index");
+                    cast_bound(shape[axis], bound.into()).map(AxisRange::At)?
                 } else {
-                    return Err(bad_request!("invalid bound {} for axis {}", bound, axis));
+                    return Err(bad_request!("invalid bound {bound:?} for axis {axis}"));
                 };
 
                 axis_bounds.push(axis_range);
@@ -2000,6 +2040,7 @@ pub fn cast_range(shape: &Shape, value: Value) -> TCResult<Range> {
 
             Ok(Range::from(axis_bounds))
         }
+        scalar if scalar.is_none() => Ok(Range::all(shape)),
         other => Err(TCError::unexpected(other, "Tensor bounds")),
     }
 }

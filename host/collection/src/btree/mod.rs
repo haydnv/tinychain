@@ -4,7 +4,6 @@ use std::fmt;
 
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
-use b_table::b_tree;
 use futures::Stream;
 use safecast::{as_type, AsType};
 

@@ -118,7 +118,7 @@ impl TableSchema {
             .indices
             .into_iter()
             .map(|(name, schema)| {
-                let len = b_table::b_tree::Schema::len(&schema) - key_len;
+                let len = b_table::BTreeSchema::len(&schema) - key_len;
                 let columns = schema.into_iter().take(len).map(|col| col.name).collect();
 
                 (name, columns)

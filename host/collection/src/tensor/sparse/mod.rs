@@ -19,7 +19,7 @@ use tc_value::{
     Complex, ComplexType, DType, FloatType, IntType, Number, NumberClass, NumberCollator,
     NumberInstance, NumberType, UIntType, ValueType,
 };
-use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
+use tcgeneric::{Instance, TCBoxTryStream, ThreadSafe};
 
 use super::block::Block;
 use super::complex::ComplexRead;
@@ -27,8 +27,8 @@ use super::dense::{DenseAccess, DenseAccessCast, DenseCacheFile, DenseSparse, De
 
 use super::{
     Axes, AxisRange, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast,
-    TensorCompare, TensorCompareConst, TensorConvert, TensorInstance, TensorMath, TensorMathConst,
-    TensorPermitRead, TensorPermitWrite, TensorRead, TensorReduce, TensorTransform, TensorType,
+    TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorInstance, TensorMath,
+    TensorMathConst, TensorPermitRead, TensorRead, TensorReduce, TensorTransform, TensorType,
     TensorUnary, TensorUnaryBoolean, TensorWrite, TensorWriteDual, IMAG, REAL,
 };
 
@@ -43,11 +43,165 @@ mod schema;
 mod stream;
 mod view;
 
+mod reduce {
+    use tcgeneric::TCBoxTryFuture;
+
+    use super::*;
+
+    pub(super) fn reduce_all<A>(txn_id: TxnId, accessor: A) -> TCBoxTryFuture<'static, bool>
+    where
+        A: SparseInstance + TensorPermitRead,
+    {
+        Box::pin(async move {
+            let _permit = accessor.read_permit(txn_id, Range::default()).await?;
+
+            let axes = (0..accessor.ndim()).into_iter().collect();
+            let mut affected = Range::all(accessor.shape()).affected();
+            let mut filled_at = accessor
+                .filled_at(txn_id, Range::default(), Axes::default(), axes)
+                .await?;
+
+            while let Some(actual) = filled_at.try_next().await? {
+                if affected.next() != Some(actual) {
+                    return Ok(false);
+                }
+            }
+
+            Ok(affected.next().is_none())
+        })
+    }
+
+    pub(super) fn reduce_any<A>(txn_id: TxnId, accessor: A) -> TCBoxTryFuture<'static, bool>
+    where
+        A: SparseInstance + TensorPermitRead,
+    {
+        Box::pin(async move {
+            let _permit = accessor.read_permit(txn_id, Range::default()).await?;
+
+            let axes = (0..accessor.ndim()).into_iter().collect();
+            let mut filled_at = accessor
+                .filled_at(txn_id, Range::default(), Axes::default(), axes)
+                .await?;
+
+            filled_at.try_next().map_ok(|r| r.is_some()).await
+        })
+    }
+
+    pub(super) fn reduce_max<A>(txn_id: TxnId, accessor: A) -> TCBoxTryFuture<'static, A::DType>
+    where
+        A: SparseInstance + TensorPermitRead,
+        A::DType: Into<Number>,
+    {
+        Box::pin(async move {
+            let _permit = accessor.read_permit(txn_id, Range::default()).await?;
+
+            // TODO: use a type-specific collator
+            let collator = NumberCollator::default();
+            let blocks = accessor.blocks(txn_id, Range::default(), vec![]).await?;
+
+            blocks
+                .map(|result| {
+                    result.and_then(|(_coords, values)| values.max_all().map_err(TCError::from))
+                })
+                .try_fold(A::DType::min(), move |max, block_max| {
+                    let max = match collator.cmp(&max.into(), &block_max.into()) {
+                        Ordering::Less => block_max,
+                        Ordering::Equal | Ordering::Greater => max,
+                    };
+
+                    futures::future::ready(Ok(max))
+                })
+                .await
+        })
+    }
+
+    pub(super) fn reduce_min<A>(txn_id: TxnId, accessor: A) -> TCBoxTryFuture<'static, A::DType>
+    where
+        A: SparseInstance + TensorPermitRead,
+        A::DType: Into<Number>,
+    {
+        Box::pin(async move {
+            let _permit = accessor.read_permit(txn_id, Range::default()).await?;
+
+            // TODO: use a type-specific collator
+            let collator = NumberCollator::default();
+            let blocks = accessor.blocks(txn_id, Range::default(), vec![]).await?;
+
+            blocks
+                .map(|result| {
+                    result.and_then(|(_coords, values)| values.max_all().map_err(TCError::from))
+                })
+                .try_fold(A::DType::min(), move |max, block_max| {
+                    let max = match collator.cmp(&max.into(), &block_max.into()) {
+                        Ordering::Less => block_max,
+                        Ordering::Equal | Ordering::Greater => max,
+                    };
+
+                    futures::future::ready(Ok(max))
+                })
+                .await
+        })
+    }
+
+    pub(super) fn reduce_product<A>(txn_id: TxnId, accessor: A) -> TCBoxTryFuture<'static, A::DType>
+    where
+        A: SparseInstance + TensorPermitRead + Clone + fmt::Debug,
+    {
+        Box::pin(async move {
+            log::debug!("calculate the total product of {accessor:?}");
+
+            let _permit = accessor.read_permit(txn_id, Range::default()).await?;
+
+            if !reduce_all(txn_id, accessor.clone()).await? {
+                return Ok(A::DType::zero());
+            } else {
+                log::trace!("all elements in {accessor:?} are filled...");
+            }
+
+            let blocks = accessor.blocks(txn_id, Range::default(), vec![]).await?;
+
+            let product: A::DType = blocks
+                .map(|result| {
+                    result.and_then(|(_coords, values)| values.product_all().map_err(TCError::from))
+                })
+                .try_fold(
+                    A::DType::one(),
+                    move |product: A::DType, block_product: A::DType| {
+                        futures::future::ready(Ok(product * block_product))
+                    },
+                )
+                .await?;
+
+            Ok(product)
+        })
+    }
+
+    pub(super) fn reduce_sum<A>(txn_id: TxnId, accessor: A) -> TCBoxTryFuture<'static, A::DType>
+    where
+        A: SparseInstance + TensorPermitRead,
+    {
+        Box::pin(async move {
+            let _permit = accessor.read_permit(txn_id, Range::default()).await?;
+
+            let blocks = accessor.blocks(txn_id, Range::default(), vec![]).await?;
+
+            blocks
+                .map(|result| {
+                    result.and_then(|(_coords, values)| values.sum_all().map_err(TCError::from))
+                })
+                .try_fold(A::DType::zero(), move |sum, block_sum| {
+                    futures::future::ready(Ok(sum + block_sum))
+                })
+                .await
+        })
+    }
+}
+
 const BLOCK_SIZE: usize = 4_096;
 
 pub type Blocks<C, V> = Pin<Box<dyn Stream<Item = Result<(C, V), TCError>> + Send>>;
 pub type Elements<T> = Pin<Box<dyn Stream<Item = Result<(Coord, T), TCError>> + Send>>;
-pub type Node = b_table::b_tree::Node<Vec<Vec<Number>>>;
+pub type Node = b_table::Node<Number>;
 
 #[async_trait]
 pub trait SparseInstance: TensorInstance + fmt::Debug {
@@ -74,22 +228,55 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
         self,
         txn_id: TxnId,
         range: Range,
+        mut order: Axes,
         axes: Axes,
-    ) -> Result<stream::FilledAt<Elements<Self::DType>>, TCError>
+    ) -> TCResult<TCBoxTryStream<'static, Coord>>
     where
         Self: Sized,
     {
-        let ndim = self.ndim();
+        log::debug!("{:?} filled at {:?}...", self, axes);
 
-        let elided = (0..ndim).filter(|x| !axes.contains(x));
+        self.shape().validate_axes(&axes)?;
+        self.shape().validate_axes(&order)?;
 
-        let mut order = Vec::with_capacity(ndim);
-        order.copy_from_slice(&axes);
-        order.extend(elided);
+        if axes.is_empty() {
+            #[cfg(debug_assertions)]
+            panic!("cannot group an empty set of axes");
 
-        self.elements(txn_id, range, order)
-            .map_ok(|elements| stream::FilledAt::new(elements, axes, ndim))
-            .await
+            #[cfg(not(debug_assertions))]
+            Err(bad_request!("cannot group an empty set of axes"))
+        } else if (0..self.ndim()).into_iter().all(|x| axes.contains(&x)) {
+            let elements = self.elements(txn_id, range, order).await?;
+            let filled_at = elements.map_ok(move |(coord, _value)| {
+                axes.iter().copied().map(|x| coord[x]).collect::<Coord>()
+            });
+
+            Ok(Box::pin(filled_at))
+        } else if axes.iter().zip(&order).all(|(x, o)| x == o) {
+            order.extend(axes.iter().copied());
+            order.dedup();
+
+            let ndim = self.ndim();
+
+            let filled_at = self
+                .elements(txn_id, range, order)
+                .map_ok(|elements| stream::FilledAt::new(elements, axes, ndim))
+                .await?;
+
+            Ok(Box::pin(filled_at))
+        } else {
+            #[cfg(debug_assertions)]
+            panic!(
+                "cannot group axes {axes:?} of {this:?} by order {order:?}",
+                this = self
+            );
+
+            #[cfg(not(debug_assertions))]
+            Err(bad_request!(
+                "cannot group axes {axes:?} of {this:?} by order {order:?}",
+                this = self
+            ))
+        }
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError>;
@@ -254,6 +441,27 @@ where
 
     fn xor_const(self, other: Number) -> TCResult<Self::Combine> {
         Err(bad_request!("cannot call XOR {} on {:?} because the result would not be sparse (consider converting to a dense tensor first)", other, self))
+    }
+}
+
+impl<Txn, FE, Cond, Then, OrElse, T>
+    TensorCond<SparseTensor<Txn, FE, Then>, SparseTensor<Txn, FE, OrElse>>
+    for SparseTensor<Txn, FE, Cond>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    Cond: SparseInstance<DType = u8> + fmt::Debug,
+    Then: SparseInstance<DType = T> + fmt::Debug,
+    OrElse: SparseInstance<DType = T> + fmt::Debug,
+{
+    type Cond = SparseTensor<Txn, FE, SparseCond<Cond, Then, OrElse>>;
+
+    fn cond(
+        self,
+        then: SparseTensor<Txn, FE, Then>,
+        or_else: SparseTensor<Txn, FE, OrElse>,
+    ) -> TCResult<Self::Cond> {
+        SparseCond::new(self.accessor, then.accessor, or_else.accessor).map(SparseTensor::from)
     }
 }
 
@@ -473,8 +681,8 @@ where
         SparseCombine::new(
             self.accessor,
             other.accessor,
-            |l, r| l.add(r).map(Array::from).map_err(TCError::from),
-            |l, r| l + r,
+            |l, r| l.sub(r).map(Array::from).map_err(TCError::from),
+            |l, r| l - r,
         )
         .map(SparseTensor::from)
     }
@@ -593,197 +801,60 @@ where
 impl<Txn, FE, A> TensorReduce for SparseTensor<Txn, FE, A>
 where
     Txn: Transaction<FE>,
-    FE: ThreadSafe,
+    FE: DenseCacheFile + AsType<Buffer<A::DType>> + AsType<Node>,
     A: SparseInstance + TensorPermitRead + Clone,
-    Number: From<A::DType>,
+    A::DType: fmt::Debug,
+    Buffer<A::DType>: de::FromStream<Context = ()>,
+    Number: From<A::DType> + CastInto<A::DType>,
+    SparseAccess<Txn, FE, A::DType>: From<A>,
 {
-    type Reduce = SparseTensor<Txn, FE, SparseReduce<A, A::DType>>;
+    type Reduce = SparseTensor<Txn, FE, SparseReduce<Txn, FE, A::DType>>;
 
     async fn all(self, txn_id: TxnId) -> TCResult<bool> {
-        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-
-        let range = Range::all(self.shape());
-        let axes = (0..self.ndim()).into_iter().collect();
-        let filled_at = self
-            .accessor
-            .filled_at(txn_id, Range::default(), axes)
-            .await?;
-
-        let mut coords = futures::stream::iter(range.affected())
-            .zip(filled_at)
-            .map(|(expected, result)| result.map(|actual| (expected, actual)));
-
-        while let Some((expected, actual)) = coords.try_next().await? {
-            if expected != actual {
-                return Ok(false);
-            }
-        }
-
-        Ok(true)
+        reduce::reduce_all(txn_id, self.accessor).await
     }
 
     async fn any(self, txn_id: TxnId) -> TCResult<bool> {
-        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-
-        let axes = (0..self.ndim()).into_iter().collect();
-        let mut filled_at = self
-            .accessor
-            .filled_at(txn_id, Range::default(), axes)
-            .await?;
-
-        filled_at.try_next().map_ok(|r| r.is_some()).await
+        reduce::reduce_any(txn_id, self.accessor).await
     }
 
     fn max(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
-        let block_op = |block: Array<A::DType>| block.max().map_err(TCError::from);
-
-        fn max_value<T: Into<Number> + Copy>(l: T, r: T) -> T {
-            match NumberCollator::default().cmp(&l.into(), &r.into()) {
-                Ordering::Less => r,
-                Ordering::Equal | Ordering::Greater => l,
-            }
-        }
-
-        SparseReduce::new(
-            self.accessor,
-            A::DType::min(),
-            axes,
-            keepdims,
-            block_op,
-            max_value,
-        )
-        .map(SparseTensor::from)
+        SparseReduce::new(self.accessor, axes, keepdims, reduce::reduce_max).map(SparseTensor::from)
     }
 
     async fn max_all(self, txn_id: TxnId) -> TCResult<Number> {
-        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-
-        let collator = NumberCollator::default();
-        let blocks = self
-            .accessor
-            .blocks(txn_id, Range::default(), vec![])
-            .await?;
-
-        blocks
-            .map(|result| {
-                result.and_then(|(_coords, values)| {
-                    values.max().map(Number::from).map_err(TCError::from)
-                })
-            })
-            .try_fold(A::DType::min().into(), move |max, block_max| {
-                let max = match collator.cmp(&max, &block_max) {
-                    Ordering::Less => block_max,
-                    Ordering::Equal | Ordering::Greater => max,
-                };
-
-                futures::future::ready(Ok(max))
-            })
+        reduce::reduce_max(txn_id, self.accessor)
+            .map_ok(Number::from)
             .await
     }
 
     fn min(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
-        let block_op = |block: Array<A::DType>| block.min().map_err(TCError::from);
-
-        fn min_value<T: Into<Number> + Copy>(l: T, r: T) -> T {
-            match NumberCollator::default().cmp(&l.into(), &r.into()) {
-                Ordering::Greater => r,
-                Ordering::Equal | Ordering::Less => l,
-            }
-        }
-
-        SparseReduce::new(
-            self.accessor,
-            A::DType::max(),
-            axes,
-            keepdims,
-            block_op,
-            min_value,
-        )
-        .map(SparseTensor::from)
+        SparseReduce::new(self.accessor, axes, keepdims, reduce::reduce_min).map(SparseTensor::from)
     }
 
     async fn min_all(self, txn_id: TxnId) -> TCResult<Number> {
-        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-
-        let collator = NumberCollator::default();
-        let blocks = self
-            .accessor
-            .blocks(txn_id, Range::default(), vec![])
-            .await?;
-
-        blocks
-            .map(|result| {
-                result.and_then(|(_coords, values)| {
-                    values.max().map(Number::from).map_err(TCError::from)
-                })
-            })
-            .try_fold(A::DType::min().into(), move |max, block_max| {
-                let max = match collator.cmp(&max, &block_max) {
-                    Ordering::Less => block_max,
-                    Ordering::Equal | Ordering::Greater => max,
-                };
-
-                futures::future::ready(Ok(max))
-            })
+        reduce::reduce_min(txn_id, self.accessor)
+            .map_ok(Number::from)
             .await
     }
 
     fn product(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
-        SparseReduce::new(
-            self.accessor,
-            A::DType::one(),
-            axes,
-            keepdims,
-            |block| block.product().map_err(TCError::from),
-            |l, r| l * r,
-        )
-        .map(SparseTensor::from)
+        SparseReduce::new(self.accessor, axes, keepdims, reduce::reduce_product)
+            .map(SparseTensor::from)
     }
 
     async fn product_all(self, txn_id: TxnId) -> TCResult<Number> {
-        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-
-        let blocks = self
-            .accessor
-            .blocks(txn_id, Range::default(), vec![])
-            .await?;
-
-        blocks
-            .map(|result| {
-                result.and_then(|(_coords, values)| values.product().map_err(TCError::from))
-            })
-            .try_fold(A::DType::one(), move |product, block_product| {
-                futures::future::ready(Ok(product * block_product))
-            })
+        reduce::reduce_product(txn_id, self.accessor)
             .map_ok(Number::from)
             .await
     }
 
     fn sum(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
-        SparseReduce::new(
-            self.accessor,
-            A::DType::one(),
-            axes,
-            keepdims,
-            |block| block.sum().map_err(TCError::from),
-            |l, r| l + r,
-        )
-        .map(SparseTensor::from)
+        SparseReduce::new(self.accessor, axes, keepdims, reduce::reduce_sum).map(SparseTensor::from)
     }
 
     async fn sum_all(self, txn_id: TxnId) -> TCResult<Number> {
-        let _permit = self.accessor.read_permit(txn_id, Range::default()).await?;
-
-        let blocks = self
-            .accessor
-            .blocks(txn_id, Range::default(), vec![])
-            .await?;
-
-        blocks
-            .map(|result| result.and_then(|(_coords, values)| values.sum().map_err(TCError::from)))
-            .try_fold(A::DType::one(), move |sum, block_sum| {
-                futures::future::ready(Ok(sum + block_sum))
-            })
+        reduce::reduce_sum(txn_id, self.accessor)
             .map_ok(Number::from)
             .await
     }
@@ -1075,7 +1146,7 @@ where
     FE: DenseCacheFile + AsType<Node>,
 {
     async fn write_value(&self, txn_id: TxnId, range: Range, value: Number) -> TCResult<()> {
-        if !bool::cast_from(value) {
+        if bool::cast_from(value) {
             return Err(bad_request!("cannot write a scalar value {} to a sparse range {:?} because the result would be dense", value, range));
         }
 
@@ -1083,15 +1154,10 @@ where
             self,
             this,
             {
-                let _write_permit = this.write_permit(txn_id, range.clone()).await?;
                 let mut guard = this.write().await;
                 guard.clear(txn_id, range).await
             },
             {
-                // always acquire these permits in-order to prevent the risk of a deadlock
-                let _write_permit = this.0.write_permit(txn_id, range.clone()).await?;
-                let _write_permit = this.1.write_permit(txn_id, range.clone()).await?;
-
                 let (mut r_guard, mut i_guard) = join!(this.0.write(), this.1.write());
 
                 try_join!(
@@ -1102,7 +1168,6 @@ where
                 Ok(())
             },
             {
-                let _write_permit = this.write_permit(txn_id, range.clone()).await?;
                 let mut guard = this.write().await;
                 guard.clear(txn_id, range).await
             }
@@ -1114,16 +1179,11 @@ where
             self,
             this,
             {
-                let _write_permit = this.write_permit(txn_id, coord.to_vec().into()).await?;
                 let mut guard = this.write().await;
                 guard.write_value(txn_id, coord, value.cast_into()).await
             },
             {
                 let (r_value, i_value) = Complex::cast_from(value).into();
-
-                // always acquire these permits in-order to prevent the risk of a deadlock
-                let _write_permit = this.0.write_permit(txn_id, coord.to_vec().into()).await?;
-                let _write_permit = this.1.write_permit(txn_id, coord.to_vec().into()).await?;
 
                 let (mut r_guard, mut i_guard) = join!(this.0.write(), this.1.write());
 
@@ -1135,7 +1195,6 @@ where
                 Ok(())
             },
             {
-                let _write_permit = this.write_permit(txn_id, coord.to_vec().into()).await?;
                 let mut guard = this.write().await;
                 guard.write_value(txn_id, coord, value.cast_into()).await
             }
@@ -1156,13 +1215,6 @@ where
             this,
             that,
             {
-                // always acquire these permits in-order to prevent the risk of a deadlock
-                let _write_permit = this.write_permit(txn_id, range.clone().into()).await?;
-                let _read_permit = that
-                    .accessor
-                    .read_permit(txn_id, range.clone().into())
-                    .await?;
-
                 if range.is_empty() || range == Range::all(this.shape()) {
                     let mut guard = this.write().await;
                     guard.overwrite(txn_id, that.accessor).await
@@ -1173,20 +1225,6 @@ where
                 }
             },
             {
-                // always acquire these permits in-order to prevent the risk of a deadlock
-                let _r_write_permit = this.0.write_permit(txn_id, range.clone().into()).await?;
-                let _i_write_permit = this.1.write_permit(txn_id, range.clone().into()).await?;
-                let _r_read_permit = that
-                    .0
-                    .accessor
-                    .read_permit(txn_id, range.clone().into())
-                    .await?;
-                let _i_read_permit = that
-                    .1
-                    .accessor
-                    .read_permit(txn_id, range.clone().into())
-                    .await?;
-
                 debug_assert_eq!(this.0.shape(), this.1.shape());
                 if range.is_empty() || range == Range::all(this.0.shape()) {
                     let (mut r_guard, mut i_guard) = join!(this.0.write(), this.1.write());
@@ -1212,13 +1250,6 @@ where
                 }
             },
             {
-                // always acquire these permits in-order to prevent the risk of a deadlock
-                let _write_permit = this.write_permit(txn_id, range.clone().into()).await?;
-                let _read_permit = that
-                    .accessor
-                    .read_permit(txn_id, range.clone().into())
-                    .await?;
-
                 if range.is_empty() || range == Range::all(this.shape()) {
                     let mut guard = this.write().await;
                     guard.overwrite(txn_id, that.accessor).await
@@ -1674,6 +1705,33 @@ impl<Txn, FE> SparseVisitor<Txn, FE> {
     }
 }
 
+impl<Txn, FE> SparseVisitor<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: AsType<Node> + ThreadSafe + Clone,
+{
+    async fn create_base<E: de::Error>(
+        &self,
+        dtype: NumberType,
+        shape: Shape,
+    ) -> Result<SparseBase<Txn, FE>, E> {
+        let (_name, store) = {
+            let mut cxt = self.txn.context().write().await;
+            cxt.create_dir_unique().map_err(de::Error::custom)?
+        };
+
+        let txn_id = *self.txn.id();
+        let schema = Schema::new(shape);
+        let store = fs::Dir::load(txn_id, store)
+            .map_err(de::Error::custom)
+            .await?;
+
+        fs::Persist::create(txn_id, (dtype, schema), store)
+            .map_err(de::Error::custom)
+            .await
+    }
+}
+
 #[async_trait]
 impl<Txn, FE> de::Visitor for SparseVisitor<Txn, FE>
 where
@@ -1687,85 +1745,113 @@ where
     }
 
     async fn visit_seq<A: de::SeqAccess>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let (dtype, shape) = seq.expect_next::<(TCPathBuf, Shape)>(()).await?;
-        let dtype = if let Some(ValueType::Number(dtype)) = ValueType::from_path(&dtype) {
+        let (dtype, shape) = seq.expect_next::<(ValueType, Shape)>(()).await?;
+        let dtype = if let ValueType::Number(dtype) = dtype {
             Ok(dtype)
         } else {
             Err(de::Error::invalid_type(dtype, "a type of number"))
         }?;
 
+        let txn = self.txn.clone();
+        let shape_clone = shape.clone();
         match dtype {
             NumberType::Bool => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::Bool)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::Bool(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::Complex(ComplexType::C32) => {
-                let visitor = seq
-                    .expect_next::<base::SparseComplexBaseVisitor<Txn, FE, f32>>((self.txn, shape))
-                    .await?;
-
-                visitor
-                    .end()
-                    .map_ok(SparseBase::C32)
-                    .map_err(de::Error::custom)
-                    .await
+                if let Some(visitor) = seq
+                    .next_element::<base::SparseComplexBaseVisitor<Txn, FE, f32>>((txn, shape))
+                    .await?
+                {
+                    visitor
+                        .end()
+                        .map_ok(SparseBase::C32)
+                        .map_err(de::Error::custom)
+                        .await
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::Complex(ComplexType::C64) => {
-                let visitor = seq
-                    .expect_next::<base::SparseComplexBaseVisitor<Txn, FE, f64>>((self.txn, shape))
-                    .await?;
-
-                visitor
-                    .end()
-                    .map_ok(SparseBase::C64)
-                    .map_err(de::Error::custom)
-                    .await
+                if let Some(visitor) = seq
+                    .next_element::<base::SparseComplexBaseVisitor<Txn, FE, f64>>((txn, shape))
+                    .await?
+                {
+                    visitor
+                        .end()
+                        .map_ok(SparseBase::C64)
+                        .map_err(de::Error::custom)
+                        .await
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::Float(FloatType::F32) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::F32)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::F32(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::Float(FloatType::F64) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::F64)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::F64(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::Int(IntType::I16) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::I16)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::I16(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::Int(IntType::I32) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::I32)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::I32(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::Int(IntType::I64) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::I64)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::I64(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::UInt(UIntType::U8) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::U8)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::U8(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::UInt(UIntType::U16) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::U16)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::U16(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::UInt(UIntType::U32) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::U32)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::U32(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             NumberType::UInt(UIntType::U64) => {
-                seq.expect_next((self.txn, shape))
-                    .map_ok(SparseBase::U64)
-                    .await
+                if let Some(base) = seq.next_element((txn, shape)).await? {
+                    Ok(SparseBase::U64(base))
+                } else {
+                    self.create_base(dtype, shape_clone).await
+                }
             }
             other => Err(de::Error::invalid_type(other, "a specific type of number")),
         }

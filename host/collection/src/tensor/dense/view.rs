@@ -4,6 +4,7 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use futures::{try_join, Stream, StreamExt, TryStreamExt};
 use ha_ndarray::NDArrayRead;
+use log::trace;
 use rayon::prelude::*;
 use safecast::{AsType, CastInto};
 
@@ -16,10 +17,10 @@ use tcgeneric::ThreadSafe;
 use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTrig, ComplexUnary};
 use crate::tensor::sparse::{sparse_from, Node};
 use crate::tensor::{
-    Axes, Coord, Range, Shape, SparseView, TensorBoolean, TensorBooleanConst, TensorCast,
-    TensorCompare, TensorCompareConst, TensorConvert, TensorDiagonal, TensorInstance, TensorMath,
-    TensorMathConst, TensorPermitRead, TensorRead, TensorReduce, TensorTransform, TensorTrig,
-    TensorUnary, TensorUnaryBoolean,
+    autoqueue, Axes, Coord, Range, Shape, SparseView, TensorBoolean, TensorBooleanConst,
+    TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal,
+    TensorInstance, TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead,
+    TensorReduce, TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{dense_from, DenseAccess, DenseCacheFile, DenseInstance, DenseTensor, DenseUnaryCast};
@@ -94,24 +95,102 @@ macro_rules! view_dispatch {
     };
 }
 
-macro_rules! view_dispatch_compare {
-    ($this:ident, $that:ident, $left:ident, $right:ident, $bool:expr, $complex:expr, $general:expr, $mismatch:expr) => {
+macro_rules! view_compare {
+    ($this:ident, $that:ident, $complex:expr, $general:expr) => {
         match ($this, $that) {
-            (DenseView::Bool($left), DenseView::Bool($right)) => $bool,
-            (DenseView::C32($left), DenseView::C32($right)) => $complex,
-            (DenseView::C64($left), DenseView::C64($right)) => $complex,
-            (DenseView::F32($left), DenseView::F32($right)) => $general,
-            (DenseView::F64($left), DenseView::F64($right)) => $general,
-            (DenseView::I16($left), DenseView::I16($right)) => $general,
-            (DenseView::I32($left), DenseView::I32($right)) => $general,
-            (DenseView::I64($left), DenseView::I64($right)) => $general,
-            (DenseView::U8($left), DenseView::U8($right)) => $general,
-            (DenseView::U16($left), DenseView::U16($right)) => $general,
-            (DenseView::U32($left), DenseView::U32($right)) => $general,
-            (DenseView::U64($left), DenseView::U64($right)) => $general,
-            ($left, $right) => $mismatch,
+            (this, that) if this.block_size() > that.block_size() => {
+                let that = that.resize_blocks(this.block_size());
+                $general(this, that)
+            }
+            (this, that) if that.block_size() > this.block_size() => {
+                let this = this.resize_blocks(that.block_size());
+                $general(this, that)
+            }
+            (Self::Bool(this), Self::Bool(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::C32((lr, li)), Self::C32((rr, ri))) => {
+                $complex((lr.into(), li.into()), (rr.into(), ri.into()))
+            }
+            (Self::C64((lr, li)), Self::C64((rr, ri))) => {
+                $complex((lr.into(), li.into()), (rr.into(), ri.into()))
+            }
+            (Self::F32(this), Self::F32(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::F64(this), Self::F64(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::I16(this), Self::I16(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::I32(this), Self::I32(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::I64(this), Self::I64(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::U8(this), Self::U8(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::U16(this), Self::U16(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::U32(this), Self::U32(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (Self::U64(this), Self::U64(that)) => {
+                $general(this, that).map(dense_from).map(Self::Bool)
+            }
+            (this, that) => {
+                let dtype = Ord::max(this.dtype(), that.dtype());
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
+                $general(this, that)
+            }
         }
     };
+}
+
+impl<Txn, FE> DenseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node>,
+{
+    fn block_size(&self) -> usize {
+        view_dispatch!(
+            self,
+            this,
+            this.block_size(),
+            this.0.block_size(),
+            this.block_size()
+        )
+    }
+
+    fn resize_blocks(self, block_size: usize) -> Self {
+        match self {
+            Self::Bool(this) => Self::Bool(dense_from(this.resize_blocks(block_size))),
+            Self::C32((re, im)) => {
+                let re = dense_from(re.resize_blocks(block_size));
+                let im = dense_from(im.resize_blocks(block_size));
+                Self::C32((re, im))
+            }
+            Self::C64((re, im)) => {
+                let re = dense_from(re.resize_blocks(block_size));
+                let im = dense_from(im.resize_blocks(block_size));
+                Self::C64((re, im))
+            }
+            Self::F32(this) => Self::F32(dense_from(this.resize_blocks(block_size))),
+            Self::F64(this) => Self::F64(dense_from(this.resize_blocks(block_size))),
+            Self::I16(this) => Self::I16(dense_from(this.resize_blocks(block_size))),
+            Self::I32(this) => Self::I32(dense_from(this.resize_blocks(block_size))),
+            Self::I64(this) => Self::I64(dense_from(this.resize_blocks(block_size))),
+            Self::U8(this) => Self::U8(dense_from(this.resize_blocks(block_size))),
+            Self::U16(this) => Self::U16(dense_from(this.resize_blocks(block_size))),
+            Self::U32(this) => Self::U32(dense_from(this.resize_blocks(block_size))),
+            Self::U64(this) => Self::U64(dense_from(this.resize_blocks(block_size))),
+        }
+    }
 }
 
 impl<Txn: ThreadSafe, FE: ThreadSafe> DenseView<Txn, FE>
@@ -127,9 +206,6 @@ where
             self,
             this,
             {
-                let context = ha_ndarray::Context::default()?;
-                let queue = ha_ndarray::Queue::new(context, this.accessor.block_size())?;
-
                 let permit = this.accessor.read_permit(txn_id, Range::default()).await?;
                 let blocks = this.accessor.read_blocks(txn_id).await?;
 
@@ -138,6 +214,7 @@ where
                         let _permit = &permit; // force this closure to capture (move/own) the permit
 
                         let block = result?;
+                        let queue = autoqueue(&block)?;
                         let buffer = block.read(&queue)?.to_slice()?.into_vec();
                         let buffer = buffer
                             .into_par_iter()
@@ -154,10 +231,6 @@ where
             {
                 let (re, im) = (this.0.into_inner(), this.1.into_inner());
 
-                let context = ha_ndarray::Context::default()?;
-                let r_queue = ha_ndarray::Queue::new(context.clone(), re.block_size())?;
-                let i_queue = ha_ndarray::Queue::new(context, im.block_size())?;
-
                 // always acquire these permits in-order to avoid the risk of a deadlock
                 let mut permit = re.read_permit(txn_id, Range::default()).await?;
                 let i_permit = im.read_permit(txn_id, Range::default()).await?;
@@ -168,8 +241,10 @@ where
 
                 let r_blocks = r_blocks.map(move |result| {
                     let block = result?;
+                    let queue = autoqueue(&block)?;
+
                     block
-                        .read(&r_queue)
+                        .read(&queue)
                         .and_then(|buffer| buffer.to_slice())
                         .map(|slice| slice.into_vec())
                         .map_err(TCError::from)
@@ -177,8 +252,10 @@ where
 
                 let i_blocks = i_blocks.map(move |result| {
                     let block = result?;
+                    let queue = autoqueue(&block)?;
+
                     block
-                        .read(&i_queue)
+                        .read(&queue)
                         .and_then(|buffer| buffer.to_slice())
                         .map(|slice| slice.into_vec())
                         .map_err(TCError::from)
@@ -204,9 +281,6 @@ where
                 Ok(Box::pin(elements))
             },
             {
-                let context = ha_ndarray::Context::default()?;
-                let queue = ha_ndarray::Queue::new(context, this.accessor.block_size())?;
-
                 let permit = this.accessor.read_permit(txn_id, Range::default()).await?;
                 let blocks = this.accessor.read_blocks(txn_id).await?;
 
@@ -215,6 +289,7 @@ where
                         let _permit = &permit; // force this closure to capture (move/own) the permit
 
                         let block = result?;
+                        let queue = autoqueue(&block)?;
                         let buffer = block.read(&queue)?.to_slice()?.into_vec();
                         let buffer = buffer
                             .into_par_iter()
@@ -273,74 +348,41 @@ where
     type LeftCombine = Self;
 
     fn and(self, other: Self) -> TCResult<Self::LeftCombine> {
-        view_dispatch_compare!(
+        view_compare!(
             self,
             other,
-            left,
-            right,
-            { left.and(right).map(dense_from).map(Self::Bool) },
-            {
-                let (lr, li) = left;
-                let (rr, ri) = right;
+            |(lr, li): (Self, Self), (rr, ri): (Self, Self)| {
                 let left = lr.or(li)?;
                 let right = rr.or(ri)?;
-
-                left.and(right).map(dense_from).map(Self::Bool)
-            },
-            { left.and(right).map(dense_from).map(Self::Bool) },
-            {
-                let left = TensorCast::cast_into(left, NumberType::Bool)?;
-                let right = TensorCast::cast_into(right, NumberType::Bool)?;
                 left.and(right)
-            }
+            },
+            TensorBoolean::and
         )
     }
 
     fn or(self, other: Self) -> TCResult<Self::Combine> {
-        view_dispatch_compare!(
+        view_compare!(
             self,
             other,
-            left,
-            right,
-            { left.or(right).map(dense_from).map(Self::Bool) },
-            {
-                let (lr, li) = left;
-                let (rr, ri) = right;
+            |(lr, li): (Self, Self), (rr, ri): (Self, Self)| {
                 let left = lr.or(li)?;
                 let right = rr.or(ri)?;
-
-                left.or(right).map(dense_from).map(Self::Bool)
-            },
-            { left.or(right).map(dense_from).map(Self::Bool) },
-            {
-                let left = TensorCast::cast_into(left, NumberType::Bool)?;
-                let right = TensorCast::cast_into(right, NumberType::Bool)?;
                 left.or(right)
-            }
+            },
+            TensorBoolean::or
         )
     }
 
     fn xor(self, other: Self) -> TCResult<Self::Combine> {
-        view_dispatch_compare!(
+        view_compare!(
             self,
             other,
-            left,
-            right,
-            { left.xor(right).map(dense_from).map(Self::Bool) },
-            {
-                let (lr, li) = left;
-                let (rr, ri) = right;
+            |(lr, li): (Self, Self), (rr, ri): (Self, Self)| {
                 let left = lr.or(li)?;
                 let right = rr.or(ri)?;
-
-                left.xor(right).map(dense_from).map(Self::Bool)
-            },
-            { left.xor(right).map(dense_from).map(Self::Bool) },
-            {
-                let left = TensorCast::cast_into(left, NumberType::Bool)?;
-                let right = TensorCast::cast_into(right, NumberType::Bool)?;
                 left.xor(right)
-            }
+            },
+            TensorBoolean::xor
         )
     }
 }
@@ -384,55 +426,6 @@ where
             this.xor_const(other).map(dense_from).map(Self::Bool)
         )
     }
-}
-
-macro_rules! view_compare {
-    ($this:ident, $that:ident, $complex:expr, $general:expr) => {
-        match ($this, $that) {
-            (Self::Bool(this), Self::Bool(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::C32((lr, li)), Self::C32((rr, ri))) => {
-                $complex((lr.into(), li.into()), (rr.into(), ri.into()))
-            }
-            (Self::C64((lr, li)), Self::C64((rr, ri))) => {
-                $complex((lr.into(), li.into()), (rr.into(), ri.into()))
-            }
-            (Self::F32(this), Self::F32(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::F64(this), Self::F64(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::I16(this), Self::I16(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::I32(this), Self::I32(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::I64(this), Self::I64(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::U8(this), Self::U8(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::U16(this), Self::U16(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::U32(this), Self::U32(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (Self::U64(this), Self::U64(that)) => {
-                $general(this, that).map(dense_from).map(Self::Bool)
-            }
-            (this, that) => {
-                let dtype = Ord::max(this.dtype(), that.dtype());
-                let this = TensorCast::cast_into(this, dtype)?;
-                let that = TensorCast::cast_into(that, dtype)?;
-                $general(this, that)
-            }
-        }
-    };
 }
 
 impl<Txn, FE> TensorCompare<Self> for DenseView<Txn, FE>
@@ -535,6 +528,110 @@ where
     }
 }
 
+impl<Txn, FE> TensorCond<Self, Self> for DenseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type Cond = Self;
+
+    fn cond(self, then: Self, or_else: Self) -> TCResult<Self::Cond> {
+        let block_size = [then.block_size(), or_else.block_size()]
+            .into_iter()
+            .fold(self.block_size(), Ord::max);
+
+        let this = if self.block_size() == block_size {
+            self
+        } else {
+            self.resize_blocks(block_size)
+        };
+
+        let then = if then.block_size() == block_size {
+            then
+        } else {
+            then.resize_blocks(block_size)
+        };
+
+        let or_else = if or_else.block_size() == block_size {
+            or_else
+        } else {
+            or_else.resize_blocks(block_size)
+        };
+
+        let this = if let Self::Bool(this) = this {
+            this
+        } else {
+            let this = TensorCast::cast_into(this, NumberType::Bool)?;
+            return this.cond(then, or_else);
+        };
+
+        match (then, or_else) {
+            (Self::Bool(then), Self::Bool(or_else)) => this
+                .cond(then, or_else)
+                .map(dense_from)
+                .map(DenseView::Bool),
+
+            (Self::C32((then_re, then_im)), Self::C32((else_re, else_im))) => {
+                let re = this.clone().cond(then_re, else_re)?;
+                let im = this.cond(then_im, else_im)?;
+                Ok(DenseView::C32((dense_from(re), dense_from(im))))
+            }
+
+            (Self::C64((then_re, then_im)), Self::C64((else_re, else_im))) => {
+                let re = this.clone().cond(then_re, else_re)?;
+                let im = this.cond(then_im, else_im)?;
+                Ok(DenseView::C64((dense_from(re), dense_from(im))))
+            }
+
+            (Self::F32(then), Self::F32(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::F32)
+            }
+
+            (Self::F64(then), Self::F64(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::F64)
+            }
+
+            (Self::I16(then), Self::I16(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::I16)
+            }
+
+            (Self::I32(then), Self::I32(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::I32)
+            }
+
+            (Self::I64(then), Self::I64(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::I64)
+            }
+
+            (Self::U8(then), Self::U8(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::U8)
+            }
+
+            (Self::U16(then), Self::U16(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::U16)
+            }
+
+            (Self::U32(then), Self::U32(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::U32)
+            }
+
+            (Self::U64(then), Self::U64(or_else)) => {
+                this.cond(then, or_else).map(dense_from).map(DenseView::U64)
+            }
+
+            (then, or_else) if then.dtype() < or_else.dtype() => {
+                let then = TensorCast::cast_into(then, or_else.dtype())?;
+                DenseView::Bool(this).cond(then, or_else)
+            }
+
+            (then, or_else) => {
+                let or_else = TensorCast::cast_into(or_else, then.dtype())?;
+                DenseView::Bool(this).cond(then, or_else)
+            }
+        }
+    }
+}
+
 impl<Txn, FE> TensorConvert for DenseView<Txn, FE>
 where
     Txn: Transaction<FE>,
@@ -550,7 +647,23 @@ where
     fn into_sparse(self) -> Self::Sparse {
         match self {
             Self::Bool(this) => SparseView::Bool(sparse_from(this.into_sparse())),
-            _ => todo!(),
+            Self::F32(this) => SparseView::F32(sparse_from(this.into_sparse())),
+            Self::F64(this) => SparseView::F64(sparse_from(this.into_sparse())),
+            Self::C32((this_re, this_im)) => SparseView::C32((
+                sparse_from(this_re.into_sparse()),
+                sparse_from(this_im.into_sparse()),
+            )),
+            Self::C64((this_re, this_im)) => SparseView::C64((
+                sparse_from(this_re.into_sparse()),
+                sparse_from(this_im.into_sparse()),
+            )),
+            Self::I16(this) => SparseView::I16(sparse_from(this.into_sparse())),
+            Self::I32(this) => SparseView::I32(sparse_from(this.into_sparse())),
+            Self::I64(this) => SparseView::I64(sparse_from(this.into_sparse())),
+            Self::U8(this) => SparseView::U8(sparse_from(this.into_sparse())),
+            Self::U16(this) => SparseView::U16(sparse_from(this.into_sparse())),
+            Self::U32(this) => SparseView::U32(sparse_from(this.into_sparse())),
+            Self::U64(this) => SparseView::U64(sparse_from(this.into_sparse())),
         }
     }
 }
@@ -563,6 +676,8 @@ where
     type Cast = Self;
 
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast> {
+        trace!("cast {:?} into {:?}", self, dtype);
+
         macro_rules! view_dispatch_cast {
             ($var:ident) => {
                 view_dispatch!(
@@ -713,15 +828,22 @@ where
 
     fn add(self, other: Self) -> TCResult<Self::Combine> {
         match (self, other) {
+            (this, that) if this.block_size() > that.block_size() => {
+                let that = that.resize_blocks(this.block_size());
+                this.add(that)
+            }
+            (this, that) if that.block_size() > this.block_size() => {
+                let this = this.resize_blocks(that.block_size());
+                this.add(that)
+            }
             (Self::Bool(this), Self::Bool(that)) => this.or(that).map(dense_from).map(Self::Bool),
             (Self::C32((a, b)), Self::C32((c, d))) => {
                 ComplexMath::add((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C32((a, b)), Self::F32(that)) => {
-                let real = a.add(that.clone()).map(dense_from)?;
-                let imag = b.add(that).map(dense_from)?;
-                Ok(Self::C32((real, imag)))
+            (Self::C32((re, im)), Self::F32(that)) => {
+                ComplexMath::add_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
                 let that = TensorCast::cast_into(that, this.0.dtype())?;
@@ -731,10 +853,9 @@ where
                 ComplexMath::add((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C64((a, b)), Self::F64(that)) => {
-                let real = a.add(that.clone()).map(dense_from)?;
-                let imag = b.add(that).map(dense_from)?;
-                Ok(Self::C64((real, imag)))
+            (Self::C64((re, im)), Self::F64(that)) => {
+                ComplexMath::add_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
                 let that = TensorCast::cast_into(that, this.0.dtype())?;
@@ -761,6 +882,14 @@ where
 
     fn div(self, other: Self) -> TCResult<Self::LeftCombine> {
         match (self, other) {
+            (this, that) if this.block_size() > that.block_size() => {
+                let that = that.resize_blocks(this.block_size());
+                this.div(that)
+            }
+            (this, that) if that.block_size() > this.block_size() => {
+                let this = this.resize_blocks(that.block_size());
+                this.div(that)
+            }
             (Self::Bool(this), Self::Bool(that)) => this.div(that).map(dense_from).map(Self::Bool),
             (Self::C32((a, b)), Self::C32((c, d))) => {
                 ComplexMath::div((a.into(), b.into()), (c.into(), d.into()))
@@ -808,6 +937,14 @@ where
 
     fn log(self, base: Self) -> TCResult<Self::LeftCombine> {
         match (self, base) {
+            (this, that) if this.block_size() > that.block_size() => {
+                let that = that.resize_blocks(this.block_size());
+                this.log(that)
+            }
+            (this, that) if that.block_size() > this.block_size() => {
+                let this = this.resize_blocks(that.block_size());
+                this.log(that)
+            }
             (Self::Bool(_), _) => Err(bad_request!("a boolean value has no logarithm")),
             (Self::C32(this), that) => Self::C32(this).ln()?.div(that.ln()?),
             (Self::C64(this), that) => Self::C64(this).ln()?.div(that.ln()?),
@@ -831,31 +968,37 @@ where
 
     fn mul(self, other: Self) -> TCResult<Self::LeftCombine> {
         match (self, other) {
+            (this, that) if this.block_size() > that.block_size() => {
+                let that = that.resize_blocks(this.block_size());
+                this.mul(that)
+            }
+            (this, that) if that.block_size() > this.block_size() => {
+                let this = this.resize_blocks(that.block_size());
+                this.mul(that)
+            }
             (Self::Bool(this), Self::Bool(that)) => this.mul(that).map(dense_from).map(Self::Bool),
             (Self::C32((a, b)), Self::C32((c, d))) => {
                 ComplexMath::mul((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C32((a, b)), Self::F32(that)) => {
-                let real = a.mul(that.clone())?;
-                let imag = b.mul(that)?;
-                Ok(Self::C32((dense_from(real), dense_from(imag))))
+            (Self::C32((re, im)), Self::F32(that)) => {
+                ComplexMath::mul_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
-                let that = TensorCast::cast_into(that, this.0.dtype())?;
+                let that = TensorCast::cast_into(that, FloatType::F32.into())?;
                 Self::C32(this).mul(that)
             }
             (Self::C64((a, b)), Self::C64((c, d))) => {
                 ComplexMath::mul((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C64((a, b)), Self::F64(that)) => {
-                let real = a.mul(that.clone())?;
-                let imag = b.mul(that)?;
-                Ok(Self::C64((dense_from(real), dense_from(imag))))
+            (Self::C64((re, im)), Self::F64(that)) => {
+                ComplexMath::mul_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
-                let that = TensorCast::cast_into(that, this.0.dtype())?;
+                let that = TensorCast::cast_into(that, FloatType::F64.into())?;
                 Self::C64(this).mul(that)
             }
             (Self::F32(this), Self::F32(that)) => this.mul(that).map(dense_from).map(Self::F32),
@@ -879,6 +1022,14 @@ where
 
     fn pow(self, other: Self) -> TCResult<Self::LeftCombine> {
         match (self, other) {
+            (this, that) if this.block_size() > that.block_size() => {
+                let that = that.resize_blocks(this.block_size());
+                this.pow(that)
+            }
+            (this, that) if that.block_size() > this.block_size() => {
+                let this = this.resize_blocks(that.block_size());
+                this.pow(that)
+            }
             (Self::Bool(this), Self::Bool(that)) => this.pow(that).map(dense_from).map(Self::Bool),
             (Self::C32((x, y)), Self::F32(that)) => {
                 ComplexMath::pow((x.into(), y.into()), that.into()).and_then(Self::complex_from)
@@ -919,15 +1070,22 @@ where
 
     fn sub(self, other: Self) -> TCResult<Self::Combine> {
         match (self, other) {
+            (this, that) if this.block_size() > that.block_size() => {
+                let that = that.resize_blocks(this.block_size());
+                this.sub(that)
+            }
+            (this, that) if that.block_size() > this.block_size() => {
+                let this = this.resize_blocks(that.block_size());
+                this.sub(that)
+            }
             (Self::Bool(this), Self::Bool(that)) => this.or(that).map(dense_from).map(Self::Bool),
             (Self::C32((a, b)), Self::C32((c, d))) => {
                 ComplexMath::sub((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C32((a, b)), Self::F32(that)) => {
-                let real = a.sub(that.clone()).map(dense_from)?;
-                let imag = b.sub(that).map(dense_from)?;
-                Ok(Self::C32((real, imag)))
+            (Self::C32((re, im)), Self::F32(that)) => {
+                ComplexMath::sub_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C32(this), that) if that.dtype().is_real() => {
                 let that = TensorCast::cast_into(that, this.0.dtype())?;
@@ -937,10 +1095,9 @@ where
                 ComplexMath::sub((a.into(), b.into()), (c.into(), d.into()))
                     .and_then(Self::complex_from)
             }
-            (Self::C64((a, b)), Self::F64(that)) => {
-                let real = a.sub(that.clone()).map(dense_from)?;
-                let imag = b.sub(that).map(dense_from)?;
-                Ok(Self::C64((real, imag)))
+            (Self::C64((re, im)), Self::F64(that)) => {
+                ComplexMath::sub_real((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from)
             }
             (Self::C64(this), that) if that.dtype().is_real() => {
                 let that = TensorCast::cast_into(that, this.0.dtype())?;
@@ -997,21 +1154,43 @@ where
     type Combine = Self;
 
     fn add_const(self, other: Number) -> TCResult<Self::Combine> {
-        math_const!(
-            self,
-            other,
-            ComplexMath::add_const,
-            TensorMathConst::add_const
-        )
+        match other {
+            Number::Complex(that) => match self {
+                Self::C32((re, im)) => ComplexMath::add_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                Self::C64((re, im)) => ComplexMath::add_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                this => Err(bad_request!("cannot add {:?} and {:?}", this, that)),
+            },
+            that => math_const!(
+                self,
+                that,
+                ComplexMath::add_const,
+                TensorMathConst::add_const
+            ),
+        }
     }
 
     fn div_const(self, other: Number) -> TCResult<Self::Combine> {
-        math_const!(
-            self,
-            other,
-            ComplexMath::div_const,
-            TensorMathConst::div_const
-        )
+        match other {
+            Number::Complex(that) => match self {
+                Self::C32((re, im)) => ComplexMath::div_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                Self::C64((re, im)) => ComplexMath::div_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                this => ComplexMath::real_div_const(this, that).and_then(Self::complex_from),
+            },
+            that => math_const!(
+                self,
+                that,
+                ComplexMath::div_const,
+                TensorMathConst::div_const
+            ),
+        }
     }
 
     fn log_const(self, base: Number) -> TCResult<Self::Combine> {
@@ -1024,12 +1203,23 @@ where
     }
 
     fn mul_const(self, other: Number) -> TCResult<Self::Combine> {
-        math_const!(
-            self,
-            other,
-            ComplexMath::mul_const,
-            TensorMathConst::mul_const
-        )
+        match other {
+            Number::Complex(that) => match self {
+                Self::C32((re, im)) => ComplexMath::mul_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                Self::C64((re, im)) => ComplexMath::mul_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                this => ComplexMath::real_mul_const(this, that).and_then(Self::complex_from),
+            },
+            that => math_const!(
+                self,
+                that,
+                ComplexMath::mul_const,
+                TensorMathConst::mul_const
+            ),
+        }
     }
 
     fn pow_const(self, other: Number) -> TCResult<Self::Combine> {
@@ -1042,12 +1232,90 @@ where
     }
 
     fn sub_const(self, other: Number) -> TCResult<Self::Combine> {
-        math_const!(
-            self,
-            other,
-            ComplexMath::sub_const,
-            TensorMathConst::sub_const
-        )
+        match other {
+            Number::Complex(that) => match self {
+                Self::C32((re, im)) => ComplexMath::sub_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                Self::C64((re, im)) => ComplexMath::sub_const((re.into(), im.into()), that.into())
+                    .and_then(Self::complex_from),
+
+                this => Err(bad_request!("cannot subtract {:?} from {:?}", that, this)),
+            },
+            that => math_const!(
+                self,
+                that,
+                ComplexMath::sub_const,
+                TensorMathConst::sub_const
+            ),
+        }
+    }
+}
+
+impl<Txn, FE> TensorMatMul<Self> for DenseView<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Node> + Clone,
+{
+    type MatMul = Self;
+
+    fn matmul(self, other: Self) -> TCResult<Self::MatMul> {
+        assert_eq!(self.ndim(), other.ndim());
+
+        let left_matrix_size = self.shape().iter().rev().take(2).product::<u64>();
+        let right_matrix_size = other.shape().iter().rev().take(2).product::<u64>();
+
+        match (self, other) {
+            (this, that)
+                if (this.block_size() as u64) < left_matrix_size
+                    || (that.block_size() as u64) < right_matrix_size =>
+            {
+                let ndim = this.ndim();
+                let this = this.expand(vec![ndim])?;
+                let that = that.expand(vec![ndim - 1])?;
+                let product = this.mul(that)?;
+                product.sum(vec![ndim - 2], false)
+            }
+            (this, that)
+                if this.size() / (this.block_size() as u64)
+                    > that.size() / that.block_size() as u64 =>
+            {
+                let num_blocks = that.size() / that.block_size() as u64;
+                let block_size = (this.size() / num_blocks) as usize;
+                let this = this.resize_blocks(block_size);
+                this.matmul(that)
+            }
+            (this, that)
+                if this.size() / (this.block_size() as u64)
+                    < that.size() / that.block_size() as u64 =>
+            {
+                let num_blocks = this.size() / this.block_size() as u64;
+                let block_size = (that.size() / num_blocks) as usize;
+                let that = that.resize_blocks(block_size);
+                this.matmul(that)
+            }
+            (Self::Bool(this), Self::Bool(that)) => {
+                this.matmul(that).map(dense_from).map(Self::Bool)
+            }
+            (Self::C32(_), _) | (Self::C64(_), _) | (_, Self::C32(_)) | (_, Self::C64(_)) => {
+                Err(not_implemented!("complex matrix multiplication"))
+            }
+            (Self::F32(this), Self::F32(that)) => this.matmul(that).map(dense_from).map(Self::F32),
+            (Self::F64(this), Self::F64(that)) => this.matmul(that).map(dense_from).map(Self::F64),
+            (Self::I16(this), Self::I16(that)) => this.matmul(that).map(dense_from).map(Self::I16),
+            (Self::I32(this), Self::I32(that)) => this.matmul(that).map(dense_from).map(Self::I32),
+            (Self::I64(this), Self::I64(that)) => this.matmul(that).map(dense_from).map(Self::I64),
+            (Self::U8(this), Self::U8(that)) => this.matmul(that).map(dense_from).map(Self::U8),
+            (Self::U16(this), Self::U16(that)) => this.matmul(that).map(dense_from).map(Self::U16),
+            (Self::U32(this), Self::U32(that)) => this.matmul(that).map(dense_from).map(Self::U32),
+            (Self::U64(this), Self::U64(that)) => this.matmul(that).map(dense_from).map(Self::U64),
+            (this, that) => {
+                let dtype = Ord::max(this.dtype(), that.dtype());
+                let this = TensorCast::cast_into(this, dtype)?;
+                let that = TensorCast::cast_into(that, dtype)?;
+                this.matmul(that)
+            }
+        }
     }
 }
 
@@ -1185,7 +1453,6 @@ where
     fn product(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
         match self {
             Self::Bool(this) => this.product(axes, keepdims).map(dense_from).map(Self::Bool),
-
             Self::C32(_) | Self::C64(_) => Err(not_implemented!("product of a complex tensor")),
             Self::F32(this) => this.product(axes, keepdims).map(dense_from).map(Self::F32),
             Self::F64(this) => this.product(axes, keepdims).map(dense_from).map(Self::F64),
@@ -1248,6 +1515,11 @@ where
     type Transpose = Self;
 
     fn broadcast(self, shape: Shape) -> TCResult<Self::Broadcast> {
+        if self.shape() == &shape {
+            trace!("no need to broadcast {self:?} into {shape:?}");
+            return Ok(self);
+        }
+
         match self {
             Self::Bool(this) => this.broadcast(shape).map(dense_from).map(Self::Bool),
             Self::C32((re, im)) => {
@@ -1273,6 +1545,10 @@ where
     }
 
     fn expand(self, axes: Axes) -> TCResult<Self::Expand> {
+        if axes.is_empty() {
+            return Ok(self);
+        }
+
         match self {
             Self::Bool(this) => this.expand(axes).map(dense_from).map(Self::Bool),
             Self::C32((re, im)) => {
@@ -1298,6 +1574,10 @@ where
     }
 
     fn reshape(self, shape: Shape) -> TCResult<Self::Reshape> {
+        if self.shape() == &shape {
+            return Ok(self);
+        }
+
         match self {
             Self::Bool(this) => this.reshape(shape).map(dense_from).map(Self::Bool),
             Self::C32((re, im)) => {
@@ -1323,6 +1603,10 @@ where
     }
 
     fn slice(self, range: Range) -> TCResult<Self::Slice> {
+        if range.is_empty() || range == Range::all(self.shape()) {
+            return Ok(self);
+        }
+
         match self {
             Self::Bool(this) => this.slice(range).map(dense_from).map(Self::Bool),
             Self::C32((re, im)) => {
@@ -1348,6 +1632,14 @@ where
     }
 
     fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+        if let Some(permutation) = &permutation {
+            if permutation.len() == self.ndim()
+                && permutation.iter().copied().enumerate().all(|(i, x)| i == x)
+            {
+                return Ok(self);
+            }
+        }
+
         match self {
             Self::Bool(this) => this.transpose(permutation).map(dense_from).map(Self::Bool),
             Self::C32((re, im)) => {

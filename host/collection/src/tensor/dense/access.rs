@@ -11,6 +11,7 @@ use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 use ha_ndarray::*;
+use log::{debug, trace};
 use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
@@ -24,16 +25,16 @@ use tcgeneric::ThreadSafe;
 use super::base::DenseBase;
 use super::file::DenseFile;
 use super::{
-    block_axis_for, block_shape_for, div_ceil, ideal_block_size_for, DenseInstance, DenseWrite,
-    DenseWriteGuard, DenseWriteLock,
+    block_axis_for, block_map_for, block_shape_for, div_ceil, ideal_block_size_for, DenseInstance,
+    DenseWrite, DenseWriteGuard, DenseWriteLock,
 };
 
 use crate::tensor::block::Block;
 use crate::tensor::sparse::{Node, SparseAccess, SparseInstance};
 use crate::tensor::transform::{Broadcast, Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
-    coord_of, offset_of, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
-    TensorPermitRead, TensorPermitWrite,
+    autoqueue, coord_of, offset_of, Axes, AxisRange, Coord, Range, Semaphore, Shape,
+    TensorInstance, TensorPermitRead, TensorPermitWrite,
 };
 
 use super::stream::{BlockResize, ValueStream};
@@ -143,7 +144,11 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> TensorPermitRead for DenseAccessCast<Txn, 
     }
 }
 
-impl<Txn, FE> fmt::Debug for DenseAccessCast<Txn, FE> {
+impl<Txn, FE> fmt::Debug for DenseAccessCast<Txn, FE>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         cast_dispatch!(self, this, this.fmt(f))
     }
@@ -157,12 +162,15 @@ pub enum DenseAccess<Txn, FE, T: CDatatype> {
     CombineConst(Box<DenseCombineConst<Self, T>>),
     Compare(Box<DenseCompare<Txn, FE, T>>),
     CompareConst(Box<DenseCompareConst<Txn, FE, T>>),
+    Cond(Box<DenseCond<DenseAccess<Txn, FE, u8>, Self, Self>>),
     Const(Box<DenseConst<Self, T>>),
     Cow(Box<DenseCow<FE, Self>>),
     Diagonal(Box<DenseDiagonal<Self>>),
     Expand(Box<DenseExpand<Self>>),
+    MatMul(Box<DenseMatMul<Self, Self>>),
     Reduce(Box<DenseReduce<Self, T>>),
     Reshape(Box<DenseReshape<Self>>),
+    ResizeBlocks(Box<DenseResizeBlocks<Self>>),
     Slice(Box<DenseSlice<Self>>),
     Sparse(Box<DenseSparse<SparseAccess<Txn, FE, T>>>),
     Transpose(Box<DenseTranspose<Self>>),
@@ -181,12 +189,15 @@ impl<Txn, FE, T: CDatatype> Clone for DenseAccess<Txn, FE, T> {
             Self::CombineConst(combine) => Self::CombineConst(combine.clone()),
             Self::Compare(compare) => Self::Compare(compare.clone()),
             Self::CompareConst(compare) => Self::CompareConst(compare.clone()),
+            Self::Cond(cond) => Self::Cond(cond.clone()),
             Self::Const(combine) => Self::Const(combine.clone()),
             Self::Cow(cow) => Self::Cow(cow.clone()),
             Self::Diagonal(diag) => Self::Diagonal(diag.clone()),
+            Self::MatMul(matmul) => Self::MatMul(matmul.clone()),
             Self::Expand(expand) => Self::Expand(expand.clone()),
             Self::Reduce(reduce) => Self::Reduce(reduce.clone()),
             Self::Reshape(reshape) => Self::Reshape(reshape.clone()),
+            Self::ResizeBlocks(resize) => Self::ResizeBlocks(resize.clone()),
             Self::Slice(slice) => Self::Slice(slice.clone()),
             Self::Sparse(sparse) => Self::Sparse(sparse.clone()),
             Self::Transpose(transpose) => Self::Transpose(transpose.clone()),
@@ -207,12 +218,15 @@ macro_rules! access_dispatch {
             DenseAccess::CombineConst($var) => $call,
             DenseAccess::Compare($var) => $call,
             DenseAccess::CompareConst($var) => $call,
+            DenseAccess::Cond($var) => $call,
             DenseAccess::Const($var) => $call,
             DenseAccess::Cow($var) => $call,
             DenseAccess::Diagonal($var) => $call,
             DenseAccess::Expand($var) => $call,
+            DenseAccess::MatMul($var) => $call,
             DenseAccess::Reduce($var) => $call,
             DenseAccess::Reshape($var) => $call,
+            DenseAccess::ResizeBlocks($var) => $call,
             DenseAccess::Slice($var) => $call,
             DenseAccess::Sparse($var) => $call,
             DenseAccess::Transpose($var) => $call,
@@ -275,6 +289,9 @@ where
             Self::CombineConst(combine) => combine.read_blocks(txn_id).await,
             Self::Compare(compare) => compare.read_blocks(txn_id).await,
             Self::CompareConst(compare) => compare.read_blocks(txn_id).await,
+            Self::Cond(cond) => Ok(Box::pin(
+                cond.read_blocks(txn_id).await?.map_ok(Array::from),
+            )),
             Self::Const(combine) => combine.read_blocks(txn_id).await,
             Self::Cow(cow) => cow.read_blocks(txn_id).await,
             Self::Diagonal(diag) => Ok(Box::pin(
@@ -283,9 +300,15 @@ where
             Self::Expand(expand) => Ok(Box::pin(
                 expand.read_blocks(txn_id).await?.map_ok(Array::from),
             )),
+            Self::MatMul(matmul) => Ok(Box::pin(
+                matmul.read_blocks(txn_id).await?.map_ok(Array::from),
+            )),
             Self::Reduce(reduce) => reduce.read_blocks(txn_id).await,
             Self::Reshape(reshape) => Ok(Box::pin(
                 reshape.read_blocks(txn_id).await?.map_ok(Array::from),
+            )),
+            Self::ResizeBlocks(resize) => Ok(Box::pin(
+                resize.read_blocks(txn_id).await?.map_ok(Array::from),
             )),
             Self::Slice(slice) => Ok(Box::pin(
                 slice.read_blocks(txn_id).await?.map_ok(Array::from),
@@ -324,12 +347,17 @@ where
             Self::CombineConst(combine) => combine.read_permit(txn_id, range).await,
             Self::Compare(compare) => compare.read_permit(txn_id, range).await,
             Self::CompareConst(compare) => compare.read_permit(txn_id, range).await,
+            Self::Cond(cond) => cond.read_permit(txn_id, range).await,
             Self::Const(combine) => combine.read_permit(txn_id, range).await,
             Self::Cow(cow) => cow.read_permit(txn_id, range).await,
             Self::Diagonal(diag) => diag.read_permit(txn_id, range).await,
             Self::Expand(expand) => expand.read_permit(txn_id, range).await,
+            Self::MatMul(matmul) => matmul.read_permit(txn_id, range).await,
+            Self::Reduce(reduce) => reduce.read_permit(txn_id, range).await,
             Self::Reshape(reshape) => reshape.read_permit(txn_id, range).await,
+            Self::ResizeBlocks(resize) => resize.read_permit(txn_id, range).await,
             Self::Slice(slice) => slice.read_permit(txn_id, range).await,
+            Self::Sparse(sparse) => sparse.read_permit(txn_id, range).await,
             Self::Transpose(transpose) => transpose.read_permit(txn_id, range).await,
             Self::Unary(unary) => unary.read_permit(txn_id, range).await,
             Self::UnaryCast(unary) => unary.read_permit(txn_id, range).await,
@@ -346,8 +374,8 @@ where
 #[async_trait]
 impl<Txn, FE, T> TensorPermitWrite for DenseAccess<Txn, FE, T>
 where
-    Txn: Send + Sync,
-    FE: Send + Sync,
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
     T: CDatatype + DType,
 {
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
@@ -363,7 +391,12 @@ where
     }
 }
 
-impl<Txn, FE, T: CDatatype + DType> fmt::Debug for DenseAccess<Txn, FE, T> {
+impl<Txn, FE, T: CDatatype + DType> fmt::Debug for DenseAccess<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         access_dispatch!(self, this, this.fmt(f))
     }
@@ -379,46 +412,59 @@ pub struct DenseBroadcast<S> {
 
 impl<S: DenseInstance> DenseBroadcast<S> {
     pub fn new(source: S, shape: Shape) -> TCResult<Self> {
-        let transform = Broadcast::new(source.shape().clone(), shape)?;
+        shape.validate()?;
 
-        let num_blocks = div_ceil(source.size(), source.block_size() as u64);
+        if shape.len() < source.ndim() {
+            return Err(bad_request!("cannot broadcast {source:?} into {shape:?}"));
+        }
+
+        debug!(
+            "broadcast {source:?} with block size {block_size} into {shape:?}",
+            block_size = source.block_size()
+        );
+
+        // characterize the source tensor
+        let num_blocks = source.size() / source.block_size() as u64;
         let block_axis = block_axis_for(source.shape(), source.block_size());
         let source_block_shape = block_shape_for(block_axis, source.shape(), source.block_size());
+        let source_block_map = block_map_for(num_blocks, source.shape(), &source_block_shape)?;
 
-        let mut block_shape = BlockShape::with_capacity(source_block_shape.len());
-        block_shape.push(source_block_shape[0]);
-        block_shape.extend(
-            transform
-                .shape()
-                .iter()
-                .rev()
-                .take(source_block_shape.len() - 1)
-                .rev()
-                .copied()
-                .map(|dim| dim as usize),
-        );
+        // characterize the output tensor (this tensor)
+        let axis_offset = shape.len() - source.ndim();
+        let block_axis = block_axis_for(&shape, (shape.size() / num_blocks) as usize);
 
-        let block_size = block_shape.iter().product();
+        let map_shape = shape
+            .iter()
+            .take(axis_offset + block_axis)
+            .copied()
+            .map(|dim| dim as usize)
+            .collect::<Vec<usize>>();
 
-        let mut block_map_shape = BlockShape::with_capacity(source.ndim());
-        block_map_shape.extend(
-            transform
-                .shape()
-                .iter()
-                .take(block_axis)
-                .copied()
-                .map(|dim| dim as usize),
-        );
-        block_map_shape.push(transform.shape()[block_axis] as usize / source_block_shape[0]);
+        let block_shape = shape
+            .iter()
+            .skip(axis_offset + block_axis)
+            .copied()
+            .map(|dim| dim as usize)
+            .collect::<Vec<usize>>();
 
-        let block_map =
-            ArrayBase::<Vec<_>>::new(block_map_shape, (0..num_blocks).into_iter().collect())?;
+        let block_map = if map_shape.is_empty() {
+            source_block_map
+        } else if source_block_map.size() == map_shape.iter().product::<usize>() {
+            // TODO: this should not be necessary
+            let block_map = source_block_map.reshape(map_shape)?;
+            ArrayBase::<Vec<u64>>::copy(&block_map)?
+        } else {
+            let block_map = source_block_map.broadcast(map_shape)?;
+            ArrayBase::<Vec<u64>>::copy(&block_map)?
+        };
+
+        let transform = Broadcast::new(source.shape().clone(), shape)?;
 
         Ok(Self {
             source,
             transform,
             block_map,
-            block_size,
+            block_size: block_shape.iter().product(),
         })
     }
 }
@@ -555,9 +601,7 @@ where
             buffer.write_owned().map_err(TCError::from).await
         } else {
             let block = self.source.read_block(txn_id, block_id).await?;
-
-            let context = ha_ndarray::Context::default()?;
-            let queue = ha_ndarray::Queue::new(context, block.size())?;
+            let queue = autoqueue(&block)?;
             let buffer = block.read(&queue)?.into_buffer()?;
 
             let type_size = S::DType::dtype().size();
@@ -599,9 +643,13 @@ where
     }
 
     async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        debug!("DenseCow::read_block {block_id} at {txn_id}");
+
         let dir = self.dir.read().await;
 
         if let Some(block) = dir.get_file(&block_id) {
+            debug!("DenseCow::read_block {block_id} at {txn_id} found new block");
+
             let buffer: Buffer<S::DType> = block
                 .read_owned::<Buffer<S::DType>>()
                 .map_ok(|block| block.clone().into())
@@ -609,12 +657,16 @@ where
                 .await?;
 
             let block_axis = block_axis_for(self.shape(), self.block_size());
-            let block_data_size = S::DType::dtype().size() * buffer.len();
-            let block_shape = block_shape_for(block_axis, self.shape(), block_data_size);
+            let block_shape = block_shape_for(block_axis, self.shape(), buffer.len());
             let block = ArrayBase::<Buffer<S::DType>>::new(block_shape, buffer)?;
 
             Ok(block.into())
         } else {
+            debug!(
+                "DenseCow::read_block {block_id} at {txn_id} reading from {source:?}",
+                source = self.source
+            );
+
             self.source
                 .read_block(txn_id, block_id)
                 .map_ok(Array::from)
@@ -643,8 +695,7 @@ where
         let block_offset = (offset % self.block_size() as u64) as usize;
 
         let block = self.read_block(txn_id, block_id).await?;
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, self.block_size())?;
+        let queue = autoqueue(&block)?;
         let buffer = block.read(&queue)?;
         Ok(buffer.to_slice()?.as_ref()[block_offset])
     }
@@ -729,7 +780,10 @@ where
     }
 }
 
-impl<FE, S: fmt::Debug> fmt::Debug for DenseCow<FE, S> {
+impl<FE, S: fmt::Debug> fmt::Debug for DenseCow<FE, S>
+where
+    FE: ThreadSafe,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "copy-on-write view of {:?}", self.source)
     }
@@ -905,11 +959,20 @@ impl<S: fmt::Debug> fmt::Debug for DenseDiagonal<S> {
 pub struct DenseExpand<S> {
     source: S,
     transform: Expand,
+    block_shape: BlockShape,
 }
 
 impl<S: DenseInstance> DenseExpand<S> {
     pub fn new(source: S, axes: Axes) -> TCResult<Self> {
-        Expand::new(source.shape().clone(), axes).map(|transform| Self { source, transform })
+        let transform = Expand::new(source.shape().clone(), axes)?;
+        let block_axis = block_axis_for(transform.shape(), source.block_size());
+        let block_shape = block_shape_for(block_axis, transform.shape(), source.block_size());
+
+        Ok(Self {
+            source,
+            transform,
+            block_shape,
+        })
     }
 }
 
@@ -924,8 +987,8 @@ impl<S: TensorInstance> TensorInstance for DenseExpand<S> {
 }
 
 #[async_trait]
-impl<S: DenseInstance> DenseInstance for DenseExpand<S> {
-    type Block = S::Block;
+impl<S: DenseInstance + Clone> DenseInstance for DenseExpand<S> {
+    type Block = Array<S::DType>;
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
@@ -933,11 +996,34 @@ impl<S: DenseInstance> DenseInstance for DenseExpand<S> {
     }
 
     async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
-        self.source.read_block(txn_id, block_id).await
+        let block = self.source.read_block(txn_id, block_id).await?;
+
+        if block.shape() == &self.block_shape {
+            Ok(block.into())
+        } else {
+            let mut block_shape = self.block_shape.to_vec();
+            block_shape[0] = block.size() / block_shape.iter().skip(1).product::<usize>();
+            block.into().reshape(block_shape).map_err(TCError::from)
+        }
     }
 
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
-        self.source.read_blocks(txn_id).await
+        let source_blocks = self.source.read_blocks(txn_id).await?;
+
+        let block_shape = self.block_shape;
+        let blocks = source_blocks.map(move |result| {
+            let block = result?;
+
+            if block.shape() == &block_shape {
+                Ok(block.into())
+            } else {
+                let mut block_shape = block_shape.to_vec();
+                block_shape[0] = block.size() / block_shape.iter().skip(1).product::<usize>();
+                block.into().reshape(block_shape).map_err(TCError::from)
+            }
+        });
+
+        Ok(Box::pin(blocks))
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
@@ -965,6 +1051,7 @@ where
         Self::Expand(Box::new(DenseExpand {
             source: expand.source.into(),
             transform: expand.transform,
+            block_shape: expand.block_shape,
         }))
     }
 }
@@ -1005,7 +1092,13 @@ where
                 value_op,
             })
         } else {
-            Err(bad_request!("cannot combine {:?} with {:?}", left, right))
+            Err(bad_request!(
+                "cannot combine {:?} (block size {}) with {:?} (block size {})",
+                left,
+                left.block_size(),
+                right,
+                right.block_size()
+            ))
         }
     }
 }
@@ -1112,7 +1205,7 @@ impl<L, R, T> fmt::Debug for DenseCombine<L, R, T>
 where
     L: fmt::Debug,
     R: fmt::Debug,
-    T: CDatatype,
+    T: CDatatype + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} with {:?}", self.left, self.right)
@@ -1191,7 +1284,7 @@ where
     }
 }
 
-impl<S: fmt::Debug, T: CDatatype> fmt::Debug for DenseCombineConst<S, T> {
+impl<S: fmt::Debug, T: CDatatype + DType> fmt::Debug for DenseCombineConst<S, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} with a constant value", self.left)
     }
@@ -1236,7 +1329,11 @@ impl<Txn, FE, T: CDatatype> DenseCompare<Txn, FE, T> {
                 value_op,
             })
         } else {
-            Err(bad_request!("cannot compare {:?} with {:?}", left, right))
+            Err(bad_request!(
+                "cannot compare {left:?} (block size {}) with {right:?} (block size {})",
+                left.block_size(),
+                right.block_size()
+            ))
         }
     }
 }
@@ -1323,7 +1420,12 @@ impl<Txn, FE, T: CDatatype> From<DenseCompare<Txn, FE, T>> for DenseAccess<Txn, 
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for DenseCompare<Txn, FE, T> {
+impl<Txn, FE, T: CDatatype> fmt::Debug for DenseCompare<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "compare {:?} with {:?}", self.left, self.right)
     }
@@ -1439,9 +1541,186 @@ impl<Txn, FE, T: CDatatype> From<DenseCompareConst<Txn, FE, T>> for DenseAccess<
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for DenseCompareConst<Txn, FE, T> {
+impl<Txn, FE, T: CDatatype> fmt::Debug for DenseCompareConst<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "compare {:?} with {:?}", self.left, self.right)
+    }
+}
+
+#[derive(Clone)]
+pub struct DenseCond<Cond, Then, OrElse> {
+    cond: Cond,
+    then: Then,
+    or_else: OrElse,
+}
+
+impl<Cond, Then, OrElse, T> DenseCond<Cond, Then, OrElse>
+where
+    Cond: DenseInstance<DType = u8> + fmt::Debug,
+    Then: DenseInstance<DType = T> + fmt::Debug,
+    OrElse: DenseInstance<DType = T> + fmt::Debug,
+    T: CDatatype,
+{
+    pub fn new(cond: Cond, then: Then, or_else: OrElse) -> TCResult<DenseCond<Cond, Then, OrElse>> {
+        if cond.shape() == then.shape()
+            && cond.shape() == or_else.shape()
+            && then.dtype() == or_else.dtype()
+            && cond.block_size() == then.block_size()
+            && cond.block_size() == or_else.block_size()
+        {
+            Ok(Self {
+                cond,
+                then,
+                or_else,
+            })
+        } else if cond.block_size() != then.block_size()
+            || cond.block_size() != or_else.block_size()
+        {
+            Err(internal!(
+                "cannot select blocks of size {cond} from blocks of size {then} and {or_else}",
+                cond = cond.block_size(),
+                then = then.block_size(),
+                or_else = or_else.block_size()
+            ))
+        } else {
+            Err(bad_request!(
+                "cannot select conditionally from {then:?} and {or_else:?} based on {cond:?}"
+            ))
+        }
+    }
+}
+
+impl<Cond, Then, OrElse> TensorInstance for DenseCond<Cond, Then, OrElse>
+where
+    Cond: TensorInstance,
+    Then: TensorInstance,
+    OrElse: TensorInstance,
+{
+    fn dtype(&self) -> NumberType {
+        debug_assert_eq!(self.then.dtype(), self.or_else.dtype());
+        self.then.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        debug_assert_eq!(self.cond.shape(), self.then.shape());
+        debug_assert_eq!(self.cond.shape(), self.or_else.shape());
+        self.cond.shape()
+    }
+}
+
+#[async_trait]
+impl<Cond, Then, OrElse, T> DenseInstance for DenseCond<Cond, Then, OrElse>
+where
+    Cond: DenseInstance<DType = u8> + Clone,
+    Then: DenseInstance<DType = T> + Clone,
+    OrElse: DenseInstance<DType = T> + Clone,
+    T: CDatatype + DType,
+{
+    type Block = ArrayOp<ha_ndarray::ops::GatherCond<Cond::Block, T, Then::Block, OrElse::Block>>;
+    type DType = T;
+
+    fn block_size(&self) -> usize {
+        self.cond.block_size()
+    }
+
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        trace!(
+            "read block {block_id} conditionally from {:?} and {:?} based on {:?}",
+            self.then,
+            self.or_else,
+            self.cond
+        );
+
+        let (cond, then, or_else) = try_join!(
+            self.cond.read_block(txn_id, block_id),
+            self.then.read_block(txn_id, block_id),
+            self.or_else.read_block(txn_id, block_id),
+        )?;
+
+        cond.cond(then, or_else).map_err(TCError::from)
+    }
+
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        let num_blocks = div_ceil(self.size(), self.block_size() as u64);
+        let blocks = futures::stream::iter(0..num_blocks)
+            .map(move |block_id| {
+                let this = self.clone();
+                async move { this.read_block(txn_id, block_id).await }
+            })
+            .buffered(num_cpus::get());
+
+        Ok(Box::pin(blocks))
+    }
+
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        let (cond, then, or_else) = try_join!(
+            self.cond.read_value(txn_id, coord.to_vec()),
+            self.then.read_value(txn_id, coord.to_vec()),
+            self.or_else.read_value(txn_id, coord)
+        )?;
+
+        if cond != 0 {
+            Ok(then)
+        } else {
+            Ok(or_else)
+        }
+    }
+}
+
+#[async_trait]
+impl<Cond, Then, OrElse> TensorPermitRead for DenseCond<Cond, Then, OrElse>
+where
+    Cond: TensorPermitRead,
+    Then: TensorPermitRead,
+    OrElse: TensorPermitRead,
+{
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        // always aquire these permits in-order to minimize the risk of a deadlock
+        let mut permit = self.cond.read_permit(txn_id, range.clone()).await?;
+
+        let then = self.then.read_permit(txn_id, range.clone()).await?;
+        permit.extend(then);
+
+        let or_else = self.or_else.read_permit(txn_id, range.clone()).await?;
+        permit.extend(or_else);
+
+        Ok(permit)
+    }
+}
+
+impl<Txn, FE, Cond, Then, OrElse, T> From<DenseCond<Cond, Then, OrElse>> for DenseAccess<Txn, FE, T>
+where
+    Cond: Into<DenseAccess<Txn, FE, u8>>,
+    Then: Into<DenseAccess<Txn, FE, T>>,
+    OrElse: Into<DenseAccess<Txn, FE, T>>,
+    T: CDatatype,
+{
+    fn from(cond: DenseCond<Cond, Then, OrElse>) -> Self {
+        Self::Cond(Box::new(DenseCond {
+            cond: cond.cond.into(),
+            then: cond.then.into(),
+            or_else: cond.or_else.into(),
+        }))
+    }
+}
+
+impl<Cond, Then, OrElse> fmt::Debug for DenseCond<Cond, Then, OrElse>
+where
+    Cond: fmt::Debug,
+    Then: fmt::Debug,
+    OrElse: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "read from {:?} or {:?} based on {:?}",
+            self.then, self.or_else, self.cond
+        )
     }
 }
 
@@ -1539,9 +1818,183 @@ where
     }
 }
 
-impl<L: fmt::Debug, T: CDatatype> fmt::Debug for DenseConst<L, T> {
+impl<L: fmt::Debug, T: CDatatype + DType> fmt::Debug for DenseConst<L, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "dual constant operation on {:?}", self.left)
+    }
+}
+
+#[derive(Clone)]
+pub struct DenseMatMul<L, R> {
+    left: L,
+    right: R,
+    shape: Shape,
+    per_block: usize,
+}
+
+impl<L, R> DenseMatMul<L, R>
+where
+    L: TensorInstance + fmt::Debug,
+    R: TensorInstance + fmt::Debug,
+{
+    pub fn new(left: L, right: R) -> TCResult<Self> {
+        left.shape().validate()?;
+        right.shape().validate()?;
+
+        let per_block_left =
+            (left.size() / left.shape().iter().rev().take(2).product::<u64>()) as usize;
+
+        let per_block_right =
+            (right.size() / right.shape().iter().rev().take(2).product::<u64>()) as usize;
+
+        if per_block_left != per_block_right {
+            // this is an internal error because this implementation detail should be invisible
+            // but it's better to error out here than enter undefined behavior later on
+            Err(internal!(
+                "cannot matrix multiply {left:?} with {right:?} due to different block sizes"
+            ))
+        } else if left.ndim() != right.ndim() {
+            Err(bad_request!("cannot matrix multiply {left:?} with {right:?} since they have different dimensions"))
+        } else if left.shape().last() != right.shape().iter().nth_back(1) {
+            Err(bad_request!(
+                "cannot matrix multiply {left:?} with {right:?} due to non-matching dimensions"
+            ))
+        } else {
+            let mut shape = Vec::with_capacity(left.ndim());
+            shape.extend_from_slice(&left.shape()[..left.ndim() - 1]);
+            shape.push(right.shape()[right.ndim() - 1]);
+
+            Ok(Self {
+                left,
+                right,
+                shape: shape.into(),
+                per_block: per_block_left,
+            })
+        }
+    }
+
+    #[inline]
+    fn block_op<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        left.matmul(right).map(Array::from).map_err(TCError::from)
+    }
+}
+
+impl<L, R> TensorInstance for DenseMatMul<L, R>
+where
+    L: TensorInstance,
+    R: TensorInstance,
+{
+    fn dtype(&self) -> NumberType {
+        self.left.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        &self.shape
+    }
+}
+
+#[async_trait]
+impl<L, R, T> DenseInstance for DenseMatMul<L, R>
+where
+    L: DenseInstance<DType = T> + Clone,
+    R: DenseInstance<DType = T> + Clone,
+    T: CDatatype + DType,
+{
+    type Block = Array<T>;
+    type DType = T;
+
+    fn block_size(&self) -> usize {
+        self.per_block * self.shape.iter().rev().take(2).product::<u64>() as usize
+    }
+
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        let (left, right) = try_join!(
+            self.left.read_block(txn_id, block_id),
+            self.right.read_block(txn_id, block_id),
+        )?;
+
+        Self::block_op(left.into(), right.into())
+    }
+
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        let num_blocks = self.size() / self.block_size() as u64;
+
+        let blocks = futures::stream::iter(0..num_blocks)
+            .map(move |block_id| {
+                let this = self.clone();
+                async move { this.read_block(txn_id, block_id).await }
+            })
+            .buffered(num_cpus::get());
+
+        Ok(Box::pin(blocks))
+    }
+
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        self.shape.validate_coord(&coord)?;
+
+        let mut right_range = Vec::with_capacity(coord.len());
+        right_range.extend(
+            coord
+                .iter()
+                .copied()
+                .map(AxisRange::At)
+                .take(self.ndim() - 2),
+        );
+        right_range.push(AxisRange::In(0..self.shape[self.ndim() - 2], 1));
+        right_range.push(AxisRange::At(coord[self.ndim() - 1]));
+        let right_range = Range::from(right_range);
+
+        let left_range = coord
+            .into_iter()
+            .take(self.ndim() - 1)
+            .map(AxisRange::At)
+            .collect::<Range>();
+
+        let coords = left_range.affected().zip(right_range.affected());
+
+        let mut sum = T::zero();
+        for (left_coord, right_coord) in coords {
+            let (left, right) = try_join!(
+                self.left.read_value(txn_id, left_coord),
+                self.right.read_value(txn_id, right_coord)
+            )?;
+
+            sum = sum + (left * right);
+        }
+
+        Ok(sum)
+    }
+}
+
+#[async_trait]
+impl<L: TensorPermitRead, R: TensorPermitRead> TensorPermitRead for DenseMatMul<L, R> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        let mut left = self.left.read_permit(txn_id, range.clone()).await?;
+        let right = self.right.read_permit(txn_id, range.clone()).await?;
+        left.extend(right);
+        Ok(left)
+    }
+}
+
+impl<Txn, FE, L, R, T> From<DenseMatMul<L, R>> for DenseAccess<Txn, FE, T>
+where
+    T: CDatatype,
+    L: Into<DenseAccess<Txn, FE, T>>,
+    R: Into<DenseAccess<Txn, FE, T>>,
+{
+    fn from(matmul: DenseMatMul<L, R>) -> Self {
+        Self::MatMul(Box::new(DenseMatMul {
+            left: matmul.left.into(),
+            right: matmul.right.into(),
+            shape: matmul.shape,
+            per_block: matmul.per_block,
+        }))
+    }
+}
+
+impl<L: fmt::Debug, R: fmt::Debug> fmt::Debug for DenseMatMul<L, R> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "matrix multiply {:?} with {:?}", self.left, self.right)
     }
 }
 
@@ -1549,7 +2002,7 @@ impl<L: fmt::Debug, T: CDatatype> fmt::Debug for DenseConst<L, T> {
 pub struct DenseReduce<S, T: CDatatype> {
     source: S,
     transform: Reduce,
-    block_map: ArrayBase<Arc<Vec<u64>>>,
+    block_map: ArrayBase<Vec<u64>>,
     map_axes: Axes,
     block_axes: Axes,
     id: T,
@@ -1561,20 +2014,28 @@ pub struct DenseReduce<S, T: CDatatype> {
 impl<S: DenseInstance> DenseReduce<S, S::DType> {
     fn new(
         source: S,
-        axes: Axes,
+        mut axes: Axes,
         keepdims: bool,
         id: S::DType,
         reduce_all: fn(Array<S::DType>, S::DType) -> TCResult<S::DType>,
         reduce_blocks: Combine<S::DType>,
         reduce_op: fn(Array<S::DType>, &[usize], bool) -> TCResult<Array<S::DType>>,
     ) -> TCResult<Self> {
+        axes.sort();
+        axes.dedup();
+
         let num_blocks = div_ceil(source.size(), source.block_size() as u64);
         let block_axis = block_axis_for(source.shape(), source.block_size());
         let block_shape = block_shape_for(block_axis, source.shape(), source.block_size());
         debug_assert_eq!(source.shape()[block_axis] % block_shape[0] as u64, 0);
 
-        let map_axes = axes[..(block_axis + 1)].to_vec();
-        let block_axes = axes[block_axis..].to_vec();
+        let map_axes = axes.iter().copied().filter(|x| *x <= block_axis).collect();
+        let block_axes = axes
+            .iter()
+            .copied()
+            .filter(|x| *x >= block_axis)
+            .map(|x| x - block_axis)
+            .collect();
 
         let transform = Reduce::new(source.shape().clone(), axes, keepdims)?;
 
@@ -1588,7 +2049,7 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
         block_map_shape.push(source.shape()[block_axis] as usize / block_shape[0]);
 
         let block_map = (0..num_blocks).into_iter().collect();
-        let block_map = ArrayBase::<Arc<Vec<u64>>>::new(block_map_shape, Arc::new(block_map))?;
+        let block_map = ArrayBase::<Vec<u64>>::new(block_map_shape, block_map)?;
 
         Ok(Self {
             source,
@@ -1613,7 +2074,7 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             keepdims,
             S::DType::min(),
             |block, max| {
-                let block_max = block.max()?;
+                let block_max = block.max_all()?;
                 let max = match NumberCollator::default().cmp(&max.into(), &block_max.into()) {
                     Ordering::Less => block_max,
                     Ordering::Equal | Ordering::Greater => max,
@@ -1631,12 +2092,11 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
                     .map(Array::from)
                     .map_err(TCError::from)
             },
-            |mut block, axes, keepdims| {
-                for x in axes.iter().rev().copied() {
-                    block = block.max_axis(x, keepdims).map(Array::from)?
-                }
-
-                Ok(block)
+            |block, axes, keepdims| {
+                block
+                    .max(axes.to_vec(), keepdims)
+                    .map(Array::from)
+                    .map_err(TCError::from)
             },
         )
     }
@@ -1651,7 +2111,7 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             keepdims,
             S::DType::max(),
             |block, min| {
-                let block_min = block.min()?;
+                let block_min = block.min_all()?;
                 let min = match NumberCollator::default().cmp(&min.into(), &block_min.into()) {
                     Ordering::Less | Ordering::Equal => min,
                     Ordering::Greater => block_min,
@@ -1669,12 +2129,11 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
                     .map(Array::from)
                     .map_err(TCError::from)
             },
-            |mut block, axes, keepdims| {
-                for x in axes.iter().rev().copied() {
-                    block = block.min_axis(x, keepdims).map(Array::from)?
-                }
-
-                Ok(block)
+            |block, axes, keepdims| {
+                block
+                    .min(axes.to_vec(), keepdims)
+                    .map(Array::from)
+                    .map_err(TCError::from)
             },
         )
     }
@@ -1687,17 +2146,16 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             S::DType::zero(),
             |block, sum| {
                 block
-                    .sum()
+                    .sum_all()
                     .map(|block_sum| block_sum + sum)
                     .map_err(TCError::from)
             },
             |l, r| l.add(r).map(Array::from).map_err(TCError::from),
-            |mut block, axes, keepdims| {
-                for x in axes.iter().rev().copied() {
-                    block = block.sum_axis(x, keepdims).map(Array::from)?
-                }
-
-                Ok(block)
+            |block, axes, keepdims| {
+                block
+                    .sum(axes.to_vec(), keepdims)
+                    .map(Array::from)
+                    .map_err(TCError::from)
             },
         )
     }
@@ -1709,16 +2167,15 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             keepdims,
             S::DType::one(),
             |block, product| {
-                let block_product = block.product()?;
+                let block_product = block.product_all()?;
                 Ok(block_product * product)
             },
             |l, r| l.mul(r).map(Array::from).map_err(TCError::from),
-            |mut block, axes, keepdims| {
-                for x in axes.iter().rev().copied() {
-                    block = block.product_axis(x, keepdims).map(Array::from)?
-                }
-
-                Ok(block)
+            |block, axes, keepdims| {
+                block
+                    .product(axes.to_vec(), keepdims)
+                    .map(Array::from)
+                    .map_err(TCError::from)
             },
         )
     }
@@ -1775,40 +2232,51 @@ where
             source_block_id as usize,
             &map_strides,
             self.block_map.shape(),
+            0,
         );
 
-        let mut map_slice = map_coord
-            .into_iter()
-            .map(|i| ha_ndarray::AxisBound::At(i))
-            .collect::<Vec<_>>();
+        let source_blocks = if !self.map_axes.is_empty() {
+            let mut map_slice = map_coord
+                .into_iter()
+                .map(|i| ha_ndarray::AxisBound::At(i))
+                .collect::<Vec<_>>();
 
-        for x in self.map_axes.iter().copied() {
-            map_slice[x] = ha_ndarray::AxisBound::In(0, self.block_map.shape()[x], 1);
-        }
+            for x in self.map_axes.iter().copied() {
+                map_slice[x] = ha_ndarray::AxisBound::In(0, self.block_map.shape()[x], 1);
+            }
 
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context, self.block_map.size())?;
-        let block_map_slice = self.block_map.clone().slice(map_slice)?;
-        let source_blocks = block_map_slice.read(&queue)?.to_slice()?;
+            let queue = autoqueue(&self.block_map)?;
+            let block_map_slice = self.block_map.clone().slice(map_slice)?;
+            block_map_slice.read(&queue)?.to_slice()?.into_vec()
+        } else {
+            let block_id = self.block_map.read_value(&map_coord)?;
+            vec![block_id]
+        };
 
-        debug_assert_eq!(source_blocks.as_ref()[0], source_block_id);
+        debug_assert_eq!(source_blocks[0], source_block_id);
 
         let block = self
             .source
             .read_block(txn_id, source_block_id)
             .map(|result| {
                 result.and_then(|block| {
+                    debug_assert!(self.block_axes.iter().copied().all(|x| x < block.ndim()));
                     (self.reduce_op)(block, &self.block_axes, self.transform.keepdims())
                 })
             })
             .await?;
 
-        futures::stream::iter(source_blocks.as_ref().iter().skip(1).copied())
+        futures::stream::iter(source_blocks.into_iter().skip(1))
             .map(|source_block_id| {
                 self.source
                     .read_block(txn_id, source_block_id)
                     .map(|result| {
                         result.and_then(|block| {
+                            debug_assert!(self
+                                .block_axes
+                                .iter()
+                                .copied()
+                                .all(|x| x < block.ndim()));
                             (self.reduce_op)(block, &self.block_axes, self.transform.keepdims())
                         })
                     })
@@ -1875,7 +2343,7 @@ where
     }
 }
 
-impl<S: fmt::Debug, T: CDatatype> fmt::Debug for DenseReduce<S, T> {
+impl<S: fmt::Debug, T: CDatatype + DType> fmt::Debug for DenseReduce<S, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -2006,6 +2474,138 @@ impl<S: fmt::Debug> fmt::Debug for DenseReshape<S> {
 }
 
 #[derive(Clone)]
+pub struct DenseResizeBlocks<S> {
+    source: S,
+    block_size: usize,
+}
+
+impl<S> DenseResizeBlocks<S> {
+    pub fn new(source: S, block_size: usize) -> Self {
+        Self { source, block_size }
+    }
+}
+
+impl<S: TensorInstance> TensorInstance for DenseResizeBlocks<S> {
+    fn dtype(&self) -> NumberType {
+        self.source.dtype()
+    }
+
+    fn shape(&self) -> &Shape {
+        self.source.shape()
+    }
+}
+
+#[async_trait]
+impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
+    type Block = ArrayBase<Vec<S::DType>>;
+    type DType = S::DType;
+
+    fn block_size(&self) -> usize {
+        self.block_size
+    }
+
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        let block_axis = block_axis_for(self.shape(), self.block_size);
+        let mut block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
+
+        let block_size = self.block_size as u64;
+        let source_block_size = self.source.block_size() as u64;
+
+        let start = block_id * block_size;
+        let stop = start + block_size;
+
+        let source_block_id_start = start / source_block_size;
+        let source_block_id_stop = div_ceil(stop, source_block_size);
+        let num_source_blocks = source_block_id_stop - source_block_id_start;
+        assert_ne!(num_source_blocks, 0);
+
+        let mut source_buffers = futures::stream::iter(source_block_id_start..source_block_id_stop)
+            .map(|block_id| self.source.read_block(txn_id, block_id))
+            .buffered(num_cpus::get())
+            .map_ok(|block| async move {
+                let queue = autoqueue(&block)?;
+                let buffer = block.read(&queue)?;
+
+                buffer
+                    .to_slice()
+                    .map(|buffer| buffer.into_vec())
+                    .map_err(TCError::from)
+            })
+            .try_buffered(num_cpus::get());
+
+        let mut buffer = Vec::with_capacity(self.block_size);
+
+        {
+            let source_buffer = source_buffers.try_next().await?;
+            let source_buffer = source_buffer.expect("source buffer");
+
+            let start = (start % source_block_size) as usize;
+            let stop = Ord::min(start + self.block_size, source_buffer.len());
+            buffer.extend_from_slice(&source_buffer[start..stop]);
+        }
+
+        if num_source_blocks > 2 {
+            for _ in 0..(num_source_blocks - 2) {
+                let source_buffer = source_buffers.try_next().await?;
+                let source_buffer = source_buffer.expect("source buffer");
+                buffer.extend(source_buffer);
+            }
+        }
+
+        if let Some(source_buffer) = source_buffers.try_next().await? {
+            let stop = (stop - ((source_block_id_stop - 1) * source_block_size)) as usize;
+            buffer.extend_from_slice(&source_buffer[0..stop]);
+        }
+
+        if stop > self.size() {
+            let trailing_size = block_shape.iter().skip(1).product::<usize>();
+            debug_assert_eq!(buffer.len() % trailing_size, 0);
+            block_shape[0] = buffer.len() / trailing_size;
+        }
+
+        ArrayBase::<Vec<Self::DType>>::new(block_shape, buffer).map_err(TCError::from)
+    }
+
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        let block_axis = block_axis_for(self.shape(), self.block_size);
+        let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
+        let source_blocks = self.source.read_blocks(txn_id).await?;
+        let blocks = BlockResize::new(source_blocks, block_shape)?;
+        Ok(Box::pin(blocks))
+    }
+
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
+        self.source.read_value(txn_id, coord).await
+    }
+}
+
+#[async_trait]
+impl<S: TensorPermitRead> TensorPermitRead for DenseResizeBlocks<S> {
+    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+        self.source.read_permit(txn_id, range).await
+    }
+}
+
+impl<Txn, FE, T, S> From<DenseResizeBlocks<S>> for DenseAccess<Txn, FE, T>
+where
+    T: CDatatype,
+    S: Into<DenseAccess<Txn, FE, T>>,
+{
+    fn from(resize: DenseResizeBlocks<S>) -> Self {
+        Self::ResizeBlocks(Box::new(DenseResizeBlocks {
+            source: resize.source.into(),
+            block_size: resize.block_size,
+        }))
+    }
+}
+
+impl<S: fmt::Debug> fmt::Debug for DenseResizeBlocks<S> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "resize blocks of {:?}", self.source)
+    }
+}
+
+#[derive(Clone)]
 pub struct DenseSlice<S> {
     source: S,
     transform: Slice,
@@ -2015,6 +2615,8 @@ pub struct DenseSlice<S> {
 
 impl<S: DenseInstance> DenseSlice<S> {
     pub fn new(source: S, range: Range) -> TCResult<Self> {
+        debug!("construct a slice {range:?} of {source:?}");
+
         let transform = Slice::new(source.shape().clone(), range)?;
 
         let block_axis = block_axis_for(source.shape(), source.block_size());
@@ -2022,60 +2624,64 @@ impl<S: DenseInstance> DenseSlice<S> {
         let num_blocks = div_ceil(
             source.size() as u64,
             block_shape.iter().product::<usize>() as u64,
-        ) as usize;
+        );
 
-        let block_map_shape = source
-            .shape()
-            .iter()
-            .take(block_axis)
-            .copied()
-            .map(|dim| {
-                dim.try_into()
-                    .map_err(|cause| bad_request!("invalid dimension: {dim} ({cause})"))
-            })
-            .collect::<Result<_, _>>()?;
+        let size = transform.shape().iter().product::<u64>();
+        let block_size = size / num_blocks;
+        debug_assert_eq!(block_size * num_blocks, size);
 
-        let block_map = ArrayBase::<Vec<_>>::new(
-            block_map_shape,
-            (0..num_blocks as u64).into_iter().collect(),
-        )?;
+        let block_map = Self::block_map(block_axis, num_blocks, &transform, block_shape)?;
+
+        Ok(Self {
+            source,
+            transform,
+            block_map,
+            block_size: block_size as usize,
+        })
+    }
+
+    fn block_map(
+        block_axis: usize,
+        num_blocks: u64,
+        transform: &Slice,
+        block_shape: BlockShape,
+    ) -> TCResult<ArrayBase<Vec<u64>>> {
+        debug!(
+            "construct block map for slice {:?} of {:?} with block shape {block_shape:?}",
+            transform.range(),
+            transform.source_shape(),
+        );
+
+        let block_map = block_map_for(num_blocks, transform.source_shape(), &block_shape)?;
 
         let mut block_map_bounds = Vec::with_capacity(block_axis + 1);
         for axis_range in transform.range().iter().take(block_axis).cloned() {
-            let bound = axis_range.try_into()?;
+            let bound = ha_ndarray::AxisBound::try_from(axis_range)?;
             block_map_bounds.push(bound);
         }
 
         if transform.range().len() > block_axis {
+            let stride = block_shape[0];
             let bound = match &transform.range()[block_axis] {
+                AxisRange::At(i) if block_map_bounds.iter().all(|b| b.is_index()) => {
+                    let i = (i / stride as u64) as usize;
+                    ha_ndarray::AxisBound::In(i, i + 1, 1)
+                }
                 AxisRange::At(i) => {
-                    let stride = block_map.shape().last().expect("stride");
-                    let i = usize::try_from(*i)
-                        .map_err(|cause| bad_request!("invalid index: {cause}"))?
-                        / stride;
+                    let i = (i / stride as u64) as usize;
                     ha_ndarray::AxisBound::At(i)
                 }
                 AxisRange::In(axis_range, _step) => {
-                    let stride = block_shape[0];
-                    let start = usize::try_from(axis_range.start)
-                        .map_err(|cause| bad_request!("invalid range start: {cause}"))?
-                        / stride;
-                    let stop = usize::try_from(axis_range.end)
-                        .map_err(|cause| bad_request!("invalid range stop: {cause}"))?
-                        / stride;
+                    let start = (axis_range.start / stride as u64) as usize;
+                    let stop = div_ceil(axis_range.end, stride as u64) as usize;
                     ha_ndarray::AxisBound::In(start, stop, 1)
                 }
                 AxisRange::Of(indices) => {
-                    let stride = block_map.shape().last().expect("stride");
                     let indices = indices
                         .iter()
                         .copied()
-                        .map(|i| {
-                            usize::try_from(i)
-                                .map(|i| i / stride)
-                                .map_err(|cause| bad_request!("invalid index: {cause}"))
-                        })
-                        .collect::<Result<Vec<usize>, TCError>>()?;
+                        .map(|i| (i / stride as u64) as usize)
+                        .collect::<Vec<usize>>();
 
                     ha_ndarray::AxisBound::Of(indices)
                 }
@@ -2084,17 +2690,16 @@ impl<S: DenseInstance> DenseSlice<S> {
             block_map_bounds.push(bound);
         }
 
-        let block_map = block_map.slice(block_map_bounds)?;
-        let block_map = ArrayBase::<Vec<u64>>::copy(&block_map)?;
+        debug!("slice block map is range {block_map_bounds:?} of {block_map:?}");
 
-        let block_size = transform.shape().iter().product::<u64>() as usize / num_blocks;
+        let block_map = if block_map_bounds.is_empty() {
+            block_map
+        } else {
+            let block_map = block_map.slice(block_map_bounds)?;
+            ArrayBase::<Vec<u64>>::copy(&block_map)?
+        };
 
-        Ok(Self {
-            source,
-            transform,
-            block_map,
-            block_size,
-        })
+        Ok(block_map)
     }
 
     #[inline]
@@ -2104,30 +2709,30 @@ impl<S: DenseInstance> DenseSlice<S> {
         let block_axis = block_axis_for(self.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
 
-        let local_bound =
-            match ha_ndarray::AxisBound::try_from(self.transform.range()[block_axis].clone())? {
-                ha_ndarray::AxisBound::At(i) => ha_ndarray::AxisBound::At(i),
-                ha_ndarray::AxisBound::In(start, stop, step) => {
-                    let stride = block_shape[0];
+        let axis_bound = self.transform.range()[block_axis].clone();
+        let local_bound = match ha_ndarray::AxisBound::try_from(axis_bound)? {
+            ha_ndarray::AxisBound::At(i) => ha_ndarray::AxisBound::At(i),
+            ha_ndarray::AxisBound::In(start, stop, step) => {
+                let stride = block_shape[0];
 
-                    if source_block_id == 0 {
-                        ha_ndarray::AxisBound::In(start, stride, step)
-                    } else if source_block_id == self.block_map.size() as u64 - 1 {
-                        ha_ndarray::AxisBound::In(stop - (stop % stride), stop, step)
-                    } else {
-                        let start = source_block_id as usize * stride;
-                        ha_ndarray::AxisBound::In(start, start + stride, step)
-                    }
+                if source_block_id == 0 {
+                    ha_ndarray::AxisBound::In(start, stride, step)
+                } else if source_block_id == self.block_map.size() as u64 - 1 {
+                    ha_ndarray::AxisBound::In(stop - (stop % stride), stop, step)
+                } else {
+                    let start = source_block_id as usize * stride;
+                    ha_ndarray::AxisBound::In(start, start + stride, step)
                 }
-                ha_ndarray::AxisBound::Of(indices) => {
-                    if source_block_id < indices.len() as u64 {
-                        let i = indices[source_block_id as usize] as usize;
-                        ha_ndarray::AxisBound::At(i)
-                    } else {
-                        return Err(bad_request!("block id {} is out of range", block_id));
-                    }
+            }
+            ha_ndarray::AxisBound::Of(indices) => {
+                if source_block_id < indices.len() as u64 {
+                    let i = indices[source_block_id as usize] as usize;
+                    ha_ndarray::AxisBound::At(i)
+                } else {
+                    return Err(bad_request!("block id {} is out of range", block_id));
                 }
-            };
+            }
+        };
 
         let mut block_bounds = Vec::with_capacity(self.ndim());
         for bound in self.transform.range().iter().take(block_axis).cloned() {
@@ -2163,7 +2768,8 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
         let block_axis = block_axis_for(transform.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, transform.shape(), self.block_size);
 
-        let local_bounds = match ha_ndarray::AxisBound::try_from(range[block_axis].clone())? {
+        let global_bound = ha_ndarray::AxisBound::try_from(range[block_axis].clone())?;
+        let local_bounds = match global_bound {
             ha_ndarray::AxisBound::At(i) => {
                 debug_assert_eq!(block_map.size(), 1);
                 vec![ha_ndarray::AxisBound::At(i)]
@@ -2174,19 +2780,21 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
                 if block_map.size() == 1 {
                     vec![ha_ndarray::AxisBound::In(start, stop, step)]
                 } else {
+                    let start = start % stride;
+                    let stop = if stop % stride == 0 {
+                        stride
+                    } else {
+                        stop % stride
+                    };
+
                     let mut local_bounds = Vec::with_capacity(block_map.size());
                     local_bounds.push(ha_ndarray::AxisBound::In(start, stride, step));
 
-                    for i in 0..(block_map.size() - 2) {
-                        let start = stride * i;
-                        local_bounds.push(ha_ndarray::AxisBound::In(start, start + stride, step));
+                    for _ in 1..(block_map.size() - 1) {
+                        local_bounds.push(ha_ndarray::AxisBound::In(0, stride, step));
                     }
 
-                    local_bounds.push(ha_ndarray::AxisBound::In(
-                        stop - (stop % stride),
-                        stop,
-                        step,
-                    ));
+                    local_bounds.push(ha_ndarray::AxisBound::In(0, stop, step));
 
                     local_bounds
                 }
@@ -2202,6 +2810,7 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
         }
 
         debug_assert_eq!(block_map.size(), local_bounds.len());
+
         let blocks = futures::stream::iter(block_map.into_inner().into_iter().zip(local_bounds))
             .map(move |(block_id, local_bound)| {
                 let mut block_bounds = block_bounds.to_vec();
@@ -2215,6 +2824,8 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
                     } else {
                         block_bounds[0] = local_bound;
                     }
+
+                    debug!("slice {block_bounds:?} from {block:?}");
 
                     block.slice(block_bounds).map_err(TCError::from)
                 }
@@ -2419,8 +3030,9 @@ pub struct DenseSparse<S> {
     block_size: usize,
 }
 
-impl<S: SparseInstance> From<S> for DenseSparse<S> {
+impl<S: SparseInstance + fmt::Debug> From<S> for DenseSparse<S> {
     fn from(source: S) -> Self {
+        debug_assert!(source.shape().validate().is_ok());
         let (block_size, _) = ideal_block_size_for(source.shape());
         Self { source, block_size }
     }
@@ -2446,50 +3058,60 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
     }
 
     async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
-        let start = block_id * self.block_size() as u64;
-        let stop = if (start + self.block_size() as u64) < self.size() {
-            start + self.block_size() as u64
-        } else {
-            self.size()
-        };
+        trace!("read block {block_id} of {self:?}");
 
-        let ndim = self.ndim();
-        let strides = self
+        let block_size = self.block_size as u64;
+        let offset = block_id * block_size;
+        let block_axis = block_axis_for(self.shape(), self.block_size);
+        let mut block_shape = block_shape_for(block_axis, self.shape(), self.block_size());
+
+        if offset + block_size > self.size() {
+            let last_block_size = (self.size() % block_size) as usize;
+            block_shape[0] = last_block_size / block_shape.iter().skip(1).product::<usize>();
+        }
+
+        let range = self
             .shape()
             .iter()
             .copied()
             .enumerate()
             .map(|(x, dim)| {
-                if dim == 1 {
+                let i = if dim == 1 {
                     0
                 } else {
-                    self.shape().iter().rev().take(ndim - 1 - x).product()
-                }
+                    let stride = self
+                        .shape()
+                        .iter()
+                        .rev()
+                        .take(self.ndim() - 1 - x)
+                        .product::<u64>();
+
+                    (offset / stride) % dim
+                };
+
+                AxisRange::At(i)
             })
-            .collect::<Vec<u64>>();
+            .take(block_axis)
+            .chain(
+                block_shape
+                    .iter()
+                    .copied()
+                    .map(|dim| AxisRange::In(0..(dim as u64), 1)),
+            )
+            .collect::<Range>();
 
-        let start = coord_of(start, &strides, self.shape());
-        let stop = coord_of(stop, &strides, self.shape());
+        debug_assert_eq!(range.len(), self.ndim());
 
-        let range: Range = start
-            .into_iter()
-            .zip(stop)
-            .map(|(from, to)| AxisRange::In(from..to, 1))
-            .collect();
+        let elements = self
+            .source
+            .clone()
+            .elements(txn_id, range.clone(), Axes::default())
+            .await?;
 
-        let shape = range
-            .shape()
-            .into_vec()
-            .into_iter()
-            .map(|dim| dim as usize)
-            .collect();
-
-        let order = (0..self.ndim()).into_iter().collect();
-        let elements = self.source.clone().elements(txn_id, range, order).await?;
-        let values = ValueStream::new(elements, Range::all(self.source.shape()), S::DType::zero());
+        let values = ValueStream::new(elements, range, S::DType::zero());
         let block = values.try_collect().await?;
 
-        ArrayBase::<Vec<S::DType>>::new(shape, block).map_err(TCError::from)
+        ArrayBase::<Vec<S::DType>>::new(block_shape, block).map_err(TCError::from)
     }
 
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
@@ -2497,7 +3119,7 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size());
 
         let range = Range::all(self.shape());
-        let order = (0..self.ndim()).into_iter().collect();
+        let order = Axes::default();
         let elements = self.source.elements(txn_id, range.clone(), order).await?;
         let values = ValueStream::new(elements, range, S::DType::zero());
         let blocks = values
@@ -2573,28 +3195,54 @@ impl<S: DenseInstance> DenseTranspose<S> {
             .map(|dim| dim as usize)
             .collect();
 
-        let permutation = transform.axes().to_vec();
-        let (map_axes, block_axes) = permutation.split_at(block_axis);
+        let valid = if num_blocks == 1 {
+            assert_eq!(block_axis, 0);
+            true
+        } else {
+            let valid_map = transform.axes()[..block_axis]
+                .iter()
+                .copied()
+                .all(|x| x < block_axis);
 
-        if map_axes.iter().copied().any(|x| x >= block_axis)
-            || block_axes.iter().copied().any(|x| x <= block_axis)
-        {
-            return Err(bad_request!(
-                "cannot transpose axes {:?} of {:?} without copying",
-                block_axes,
-                source
-            ));
-        }
+            let valid_block = transform.axes()[block_axis..]
+                .iter()
+                .copied()
+                .all(|x| x > block_axis);
+
+            valid_map && valid_block
+        };
+
+        let (map_axes, block_axes) = if valid {
+            let (map_axes, block_axes) = transform.axes().split_at(block_axis);
+
+            let block_axes = block_axes
+                .iter()
+                .copied()
+                .map(|x| x - block_axis)
+                .collect::<Axes>();
+
+            Ok((map_axes.to_vec(), block_axes))
+        } else {
+            Err(bad_request!(
+                "cannot transpose axes {axes:?} of {source:?} without copying",
+                axes = transform.axes()
+            ))
+        }?;
 
         let block_map = ArrayBase::<Vec<_>>::new(map_shape, (0..num_blocks).into_iter().collect())?;
-        let block_map = block_map.transpose(Some(map_axes.to_vec()))?;
-        let block_map = ArrayBase::<Vec<_>>::copy(&block_map)?;
+
+        let block_map = if num_blocks > 1 {
+            let block_map = block_map.transpose(Some(map_axes.to_vec()))?;
+            ArrayBase::<Vec<_>>::copy(&block_map).map_err(TCError::from)
+        } else {
+            Ok(block_map)
+        }?;
 
         Ok(Self {
             source,
             transform,
             block_map,
-            block_axes: block_axes.to_vec(),
+            block_axes,
         })
     }
 }
@@ -2813,7 +3461,7 @@ where
     }
 }
 
-impl<S: fmt::Debug, T: CDatatype> fmt::Debug for DenseUnary<S, T> {
+impl<S: fmt::Debug, T: CDatatype + DType> fmt::Debug for DenseUnary<S, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "unary transform of {:?}", self.source)
     }
@@ -3215,7 +3863,12 @@ impl<Txn, FE, T: CDatatype> From<DenseUnaryCast<Txn, FE, T>> for DenseAccess<Txn
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for DenseUnaryCast<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for DenseUnaryCast<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "unary transform/cast of {:?}", self.source)
     }
@@ -3343,7 +3996,11 @@ impl<Txn, FE, T: CDatatype> From<DenseVersion<FE, T>> for DenseAccess<Txn, FE, T
     }
 }
 
-impl<FE, T> fmt::Debug for DenseVersion<FE, T> {
+impl<FE, T> fmt::Debug for DenseVersion<FE, T>
+where
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "transactional version of {:?}", self.file)
     }

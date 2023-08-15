@@ -63,13 +63,3 @@ def tile(tensor, multiples):
     """
 
     return Tensor(form=Tile(tensor, multiples))
-
-
-def where(cond, x, y):
-    """
-    Return a view of `x` and `y` depending on whether the corresponding element of `cond` is `True`.
-
-    `cond`, `x`, and `y` must support broadcasting to the same shape.
-    """
-
-    return (cond.cast(Bool) * x) + (cond.logical_not() * y)

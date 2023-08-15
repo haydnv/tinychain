@@ -9,7 +9,7 @@ from ...generic import autobox, gcs, resolve_class, Map
 from ...interface import Compare, Interface
 from ...math.interface import Boolean, Numeric, Trigonometric
 from ...math.operator import deref, is_one, is_zero, operator
-from ...math.operator import Abs, Exp, Log, Pow
+from ...math.operator import Abs, Cond, Exp, Log, Pow
 from ...math.operator import Add, Mul, MatMul, Div, Sub
 from ...math.operator import Sin, Sinh, Asin, Asinh, Cos, Cosh, Acos, Acosh, Tan, Tanh, Atan, Atanh
 from ...math.operator import LogicalAnd, LogicalNot, LogicalOr, LogicalXor
@@ -94,10 +94,15 @@ class NDArray(Interface):
 
         return ref.Get(URI(self, "expand_dims"), axis)
 
-    def flip(self, axis):
-        """Flip this :class:`NDArray` along the given `axis`"""
+    def cond(self, then, or_else):
+        """
+        Return a view of `then` and `or_else` depending on whether the corresponding element of this tensor is `True`.
 
-        return self._get("flip", axis)
+        `self`, `then`, and `or_else` must support broadcasting to the same shape.
+        """
+
+        rtype = gcs(type(then), type(or_else))
+        return self._post("cond", {"then": then, "or_else": or_else}, rtype)
 
     def max(self, axis=None):
         """
@@ -113,15 +118,15 @@ class NDArray(Interface):
 
         return ref.Get(URI(self, "min"), axis)
 
-    def mean(self, axis=None):
+    def mean(self, axes=None):
         """
-        Return the average of this :class:`NDArray` along the given `axis`, or the total average if no `axis` is given.
+        Return the average of this :class:`NDArray` along the given `axes`, or the total average if no `axes` are given.
         """
 
-        if axis is None:
+        if axes is None:
             return self.sum() / self.size
         else:
-            return self.sum(axis) / self.shape[axis]
+            return self.sum(axes) / self.shape[axes]
 
     def logical_and(self, other):
         return Tensor(form=LogicalAnd(self, other))
@@ -276,7 +281,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
 
     @property
     def schema(self):
-        return self.shape, self.dtype
+        return self.dtype, self.shape
 
     @property
     def shape(self):
@@ -328,7 +333,10 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
             return Sparse.zeros_like(self)
 
         return Tensor(form=Exp(self))
-    
+
+    def cond(self, then, or_else):
+        return Tensor(form=Cond(self, (then, or_else)))
+
     def log(self, base=None):
         return Tensor(form=Log(self, base))
 
@@ -397,7 +405,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
     def gte(self, other):
         """Return a boolean `Tensor` with element-wise greater-or-equal values."""
 
-        return self._post("gte", {"r": other}, Tensor)
+        return self._post("ge", {"r": other}, Tensor)
 
     def lt(self, other):
         """Return a boolean `Tensor` with element-wise less-than values."""
@@ -407,7 +415,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
     def lte(self, other):
         """Return a boolean `Tensor` with element-wise less-or-equal values."""
 
-        return self._post("lte", {"r": other}, Tensor)
+        return self._post("le", {"r": other}, Tensor)
 
     def max(self, axis=None, keepdims=False):
         """
@@ -548,7 +556,7 @@ class Dense(Tensor, typing.Generic[DType]):
         Call this method to initialize a persistent `Tensor` in a `Chain`.
         """
 
-        return cls[dtype].with_shape(shape)(form=ref.Get(URI(cls), (shape, dtype)))
+        return cls[dtype].with_shape(shape)(form=ref.Get(URI(cls), (dtype, shape)))
 
     @classmethod
     def load(cls, shape, data, dtype=F32):
@@ -563,7 +571,7 @@ class Dense(Tensor, typing.Generic[DType]):
                 dense = tc.tensor.Dense.load([1, 3], values, tc.I32)
         """
 
-        return cls[dtype].with_shape(shape)(form=ref.Get(URI(cls, "load"), ((shape, dtype), data)))
+        return cls[dtype].with_shape(shape)(form=ref.Get(URI(cls, "load"), ((dtype, shape), data)))
 
     @classmethod
     def constant(cls, shape, value):
@@ -679,9 +687,8 @@ class Dense(Tensor, typing.Generic[DType]):
 
         @post
         def step(cxt, tensor: Dense) -> Map:
-            from .functions import where
             cxt.new_dist = Dense.random_normal(shape, mean, std)
-            cxt.new_tensor = where((tensor >= minval).logical_and(tensor <= maxval), tensor, cxt.new_dist)
+            cxt.new_tensor = (tensor >= minval).logical_and(tensor <= maxval).cond(tensor, cxt.new_dist)
             return Map(tensor=cxt.new_tensor.copy())
 
         truncated = Map(ref.While(cond, step, Map(tensor=Dense.random_normal(shape, mean, std))))["tensor"]
@@ -744,7 +751,7 @@ class Sparse(Tensor, typing.Generic[DType]):
         Call this method to initialize a persistent :class:`Tensor` in a :class:`Chain`.
         """
 
-        op_ref = ref.Get(URI(cls), (shape, dtype))
+        op_ref = ref.Get(URI(cls), (dtype, shape))
 
         try:
             return cls[dtype].with_shape(shape)(form=op_ref)
@@ -765,7 +772,7 @@ class Sparse(Tensor, typing.Generic[DType]):
                 sparse = tc.tensor.Sparse.load([2, 3, 4], zip(coords, values))
         """
 
-        op_ref = ref.Get(URI(cls, "load"), ((shape, dtype), data))
+        op_ref = ref.Get(URI(cls, "load"), ((dtype, shape), data))
 
         try:
             return cls[dtype].with_shape(shape)(form=op_ref)
@@ -790,7 +797,7 @@ class Sparse(Tensor, typing.Generic[DType]):
         If `dtype` is not specified, the data type will be :class:`F32`.
         """
 
-        op_ref = ref.Get(URI(cls), (shape, dtype))
+        op_ref = ref.Get(URI(cls), (dtype, shape))
 
         try:
             return cls[dtype].with_shape(shape)(form=op_ref)
@@ -837,13 +844,13 @@ class Sparse(Tensor, typing.Generic[DType]):
         return Sparse(form=Tensor.mul(self, other))
 
 
-def _reduce_args(axis=None, keepdims=False):
+def _reduce_args(axes=None, keepdims=False):
     args = {}
 
-    if axis is not None:
-        args["axis"] = axis
+    if axes is not None:
+        args["axes"] = axes
 
-    if keepdims:
-        args["keepdims"] = keepdims
+        if keepdims:
+            args["keepdims"] = keepdims
 
     return args

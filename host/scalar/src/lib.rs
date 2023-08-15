@@ -649,7 +649,18 @@ impl From<u64> for Scalar {
 impl TryFrom<Scalar> for bool {
     type Error = TCError;
 
-    fn try_from(scalar: Scalar) -> Result<Self, Self::Error> {
+    fn try_from(scalar: Scalar) -> TCResult<Self> {
+        match scalar {
+            Scalar::Value(value) => value.try_into(),
+            other => Err(TCError::unexpected(other, "a boolean")),
+        }
+    }
+}
+
+impl TryFrom<Scalar> for Id {
+    type Error = TCError;
+
+    fn try_from(scalar: Scalar) -> TCResult<Self> {
         match scalar {
             Scalar::Value(value) => value.try_into(),
             other => Err(TCError::unexpected(other, "a boolean")),
@@ -663,7 +674,54 @@ impl TryFrom<Scalar> for Map<Scalar> {
     fn try_from(scalar: Scalar) -> TCResult<Map<Scalar>> {
         match scalar {
             Scalar::Map(map) => Ok(map),
+            Scalar::Tuple(tuple) => tuple.into_iter().map(|item| -> TCResult<(Id, Scalar)> {
+                item.try_into()
+            }).collect(),
             other => Err(TCError::unexpected(other, "a Map")),
+        }
+    }
+}
+
+impl TryFrom<Scalar> for Map<Value> {
+    type Error = TCError;
+
+    fn try_from(scalar: Scalar) -> TCResult<Map<Value>> {
+        debug!("try to construct a Map<Value> from {scalar:?}");
+
+        match scalar {
+            Scalar::Map(map) => map
+                .into_iter()
+                .map(|(id, scalar)| Value::try_from(scalar).map(|value| (id, value)))
+                .collect(),
+
+            Scalar::Tuple(tuple) => tuple
+                .into_iter()
+                .map(|item| -> TCResult<(Id, Value)> {
+                    item.try_into()
+                })
+                .collect(),
+
+            Scalar::Value(value) => value.try_into(),
+
+            other => Err(TCError::unexpected(other, "a Map")),
+        }
+    }
+}
+
+impl<T: TryFrom<Scalar>> TryFrom<Scalar> for (Id, T)
+where
+    TCError: From<T::Error>,
+{
+    type Error = TCError;
+
+    fn try_from(scalar: Scalar) -> Result<Self, Self::Error> {
+        match scalar {
+            Scalar::Tuple(mut tuple) if tuple.len() == 2 => {
+                let value = tuple.pop().expect("value");
+                let key = tuple.pop().expect("key");
+                Ok((Id::try_from(key)?, value.try_into()?))
+            }
+            other => Err(TCError::unexpected(other, "a map item")),
         }
     }
 }

@@ -4,14 +4,14 @@ use std::task::{self, ready};
 
 use futures::stream::{Fuse, FusedStream, Stream};
 use futures::StreamExt;
-use ha_ndarray::{ArrayBase, CDatatype, NDArrayRead, Queue, Shape};
+use ha_ndarray::{ArrayBase, CDatatype, NDArrayRead, Shape};
 use itertools::MultiProduct;
 use pin_project::pin_project;
 
 use tc_error::*;
 
 use crate::tensor::shape::AxisRangeIter;
-use crate::tensor::{Coord, Range};
+use crate::tensor::{autoqueue, Coord, Range};
 
 #[pin_project]
 pub struct BlockResize<S, T> {
@@ -19,7 +19,6 @@ pub struct BlockResize<S, T> {
     source: Fuse<S>,
     shape: Shape,
     pending: Vec<T>,
-    queue: Queue,
 }
 
 impl<S, T> BlockResize<S, T>
@@ -27,15 +26,12 @@ where
     S: Stream,
 {
     pub fn new(source: S, block_shape: Shape) -> TCResult<Self> {
-        let size = block_shape.iter().product();
-        let context = ha_ndarray::Context::default()?;
-        let queue = Queue::new(context, size)?;
+        let size = block_shape.iter().product::<usize>();
 
         Ok(Self {
             source: source.fuse(),
             shape: block_shape,
             pending: Vec::with_capacity(size * 2),
-            queue,
         })
     }
 }
@@ -64,9 +60,12 @@ where
                 break Some(data);
             } else {
                 match ready!(this.source.as_mut().poll_next(cxt)) {
-                    Some(Ok(block)) => match block.read(&this.queue) {
-                        Ok(buffer) => match buffer.to_slice() {
-                            Ok(slice) => this.pending.extend(slice.as_ref()),
+                    Some(Ok(block)) => match autoqueue(&block) {
+                        Ok(queue) => match block.read(&queue) {
+                            Ok(buffer) => match buffer.to_slice() {
+                                Ok(slice) => this.pending.extend(slice.as_ref()),
+                                Err(cause) => break Some(Err(TCError::from(cause))),
+                            },
                             Err(cause) => break Some(Err(TCError::from(cause))),
                         },
                         Err(cause) => break Some(Err(TCError::from(cause))),

@@ -11,7 +11,7 @@ use futures::{join, try_join, TryFutureExt};
 use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype};
 use log::debug;
 use rayon::prelude::*;
-use safecast::{AsType, CastInto};
+use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
@@ -60,11 +60,16 @@ where
         }
 
         let mut version = canon;
-        for (_version_id, delta) in self
+        for (version_id, delta) in self
             .deltas
             .iter()
             .take_while(|(version_id, _delta)| *version_id <= &txn_id)
         {
+            debug!("version at {txn_id} includes a committed delta at {version_id}");
+            version = DenseCow::create(version, delta.clone()).into();
+        }
+
+        if let Some(delta) = self.pending.get(&txn_id) {
             version = DenseCow::create(version, delta.clone()).into();
         }
 
@@ -78,6 +83,7 @@ where
         canon: DenseAccess<Txn, FE, T>,
     ) -> TCResult<DenseCow<FE, DenseAccess<Txn, FE, T>>> {
         if self.commits.contains(&txn_id) {
+            debug_assert!(!self.pending.contains_key(&txn_id));
             return Err(conflict!("{txn_id} has already been committed"));
         } else if self.finalized > Some(txn_id) {
             return Err(conflict!("dense tensor is already finalized at {txn_id}"));
@@ -119,6 +125,65 @@ impl<Txn, FE, T> Clone for DenseBase<Txn, FE, T> {
             canon: self.canon.clone(),
             state: self.state.clone(),
         }
+    }
+}
+
+impl<Txn, FE, T> DenseBase<Txn, FE, T>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + Clone,
+    T: CDatatype + DType,
+    Buffer<T>: de::FromStream<Context = ()>,
+{
+    pub async fn constant(store: fs::Dir<FE>, shape: Shape, value: T) -> TCResult<Self> {
+        let (dir, canon, versions) = fs_init(store).await?;
+        let canon = DenseFile::constant(canon, shape, value).await?;
+        Ok(Self::new(dir, canon, versions))
+    }
+
+    pub async fn from_values(
+        store: fs::Dir<FE>,
+        shape: Shape,
+        values: Vec<Number>,
+    ) -> TCResult<Self>
+    where
+        T: CastFrom<Number>,
+    {
+        let (dir, canon, versions) = fs_init(store).await?;
+        let canon = DenseFile::from_values(canon, shape, values).await?;
+        Ok(Self::new(dir, canon, versions))
+    }
+
+    pub async fn range(store: fs::Dir<FE>, shape: Shape, start: T, stop: T) -> TCResult<Self>
+    where
+        T: fmt::Display,
+    {
+        let (dir, canon, versions) = fs_init(store).await?;
+        let canon = DenseFile::range(canon, shape, start, stop).await?;
+        Ok(Self::new(dir, canon, versions))
+    }
+}
+
+impl<Txn, FE> DenseBase<Txn, FE, f32>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + Clone,
+{
+    pub async fn random_normal(
+        store: fs::Dir<FE>,
+        shape: Shape,
+        mean: f32,
+        std: f32,
+    ) -> TCResult<Self> {
+        let (dir, canon, versions) = fs_init(store).await?;
+        let canon = DenseFile::random_normal(canon, shape, mean, std).await?;
+        Ok(Self::new(dir, canon, versions))
+    }
+
+    pub async fn random_uniform(store: fs::Dir<FE>, shape: Shape) -> TCResult<Self> {
+        let (dir, canon, versions) = fs_init(store).await?;
+        let canon = DenseFile::random_uniform(canon, shape).await?;
+        Ok(Self::new(dir, canon, versions))
     }
 }
 
@@ -533,9 +598,19 @@ impl<Txn, FE, T: CDatatype> From<DenseBase<Txn, FE, T>> for DenseAccess<Txn, FE,
     }
 }
 
-impl<Txn, FE, T> fmt::Debug for DenseBase<Txn, FE, T> {
+impl<Txn, FE, T> fmt::Debug for DenseBase<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "transactional dense tensor")
+        write!(
+            f,
+            "transactional dense tensor with shape {:?} and type {:?}",
+            self.shape(),
+            self.dtype()
+        )
     }
 }
 

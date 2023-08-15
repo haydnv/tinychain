@@ -4,7 +4,6 @@ use std::string::ToString;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use b_table::b_tree;
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, DirWriteGuard, FileLoad};
