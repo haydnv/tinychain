@@ -16,7 +16,8 @@ use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
 use super::btree::{self, BTree, BTreeFile, BTreeInstance};
 use super::table::{Table, TableFile, TableInstance};
 use super::tensor::{
-    self, Dense, DenseCacheFile, Sparse, Tensor, TensorBase, TensorInstance, TensorType,
+    self, Dense, DenseBase, DenseCacheFile, Sparse, SparseBase, Tensor, TensorBase, TensorInstance,
+    TensorType,
 };
 use super::{Collection, CollectionType, CollectionView, Schema};
 
@@ -127,23 +128,45 @@ where
                     .map_ok(Self::Table)
                     .await
             }
-            schema => Err(not_implemented!("create {:?}", schema)),
+            Schema::Dense(schema) => {
+                DenseBase::create(txn_id, schema, store)
+                    .map_ok(TensorBase::Dense)
+                    .map_ok(Self::Tensor)
+                    .await
+            }
+            Schema::Sparse(schema) => {
+                SparseBase::create(txn_id, schema.into(), store)
+                    .map_ok(TensorBase::Sparse)
+                    .map_ok(Self::Tensor)
+                    .await
+            }
         }
     }
 
     async fn load(txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
         match schema {
             Schema::BTree(schema) => {
-                BTreeFile::create(txn_id, schema, store)
+                BTreeFile::load(txn_id, schema, store)
                     .map_ok(Self::BTree)
                     .await
             }
             Schema::Table(schema) => {
-                TableFile::create(txn_id, schema, store)
+                TableFile::load(txn_id, schema, store)
                     .map_ok(Self::Table)
                     .await
             }
-            schema => Err(not_implemented!("load {:?}", schema)),
+            Schema::Dense(schema) => {
+                DenseBase::load(txn_id, schema, store)
+                    .map_ok(TensorBase::Dense)
+                    .map_ok(Self::Tensor)
+                    .await
+            }
+            Schema::Sparse(schema) => {
+                SparseBase::load(txn_id, schema.into(), store)
+                    .map_ok(TensorBase::Sparse)
+                    .map_ok(Self::Tensor)
+                    .await
+            }
         }
     }
 

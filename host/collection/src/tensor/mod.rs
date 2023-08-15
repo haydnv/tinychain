@@ -1897,6 +1897,7 @@ where
 
     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
         let (class, schema) = schema;
+
         match class {
             TensorType::Dense => {
                 DenseBase::create(txn_id, schema, store)
@@ -1904,9 +1905,7 @@ where
                     .await
             }
             TensorType::Sparse => {
-                let dtype = schema.dtype;
-                let schema = sparse::Schema::new(schema.shape);
-                SparseBase::create(txn_id, (dtype, schema), store)
+                SparseBase::create(txn_id, schema, store)
                     .map_ok(Self::Sparse)
                     .await
             }
@@ -1915,6 +1914,7 @@ where
 
     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
         let (class, schema) = schema;
+
         match class {
             TensorType::Dense => {
                 DenseBase::load(txn_id, schema, store)
@@ -1922,9 +1922,7 @@ where
                     .await
             }
             TensorType::Sparse => {
-                let dtype = schema.dtype;
-                let schema = sparse::Schema::new(schema.shape);
-                SparseBase::load(txn_id, (dtype, schema), store)
+                SparseBase::load(txn_id, schema, store)
                     .map_ok(Self::Sparse)
                     .await
             }

@@ -1824,10 +1824,9 @@ where
     State: StateInstance,
     State::FE: AsType<Node> + ThreadSafe + Clone,
 {
-    let dtype = schema.dtype;
-    let schema = crate::tensor::sparse::Schema::new(schema.shape);
     let store = create_dir(txn).await?;
-    tc_transact::fs::Persist::create(*txn.id(), (dtype, schema), store)
+
+    tc_transact::fs::Persist::create(*txn.id(), schema, store)
         .map_ok(Sparse::Base)
         .await
 }

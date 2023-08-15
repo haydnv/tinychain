@@ -26,10 +26,11 @@ use super::complex::ComplexRead;
 use super::dense::{DenseAccess, DenseAccessCast, DenseCacheFile, DenseSparse, DenseTensor};
 
 use super::{
-    Axes, AxisRange, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast,
-    TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorInstance, TensorMath,
-    TensorMathConst, TensorPermitRead, TensorRead, TensorReduce, TensorTransform, TensorType,
-    TensorUnary, TensorUnaryBoolean, TensorWrite, TensorWriteDual, IMAG, REAL,
+    Axes, AxisRange, Coord, Range, Schema as TensorSchema, Shape, TensorBoolean,
+    TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert,
+    TensorInstance, TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce,
+    TensorTransform, TensorType, TensorUnary, TensorUnaryBoolean, TensorWrite, TensorWriteDual,
+    IMAG, REAL,
 };
 
 pub use access::*;
@@ -1319,10 +1320,12 @@ where
     FE: AsType<Node> + ThreadSafe + Clone,
 {
     type Txn = Txn;
-    type Schema = (NumberType, Schema);
+    type Schema = TensorSchema;
 
     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
-        let (dtype, schema) = schema;
+        let dtype = schema.dtype;
+        let shape = schema.shape;
+        let schema = Schema::new(shape);
 
         match dtype {
             NumberType::Bool => {
@@ -1408,7 +1411,9 @@ where
     }
 
     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
-        let (dtype, schema) = schema;
+        let dtype = schema.dtype;
+        let shape = schema.shape;
+        let schema = Schema::new(shape);
 
         match dtype {
             NumberType::Bool => {
@@ -1721,12 +1726,11 @@ where
         };
 
         let txn_id = *self.txn.id();
-        let schema = Schema::new(shape);
         let store = fs::Dir::load(txn_id, store)
             .map_err(de::Error::custom)
             .await?;
 
-        fs::Persist::create(txn_id, (dtype, schema), store)
+        fs::Persist::create(txn_id, (dtype, shape).into(), store)
             .map_err(de::Error::custom)
             .await
     }

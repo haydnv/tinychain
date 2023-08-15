@@ -2,7 +2,7 @@ use std::fmt;
 
 use async_hash::{Digest, Hash, Output};
 use destream::en;
-use safecast::{as_type, CastFrom, CastInto};
+use safecast::{as_type, CastFrom, CastInto, TryCastFrom};
 
 use tc_error::*;
 use tc_value::Value;
@@ -54,7 +54,16 @@ impl TryFrom<(TCPathBuf, Value)> for Schema {
         match class {
             CollectionType::BTree(_) => BTreeSchema::try_cast_from_value(schema).map(Self::BTree),
             CollectionType::Table(_) => TableSchema::try_cast_from_value(schema).map(Self::Table),
-            CollectionType::Tensor(_) => todo!(),
+            CollectionType::Tensor(class) => {
+                let schema = TensorSchema::try_cast_from(schema, |v| {
+                    bad_request!("invalid Tensor schema: {v:?}")
+                })?;
+
+                match class {
+                    TensorType::Dense => Ok(Self::Dense(schema)),
+                    TensorType::Sparse => Ok(Self::Sparse(schema)),
+                }
+            }
         }
     }
 }
