@@ -8,7 +8,9 @@ from ..process import DEFAULT_PORT
 LEAD = f"http://127.0.0.1:{DEFAULT_PORT}"
 NS = tc.URI("/test")
 NAME = "btree"
-SCHEMA = tc.btree.Schema((tc.Column("number", tc.Int), tc.Column("word", tc.String, 100)))
+SCHEMA = tc.btree.Schema(
+    (tc.Column("number", tc.Int), tc.Column("word", tc.String, 100))
+)
 
 
 class BTreeChainTests(PersistenceTest, unittest.TestCase):
