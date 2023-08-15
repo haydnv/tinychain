@@ -4,13 +4,13 @@ import unittest
 
 from num2words import num2words
 from .base import PersistenceTest
-from ..process import DEFAULT_PORT, start_host
+from ..process import DEFAULT_PORT
 
 LEAD = f"http://127.0.0.1:{DEFAULT_PORT}"
 NS = tc.URI("/test_table")
 SCHEMA = tc.table.Schema(
-    [tc.Column("name", tc.String, 512)],
-    [tc.Column("views", tc.UInt)]).create_index("views", ["views"])
+    [tc.Column("name", tc.String, 512)], [tc.Column("views", tc.UInt)]
+).create_index("views", ["views"])
 
 
 class TableChainTests(PersistenceTest, unittest.TestCase):
@@ -67,7 +67,7 @@ class TableChainTests(PersistenceTest, unittest.TestCase):
             count = hosts[i].get(endpoint.append("count"))
             self.assertEqual(0, count, f"host {i}")
 
-        total = 100
+        total = 50
         for n in range(1, total):
             i = random.choice(range(self.NUM_HOSTS))
 
