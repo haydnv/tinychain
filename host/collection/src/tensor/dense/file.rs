@@ -59,10 +59,11 @@ where
 
         let (block_size, num_blocks) = ideal_block_size_for(&shape);
 
-        debug_assert!(block_size > 0);
+        assert_ne!(block_size, 0);
 
         {
             let dtype_size = T::dtype().size();
+            debug_assert_ne!(dtype_size, 0);
 
             let mut dir = dir.write().await;
 
@@ -127,8 +128,17 @@ where
 
         let mut block_id = 0;
         while let Some(block) = source_blocks.try_next().await? {
-            let buffer = Buffer::from(block.into_inner());
+            let buffer = block.into_inner();
+
+            if block_id == num_blocks - 1 {
+                assert_ne!(buffer.len(), 0);
+                assert_eq!(block_size % buffer.len(), 0);
+            } else {
+                assert_eq!(block_size, buffer.len());
+            }
+
             let size_in_bytes = buffer.len() * T::dtype().size();
+            let buffer = Buffer::from(buffer);
             dir_guard.create_file(block_id.to_string(), buffer, size_in_bytes)?;
             block_id += 1;
         }
@@ -420,9 +430,12 @@ where
     async fn read_blocks(self, _txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         let shape = self.shape;
         let block_axis = block_axis_for(&shape, self.block_size);
+        let block_map = self.block_map.into_inner();
         let dir = self.dir.into_read().await;
 
-        let blocks = futures::stream::iter(self.block_map.into_inner())
+        log::debug!("read blocks {block_map:?} from dense file");
+
+        let blocks = futures::stream::iter(block_map)
             .map(move |block_id| {
                 dir.get_file(&block_id).cloned().ok_or_else(|| {
                     io::Error::new(
@@ -707,18 +720,43 @@ macro_rules! impl_visitor {
                 self,
                 mut array: A,
             ) -> Result<Self::Value, A::Error> {
+                let size = self.shape.iter().product::<u64>();
                 let mut contents = self.dir.write().await;
 
                 let (block_size, num_blocks) = ideal_block_size_for(&self.shape);
 
+                let zero = <$t>::zero();
                 let type_size = <$t>::dtype().size();
-                let mut buffer = Vec::<$t>::with_capacity(block_size);
+                let mut buffer = vec![zero; block_size];
                 for block_id in 0..num_blocks {
-                    let size = array.buffer(&mut buffer).await?;
-                    let block = Buffer::from(buffer.drain(..).collect::<Vec<$t>>());
+                    let buffered = array.buffer(&mut buffer).await?;
+
+                    let buffer = if block_id == num_blocks - 1 {
+                        let expected_block_size =
+                            (size - (block_size as u64 * block_id as u64)) as usize;
+
+                        if buffered == expected_block_size {
+                            Ok(buffer.drain(..).collect::<Vec<$t>>())
+                        } else {
+                            Err(de::Error::invalid_length(
+                                buffered,
+                                format!(
+                                    "a trailing Tensor block of {expected_block_size} elements"
+                                ),
+                            ))
+                        }
+                    } else if buffer.len() == block_size {
+                        Ok(buffer.drain(..).collect::<Vec<$t>>())
+                    } else {
+                        Err(de::Error::invalid_length(
+                            buffered,
+                            format!("a Tensor block of {block_size} elements"),
+                        ))
+                    }
+                    .map(Buffer::from)?;
 
                     contents
-                        .create_file(block_id.to_string(), block, size * type_size)
+                        .create_file(block_id.to_string(), buffer, buffered * type_size)
                         .map_err(de::Error::custom)?;
                 }
 

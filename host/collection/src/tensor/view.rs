@@ -6,6 +6,7 @@ use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 use ha_ndarray::{Buffer, CDatatype, NDArrayRead};
+use log::trace;
 use rayon::prelude::*;
 use safecast::{AsType, CastInto};
 
@@ -151,12 +152,18 @@ where
             let block = result?;
             let queue = autoqueue(&block)?;
 
+            trace!(
+                "encoding dense block of {} elements...",
+                ha_ndarray::NDArray::size(&block)
+            );
+
             block
                 .read(&queue)
                 .and_then(|buffer| buffer.to_slice())
                 .map(|slice| slice.into_vec())
                 .map_err(TCError::from)
         })
+        .inspect_ok(|buffer| trace!("buffered {} elements...", buffer.len()))
         .take_while(|result| {
             future::ready({
                 match result {
@@ -228,6 +235,8 @@ impl DenseView {
 
 impl<'en> en::IntoStream<'en> for DenseView {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
+        log::debug!("DenseView::into_stream {:?}", self.schema);
+
         use en::EncodeSeq;
 
         let mut seq = encoder.encode_seq(Some(2))?;

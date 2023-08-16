@@ -2009,7 +2009,8 @@ fn block_map_for(
 
 #[inline]
 fn block_shape_for(axis: usize, shape: &[u64], block_size: usize) -> BlockShape {
-    debug_assert!(!shape.is_empty());
+    assert_ne!(block_size, 0);
+    assert_ne!(shape.iter().product::<u64>(), 0, "invalid shape: {shape:?}");
 
     if axis == shape.len() - 1 {
         vec![block_size]

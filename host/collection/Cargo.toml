@@ -23,7 +23,7 @@ collate = { version = "0.3", features = ["stream"] }
 destream = "0.7"
 ds-ext = "0.1"
 futures = "0.3"
-freqfs = "~0.8.1"
+freqfs = { path = "../../../freqfs" }
 ha-ndarray = { path = "../../../ha-ndarray", features = ["freqfs", "stream"] }
 itertools = "0.11"
 log = { version = "0.4", features = ["release_max_level_info"] }
