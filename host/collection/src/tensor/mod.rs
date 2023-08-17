@@ -1,4 +1,5 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
+
 use std::marker::PhantomData;
 use std::ops::{Div, Rem};
 use std::{fmt, iter};
@@ -1011,9 +1012,9 @@ where
             Self::Dense(this) => match other {
                 Self::Dense(that) => this.into_view().eq(that.into()).map(Self::from),
 
-                Self::Sparse(that) => that
+                Self::Sparse(that) => this
                     .into_view()
-                    .eq(this.into_view().into_sparse())
+                    .eq(that.into_view().into_dense())
                     .map(Self::from),
             },
             Self::Sparse(this) => match other {

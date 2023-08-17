@@ -142,12 +142,15 @@ macro_rules! view_compare {
             (Self::U64(this), Self::U64(that)) => {
                 $general(this, that).map(dense_from).map(Self::Bool)
             }
-            (this, that) => {
-                let dtype = Ord::max(this.dtype(), that.dtype());
-                let this = TensorCast::cast_into(this, dtype)?;
-                let that = TensorCast::cast_into(that, dtype)?;
+            (this, that) if this.dtype() > that.dtype() => {
+                let that = TensorCast::cast_into(that, this.dtype())?;
                 $general(this, that)
             }
+            (this, that) if this.dtype() < that.dtype() => {
+                let this = TensorCast::cast_into(this, that.dtype())?;
+                $general(this, that)
+            }
+            _ => unreachable!(),
         }
     };
 }
