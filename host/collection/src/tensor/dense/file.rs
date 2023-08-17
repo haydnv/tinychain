@@ -13,7 +13,7 @@ use itertools::Itertools;
 use safecast::{AsType, CastFrom};
 
 use tc_error::*;
-use tc_transact::TxnId;
+use tc_transact::{fs, TxnId};
 use tc_value::{DType, Number, NumberClass, NumberType};
 use tcgeneric::ThreadSafe;
 
@@ -205,8 +205,15 @@ where
         let num_blocks = contents.len();
 
         if num_blocks == 0 {
+            #[cfg(debug_assertions)]
+            panic!(
+                "cannot load a dense tensor from an empty directory {}",
+                contents.path().display()
+            );
+
+            #[cfg(not(debug_assertions))]
             return Err(bad_request!(
-                "cannot load a dense tensor from an empty directory"
+                "cannot load a dense tensor from an empty directory",
             ));
         }
 
@@ -343,6 +350,13 @@ where
             shape,
             dtype: PhantomData,
         })
+    }
+
+    pub(super) async fn commit(&self)
+    where
+        FE: for<'en> fs::FileSave<'en>,
+    {
+        self.dir.sync().await.expect("commit")
     }
 }
 

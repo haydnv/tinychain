@@ -1720,10 +1720,7 @@ where
         dtype: NumberType,
         shape: Shape,
     ) -> Result<SparseBase<Txn, FE>, E> {
-        let (_name, store) = {
-            let mut cxt = self.txn.context().write().await;
-            cxt.create_dir_unique().map_err(de::Error::custom)?
-        };
+        let store = self.txn.context().clone();
 
         let txn_id = *self.txn.id();
         let store = fs::Dir::load(txn_id, store)

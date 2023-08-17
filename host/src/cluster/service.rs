@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
 use futures::join;
 use futures::stream::TryStreamExt;
-use log::{debug, trace};
+use log::{debug, info, trace};
 use safecast::{as_type, AsType};
 
 use tc_chain::{ChainType, Recover};
@@ -89,6 +89,8 @@ impl Replica for Version {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        debug!("replicate {self:?} from {source}");
+
         for (name, attr) in self.attrs.iter() {
             if let Attr::Chain(chain) = attr {
                 let source = source.clone().append(name.clone());
@@ -319,6 +321,8 @@ impl Replica for Service {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        info!("replicate all versions of {self:?} from {source}");
+
         for (number, version) in self.versions.iter(*txn.id()).await? {
             let number = (&*number).clone();
             let source = source.clone().append(number);
@@ -430,6 +434,7 @@ impl Persist<tc_fs::CacheBlock> for Service {
 
             // `get_or_create_dir` here in case of a service with no persistent data
             let store = dir.get_or_create_dir(txn_id, (*number).clone()).await?;
+
             trace!(
                 "got transactional directory for Service version {}",
                 version_number

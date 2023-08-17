@@ -1,6 +1,7 @@
 use std::fmt;
 
 use async_trait::async_trait;
+use log::debug;
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_chain::{ChainInstance, CHAIN};
@@ -184,6 +185,8 @@ impl Replica for Chain<CollectionBase> {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        debug!("replicate {self:?} from {source}");
+
         match self {
             Self::Block(chain) => chain.replicate(txn, source).await,
             Self::Sync(chain) => chain.replicate(txn, source).await,

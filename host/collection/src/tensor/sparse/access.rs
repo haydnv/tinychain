@@ -2125,6 +2125,29 @@ where
         let strides = strides_for(&shape, ndim);
         let strides = ArrayBase::<Arc<Vec<_>>>::new(vec![strides.len()], Arc::new(strides))?;
 
+        #[cfg(debug_assertions)]
+        let (source_blocks, filled_blocks, zero_blocks) = {
+            let source_blocks = self
+                .source
+                .blocks(txn_id, range.clone(), order.to_vec())
+                .await?;
+
+            log::trace!("constructed source block stream");
+
+            let filled_blocks = self
+                .filled
+                .blocks(txn_id, range.clone(), order.to_vec())
+                .await?;
+
+            log::trace!("constructed filled block stream");
+
+            let zero_blocks = self.zeros.blocks(txn_id, range, order).await?;
+            log::trace!("constructed zero block stream");
+
+            (source_blocks, filled_blocks, zero_blocks)
+        };
+
+        #[cfg(not(debug_assertions))]
         let (source_blocks, filled_blocks, zero_blocks) = try_join!(
             self.source.blocks(txn_id, range.clone(), order.to_vec()),
             self.filled.blocks(txn_id, range.clone(), order.to_vec()),
@@ -2148,6 +2171,8 @@ where
 
             Ok((coords, values))
         });
+
+        log::trace!("constructed SparseCow block stream");
 
         Ok(Box::pin(blocks))
     }

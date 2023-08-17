@@ -513,6 +513,8 @@ where
     Number: From<T> + CastInto<T>,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
+        debug!("restore {self:?} from {backup:?}");
+
         // always acquire these permits in-order to avoid the risk of a deadlock
         let _write_permit = self.write_permit(txn_id, Range::default()).await?;
         let _read_permit = backup.read_permit(txn_id, Range::default()).await?;
@@ -543,13 +545,10 @@ where
     ) -> Result<Self, D::Error> {
         let (txn, shape) = cxt;
 
-        let (_dir_name, dir) = {
-            let mut cxt = txn.context().write().await;
-            cxt.create_dir_unique().map_err(de::Error::custom)?
-        };
-
+        let dir = txn.context().clone();
         let (dir, canon, versions) = dir_init(dir).map_err(de::Error::custom).await?;
         let canon = SparseFile::from_stream((canon, shape), decoder).await?;
+
         Ok(Self::new(dir, canon, versions))
     }
 }

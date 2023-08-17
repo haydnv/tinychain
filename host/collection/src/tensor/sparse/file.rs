@@ -9,6 +9,7 @@ use freqfs::DirLock;
 use futures::future::TryFutureExt;
 use futures::stream::TryStreamExt;
 use ha_ndarray::{ArrayBase, CDatatype};
+use log::trace;
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
@@ -147,10 +148,18 @@ where
         self.shape().validate_range(&range)?;
         self.shape().validate_axes(&order)?;
 
+        trace!("SparseFile::elements in range {range:?} with order {order:?}");
+
         let range = table_range(&range)?;
         let table = self.table.read().await;
+
+        trace!("acquired table read lock");
+
         let rows = table.rows(range, &order, false, None)?;
         let elements = rows.map_ok(unwrap_row).map_err(TCError::from);
+
+        trace!("constructed table row stream");
+
         Ok(Box::pin(elements))
     }
 

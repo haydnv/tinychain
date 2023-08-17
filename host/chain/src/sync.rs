@@ -75,6 +75,8 @@ where
     T: fs::Persist<State::FE, Txn = State::Txn> + fs::Restore<State::FE> + TryCastFrom<State>,
 {
     pub async fn restore_from(&self, txn: &State::Txn, source: Link) -> TCResult<()> {
+        debug!("restore {self:?} from {source}");
+
         let backup = txn.get(source, Value::default()).await?;
         let backup =
             backup.try_cast_into(|backup| bad_request!("{:?} is not a valid backup", backup))?;

@@ -117,8 +117,12 @@ impl<'a> ServiceHandler<'a> {
                     .create_version(txn, number.clone(), schema)
                     .await?;
 
-                if link != txn.link(link.path().clone()) {
-                    version.replicate(txn, link.append(number)).await?;
+                if link == txn.link(link.path().clone()) {
+                    debug!("no need to replicate {link}");
+                } else {
+                    let source = link.append(number);
+                    debug!("replicating new service version from {source}...");
+                    version.replicate(txn, source).await?;
                 }
 
                 Ok(())

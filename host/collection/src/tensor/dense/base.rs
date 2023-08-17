@@ -138,7 +138,7 @@ where
     pub async fn constant(store: fs::Dir<FE>, shape: Shape, value: T) -> TCResult<Self> {
         let (dir, canon, versions) = fs_init(store).await?;
         let canon = DenseFile::constant(canon, shape, value).await?;
-        Ok(Self::new(dir, canon, versions))
+        Self::new(dir, canon, versions)
     }
 
     pub async fn from_values(
@@ -151,7 +151,7 @@ where
     {
         let (dir, canon, versions) = fs_init(store).await?;
         let canon = DenseFile::from_values(canon, shape, values).await?;
-        Ok(Self::new(dir, canon, versions))
+        Self::new(dir, canon, versions)
     }
 
     pub async fn range(store: fs::Dir<FE>, shape: Shape, start: T, stop: T) -> TCResult<Self>
@@ -160,7 +160,7 @@ where
     {
         let (dir, canon, versions) = fs_init(store).await?;
         let canon = DenseFile::range(canon, shape, start, stop).await?;
-        Ok(Self::new(dir, canon, versions))
+        Self::new(dir, canon, versions)
     }
 }
 
@@ -177,13 +177,13 @@ where
     ) -> TCResult<Self> {
         let (dir, canon, versions) = fs_init(store).await?;
         let canon = DenseFile::random_normal(canon, shape, mean, std).await?;
-        Ok(Self::new(dir, canon, versions))
+        Self::new(dir, canon, versions)
     }
 
     pub async fn random_uniform(store: fs::Dir<FE>, shape: Shape) -> TCResult<Self> {
         let (dir, canon, versions) = fs_init(store).await?;
         let canon = DenseFile::random_uniform(canon, shape).await?;
-        Ok(Self::new(dir, canon, versions))
+        Self::new(dir, canon, versions)
     }
 }
 
@@ -206,23 +206,38 @@ where
     FE: AsType<Buffer<T>> + ThreadSafe,
     T: CDatatype,
 {
-    fn new(dir: DirLock<FE>, canon: DenseFile<FE, T>, versions: DirLock<FE>) -> Self {
+    fn new(dir: DirLock<FE>, canon: DenseFile<FE, T>, versions: DirLock<FE>) -> TCResult<Self> {
         let semaphore = Semaphore::new(Arc::new(Collator::default()));
+
+        let pending = {
+            let mut pending = OrdHashMap::new();
+            let versions = versions.try_read()?;
+
+            for (name, version) in versions.iter() {
+                let version = version.as_dir().cloned().ok_or_else(|| {
+                    internal!("expected a dense tensor version dir but found a file")
+                })?;
+
+                pending.insert(name.parse()?, version);
+            }
+
+            pending
+        };
 
         let state = State {
             commits: OrdHashSet::new(),
             deltas: OrdHashMap::new(),
-            pending: OrdHashMap::new(),
+            pending,
             versions,
             finalized: None,
             dtype: PhantomData,
         };
 
-        Self {
+        Ok(Self {
             dir,
             state: Arc::new(RwLock::new(state)),
             canon: DenseVersion::new(canon, semaphore),
-        }
+        })
     }
 }
 
@@ -407,7 +422,7 @@ where
 impl<Txn, FE, T> Transact for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Buffer<T>> + ThreadSafe,
+    FE: DenseCacheFile + AsType<Buffer<T>> + for<'en> fs::FileSave<'en>,
     T: CDatatype + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
@@ -416,17 +431,27 @@ where
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("DenseTensor::commit {}", txn_id);
 
-        let mut state = self.state.write().expect("state");
+        let version = {
+            let mut state = self.state.write().expect("state");
 
-        if state.finalized.as_ref() > Some(&txn_id) {
-            panic!("cannot commit finalized version {}", txn_id);
-        } else if !state.commits.insert(txn_id) {
-            log::warn!("duplicate commit at {}", txn_id);
-        } else if let Some(delta) = state.pending.remove(&txn_id) {
-            state.deltas.insert(txn_id, delta);
+            if state.finalized.as_ref() > Some(&txn_id) {
+                panic!("cannot commit finalized version {}", txn_id);
+            } else if !state.commits.insert(txn_id) {
+                log::warn!("duplicate commit at {}", txn_id);
+                None
+            } else if let Some(delta) = state.pending.remove(&txn_id) {
+                state.deltas.insert(txn_id, delta.clone());
+                Some(delta)
+            } else {
+                None
+            }
+        };
+
+        if let Some(version) = version {
+            version.sync().await.expect("commit version");
         }
 
-        self.canon.commit(&txn_id);
+        self.canon.commit(&txn_id)
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
@@ -493,7 +518,7 @@ where
             canon.merge(delta).await.expect("write dense tensor delta");
         }
 
-        self.canon.finalize(txn_id);
+        self.canon.finalize(txn_id).await;
     }
 }
 
@@ -511,13 +536,26 @@ where
     async fn create(_txn_id: TxnId, shape: Shape, store: fs::Dir<FE>) -> TCResult<Self> {
         let (dir, canon, versions) = fs_init(store).await?;
         let canon = DenseFile::constant(canon, shape, T::zero()).await?;
-        Ok(Self::new(dir, canon, versions))
+        Self::new(dir, canon, versions)
     }
 
     async fn load(_txn_id: TxnId, shape: Shape, store: fs::Dir<FE>) -> TCResult<Self> {
-        let (dir, canon, versions) = fs_init(store).await?;
-        let canon = DenseFile::load(canon, shape).await?;
-        Ok(Self::new(dir, canon, versions))
+        let dir = store.into_inner();
+        let (canon, versions) = {
+            let mut guard = dir.write().await;
+            let versions = guard.get_or_create_dir(fs::VERSIONS.to_string())?;
+            let canon = guard.get_or_create_dir(CANON.to_string())?;
+            (canon, versions)
+        };
+
+        // handle the case that no canonical version was ever finalized
+        let canon = if canon.try_read().expect("canon").is_empty() {
+            DenseFile::constant(canon, shape, T::zero()).await?
+        } else {
+            DenseFile::load(canon, shape).await?
+        };
+
+        Self::new(dir, canon, versions)
     }
 
     fn dir(&self) -> fs::Inner<FE> {
@@ -537,7 +575,7 @@ where
     async fn copy_from(txn: &Txn, store: fs::Dir<FE>, other: O) -> TCResult<Self> {
         let (dir, canon, versions) = fs_init(store).await?;
         let canon = DenseFile::copy_from(canon, *txn.id(), other).await?;
-        Ok(Self::new(dir, canon, versions))
+        Self::new(dir, canon, versions)
     }
 }
 
@@ -581,14 +619,11 @@ where
     ) -> Result<Self, D::Error> {
         let (txn, shape) = cxt;
 
-        let (_dir_name, dir) = {
-            let mut cxt = txn.context().write().await;
-            cxt.create_dir_unique().map_err(de::Error::custom)?
-        };
-
+        let dir = txn.context().clone();
         let (dir, canon, versions) = dir_init(dir).map_err(de::Error::custom).await?;
         let canon = DenseFile::from_stream((canon, shape), decoder).await?;
-        Ok(Self::new(dir, canon, versions))
+
+        Self::new(dir, canon, versions).map_err(de::Error::custom)
     }
 }
 
@@ -633,8 +668,8 @@ where
         let im = DenseFile::load(self.im.1, self.shape);
         let (re, im) = try_join!(re, im)?;
 
-        let re = DenseBase::new(self.re.0, re, self.re.2);
-        let im = DenseBase::new(self.im.0, im, self.im.2);
+        let re = DenseBase::new(self.re.0, re, self.re.2)?;
+        let im = DenseBase::new(self.im.0, im, self.im.2)?;
 
         Ok((re, im))
     }

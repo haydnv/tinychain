@@ -5,12 +5,12 @@ use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use destream::de;
 use futures::TryFutureExt;
-use log::debug;
+use log::{debug, info};
 use safecast::{AsType, TryCastFrom};
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Persist, Restore};
-use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
+use tc_transact::{fs, AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
 
 use super::btree::{self, BTree, BTreeFile, BTreeInstance};
@@ -66,7 +66,7 @@ where
 impl<Txn, FE> Transact for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + for<'en> fs::FileSave<'en>,
 {
     type Commit = ();
 
@@ -117,6 +117,8 @@ where
     type Schema = Schema;
 
     async fn create(txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
+        info!("create persistent mutable collection at {store:?}");
+
         match schema {
             Schema::BTree(schema) => {
                 BTreeFile::create(txn_id, schema, store)
@@ -144,6 +146,8 @@ where
     }
 
     async fn load(txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
+        info!("load persistent mutable collection at {store:?}");
+
         match schema {
             Schema::BTree(schema) => {
                 BTreeFile::load(txn_id, schema, store)

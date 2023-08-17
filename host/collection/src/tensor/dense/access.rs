@@ -16,7 +16,7 @@ use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
-use tc_transact::{Transaction, TxnId};
+use tc_transact::{fs, Transaction, TxnId};
 use tc_value::{
     DType, Number, NumberClass, NumberCollator, NumberInstance, NumberType, Trigonometry,
 };
@@ -3887,22 +3887,29 @@ impl<FE, T> Clone for DenseVersion<FE, T> {
         }
     }
 }
-
 impl<FE, T> DenseVersion<FE, T> {
     pub fn new(file: DenseFile<FE, T>, semaphore: Semaphore) -> Self {
         Self { file, semaphore }
     }
+}
 
+impl<FE, T> DenseVersion<FE, T>
+where
+    FE: DenseCacheFile + AsType<Buffer<T>> + for<'en> fs::FileSave<'en>,
+    T: CDatatype + DType,
+    Buffer<T>: de::FromStream<Context = ()>,
+{
     pub fn commit(&self, txn_id: &TxnId) {
-        self.semaphore.finalize(txn_id, false)
+        self.semaphore.finalize(txn_id, true)
+    }
+
+    pub async fn finalize(&self, txn_id: &TxnId) {
+        self.file.commit().await;
+        self.semaphore.finalize(txn_id, true)
     }
 
     pub fn rollback(&self, txn_id: &TxnId) {
         self.semaphore.finalize(txn_id, false)
-    }
-
-    pub fn finalize(&self, txn_id: &TxnId) {
-        self.semaphore.finalize(txn_id, true)
     }
 }
 
