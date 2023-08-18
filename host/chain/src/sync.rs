@@ -222,7 +222,7 @@ where
 
         let store = {
             let dir = dir.create_dir(STORE.to_string())?;
-            fs::Dir::load(txn_id, dir)
+            fs::Dir::load(txn_id, dir, false)
                 .map_ok(super::data::Store::new)
                 .await?
         };
@@ -260,7 +260,7 @@ where
 
         let store = {
             let dir = dir.get_or_create_dir(STORE.to_string())?;
-            fs::Dir::load(txn_id, dir)
+            fs::Dir::load(txn_id, dir, true)
                 .map_ok(super::data::Store::new)
                 .await?
         };
@@ -360,7 +360,7 @@ where
                 .create_dir(STORE.to_string())
                 .map_err(de::Error::custom)?;
 
-            fs::Dir::load(*txn.id(), dir)
+            fs::Dir::load(*txn.id(), dir, false)
                 .map_ok(super::data::Store::new)
                 .map_err(de::Error::custom)
                 .await?

@@ -53,6 +53,7 @@ impl<State: StateInstance> Clone for History<State> {
     }
 }
 
+// TODO: fix dir entry lookup so that `Dir::get_file` can be called with a u64 (not a String)
 impl<State> History<State>
 where
     State: StateInstance,
@@ -64,6 +65,11 @@ where
         latest: u64,
         cutoff: TxnId,
     ) -> Self {
+        debug_assert!(file
+            .try_read()
+            .expect("history")
+            .contains(&latest.to_string()));
+
         Self {
             file,
             store,
@@ -89,7 +95,7 @@ where
     ) -> TCResult<freqfs::FileReadGuardOwned<State::FE, ChainBlock>> {
         let file = self.file.read().await;
         let block = file
-            .get_file(&block_id)
+            .get_file(&block_id.to_string())
             .ok_or_else(|| TCError::not_found(format!("chain block {}", block_id)))?;
 
         block.read_owned().map_err(TCError::from).await
@@ -101,7 +107,7 @@ where
     ) -> TCResult<freqfs::FileWriteGuardOwned<State::FE, ChainBlock>> {
         let file = self.file.read().await;
         let block: &FileLock<State::FE> = file
-            .get_file(&block_id)
+            .get_file(&block_id.to_string())
             .ok_or_else(|| TCError::not_found(format!("chain block {}", block_id)))?;
 
         block.write_owned().map_err(TCError::from).await
@@ -231,8 +237,14 @@ where
 
         // handle the latest block, which may be shorter than the corresponding block to replicate
         let mut last_hash = {
-            let (mut dest, source) =
-                try_join!(self.write_block(*latest), other.read_block(*latest))?;
+            let (mut dest, source) = try_join!(
+                self.write_block(*latest)
+                    .map_err(|cause| internal!("missing chain block {}: {cause}", *latest)),
+
+                other
+                    .read_block(*latest)
+                    .map_err(|cause| bad_request!("invalid source Chain: {cause}"))
+            )?;
 
             if let Some(txn_id) = dest.mutations.keys().last() {
                 latest_txn_id = Some(*txn_id);
@@ -348,6 +360,8 @@ where
         create_block(&mut file_lock, WRITE_AHEAD)?;
         create_block(&mut file_lock, latest)?;
 
+        std::mem::drop(file_lock);
+
         Ok(Self::new(file.clone(), store, latest, cutoff))
     }
 
@@ -371,15 +385,9 @@ where
 
         get_or_create_block(&mut file_lock, PENDING.to_string())?;
         get_or_create_block(&mut file_lock, WRITE_AHEAD.to_string())?;
-        get_or_create_block(&mut file_lock, latest.to_string())?;
 
-        while let Some(_block) = file_lock.get_file(&latest) {
-            latest += 1;
-        }
-
-        let mut latest = 0;
         let mut last_hash = Bytes::from(null_hash().to_vec());
-        while let Some(block) = file_lock.get_file(&latest) {
+        while let Some(block) = file_lock.get_file(&latest.to_string()) {
             let block: FileReadGuard<ChainBlock> = block.read().await?;
 
             if block.last_hash() == &last_hash {
@@ -395,7 +403,20 @@ where
             latest += 1;
         }
 
-        let latest = if latest == 0 { 0 } else { latest - 1 };
+        let latest = if latest == 0 {
+            create_block(&mut file_lock, latest.to_string())?;
+            0
+        } else {
+            latest - 1
+        };
+
+        assert!(
+            file_lock.contains(&latest.to_string()),
+            "Chain is missing block {latest}"
+        );
+
+        std::mem::drop(file_lock);
+
         Ok(Self::new(file.clone(), store, latest, cutoff))
     }
 
@@ -496,7 +517,10 @@ where
 
                 trace!("locked latest block ordinal for writing");
 
-                let latest_block = file.get_file(&*latest).expect("latest block").clone();
+                let latest_block = file
+                    .get_file(&latest.to_string())
+                    .expect("latest block")
+                    .clone();
 
                 {
                     let mut latest_block: FileWriteGuard<ChainBlock> =
@@ -610,7 +634,7 @@ where
 
         let seq = stream::iter(0..((*latest) + 1))
             .map(move |block_id| {
-                file.get_file(&block_id)
+                file.get_file(&block_id.to_string())
                     .cloned()
                     .ok_or_else(|| internal!("missing chain block"))
             })
@@ -710,7 +734,7 @@ where
                 .create_dir(STORE.to_string())
                 .map_err(de::Error::custom)?;
 
-            let dir = fs::Dir::load(txn_id, dir)
+            let dir = fs::Dir::load(txn_id, dir, false)
                 .map_err(de::Error::custom)
                 .await?;
 
@@ -719,6 +743,7 @@ where
 
         let file = {
             let mut dir = self.txn.context().write().await;
+
             dir.create_dir(CHAIN.to_string())
                 .map_err(de::Error::custom)?
         };
@@ -768,9 +793,17 @@ where
             i += 1;
         }
 
+        let latest = if i == 0 {
+            create_block(&mut guard, 0).map_err(de::Error::custom)?;
+            0
+        } else {
+            i - 1
+        };
+
+        assert!(guard.contains(&latest.to_string()));
+
         std::mem::drop(guard);
 
-        let latest = if i == 0 { 0 } else { i - 1 };
         Ok(History::new(file, store, latest, txn_id))
     }
 }

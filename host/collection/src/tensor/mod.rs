@@ -1,5 +1,4 @@
 /// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
-
 use std::marker::PhantomData;
 use std::ops::{Div, Rem};
 use std::{fmt, iter};

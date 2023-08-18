@@ -13,7 +13,7 @@ use log::trace;
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
-use tc_transact::TxnId;
+use tc_transact::{fs, TxnId};
 use tc_value::{DType, Number, NumberCollator, NumberType};
 use tcgeneric::{ThreadSafe, Tuple};
 
@@ -99,6 +99,13 @@ impl<FE: AsType<Node> + ThreadSafe, T> SparseFile<FE, T> {
             table,
             dtype: PhantomData,
         })
+    }
+
+    pub async fn sync(&self) -> TCResult<()>
+    where
+        FE: for<'a> fs::FileSave<'a>,
+    {
+        self.table.sync().map_err(TCError::from).await
     }
 }
 

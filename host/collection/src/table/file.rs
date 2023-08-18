@@ -7,14 +7,14 @@ use async_trait::async_trait;
 use b_table::{Schema, TableLock};
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
-use freqfs::{DirLock, DirWriteGuard};
+use freqfs::{DirLock, DirReadGuard, DirWriteGuard};
 use futures::{future, try_join, TryFutureExt, TryStreamExt};
 use log::{debug, trace};
 use safecast::AsType;
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Inner, Persist, Restore, VERSIONS};
-use tc_transact::{Transact, Transaction, TxnId};
+use tc_transact::{fs, Transact, Transaction, TxnId};
 use tc_value::{Value, ValueCollator};
 use tcgeneric::{label, Id, Instance, Label, Map, TCBoxTryStream, ThreadSafe};
 
@@ -71,6 +71,23 @@ where
         })
     }
 
+    fn load(schema: TableSchema, collator: ValueCollator, dir: DirReadGuard<FE>) -> TCResult<Self> {
+        let deletes = dir
+            .get_dir(&*DELETES)
+            .cloned()
+            .ok_or_else(|| TCError::not_found(DELETES))?;
+
+        let inserts = dir
+            .get_dir(&*INSERTS)
+            .cloned()
+            .ok_or_else(|| TCError::not_found(INSERTS))?;
+
+        Ok(Self {
+            deletes: Version::load(schema.clone(), collator.clone(), deletes)?,
+            inserts: Version::load(schema, collator, inserts)?,
+        })
+    }
+
     async fn read(self) -> (VersionReadGuard<FE>, VersionReadGuard<FE>) {
         // acquire these locks in order to avoid the risk of a deadlock
         let inserts = self.inserts.into_read().await;
@@ -110,6 +127,13 @@ where
         rows = Box::pin(collate::try_diff(collator.clone(), rows, deleted));
 
         Ok(rows)
+    }
+
+    async fn commit(&self)
+    where
+        FE: for<'a> fs::FileSave<'a>,
+    {
+        try_join!(self.inserts.sync(), self.deletes.sync()).expect("commit");
     }
 }
 
@@ -178,24 +202,45 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    fn new(dir: DirLock<FE>, canon: Version<FE>, versions: DirLock<FE>) -> Self {
+    fn new(dir: DirLock<FE>, canon: Version<FE>, versions: DirLock<FE>) -> TCResult<Self> {
         let semaphore = Semaphore::new(Arc::new(canon.collator().inner().clone()));
+
+        let pending = {
+            let mut pending = OrdHashMap::new();
+
+            let versions = versions.try_read()?;
+
+            for (name, version) in versions.iter() {
+                let version = version
+                    .as_dir()
+                    .cloned()
+                    .ok_or_else(|| internal!("expected a table version dir but found a file"))?;
+
+                let schema = canon.schema().clone();
+                let collator = canon.collator().inner().clone();
+                let version = Delta::load(schema, collator, version.try_read()?)?;
+
+                pending.insert(name.parse()?, version);
+            }
+
+            pending
+        };
 
         let state = State {
             commits: OrdHashSet::new(),
             deltas: OrdHashMap::new(),
-            pending: OrdHashMap::new(),
+            pending,
             versions,
             finalized: None,
         };
 
-        Self {
+        Ok(Self {
             dir,
             state: Arc::new(RwLock::new(state)),
             canon,
             semaphore,
             phantom: PhantomData,
-        }
+        })
     }
 }
 
@@ -632,21 +677,32 @@ where
 impl<Txn, FE> Transact for TableFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + for<'a> fs::FileSave<'a>,
 {
     type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("Table::commit {}", txn_id);
 
-        let mut state = self.state.write().expect("state");
+        let version = {
+            let mut state = self.state.write().expect("state");
 
-        if state.finalized.as_ref() > Some(&txn_id) {
-            panic!("cannot commit finalized version {}", txn_id);
-        } else if !state.commits.insert(txn_id) {
-            log::warn!("duplicate commit at {}", txn_id);
-        } else if let Some(delta) = state.pending.remove(&txn_id) {
-            state.deltas.insert(txn_id, delta);
+            if state.finalized.as_ref() > Some(&txn_id) {
+                panic!("cannot commit finalized version {}", txn_id);
+            } else if !state.commits.insert(txn_id) {
+                log::warn!("duplicate commit at {}", txn_id);
+                None
+            } else if let Some(delta) = state.pending.remove(&txn_id) {
+                state.deltas.insert(txn_id, delta.clone());
+                Some(delta)
+            } else {
+                None
+            }
+        };
+
+        if let Some(delta) = version {
+            trace!("commit new version at {txn_id}");
+            delta.commit().await;
         }
 
         self.semaphore.finalize(&txn_id, false);
@@ -737,13 +793,19 @@ where
 
         let (canon, versions) = {
             let mut dir = dir.write().await;
-            let versions = dir.create_dir(VERSIONS.to_string())?;
+
+            let versions = dir
+                .get_dir(&*VERSIONS)
+                .cloned()
+                .ok_or_else(|| internal!("missing versions dir"))?;
+
             let canon = dir.create_dir(CANON.to_string())?;
             let canon = Version::create(schema, collator, canon)?;
+
             (canon, versions)
         };
 
-        Ok(Self::new(dir, canon, versions))
+        Self::new(dir, canon, versions)
     }
 
     async fn load(_txn_id: TxnId, schema: TableSchema, store: Dir<FE>) -> TCResult<Self> {
@@ -752,13 +814,19 @@ where
 
         let (canon, versions) = {
             let mut dir = dir.write().await;
-            let versions = dir.get_or_create_dir(VERSIONS.to_string())?;
+
+            let versions = dir
+                .get_dir(&*VERSIONS)
+                .cloned()
+                .ok_or_else(|| internal!("missing versions dir"))?;
+
             let canon = dir.get_or_create_dir(CANON.to_string())?;
             let canon = Version::load(schema, collator, canon)?;
+
             (canon, versions)
         };
 
-        Ok(Self::new(dir, canon, versions))
+        Self::new(dir, canon, versions)
     }
 
     fn dir(&self) -> Inner<FE> {
@@ -788,8 +856,14 @@ where
 
         let (canon, versions) = {
             let mut dir = dir.write().await;
+
+            let versions = dir
+                .get_dir(&*VERSIONS)
+                .cloned()
+                .ok_or_else(|| internal!("missing versions dir"))?;
+
             let canon = dir.create_dir(CANON.to_string())?;
-            let versions = dir.create_dir(VERSIONS.to_string())?;
+
             (canon, versions)
         };
 

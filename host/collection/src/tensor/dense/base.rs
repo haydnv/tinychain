@@ -7,9 +7,9 @@ use collate::Collator;
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, FileWriteGuardOwned};
-use futures::{join, try_join, TryFutureExt};
+use futures::{join, try_join};
 use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype};
-use log::debug;
+use log::{debug, info, trace, warn};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
 
@@ -212,6 +212,8 @@ where
         let pending = {
             let mut pending = OrdHashMap::new();
             let versions = versions.try_read()?;
+
+            info!("found {} pending versions", versions.len());
 
             for (name, version) in versions.iter() {
                 let version = version.as_dir().cloned().ok_or_else(|| {
@@ -437,7 +439,7 @@ where
             if state.finalized.as_ref() > Some(&txn_id) {
                 panic!("cannot commit finalized version {}", txn_id);
             } else if !state.commits.insert(txn_id) {
-                log::warn!("duplicate commit at {}", txn_id);
+                warn!("duplicate commit at {}", txn_id);
                 None
             } else if let Some(delta) = state.pending.remove(&txn_id) {
                 state.deltas.insert(txn_id, delta.clone());
@@ -541,15 +543,22 @@ where
 
     async fn load(_txn_id: TxnId, shape: Shape, store: fs::Dir<FE>) -> TCResult<Self> {
         let dir = store.into_inner();
+
         let (canon, versions) = {
-            let mut guard = dir.write().await;
-            let versions = guard.get_or_create_dir(fs::VERSIONS.to_string())?;
-            let canon = guard.get_or_create_dir(CANON.to_string())?;
+            let mut dir = dir.write().await;
+
+            let versions = dir
+                .get_dir(&*fs::VERSIONS)
+                .cloned()
+                .ok_or_else(|| internal!("missing versions dir"))?;
+
+            let canon = dir.get_or_create_dir(CANON.to_string())?;
+
             (canon, versions)
         };
 
         // handle the case that no canonical version was ever finalized
-        let canon = if canon.try_read().expect("canon").is_empty() {
+        let canon = if canon.try_read()?.is_empty() {
             DenseFile::constant(canon, shape, T::zero()).await?
         } else {
             DenseFile::load(canon, shape).await?
@@ -620,7 +629,21 @@ where
         let (txn, shape) = cxt;
 
         let dir = txn.context().clone();
-        let (dir, canon, versions) = dir_init(dir).map_err(de::Error::custom).await?;
+
+        let (canon, versions) = {
+            let mut guard = dir.write().await;
+
+            let versions = guard
+                .create_dir(fs::VERSIONS.to_string())
+                .map_err(de::Error::custom)?;
+
+            let canon = guard
+                .create_dir(CANON.to_string())
+                .map_err(de::Error::custom)?;
+
+            (canon, versions)
+        };
+
         let canon = DenseFile::from_stream((canon, shape), decoder).await?;
 
         Self::new(dir, canon, versions).map_err(de::Error::custom)
@@ -810,8 +833,14 @@ where
 {
     let (canon, versions) = {
         let mut guard = dir.write().await;
-        let versions = guard.create_dir(fs::VERSIONS.to_string())?;
+
+        let versions = guard
+            .get_dir(&*fs::VERSIONS)
+            .cloned()
+            .ok_or_else(|| internal!("missing versions dir"))?;
+
         let canon = guard.create_dir(CANON.to_string())?;
+
         (canon, versions)
     };
 

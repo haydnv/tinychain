@@ -126,6 +126,11 @@ pub struct TCError {
 impl TCError {
     /// Returns a new error with the given code and message.
     pub fn new<I: fmt::Display>(code: ErrorKind, message: I) -> Self {
+        #[cfg(debug_assertions)]
+        if code == ErrorKind::Internal {
+            panic!("internal error: {message}");
+        }
+
         Self {
             kind: code,
             data: message.into(),

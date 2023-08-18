@@ -1272,7 +1272,7 @@ where
 impl<Txn, FE> Transact for SparseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + for<'a> fs::FileSave<'a>,
 {
     type Commit = ();
 
@@ -1723,7 +1723,7 @@ where
         let store = self.txn.context().clone();
 
         let txn_id = *self.txn.id();
-        let store = fs::Dir::load(txn_id, store)
+        let store = fs::Dir::load(txn_id, store, false)
             .map_err(de::Error::custom)
             .await?;
 

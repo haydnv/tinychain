@@ -1876,7 +1876,7 @@ where
 {
     let mut cxt = txn.context().write().await;
     let (_dir_name, dir) = cxt.create_dir_unique()?;
-    fs::Dir::load(*txn.id(), dir).await
+    fs::Dir::load(*txn.id(), dir, false).await
 }
 
 async fn create_tensor<State>(
