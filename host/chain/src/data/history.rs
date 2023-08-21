@@ -11,7 +11,7 @@ use freqfs::{DirLock, DirWriteGuard, FileLock, FileReadGuard, FileReadGuardOwned
 use futures::stream::{self, StreamExt};
 use futures::{try_join, TryFutureExt, TryStreamExt};
 use get_size::GetSize;
-use log::{debug, error, trace};
+use log::{debug, error, info, trace};
 use safecast::*;
 
 use tc_collection::btree::Node as BTreeNode;
@@ -28,7 +28,7 @@ use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, ThreadSafe, Tupl
 
 use crate::{null_hash, BLOCK_SIZE, CHAIN};
 
-use super::block::{ChainBlock, Mutation};
+use super::block::{ChainBlock, MutationRecord};
 use super::store::{Store, StoreEntry, StoreEntryView};
 
 const STORE: Label = label("store");
@@ -205,7 +205,7 @@ where
         let err_divergent =
             |block_id| bad_request!("chain to replicate diverges at block {}", block_id);
 
-        debug!("replicate chain history");
+        info!("replicate {subject:?} from chain history {other:?}");
 
         let (latest, other_latest) =
             try_join!(self.latest.read(*txn.id()), other.latest.read(*txn.id()))?;
@@ -694,6 +694,12 @@ where
     }
 }
 
+impl<State: StateInstance> fmt::Debug for History<State> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a chain history")
+    }
+}
+
 struct HistoryVisitor<State: StateInstance> {
     txn: State::Txn,
 }
@@ -812,7 +818,7 @@ async fn parse_block_state<State>(
     store: &Store<State::Txn, State::FE>,
     txn: &State::Txn,
     block_data: Map<Tuple<State>>,
-) -> TCResult<BTreeMap<TxnId, Vec<Mutation>>>
+) -> TCResult<BTreeMap<TxnId, Vec<MutationRecord>>>
 where
     State: StateInstance,
     State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
@@ -833,12 +839,12 @@ where
         for op in ops.into_iter() {
             if op.matches::<(Value,)>() {
                 let (key,) = op.opt_cast_into().expect("GET op");
-                parsed.push(Mutation::Delete(key));
+                parsed.push(MutationRecord::Delete(key));
             } else if op.matches::<(Value, State)>() {
                 let (key, value) = op.opt_cast_into().expect("PUT op");
                 let value = StoreEntry::try_from_state(value)?;
                 let value = store.save_state(txn, value).await?;
-                parsed.push(Mutation::Put(key, value));
+                parsed.push(MutationRecord::Put(key, value));
             } else {
                 return Err(internal!("unable to parse historical mutation {:?}", op,));
             }
@@ -854,7 +860,7 @@ async fn replay_and_save<State, T>(
     subject: &T,
     txn: &State::Txn,
     txn_id: TxnId,
-    ops: &[Mutation],
+    ops: &[MutationRecord],
     source: &Store<State::Txn, State::FE>,
     dest: &Store<State::Txn, State::FE>,
     block: &mut ChainBlock,
@@ -868,13 +874,13 @@ where
 {
     for op in ops {
         match op {
-            Mutation::Delete(key) => {
+            MutationRecord::Delete(key) => {
                 trace!("replay DELETE {} at {}", key, txn_id);
 
                 subject.delete(txn, &[], key.clone()).await?;
                 block.append_delete(txn_id, key.clone())
             }
-            Mutation::Put(key, original_hash) => {
+            MutationRecord::Put(key, original_hash) => {
                 let state = source.resolve(*txn.id(), original_hash.clone()).await?;
 
                 trace!("replay PUT {}: {:?} at {}", key, state, txn_id);
@@ -905,7 +911,7 @@ pub type HistoryView<'en> =
 
 async fn load_history<'en, State>(
     history: History<State>,
-    op: Mutation,
+    op: MutationRecord,
     txn: State::Txn,
 ) -> TCResult<MutationView<'en>>
 where
@@ -913,10 +919,8 @@ where
     State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     match op {
-        Mutation::Delete(key) => Ok(MutationView::Delete(key)),
-        Mutation::Put(key, value) => {
-            debug!("historical mutation: PUT {} <- {:?}", key, value);
-
+        MutationRecord::Delete(key) => Ok(MutationView::Delete(key)),
+        MutationRecord::Put(key, value) => {
             let value = history
                 .store
                 .resolve(*txn.id(), value)

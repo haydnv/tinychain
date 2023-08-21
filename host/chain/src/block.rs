@@ -110,7 +110,7 @@ where
         schema: Self::Schema,
         store: fs::Dir<State::FE>,
     ) -> TCResult<Self> {
-        debug!("BlockChain::load");
+        debug!("BlockChain::load {}", std::any::type_name::<T>());
 
         let subject = T::load(txn_id, schema.clone(), store).await?;
 

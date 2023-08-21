@@ -17,22 +17,22 @@ use tc_value::Value;
 use tcgeneric::Tuple;
 
 #[derive(Clone, Eq, PartialEq)]
-pub enum Mutation {
+pub enum MutationRecord {
     Delete(Value),
     Put(Value, Scalar),
 }
 
-impl<'a, D: Digest> Hash<D> for &'a Mutation {
+impl<'a, D: Digest> Hash<D> for &'a MutationRecord {
     fn hash(self) -> Output<D> {
         match self {
-            Mutation::Delete(key) => Hash::<D>::hash(key),
-            Mutation::Put(key, value) => Hash::<D>::hash((key, value)),
+            MutationRecord::Delete(key) => Hash::<D>::hash(key),
+            MutationRecord::Put(key, value) => Hash::<D>::hash((key, value)),
         }
     }
 }
 
 #[async_trait]
-impl de::FromStream for Mutation {
+impl de::FromStream for MutationRecord {
     type Context = ();
 
     async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
@@ -40,7 +40,7 @@ impl de::FromStream for Mutation {
     }
 }
 
-impl<'en> en::ToStream<'en> for Mutation {
+impl<'en> en::ToStream<'en> for MutationRecord {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
         use en::IntoStream;
 
@@ -51,7 +51,7 @@ impl<'en> en::ToStream<'en> for Mutation {
     }
 }
 
-impl<'en> en::IntoStream<'en> for Mutation {
+impl<'en> en::IntoStream<'en> for MutationRecord {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
             Self::Delete(key) => (key,).into_stream(encoder),
@@ -60,7 +60,7 @@ impl<'en> en::IntoStream<'en> for Mutation {
     }
 }
 
-impl fmt::Debug for Mutation {
+impl fmt::Debug for MutationRecord {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Delete(key) => write!(f, "DELETE {:?}", key),
@@ -73,7 +73,7 @@ struct MutationVisitor;
 
 #[async_trait]
 impl de::Visitor for MutationVisitor {
-    type Value = Mutation;
+    type Value = MutationRecord;
 
     fn expecting() -> &'static str {
         "a mutation record"
@@ -86,8 +86,8 @@ impl de::Visitor for MutationVisitor {
             .ok_or_else(|| de::Error::invalid_length(0, Self::expecting()))?;
 
         match seq.next_element(()).await? {
-            Some(value) => Ok(Mutation::Put(key, value)),
-            None => Ok(Mutation::Delete(key)),
+            Some(value) => Ok(MutationRecord::Put(key, value)),
+            None => Ok(MutationRecord::Delete(key)),
         }
     }
 }
@@ -96,7 +96,7 @@ impl de::Visitor for MutationVisitor {
 #[derive(Clone, Eq, PartialEq)]
 pub struct ChainBlock {
     last_hash: Bytes,
-    pub mutations: BTreeMap<TxnId, Vec<Mutation>>,
+    pub mutations: BTreeMap<TxnId, Vec<MutationRecord>>,
 }
 
 impl GetSize for ChainBlock {
@@ -116,7 +116,7 @@ impl ChainBlock {
     pub fn hash<'a, M, R>(last_hash: &'a [u8], mutations: M) -> Output<Sha256>
     where
         M: IntoIterator<Item = (&'a TxnId, &'a R)> + 'a,
-        &'a R: IntoIterator<Item = &'a Mutation> + 'a,
+        &'a R: IntoIterator<Item = &'a MutationRecord> + 'a,
     {
         let mut hasher = Sha256::new();
         hasher.update(last_hash);
@@ -157,15 +157,15 @@ impl ChainBlock {
     }
 
     /// Return a new, empty block with an the given mutation list for the given `TxnId`.
-    pub fn with_mutations(hash: Bytes, mutations: BTreeMap<TxnId, Vec<Mutation>>) -> Self {
+    pub fn with_mutations(hash: Bytes, mutations: BTreeMap<TxnId, Vec<MutationRecord>>) -> Self {
         Self {
             last_hash: hash,
             mutations,
         }
     }
 
-    /// Append a [`Mutation`] to this [`ChainBlock`]
-    pub(super) fn append(&mut self, txn_id: TxnId, mutation: Mutation) {
+    /// Append a [`MutationRecord`] to this [`ChainBlock`]
+    pub(super) fn append(&mut self, txn_id: TxnId, mutation: MutationRecord) {
         match self.mutations.entry(txn_id) {
             Entry::Vacant(entry) => {
                 entry.insert(vec![mutation]);
@@ -178,13 +178,13 @@ impl ChainBlock {
 
     /// Append a DELETE op to this `ChainBlock`
     pub fn append_delete(&mut self, txn_id: TxnId, key: Value) {
-        self.append(txn_id, Mutation::Delete(key))
+        self.append(txn_id, MutationRecord::Delete(key))
     }
 
     /// Append a PUT op to the this `ChainBlock`
     pub fn append_put(&mut self, txn_id: TxnId, key: Value, value: Scalar) {
         debug!("ChainBlock::append_put {} <- {:?}", key, value);
-        self.append(txn_id, Mutation::Put(key, value))
+        self.append(txn_id, MutationRecord::Put(key, value))
     }
 
     /// The current hash of this block
@@ -249,7 +249,7 @@ impl fmt::Debug for ChainBlock {
                 f,
                 "\t\t{}: {:?}",
                 txn_id,
-                Tuple::<&Mutation>::from_iter(mutations)
+                Tuple::<&MutationRecord>::from_iter(mutations)
             )?;
         }
 
