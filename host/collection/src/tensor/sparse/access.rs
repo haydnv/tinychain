@@ -10,6 +10,7 @@ use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 use ha_ndarray::*;
 use itertools::Itertools;
+use log::{debug, trace};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
 
@@ -2070,7 +2071,12 @@ impl<FE, T, S: Clone> Clone for SparseCow<FE, T, S> {
 }
 
 impl<FE, T, S> SparseCow<FE, T, S> {
-    pub fn create(source: S, filled: SparseFile<FE, T>, zeros: SparseFile<FE, T>) -> Self {
+    pub fn create(source: S, filled: SparseFile<FE, T>, zeros: SparseFile<FE, T>) -> Self
+    where
+        S: fmt::Debug,
+    {
+        debug!("create copy-on-write view of {source:?}");
+
         Self {
             source,
             filled,
@@ -2244,11 +2250,13 @@ where
     S: SparseInstance<DType = T> + Clone,
     Number: From<T> + CastInto<T>,
 {
-    type Guard = SparseCowWriteGuard<'a, FE, Self, T>;
+    type Guard = SparseCowWriteGuard<'a, FE, T, S>;
 
     async fn write(&'a self) -> Self::Guard {
+        debug!("lock {self:?} for writing...");
+
         SparseCowWriteGuard {
-            source: self,
+            source: &self.source,
             filled: self.filled.write().await,
             zeros: self.zeros.write().await,
         }
@@ -2280,14 +2288,14 @@ where
     }
 }
 
-pub struct SparseCowWriteGuard<'a, FE, S, T> {
+pub struct SparseCowWriteGuard<'a, FE, T, S> {
     source: &'a S,
     filled: SparseFileWriteGuard<'a, FE, T>,
     zeros: SparseFileWriteGuard<'a, FE, T>,
 }
 
 #[async_trait]
-impl<'a, FE, S, T> SparseWriteGuard<T> for SparseCowWriteGuard<'a, FE, S, T>
+impl<'a, FE, T, S> SparseWriteGuard<T> for SparseCowWriteGuard<'a, FE, T, S>
 where
     FE: AsType<Node> + ThreadSafe,
     S: SparseInstance<DType = T> + Clone,
@@ -2295,8 +2303,15 @@ where
     Number: From<T>,
 {
     async fn clear(&mut self, txn_id: TxnId, range: Range) -> TCResult<()> {
+        debug!("clear {range:?} of COW guard with source {:?}", self.source);
+
         self.filled.clear(txn_id, range.clone()).await?;
+        trace!("cleared filled elements");
+
         self.zeros.clear(txn_id, range.clone()).await?;
+        trace!("cleared zero elements");
+
+        trace!("copying new zero elements from {:?}...", self.source);
 
         let mut elements = self
             .source
@@ -2307,6 +2322,8 @@ where
         while let Some((coord, value)) = elements.try_next().await? {
             self.zeros.write_value(txn_id, coord, value).await?;
         }
+
+        trace!("copied new zero elements");
 
         Ok(())
     }

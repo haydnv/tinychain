@@ -9,7 +9,7 @@ use freqfs::DirLock;
 use futures::future::TryFutureExt;
 use futures::stream::TryStreamExt;
 use ha_ndarray::{ArrayBase, CDatatype};
-use log::trace;
+use log::{debug, trace};
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
@@ -61,9 +61,11 @@ impl<FE, T> SparseFile<FE, T> {
 impl<FE: AsType<Node> + ThreadSafe, T> SparseFile<FE, T> {
     pub async fn copy_from<O>(dir: DirLock<FE>, txn_id: TxnId, other: O) -> TCResult<Self>
     where
-        O: SparseInstance<DType = T>,
+        O: SparseInstance<DType = T> + fmt::Debug,
         T: Into<Number>,
     {
+        debug!("SparseFile::copy_from {other:?}");
+
         let this = Self::create(dir, other.shape().clone())?;
         let mut table = this.table.write().await;
         let mut elements = other
@@ -80,6 +82,8 @@ impl<FE: AsType<Node> + ThreadSafe, T> SparseFile<FE, T> {
     }
 
     pub fn create(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
+        debug!("SparseFile::create");
+
         let schema = Schema::new(shape);
         let collator = NumberCollator::default();
         let table = TableLock::create(schema, collator, dir)?;
@@ -91,6 +95,8 @@ impl<FE: AsType<Node> + ThreadSafe, T> SparseFile<FE, T> {
     }
 
     pub fn load(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
+        debug!("SparseFile::load");
+
         let schema = Schema::new(shape);
         let collator = NumberCollator::default();
         let table = TableLock::load(schema, collator, dir)?;
@@ -194,6 +200,8 @@ where
     type Guard = SparseFileWriteGuard<'a, FE, T>;
 
     async fn write(&'a self) -> SparseFileWriteGuard<'a, FE, T> {
+        debug!("SparseFile::write");
+
         SparseFileWriteGuard {
             shape: self.table.schema().shape(),
             table: self.table.write().await,
@@ -251,6 +259,8 @@ where
     Number: From<T>,
 {
     async fn clear(&mut self, _txn_id: TxnId, range: Range) -> TCResult<()> {
+        debug!("SparseFileWriteGuard::clear {range:?}");
+
         if range == Range::default() || range == Range::all(&self.shape) {
             self.table.truncate().map_err(TCError::from).await
         } else {

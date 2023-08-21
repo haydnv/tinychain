@@ -101,20 +101,25 @@ where
         txn_id: TxnId,
         canon: SparseAccess<Txn, FE, T>,
     ) -> TCResult<SparseAccess<Txn, FE, T>> {
+        debug!("construct latest Sparse version at {txn_id}");
+
         if self.finalized > Some(txn_id) {
             return Err(conflict!("sparse tensor is already finalized at {txn_id}"));
         }
 
         let mut version = canon.clone().into();
-        for (_version_id, delta) in self
+        for (version_id, delta) in self
             .deltas
             .iter()
             .take_while(|(version_id, _delta)| *version_id <= &txn_id)
         {
+            trace!("load a committed version at {version_id}");
             version = Version::create(version, delta.filled.clone(), delta.zeros.clone()).into();
         }
 
         if let Some(delta) = self.pending.get(&txn_id) {
+            trace!("load a pending version at {txn_id}");
+            assert!(!self.deltas.contains_key(&txn_id));
             version = Version::create(version, delta.filled.clone(), delta.zeros.clone()).into();
         }
 
@@ -127,28 +132,37 @@ where
         txn_id: TxnId,
         canon: SparseAccess<Txn, FE, T>,
     ) -> TCResult<Version<Txn, FE, T>> {
+        debug!("construct a pending Sparse version at {txn_id}");
+
         if self.commits.contains(&txn_id) {
             return Err(conflict!("{} has already been committed", txn_id));
         } else if self.finalized > Some(txn_id) {
             return Err(conflict!("sparse tensor is already finalized at {txn_id}"));
         }
 
+        assert!(!self.deltas.contains_key(&txn_id));
+
         let mut version = canon.clone().into();
-        for (_version_id, delta) in self
+        for (version_id, delta) in self
             .deltas
             .iter()
             .take_while(|(version_id, _delta)| *version_id < &txn_id)
         {
+            trace!("load a committed version at {version_id}");
             version = Version::create(version, delta.filled.clone(), delta.zeros.clone()).into();
         }
 
         if let Some(delta) = self.pending.get(&txn_id) {
+            trace!("load a pending version at {txn_id}");
+
             Ok(Version::create(
                 version,
                 delta.filled.clone(),
                 delta.zeros.clone(),
             ))
         } else {
+            trace!("create a new pending version at {txn_id}");
+
             let dir = {
                 let mut versions = self.versions.try_write()?;
                 versions.create_dir(txn_id.to_string())?
@@ -159,11 +173,15 @@ where
             let zeros = dir.create_dir(ZEROS.to_string())?;
             let filled = SparseFile::create(filled, canon.shape().clone())?;
             let zeros = SparseFile::create(zeros, canon.shape().clone())?;
-            let delta = Delta { filled, zeros };
 
-            self.pending.insert(txn_id, delta.clone());
+            let delta = Delta {
+                filled: filled.clone(),
+                zeros: zeros.clone(),
+            };
 
-            Ok(Version::create(version, delta.filled, delta.zeros))
+            self.pending.insert(txn_id, delta);
+
+            Ok(Version::create(version, filled, zeros))
         }
     }
 }
@@ -603,7 +621,14 @@ where
         };
 
         let mut guard = version.write().await;
-        guard.overwrite(txn_id, backup.clone()).await
+
+        trace!("locked {version:?} for writing");
+
+        guard.overwrite(txn_id, backup.canon.clone()).await?;
+
+        trace!("restored {self:?} from {backup:?}");
+
+        Ok(())
     }
 }
 
