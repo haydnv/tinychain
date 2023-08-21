@@ -138,6 +138,8 @@ impl Replica for BlockChain<CollectionBase> {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        debug!("BlockChain::<CollectionBase>>::replicate");
+
         let chain = txn.get(source.append(CHAIN), Value::default()).await?;
         let chain: Self = chain.try_cast_into(|s| {
             bad_request!(

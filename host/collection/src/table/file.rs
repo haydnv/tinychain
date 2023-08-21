@@ -205,10 +205,12 @@ where
     fn new(dir: DirLock<FE>, canon: Version<FE>, versions: DirLock<FE>) -> TCResult<Self> {
         let semaphore = Semaphore::new(Arc::new(canon.collator().inner().clone()));
 
-        let pending = {
-            let mut pending = OrdHashMap::new();
+        let deltas = {
+            let mut deltas = OrdHashMap::new();
 
             let versions = versions.try_read()?;
+
+            debug!("found {} table versions pending merge", versions.len());
 
             for (name, version) in versions.iter() {
                 let version = version
@@ -220,16 +222,16 @@ where
                 let collator = canon.collator().inner().clone();
                 let version = Delta::load(schema, collator, version.try_read()?)?;
 
-                pending.insert(name.parse()?, version);
+                deltas.insert(name.parse()?, version);
             }
 
-            pending
+            deltas
         };
 
         let state = State {
-            commits: OrdHashSet::new(),
-            deltas: OrdHashMap::new(),
-            pending,
+            commits: deltas.keys().copied().collect(),
+            deltas,
+            pending: OrdHashMap::new(),
             versions,
             finalized: None,
         };

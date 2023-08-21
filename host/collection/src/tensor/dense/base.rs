@@ -9,7 +9,7 @@ use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, FileWriteGuardOwned};
 use futures::{join, try_join};
 use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype};
-use log::{debug, info, trace, warn};
+use log::{debug, info, warn};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
 
@@ -209,8 +209,8 @@ where
     fn new(dir: DirLock<FE>, canon: DenseFile<FE, T>, versions: DirLock<FE>) -> TCResult<Self> {
         let semaphore = Semaphore::new(Arc::new(Collator::default()));
 
-        let pending = {
-            let mut pending = OrdHashMap::new();
+        let deltas = {
+            let mut deltas = OrdHashMap::new();
             let versions = versions.try_read()?;
 
             info!("found {} pending versions", versions.len());
@@ -220,16 +220,16 @@ where
                     internal!("expected a dense tensor version dir but found a file")
                 })?;
 
-                pending.insert(name.parse()?, version);
+                deltas.insert(name.parse()?, version);
             }
 
-            pending
+            deltas
         };
 
         let state = State {
-            commits: OrdHashSet::new(),
-            deltas: OrdHashMap::new(),
-            pending,
+            commits: deltas.keys().copied().collect(),
+            deltas,
+            pending: OrdHashMap::new(),
             versions,
             finalized: None,
             dtype: PhantomData,
