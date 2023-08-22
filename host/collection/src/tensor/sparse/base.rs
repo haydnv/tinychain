@@ -223,8 +223,8 @@ where
     fn new(dir: DirLock<FE>, canon: SparseFile<FE, T>, versions: DirLock<FE>) -> TCResult<Self> {
         let semaphore = Semaphore::new(Arc::new(Collator::default()));
 
-        let pending = {
-            let mut pending = OrdHashMap::new();
+        let deltas = {
+            let mut deltas = OrdHashMap::new();
 
             let versions = versions.try_read()?;
 
@@ -238,16 +238,16 @@ where
                 let shape = canon.schema().shape().clone();
                 let delta = Delta::load(dir.clone(), shape)?;
 
-                pending.insert(name.parse()?, delta);
+                deltas.insert(name.parse()?, delta);
             }
 
-            pending
+            deltas
         };
 
         let state = State {
-            commits: OrdHashSet::new(),
-            deltas: OrdHashMap::new(),
-            pending,
+            commits: deltas.keys().copied().collect(),
+            deltas,
+            pending: OrdHashMap::new(),
             versions,
             finalized: None,
             phantom: PhantomData,
