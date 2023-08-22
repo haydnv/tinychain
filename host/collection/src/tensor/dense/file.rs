@@ -250,7 +250,7 @@ where
             }
         }
 
-        {
+        if num_blocks > 1 {
             let block_id = num_blocks - 1;
             let block = contents
                 .get_file(&block_id)

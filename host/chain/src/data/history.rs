@@ -57,7 +57,7 @@ impl<State: StateInstance> Clone for History<State> {
 impl<State> History<State>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe + Clone,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
 {
     fn new(
         file: DirLock<State::FE>,
@@ -177,8 +177,7 @@ where
         + AsType<BTreeNode>
         + AsType<ChainBlock>
         + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+        + for<'a> fs::FileSave<'a>,
 {
     pub async fn append_put(&self, txn: &State::Txn, key: Value, value: State) -> TCResult<()>
     where
@@ -240,7 +239,6 @@ where
             let (mut dest, source) = try_join!(
                 self.write_block(*latest)
                     .map_err(|cause| internal!("missing chain block {}: {cause}", *latest)),
-
                 other
                     .read_block(*latest)
                     .map_err(|cause| bad_request!("invalid source Chain: {cause}"))
@@ -329,7 +327,7 @@ where
 impl<State> fs::Persist<State::FE> for History<State>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + ThreadSafe + for<'a> fs::FileSave<'a> + Clone,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
 {
     type Txn = State::Txn;
     type Schema = ();
@@ -429,7 +427,7 @@ where
 impl<State> AsyncHash for History<State>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe + Clone,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
 {
     async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         let latest_block_id = self.latest.read(txn_id).await?;
@@ -486,7 +484,7 @@ where
 impl<State> Transact for History<State>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe + Clone,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
 {
     type Commit = ();
 
@@ -620,7 +618,7 @@ where
 impl<'en, State> IntoView<'en, State::FE> for History<State>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode>,
 {
     type Txn = State::Txn;
     type View = HistoryView<'en>;
@@ -675,8 +673,7 @@ where
         + AsType<ChainBlock>
         + AsType<BTreeNode>
         + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+        + for<'a> fs::FileSave<'a>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -712,8 +709,7 @@ where
         + AsType<ChainBlock>
         + AsType<BTreeNode>
         + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+        + for<'a> fs::FileSave<'a>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -821,7 +817,7 @@ async fn parse_block_state<State>(
 ) -> TCResult<BTreeMap<TxnId, Vec<MutationRecord>>>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
     State: StateInstance + From<Scalar>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
@@ -867,7 +863,7 @@ async fn replay_and_save<State, T>(
 ) -> TCResult<()>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Scalar>,
-    State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode>,
     T: Route<State> + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
@@ -916,7 +912,7 @@ async fn load_history<'en, State>(
 ) -> TCResult<MutationView<'en>>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
 {
     match op {
         MutationRecord::Delete(key) => Ok(MutationView::Delete(key)),

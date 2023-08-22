@@ -46,7 +46,7 @@ pub struct SyncChain<State: StateInstance, T> {
 impl<State, T> SyncChain<State, T>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + Clone,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
 {
     async fn write_ahead(&self, txn_id: TxnId) {
         trace!("SyncChain::write_ahead {}", txn_id);
@@ -96,7 +96,7 @@ where
 impl<State, T> ChainInstance<State, T> for SyncChain<State, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
@@ -142,7 +142,7 @@ where
 impl<State, T> Transact for SyncChain<State, T>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + Clone,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
     T: Transact + Send + Sync,
 {
     type Commit = T::Commit;
@@ -203,7 +203,7 @@ where
 impl<State, T> fs::Persist<State::FE> for SyncChain<State, T>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + Clone,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Send + Sync,
 {
     type Txn = State::Txn;
@@ -293,7 +293,7 @@ where
         })
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<State::FE> {
+    fn dir(&self) -> fs::Inner<State::FE> {
         self.subject.dir()
     }
 }
@@ -302,8 +302,15 @@ where
 impl<State, T> Recover<State::FE> for SyncChain<State, T>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Scalar>,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + Clone,
+    State::FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<TensorNode>
+        + AsType<ChainBlock>
+        + for<'a> fs::FileSave<'a>,
     T: Route<State> + fmt::Debug + Send + Sync,
+    Collection<State::Txn, State::FE>: TryCastFrom<State>,
+    Scalar: TryCastFrom<State>,
+    BTreeNode: freqfs::FileLoad,
 {
     type Txn = State::Txn;
 
@@ -326,7 +333,7 @@ where
 impl<State, T> fs::CopyFrom<State::FE, Self> for SyncChain<State, T>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + Clone,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + fmt::Debug,
 {
     async fn copy_from(

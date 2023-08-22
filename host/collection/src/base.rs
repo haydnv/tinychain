@@ -13,13 +13,13 @@ use tc_transact::fs::{CopyFrom, Dir, Persist, Restore};
 use tc_transact::{fs, AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
 
-use super::btree::{self, BTree, BTreeFile, BTreeInstance};
+use super::btree::{BTree, BTreeFile, BTreeInstance};
 use super::table::{Table, TableFile, TableInstance};
 use super::tensor::{
-    self, Dense, DenseBase, DenseCacheFile, Sparse, SparseBase, Tensor, TensorBase, TensorInstance,
+    Dense, DenseBase, DenseCacheFile, Sparse, SparseBase, Tensor, TensorBase, TensorInstance,
     TensorType,
 };
-use super::{Collection, CollectionType, CollectionView, Schema};
+use super::{BTreeNode, Collection, CollectionType, CollectionView, Schema, TensorNode};
 
 #[derive(Clone)]
 pub enum CollectionBase<Txn, FE> {
@@ -31,7 +31,7 @@ pub enum CollectionBase<Txn, FE> {
 impl<Txn, FE> CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<btree::Node> + ThreadSafe,
+    FE: AsType<BTreeNode> + ThreadSafe,
 {
     /// Get the [`Schema`] of this [`Collection`]
     pub fn schema(&self) -> Schema {
@@ -66,7 +66,7 @@ where
 impl<Txn, FE> Transact for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + for<'en> fs::FileSave<'en>,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + for<'en> fs::FileSave<'en>,
 {
     type Commit = ();
 
@@ -99,7 +99,7 @@ where
 impl<T, FE> AsyncHash for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         Collection::from(self).hash(txn_id).await
@@ -110,8 +110,8 @@ where
 impl<Txn, FE> Persist<FE> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
-    btree::Node: freqfs::FileLoad,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    BTreeNode: freqfs::FileLoad,
 {
     type Txn = Txn;
     type Schema = Schema;
@@ -187,8 +187,8 @@ where
 impl<Txn, FE> CopyFrom<FE, Collection<Txn, FE>> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
-    btree::Node: freqfs::FileLoad,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    BTreeNode: freqfs::FileLoad,
 {
     async fn copy_from(txn: &Txn, store: Dir<FE>, instance: Collection<Txn, FE>) -> TCResult<Self> {
         match instance {
@@ -215,8 +215,8 @@ where
 impl<Txn, FE> Restore<FE> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
-    btree::Node: freqfs::FileLoad,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    BTreeNode: freqfs::FileLoad,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         match (self, backup) {
@@ -258,7 +258,7 @@ impl<T, FE> TryCastFrom<Collection<T, FE>> for CollectionBase<T, FE> {
 impl<'en, T, FE> IntoView<'en, FE> for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
     Self: 'en,
 {
     type Txn = T;
@@ -284,7 +284,7 @@ pub struct CollectionVisitor<Txn, FE> {
 impl<Txn, FE> CollectionVisitor<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     pub fn new(txn: Txn) -> Self {
         Self {
@@ -339,7 +339,7 @@ where
 impl<T, FE> de::Visitor for CollectionVisitor<T, FE>
 where
     T: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     type Value = CollectionBase<T, FE>;
 
@@ -364,7 +364,7 @@ where
 impl<T, FE> de::FromStream for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     type Context = T;
 

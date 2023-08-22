@@ -17,12 +17,12 @@ use table::{TableInstance, TableStream, TableType};
 use tensor::TensorType;
 
 pub use base::{CollectionBase, CollectionVisitor};
-pub use btree::{BTree, BTreeFile};
+pub use btree::{BTree, BTreeFile, Node as BTreeNode};
 pub use schema::Schema;
 pub use table::Table;
 pub use tensor::{
-    Dense, DenseBase, DenseCacheFile, DenseView, Sparse, SparseBase, SparseView, Tensor,
-    TensorBase, TensorInstance, TensorView,
+    Dense, DenseBase, DenseCacheFile, DenseView, Node as TensorNode, Sparse, SparseBase,
+    SparseView, Tensor, TensorBase, TensorInstance, TensorView,
 };
 
 mod base;
@@ -106,7 +106,7 @@ as_type!(Collection<Txn, FE>, Tensor, Tensor<Txn, FE>);
 impl<Txn, FE> Collection<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<btree::Node> + ThreadSafe,
+    FE: AsType<BTreeNode> + ThreadSafe,
 {
     pub fn schema(&self) -> Schema {
         match self {
@@ -211,7 +211,7 @@ where
 impl<T, FE> de::FromStream for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: tensor::dense::DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     type Context = T;
 

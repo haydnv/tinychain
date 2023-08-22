@@ -128,8 +128,7 @@ where
         + AsType<BTreeNode>
         + AsType<ChainBlock>
         + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+        + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + Clone + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,

@@ -111,7 +111,7 @@ struct ContainsHandler<Txn, FE> {
 impl<'a, State> Handler<'a, State> for ContainsHandler<State::Txn, State::FE>
 where
     State: StateInstance,
-    State::FE: AsType<Node> + ThreadSafe,
+    State::FE: AsType<Node>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -307,7 +307,7 @@ where
 impl<'a, State> Handler<'a, State> for TableHandler<State::Txn, State::FE>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Map<State>>,
-    State::FE: AsType<Node> + ThreadSafe,
+    State::FE: AsType<Node>,
     Map<Value>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
     Tuple<State>: TryFrom<State, Error = TCError>,
@@ -482,7 +482,7 @@ impl<T> From<T> for SelectHandler<T> {
 impl<State> Route<State> for Table<State::Txn, State::FE>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<u64>,
-    State::FE: AsType<Node> + ThreadSafe,
+    State::FE: AsType<Node>,
     Map<Value>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
     Tuple<State>: TryFrom<State, Error = TCError>,
@@ -496,7 +496,7 @@ where
 impl<State> Route<State> for TableFile<State::Txn, State::FE>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<u64>,
-    State::FE: AsType<Node> + ThreadSafe,
+    State::FE: AsType<Node>,
     Map<Value>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
     Tuple<State>: TryFrom<State, Error = TCError>,
@@ -514,7 +514,7 @@ fn route<'a, State, T>(
 ) -> Option<Box<dyn Handler<'a, State> + 'a>>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<u64>,
-    State::FE: AsType<Node> + ThreadSafe,
+    State::FE: AsType<Node>,
     T: TableRead + TableOrder + TableSlice + TableStream + TableWrite + Clone + fmt::Debug,
     <T as TableSlice>::Slice: TableStream,
     Map<Value>: TryFrom<State, Error = TCError>,
