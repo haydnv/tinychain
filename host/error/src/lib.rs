@@ -6,6 +6,7 @@ use std::convert::Infallible;
 use std::{fmt, io};
 
 use destream::en;
+use log::warn;
 
 /// A result of type `T`, or a [`TCError`]
 pub type TCResult<T> = Result<T, TCError>;
@@ -127,8 +128,11 @@ impl TCError {
     /// Returns a new error with the given code and message.
     pub fn new<I: fmt::Display>(code: ErrorKind, message: I) -> Self {
         #[cfg(debug_assertions)]
-        if code == ErrorKind::Internal {
-            panic!("internal error: {message}");
+        match code {
+            ErrorKind::Internal | ErrorKind::MethodNotAllowed | ErrorKind::NotImplemented => {
+                panic!("{code}: {message}")
+            }
+            other => warn!("{other}: {message}"),
         }
 
         Self {
@@ -174,10 +178,6 @@ impl TCError {
             subject, path, method
         );
 
-        #[cfg(debug_assertions)]
-        panic!("{}", message);
-
-        #[cfg(not(debug_assertions))]
         Self::new(ErrorKind::MethodNotAllowed, message)
     }
 
@@ -227,10 +227,6 @@ impl From<pathlink::ParseError> for TCError {
 
 impl From<ha_ndarray::Error> for TCError {
     fn from(err: ha_ndarray::Error) -> Self {
-        #[cfg(debug_assertions)]
-        panic!("array math error: {err}");
-
-        #[cfg(not(debug_assertions))]
         Self {
             kind: ErrorKind::Internal,
             data: err.to_string().into(),
@@ -275,10 +271,6 @@ impl From<io::Error> for TCError {
             io::ErrorKind::InvalidInput => bad_request!("{}", cause),
             io::ErrorKind::NotFound => TCError::not_found(cause),
             io::ErrorKind::PermissionDenied => {
-                #[cfg(debug_assertions)]
-                panic!("host filesystem denied permission: {}", cause);
-
-                #[cfg(not(debug_assertions))]
                 bad_gateway!("host filesystem permission denied").consume(cause)
             }
             io::ErrorKind::WouldBlock => {
