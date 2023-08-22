@@ -1,5 +1,3 @@
-from ...generic import gcs
-from ...scalar.number import Bool
 from ...scalar.ref import deref, is_literal
 
 from .base import Tensor

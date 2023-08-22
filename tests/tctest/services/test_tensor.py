@@ -64,26 +64,26 @@ class TensorChainTests(PersistenceTest, unittest.TestCase):
         hosts[2].put(endpoints["tensor"].append("overwrite"))
         hosts[1].start()
 
-        # dense = expect_dense(tc.I32, [2, 3], [2] * 6)
-        #
-        # for host in hosts:
-        #     actual = host.get(endpoints["dense"])
-        #     self.assertEqual(actual, dense, host)
-        #
-        #     actual = host.get(endpoints["sparse"])
-        #     self.assertEqual(actual, sparse, host)
-        #
-        # eq = expect_dense(tc.Bool, [2, 3], [True] + [False] * 5)
-        #
-        # for host in hosts:
-        #     actual = host.get(endpoints["dense"])
-        #     self.assertEqual(actual, dense)
-        #
-        #     actual = host.get(endpoints["sparse"])
-        #     self.assertEqual(actual, sparse)
-        #
-        #     actual = host.get(endpoints["tensor"].append("eq"))
-        #     self.assertEqual(actual, eq)
+        dense = expect_dense(tc.I32, [2, 3], [2] * 6)
+
+        for host in hosts:
+            actual = host.get(endpoints["dense"])
+            self.assertEqual(actual, dense, host)
+
+            actual = host.get(endpoints["sparse"])
+            self.assertEqual(actual, sparse, host)
+
+        eq = expect_dense(tc.Bool, [2, 3], [True] + [False] * 5)
+
+        for host in hosts:
+            actual = host.get(endpoints["dense"])
+            self.assertEqual(actual, dense)
+
+            actual = host.get(endpoints["sparse"])
+            self.assertEqual(actual, sparse)
+
+            actual = host.get(endpoints["tensor"].append("eq"))
+            self.assertEqual(actual, eq)
 
 
 def expect_dense(dtype, shape, flat):

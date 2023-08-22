@@ -2,17 +2,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Type
 
-from ..decorators import closure, delete, get
 from ..error import BadRequest
 from ..generic import Map, Tuple
 from ..json import to_json
 from ..scalar.bound import Range
 from ..scalar.number import Bool, UInt
 from ..scalar.ref import If, Ref, form_of
-from ..state import State, Stream
+from ..state import State
 from ..uri import URI
 from .base import Collection, Column
-from .btree import BTree
 
 if TYPE_CHECKING:
     from ..service import Model

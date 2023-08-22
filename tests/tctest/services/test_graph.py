@@ -36,14 +36,14 @@ class TestService(tc.graph.Graph):
     @tc.post
     def create_user(self, first_name: tc.String, last_name: tc.String):
         # TODO: change method signature to (self, new_user: User) on completion of #175
-        user_id = self.user.max_id() + 1
+        user_id = 1
         return tc.after(self.user.insert([user_id], [first_name, last_name]), user_id)
 
 
 class GraphTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        actor = rjwt.Actor('/')
+        actor = rjwt.Actor("/")
 
         cls.host = start_host(NS, replicate=LEAD, public_key=actor.public_key)
         cls.host.create_namespace(actor, tc.URI(TestService).path()[0], NS, LEAD)
@@ -52,10 +52,14 @@ class GraphTests(unittest.TestCase):
     def testCreateUser(self):
         uri = tc.URI(TestService).path()
         count = self.host.get(uri.extend("user", "count"))
-        user_id = self.host.post(uri.append("create_user"), {"first_name": "First", "last_name": "Last"})
+        user_id = self.host.post(
+            uri.append("create_user"), {"first_name": "First", "last_name": "Last"}
+        )
 
         self.assertEqual(self.host.get(uri.extend("user", "count")), count + 1)
-        self.assertEqual(self.host.get(uri.append("user"), [user_id]), [user_id, "First", "Last"])
+        self.assertEqual(
+            self.host.get(uri.append("user"), [user_id]), [user_id, "First", "Last"]
+        )
 
     @classmethod
     def tearDownClass(cls) -> None:
