@@ -10,7 +10,7 @@ use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::{join, try_join};
 use ha_ndarray::*;
-use log::debug;
+use log::{debug, trace};
 use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
@@ -1403,9 +1403,14 @@ where
                 }
             },
             {
+                trace!("acquiring write permit on {this:?}[{range:?}]...");
+
                 // always acquire these permits in-order to avoid the risk of a deadlock
-                let _write_permit = this.write_permit(txn_id, range.clone()).await?;
-                let _read_permit = that.accessor.read_permit(txn_id, Range::default()).await?;
+                let write_permit = this.write_permit(txn_id, range.clone()).await?;
+                trace!("acquired write permit {write_permit:?}");
+
+                let read_permit = that.accessor.read_permit(txn_id, Range::default()).await?;
+                trace!("acquired read permit {read_permit:?}");
 
                 if range.is_empty() || range == Range::all(this.shape()) {
                     let guard = this.write().await;

@@ -19,7 +19,7 @@ use tcgeneric::{label, Id, Label, PathSegment, TCBoxTryFuture, ThreadSafe, Tuple
 
 use super::{
     broadcast, broadcast_shape, Axes, AxisRange, Dense, DenseBase, DenseCacheFile, DenseView, Node,
-    Range, Schema, Shape, Sparse, SparseBase, SparseView, Tensor, TensorBoolean,
+    Range, Schema, Shape, Sparse, SparseBase, SparseView, Tensor, TensorBase, TensorBoolean,
     TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert,
     TensorDiagonal, TensorInstance, TensorMatMul, TensorMath, TensorMathConst, TensorRead,
     TensorReduce, TensorTransform, TensorTrig, TensorType, TensorUnary, TensorUnaryBoolean,
@@ -1370,7 +1370,7 @@ where
     {
         Some(Box::new(move |txn, key, value| {
             debug!("PUT Tensor: {} <- {:?}", key, value);
-            Box::pin(write::<State, T>(self.tensor, *txn.id(), key, value))
+            Box::pin(write::<State, T>(self.tensor, txn, key, value))
         }))
     }
 }
@@ -1831,7 +1831,7 @@ where
         .await
 }
 
-async fn write<State, T>(tensor: T, txn_id: TxnId, key: Value, value: State) -> TCResult<()>
+async fn write<State, T>(tensor: T, txn: &State::Txn, key: Value, value: State) -> TCResult<()>
 where
     State: StateInstance,
     State::FE: DenseCacheFile + AsType<Node>,
@@ -1845,8 +1845,8 @@ where
         + TensorTransform<Broadcast = Tensor<State::Txn, State::FE>>
         + TryCastFrom<State>,
 {
-    debug!("write {value:?} to {key}");
     let range = cast_range(tensor.shape(), Scalar::Value(key))?;
+    let txn_id = *txn.id();
 
     if value.matches::<Tensor<_, _>>() {
         let value = Tensor::<_, _>::opt_cast_from(value).expect("tensor");
@@ -1855,9 +1855,22 @@ where
             value.broadcast(range.shape())?
         };
 
-        tensor.write(txn_id, range, value).await
+        let (_name, store) = {
+            let mut cxt = txn.context().write().await;
+            cxt.create_dir_unique()?
+        };
+
+        // TODO: is there a more efficient way to do this?
+        let store = fs::Dir::load(txn_id, store, false).await?;
+        let value: TensorBase<_, _> = fs::CopyFrom::copy_from(txn, store, value.into()).await?;
+
+        debug!("write {value:?} to {range:?}");
+
+        tensor.write(txn_id, range, value.into()).await
     } else if value.matches::<Number>() {
         let value = Number::opt_cast_from(value).expect("element");
+
+        debug!("write {value:?} to {range:?}");
 
         if let Some(coord) = range.as_coord(tensor.shape()) {
             tensor.write_value_at(txn_id, coord, value).await
