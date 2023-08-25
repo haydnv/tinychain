@@ -9,7 +9,7 @@ use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, FileWriteGuardOwned};
 use futures::{join, try_join};
 use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype};
-use log::{debug, info, warn};
+use log::{debug, warn};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
 
@@ -213,7 +213,7 @@ where
             let mut deltas = OrdHashMap::new();
             let versions = versions.try_read()?;
 
-            info!("found {} pending versions", versions.len());
+            debug!("found {} pending versions", versions.len());
 
             for (name, version) in versions.iter() {
                 let version = version.as_dir().cloned().ok_or_else(|| {

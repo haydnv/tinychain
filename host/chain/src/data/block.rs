@@ -1,6 +1,5 @@
 use std::collections::btree_map::{BTreeMap, Entry};
 use std::fmt;
-use std::iter::FromIterator;
 
 use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
@@ -14,7 +13,6 @@ use tc_error::*;
 use tc_scalar::Scalar;
 use tc_transact::TxnId;
 use tc_value::Value;
-use tcgeneric::Tuple;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum MutationRecord {
@@ -245,12 +243,7 @@ impl fmt::Debug for ChainBlock {
         writeln!(f, "\tentries: {}", self.mutations.len())?;
 
         for (txn_id, mutations) in &self.mutations {
-            writeln!(
-                f,
-                "\t\t{}: {:?}",
-                txn_id,
-                Tuple::<&MutationRecord>::from_iter(mutations)
-            )?;
+            writeln!(f, "\t\t{}: {:?}", txn_id, mutations)?;
         }
 
         Ok(())

@@ -70,13 +70,13 @@ class DenseTests(HostTest):
 
     def testAdd(self):
         cxt = tc.Context()
-        cxt.left = tc.tensor.Dense.arange([5, 2, 2], 1., 21.)
+        cxt.left = tc.tensor.Dense.arange([5, 2, 2], 1.0, 21.0)
         cxt.right = tc.tensor.Dense.constant([2, 5, 1, 2], 2)
         cxt.result = cxt.left + cxt.right
 
         actual = self.host.post(ENDPOINT, cxt)
 
-        left = np.arange(1., 21., 1.).reshape([5, 2, 2])
+        left = np.arange(1.0, 21.0, 1.0).reshape([5, 2, 2])
         right = np.ones([2, 5, 1, 2], np.int32) * 2
         expected = expect_dense(tc.F64, [2, 5, 2, 2], (left + right).flatten())
 
@@ -85,19 +85,21 @@ class DenseTests(HostTest):
     def testCast(self):
         cxt = tc.Context()
         cxt.x = tc.tensor.Dense.random_normal([3, 3])
-        cxt.y1 = cxt.x / tc.Float(3.)
+        cxt.y1 = cxt.x / tc.Float(3.0)
         cxt.y2 = cxt.x / tc.Int(3).cast(tc.Float)
         cxt.y3 = cxt.x.cast(tc.F32) / 3
         cxt.result = (cxt.y1.dtype, cxt.y2.dtype, cxt.y3.dtype)
 
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, tc.to_json([{tc.URI(tc.Class): {tc.URI(tc.F32): {}}}] * 3))
+        self.assertEqual(
+            actual, tc.to_json([{tc.URI(tc.Class): {tc.URI(tc.F32): {}}}] * 3)
+        )
 
     def testDiv(self):
         shape = [3]
 
         cxt = tc.Context()
-        cxt.left = tc.tensor.Dense.arange(shape, 2., 8.)
+        cxt.left = tc.tensor.Dense.arange(shape, 2.0, 8.0)
         cxt.right = tc.tensor.Dense.constant([1], 2)
         cxt.result = cxt.left / cxt.right
 
@@ -274,19 +276,21 @@ class DenseTests(HostTest):
         axis = 2
 
         cxt = tc.Context()
-        cxt.big = tc.tensor.Dense.arange(shape, 0., 24.)
+        cxt.big = tc.tensor.Dense.arange(shape, 0.0, 24.0)
         cxt.result = cxt.big.max(axis)
 
         actual = self.host.post(ENDPOINT, cxt)
         expected = np.max(np.arange(0, 24).reshape(shape), axis)
-        self.assertEqual(actual, expect_dense(tc.F64, expected.shape, expected.flatten()))
+        self.assertEqual(
+            actual, expect_dense(tc.F64, expected.shape, expected.flatten())
+        )
 
     def testSum(self):
         shape = [4, 2, 3, 5]
         axis = 2
 
         cxt = tc.Context()
-        cxt.big = tc.tensor.Dense.arange(shape, 0., 120.)
+        cxt.big = tc.tensor.Dense.arange(shape, 0.0, 120.0)
         cxt.result = cxt.big.sum(axis)
 
         actual = self.host.post(ENDPOINT, cxt)
@@ -316,7 +320,7 @@ class DenseTests(HostTest):
         actual_y, actual_z = self.host.post(ENDPOINT, cxt)
 
         expected_y = np.tanh(x)
-        expected_z = 1 / (np.cosh(x)**2)
+        expected_z = 1 / (np.cosh(x) ** 2)
 
         self.assertTrue(all_close(actual_y, expected_y))
         self.assertTrue(all_close(actual_z, expected_z))
@@ -392,7 +396,12 @@ class DenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = tc.tensor.Dense.random_uniform([5, 1], minval, maxval)
-        cxt.result = (cxt.x >= -1).all().logical_and((cxt.x <= 3).all()).logical_and(cxt.x.mean() > 0)
+        cxt.result = (
+            (cxt.x >= -1)
+            .all()
+            .logical_and((cxt.x <= 3).all())
+            .logical_and(cxt.x.mean() > 0)
+        )
 
         actual = self.host.post(ENDPOINT, cxt)
         self.assertTrue(actual)
@@ -429,10 +438,13 @@ class SparseTests(HostTest):
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape)
         cxt.small = tc.tensor.Sparse.zeros([3])
-        cxt.result = tc.after([
-            cxt.big[1, 1].write(1),
-            cxt.small[1].write(2),
-        ], cxt.big + cxt.small)
+        cxt.result = tc.after(
+            [
+                cxt.big[1, 1].write(1),
+                cxt.small[1].write(2),
+            ],
+            cxt.big + cxt.small,
+        )
 
         actual = self.host.post(ENDPOINT, cxt)
 
@@ -461,7 +473,6 @@ class SparseTests(HostTest):
         cxt.result = cxt.sparse.expand_dims(2) * cxt.sparse.expand_dims(1)
 
         actual = self.host.post(ENDPOINT, cxt)
-        print("actual", actual)
 
         expected = np.zeros(shape)
         for coord, value in data:
@@ -477,10 +488,13 @@ class SparseTests(HostTest):
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape, tc.I16)
         cxt.small = tc.tensor.Sparse.zeros([5, 2], tc.U32)
-        cxt.result = tc.after([
-            cxt.big[1, 2, 0].write(2),
-            cxt.small[3, 1].write(3),
-        ], cxt.small - cxt.big)
+        cxt.result = tc.after(
+            [
+                cxt.big[1, 2, 0].write(2),
+                cxt.small[3, 1].write(3),
+            ],
+            cxt.small - cxt.big,
+        )
 
         actual = self.host.post(ENDPOINT, cxt)
 
@@ -524,14 +538,12 @@ class SparseTests(HostTest):
         cxt.result = cxt.sparse.sum(0)
 
         actual = self.host.post(ENDPOINT, cxt)
-        print("actual", actual)
 
         expected = np.zeros(shape)
         for coord, value in data:
             expected[coord] = value
         expected = np.sum(expected, 0)
         expected = expect_sparse(tc.I32, (2,), expected)
-        print("expected", expected)
 
         self.assertEqual(actual, expected)
 
@@ -573,9 +585,9 @@ class SparseTests(HostTest):
         self.maxDiff = None
 
         data = [
-            [[0, 0, 3, 0], 1.],
-            [[0, 2, 0, 0], 2.],
-            [[1, 0, 0, 0], 3.],
+            [[0, 0, 3, 0], 1.0],
+            [[0, 2, 0, 0], 2.0],
+            [[1, 0, 0, 0], 3.0],
         ]
 
         shape = [2, 5, 2, 3, 4, 10]
@@ -633,14 +645,14 @@ class TensorTests(HostTest):
     def testDiv(self):
         self.maxDiff = None
         cxt = tc.Context()
-        cxt.dense = tc.tensor.Dense.arange([30, 3, 2], 1., 181.)
+        cxt.dense = tc.tensor.Dense.arange([30, 3, 2], 1.0, 181.0)
         cxt.sparse = tc.tensor.Sparse.zeros([3, 2], tc.F32)
         cxt.result = tc.after(cxt.sparse[1, 0].write(2), cxt.sparse / cxt.dense)
 
         actual = self.host.post(ENDPOINT, cxt)
         l = np.arange(1, 181).reshape([30, 3, 2])
         r = np.zeros([3, 2], float)
-        r[1, 0] = 2.
+        r[1, 0] = 2.0
         expected = r / l
         self.assertEqual(actual, expect_sparse(tc.F64, [30, 3, 2], expected))
 
@@ -671,7 +683,11 @@ class TensorTests(HostTest):
 
     def testSparseAsDense(self):
         matrix = np.eye(3).astype(bool)
-        data = [(list(coord), bool(matrix[coord])) for coord in np.ndindex(matrix.shape) if matrix[coord] != 0]
+        data = [
+            (list(coord), bool(matrix[coord]))
+            for coord in np.ndindex(matrix.shape)
+            if matrix[coord] != 0
+        ]
 
         cxt = tc.Context()
         cxt.sparse = tc.tensor.Sparse.load([3, 3], data, tc.Bool)
@@ -689,9 +705,7 @@ class TensorTests(HostTest):
         cxt.sparse = cxt.dense.as_sparse()
 
         actual = self.host.post(ENDPOINT, cxt)
-        print("actual", actual)
         expected = expect_sparse(tc.I32, [3, 3], matrix)
-        print("expected", expected)
         self.assertEqual(actual, expected)
 
     def testConcatenate(self):
@@ -702,11 +716,12 @@ class TensorTests(HostTest):
         cxt.x1 = load_dense(x1, tc.I32)
         cxt.x2 = load_dense(x2, tc.I32)
         cxt.result = tc.tensor.Dense.concatenate([cxt.x1, cxt.x2], axis=1)
-        tc.print_json(cxt)
         actual = self.host.post(ENDPOINT, cxt)
 
         expected = np.concatenate([x1, x2], axis=1)
-        self.assertEqual(actual, expect_dense(tc.I32, [5, 12], expected.flatten().tolist()))
+        self.assertEqual(
+            actual, expect_dense(tc.I32, [5, 12], expected.flatten().tolist())
+        )
 
 
 def all_close(actual, expected):
@@ -742,7 +757,11 @@ def nparray_to_sparse(arr, dtype):
     dtype = float if issubclass(dtype, tc.Float) else int
     zero = dtype(0)
     coords = itertools.product(*[range(dim) for dim in arr.shape])
-    sparse = [[list(coord), n] for (coord, n) in zip(coords, (dtype(n) for n in arr.flatten())) if n != zero]
+    sparse = [
+        [list(coord), n]
+        for (coord, n) in zip(coords, (dtype(n) for n in arr.flatten()))
+        if n != zero
+    ]
     return sparse
 
 

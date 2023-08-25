@@ -102,38 +102,6 @@ class State(_Base):
         return self.is_none().logical_not()
 
 
-# A stream of `State` s
-
-class Stream(State, Functional):
-    """A stream of states which supports functional methods like `fold` and `map`."""
-
-    __uri__ = URI(State) + "/stream"
-
-    @classmethod
-    def range(cls, range):
-        """
-        Construct a new :class:`Stream` of :class:`Number` s in the given `range`.
-
-        `range` can be a positive :class:`Number`, `(start, stop)`, or `(start, stop, step)`
-        """
-
-        from .scalar.ref import Get
-        return cls(Get(URI(cls) + "/range", range))
-
-    def aggregate(self):
-        return self._get("aggregate", rtype=Stream)
-
-    def first(self):
-        """Return the first item in this `Stream`, or `Nil` if the `Stream` is empty."""
-
-        return self._get("first", rtype=State)
-
-    def flatten(self):
-        """Flatten a `Stream` of `Stream` s into a single `Stream` of their component elements."""
-
-        return self._get("flatten", rtype=Stream)
-
-
 class Object(State):
     """A user-defined type"""
 

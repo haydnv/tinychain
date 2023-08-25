@@ -17,7 +17,7 @@ from ...scalar.bound import handle_bounds
 from ...scalar.number import Bool, F32, F64, Number, U64
 from ...scalar import ref
 from ...shape import Shape
-from ...state import Class, State, Stream
+from ...state import Class, State
 from ...uri import URI
 
 from ..base import Collection
@@ -716,12 +716,6 @@ class Dense(Tensor, typing.Generic[DType]):
         except TypeError:
             return Dense(form=Cast(self, dtype))
 
-    def elements(self, bounds=None):
-        """Return a :class:`Stream` of the :class:`Number` elements of this `Dense` tensor."""
-
-        bounds = handle_bounds(bounds)
-        return self._get("elements", bounds, Stream)
-
     def sub(self, other):
         if ref.same_as(other, 0):
             return self
@@ -826,16 +820,6 @@ class Sparse(Tensor, typing.Generic[DType]):
             return self
 
         return Sparse(form=Div(self, other))
-
-    def elements(self, bounds=None):
-        """
-        Return a :class:`Stream` of this tensor's `(coord, number)` coordinate-value elements.
-
-        `coord` is a :class:`Tuple` of :class:`U64` coordinates, and `number` is the element at `coord`.
-        """
-
-        bounds = handle_bounds(bounds)
-        return self._get("elements", bounds, Stream)
 
     def mul(self, other):
         if ref.same_as(other, 1):

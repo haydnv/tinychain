@@ -53,5 +53,5 @@ from tinychain.scalar.ref import (
     while_loop,
 )
 from tinychain.scalar.value import EmailAddress, Id, String, Value, Version
-from tinychain.state import Class, Instance, State, Stream
+from tinychain.state import Class, Instance, State
 from tinychain.uri import URI

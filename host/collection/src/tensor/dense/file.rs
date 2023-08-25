@@ -46,6 +46,7 @@ impl<FE, T> Clone for DenseFile<FE, T> {
     }
 }
 
+// TODO: remove calls .to_string() in get_file after validating a fix in freqfs
 impl<FE, T> DenseFile<FE, T>
 where
     FE: DenseCacheFile + AsType<Buffer<T>>,
@@ -221,8 +222,8 @@ where
 
         let block_size = {
             let block = contents
-                .get_file(&0)
-                .ok_or_else(|| TCError::not_found("block 0"))?;
+                .get_file(&0.to_string())
+                .ok_or_else(|| internal!("tensor missing block 0"))?;
 
             let block: FileReadGuard<Buffer<T>> = block.read().await?;
             size += block.len() as u64;
@@ -234,8 +235,8 @@ where
 
         for block_id in 1..(num_blocks - 1) {
             let block = contents
-                .get_file(&block_id)
-                .ok_or_else(|| TCError::not_found(format!("block {block_id}")))?;
+                .get_file(&block_id.to_string())
+                .ok_or_else(|| internal!("tensor missing block {block_id}"))?;
 
             let block: FileReadGuard<Buffer<T>> = block.read().await?;
             if block.len() == block_size {
@@ -253,8 +254,8 @@ where
         if num_blocks > 1 {
             let block_id = num_blocks - 1;
             let block = contents
-                .get_file(&block_id)
-                .ok_or_else(|| bad_request!("block {block_id}"))?;
+                .get_file(&block_id.to_string())
+                .ok_or_else(|| internal!("tensor missing block {block_id}"))?;
 
             let block: FileReadGuard<Buffer<T>> = block.read().await?;
             size += block.len() as u64;
@@ -427,12 +428,9 @@ where
 
     async fn read_block(&self, _txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         let dir = self.dir.read().await;
-        let file = dir.get_file(&block_id).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("dense tensor block {}", block_id),
-            )
-        })?;
+        let file = dir
+            .get_file(&block_id.to_string())
+            .ok_or_else(|| internal!("tensor missing block {block_id}"))?;
 
         let buffer = file.read_owned().await?;
         let block_axis = block_axis_for(self.shape(), self.block_size);
@@ -451,12 +449,8 @@ where
 
         let blocks = futures::stream::iter(block_map)
             .map(move |block_id| {
-                dir.get_file(&block_id).cloned().ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!("dense tensor block {}", block_id),
-                    )
-                    .into()
+                dir.get_file(&block_id.to_string()).cloned().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, format!("tensor block {block_id}"))
                 })
             })
             .map_ok(|block| block.into_read())
@@ -496,12 +490,9 @@ where
 
     async fn write_block(&self, _txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
         let dir = self.dir.read().await;
-        let file = dir.get_file(&block_id).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("dense tensor block {}", block_id),
-            )
-        })?;
+        let file = dir
+            .get_file(&block_id.to_string())
+            .ok_or_else(|| internal!("tensor missing block {block_id}"))?;
 
         let buffer = file.write_owned().await?;
         let block_axis = block_axis_for(self.shape(), self.block_size);
@@ -517,12 +508,8 @@ where
 
         let blocks = futures::stream::iter(self.block_map.into_inner())
             .map(move |block_id| {
-                dir.get_file(&block_id).cloned().ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!("dense tensor block {}", block_id),
-                    )
-                    .into()
+                dir.get_file(&block_id.to_string()).cloned().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, format!("tensor block {block_id}"))
                 })
             })
             .map_ok(|block| block.into_write())

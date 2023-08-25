@@ -689,7 +689,7 @@ impl TryCastFrom<Value> for Number {
             Value::Email(_) => false,
             Value::Id(id) => f64::from_str(id.as_str()).is_ok(),
             Value::Link(_) => false,
-            Value::None => true,
+            Value::None => false,
             Value::Number(_) => true,
             Value::Tuple(t) if t.len() == 1 => Self::can_cast_from(&t[0]),
             Value::Tuple(t) if t.len() == 2 => {
@@ -710,7 +710,7 @@ impl TryCastFrom<Value> for Number {
                 .map(Self::Float)
                 .ok(),
             Value::Link(_) => None,
-            Value::None => Some(false.into()),
+            Value::None => None,
             Value::Number(n) => Some(n),
             Value::Tuple(mut t) if t.len() == 1 => Self::opt_cast_from(t.pop().unwrap()),
             Value::Tuple(mut t) if t.len() == 2 => {

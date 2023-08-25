@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use hyper::body::{Body, HttpBody};
 use hyper::client::HttpConnector;
-use log::{debug, warn};
+use log::debug;
 use url::Url;
 
 use tc_error::*;
@@ -60,7 +60,7 @@ impl crate::gateway::Client for Client {
             tbon::de::try_decode((), body)
                 .map_err(|cause| {
                     #[cfg(debug_assertions)]
-                    warn!("upstream error: {cause}");
+                    log::warn!("upstream error: {cause}");
 
                     bad_gateway!("error decoding response from {}", link).consume(cause)
                 })
@@ -90,7 +90,7 @@ impl crate::gateway::Client for Client {
             tbon::de::try_decode(txn, response.into_body())
                 .map_err(|cause| {
                     #[cfg(debug_assertions)]
-                    warn!("upstream error: {cause}");
+                    log::warn!("upstream error: {cause}");
 
                     bad_gateway!("error decoding response from {}", link).consume(cause)
                 })
@@ -166,7 +166,7 @@ impl crate::gateway::Client for Client {
             tbon::de::try_decode(txn, response.into_body())
                 .map_err(|cause| {
                     #[cfg(debug_assertions)]
-                    warn!("upstream error: {cause}");
+                    log::warn!("upstream error: {cause}");
 
                     bad_gateway!("error decoding response from {}: {:?}", link, params)
                         .consume(cause)

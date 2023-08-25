@@ -269,7 +269,10 @@ impl<FE, B> File<FE, B> {
     }
 
     /// Destructure this [`File`] into its underlying [`freqfs::DirLock`].
-    pub fn into_inner(self) -> Inner<FE> where FE: Send + Sync {
+    pub fn into_inner(self) -> Inner<FE>
+    where
+        FE: Send + Sync,
+    {
         self.inner.into_inner()
     }
 }

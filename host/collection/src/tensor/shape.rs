@@ -364,6 +364,15 @@ impl IntoIterator for Range {
     }
 }
 
+impl<'a> IntoIterator for &'a Range {
+    type Item = &'a AxisRange;
+    type IntoIter = <&'a [AxisRange] as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.axes.as_slice().iter()
+    }
+}
+
 impl Default for Range {
     fn default() -> Self {
         Self { axes: vec![] }
@@ -449,7 +458,7 @@ impl Shape {
         self.0
             .iter()
             .copied()
-            .zip(range.iter())
+            .zip(range)
             .all(|(dim, bound)| match bound {
                 AxisRange::At(i) => *i < dim,
                 AxisRange::In(range, _step) => range.start < dim && range.end <= dim,
@@ -523,10 +532,6 @@ impl Shape {
         if self.contains_range(range) {
             Ok(())
         } else {
-            #[cfg(debug_assertions)]
-            panic!("shape {self:?} does not contain {range:?}");
-
-            #[cfg(not(debug_assertions))]
             Err(bad_request!("shape {self:?} does not contain {range:?}"))
         }
     }

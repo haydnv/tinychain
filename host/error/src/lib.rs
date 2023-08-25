@@ -6,7 +6,6 @@ use std::convert::Infallible;
 use std::{fmt, io};
 
 use destream::en;
-use log::warn;
 
 /// A result of type `T`, or a [`TCError`]
 pub type TCResult<T> = Result<T, TCError>;
@@ -132,7 +131,7 @@ impl TCError {
             ErrorKind::Internal | ErrorKind::MethodNotAllowed | ErrorKind::NotImplemented => {
                 panic!("{code}: {message}")
             }
-            other => warn!("{other}: {message}"),
+            other => log::warn!("{other}: {message}"),
         }
 
         Self {
@@ -155,7 +154,7 @@ impl TCError {
             ErrorKind::Internal | ErrorKind::MethodNotAllowed | ErrorKind::NotImplemented => {
                 panic!("{code}: {message} (cause: {stack:?})")
             }
-            other => warn!("{other}: {message} (cause: {stack:?})"),
+            other => log::warn!("{other}: {message} (cause: {stack:?})"),
         }
 
         Self {

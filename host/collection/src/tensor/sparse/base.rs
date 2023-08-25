@@ -9,7 +9,7 @@ use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::DirLock;
 use futures::{join, try_join, TryFutureExt};
 use ha_ndarray::{Array, Buffer, CDatatype};
-use log::{debug, info, trace};
+use log::{debug, trace};
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
@@ -228,7 +228,7 @@ where
 
             let versions = versions.try_read()?;
 
-            info!("found {} pending versions", versions.len());
+            debug!("found {} pending versions", versions.len());
 
             for (name, dir) in versions.iter() {
                 let dir = dir.as_dir().ok_or_else(|| {

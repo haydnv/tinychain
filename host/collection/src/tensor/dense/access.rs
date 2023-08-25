@@ -606,7 +606,8 @@ where
     ) -> TCResult<FileWriteGuardOwned<FE, Buffer<S::DType>>> {
         let mut dir = self.dir.write().await;
 
-        if let Some(buffer) = dir.get_file(&block_id) {
+        // TODO: remove this call to .to_string()
+        if let Some(buffer) = dir.get_file(&block_id.to_string()) {
             buffer.write_owned().map_err(TCError::from).await
         } else {
             let block = self.source.read_block(txn_id, block_id).await?;
@@ -656,7 +657,8 @@ where
 
         let dir = self.dir.read().await;
 
-        if let Some(block) = dir.get_file(&block_id) {
+        // TODO: remove this call to .to_string()
+        if let Some(block) = dir.get_file(&block_id.to_string()) {
             debug!("DenseCow::read_block {block_id} at {txn_id} found new block");
 
             let buffer: Buffer<S::DType> = block
@@ -2778,7 +2780,9 @@ impl<S: DenseInstance> DenseSlice<S> {
             block_bounds.push(bound.try_into()?);
         }
 
-        if block_bounds.len() < block_shape.len() {
+        if block_bounds.len() < block_shape.len()
+            || (block_shape[0] as u64) < transform.shape()[block_axis]
+        {
             let axis_bound = transform.range()[block_axis].clone();
             let block_axis_bound = ha_ndarray::AxisBound::try_from(axis_bound)?;
             trace!("block axis bound is {block_axis_bound:?}");

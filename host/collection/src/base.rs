@@ -117,7 +117,7 @@ where
     type Schema = Schema;
 
     async fn create(txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
-        info!("create persistent mutable collection at {store:?}");
+        debug!("create persistent mutable collection at {store:?}");
 
         match schema {
             Schema::BTree(schema) => {
