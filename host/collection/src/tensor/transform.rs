@@ -20,10 +20,12 @@ impl Broadcast {
         source_shape.validate()?;
         shape.validate()?;
 
-        if source_shape.is_empty() {
-            return Err(bad_request!("cannot broadcast an empty Tensor"));
-        } else if shape.is_empty() {
-            return Err(bad_request!("cannot broadcast into an empty Tensor"));
+        if source_shape.len() > shape.len() {
+            return Err(bad_request!(
+                "cannot broadcast {:?} into {:?}",
+                source_shape,
+                shape
+            ));
         } else if source_shape == shape {
             warn!(
                 "broadcast a Tensor with shape {:?} into {:?}",
@@ -32,16 +34,6 @@ impl Broadcast {
         }
 
         let ndim = shape.len();
-        debug_assert!(source_shape.len() <= ndim);
-
-        if source_shape.len() > ndim {
-            return Err(bad_request!(
-                "cannot broadcast {:?} into {:?}",
-                source_shape,
-                shape
-            ));
-        }
-
         let offset = ndim - source_shape.len();
         let mut inverted_axes = Vec::with_capacity(shape.len());
         let mut broadcast: Vec<bool> = iter::repeat(true).take(ndim).collect();
@@ -391,6 +383,7 @@ pub struct Slice {
 impl Slice {
     pub fn new(source_shape: Shape, range: Range) -> TCResult<Slice> {
         source_shape.validate_range(&range)?;
+        let range = range.normalize(&source_shape);
 
         if range.is_coord(source_shape.as_slice()) {
             return Err(bad_request!(

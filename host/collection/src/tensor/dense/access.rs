@@ -412,16 +412,12 @@ pub struct DenseBroadcast<S> {
 
 impl<S: DenseInstance> DenseBroadcast<S> {
     pub fn new(source: S, shape: Shape) -> TCResult<Self> {
-        shape.validate()?;
-
-        if shape.len() < source.ndim() {
-            return Err(bad_request!("cannot broadcast {source:?} into {shape:?}"));
-        }
-
         debug!(
             "broadcast {source:?} with block size {block_size} into {shape:?}",
             block_size = source.block_size()
         );
+
+        let transform = Broadcast::new(source.shape().clone(), shape)?;
 
         // characterize the source tensor
         let num_blocks = source.size() / source.block_size() as u64;
@@ -430,17 +426,22 @@ impl<S: DenseInstance> DenseBroadcast<S> {
         let source_block_map = block_map_for(num_blocks, source.shape(), &source_block_shape)?;
 
         // characterize the output tensor (this tensor)
-        let axis_offset = shape.len() - source.ndim();
-        let block_axis = block_axis_for(&shape, (shape.size() / num_blocks) as usize);
+        let axis_offset = transform.shape().len() - source.ndim();
+        let block_axis = block_axis_for(
+            transform.shape(),
+            (transform.shape().size() / num_blocks) as usize,
+        );
 
-        let map_shape = shape
+        let map_shape = transform
+            .shape()
             .iter()
             .take(axis_offset + block_axis)
             .copied()
             .map(|dim| dim as usize)
             .collect::<Vec<usize>>();
 
-        let block_shape = shape
+        let block_shape = transform
+            .shape()
             .iter()
             .skip(axis_offset + block_axis)
             .copied()
@@ -457,8 +458,6 @@ impl<S: DenseInstance> DenseBroadcast<S> {
             let block_map = source_block_map.broadcast(map_shape)?;
             ArrayBase::<Vec<u64>>::copy(&block_map)?
         };
-
-        let transform = Broadcast::new(source.shape().clone(), shape)?;
 
         Ok(Self {
             source,
@@ -497,6 +496,10 @@ where
         let source_block_id = source_block_id_for(&self.block_map, block_id)?;
         let block_axis = block_axis_for(self.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
+
+        let this = &self;
+        debug!("DenseBroadcast::read_block {block_id} from {this:?} by broadcasting source block {source_block_id} into {block_shape:?}");
+
         let source_block = self.source.read_block(txn_id, source_block_id).await?;
         source_block.broadcast(block_shape).map_err(TCError::from)
     }
@@ -504,6 +507,9 @@ where
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         let block_axis = block_axis_for(self.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
+
+        let this = &self;
+        debug!("DenseBroadcast::read_blocks from {this:?} by broadcasting source blocks into {block_shape:?}");
 
         let blocks = futures::stream::iter(self.block_map.into_inner())
             .map(move |block_id| {
@@ -513,6 +519,9 @@ where
             .buffered(num_cpus::get())
             .map(move |result| {
                 let source_block = result?;
+
+                trace!("broadcast {source_block:?} into {block_shape:?}");
+
                 source_block
                     .broadcast(block_shape.to_vec())
                     .map_err(TCError::from)
@@ -959,20 +968,11 @@ impl<S: fmt::Debug> fmt::Debug for DenseDiagonal<S> {
 pub struct DenseExpand<S> {
     source: S,
     transform: Expand,
-    block_shape: BlockShape,
 }
 
 impl<S: DenseInstance> DenseExpand<S> {
     pub fn new(source: S, axes: Axes) -> TCResult<Self> {
-        let transform = Expand::new(source.shape().clone(), axes)?;
-        let block_axis = block_axis_for(transform.shape(), source.block_size());
-        let block_shape = block_shape_for(block_axis, transform.shape(), source.block_size());
-
-        Ok(Self {
-            source,
-            transform,
-            block_shape,
-        })
+        Expand::new(source.shape().clone(), axes).map(|transform| Self { source, transform })
     }
 }
 
@@ -996,30 +996,68 @@ impl<S: DenseInstance + Clone> DenseInstance for DenseExpand<S> {
     }
 
     async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
-        let block = self.source.read_block(txn_id, block_id).await?;
+        debug!(
+            "DenseExpand::read_block {block_id} from {:?} and expand axes {:?}",
+            self.source,
+            self.transform.expand_axes()
+        );
 
-        if block.shape() == &self.block_shape {
+        let block = self.source.read_block(txn_id, block_id).await?;
+        assert!(
+            block.ndim() <= self.source.ndim(),
+            "{:?} returned a block with too many dimensions",
+            self.source
+        );
+
+        let offset = self.source.ndim() - block.ndim();
+        let axes = self
+            .transform
+            .expand_axes()
+            .iter()
+            .copied()
+            .filter(|x| x >= &offset)
+            .map(|x| x - offset)
+            .collect::<Axes>();
+
+        if axes.is_empty() {
+            trace!("no need to expand {block:?}");
             Ok(block.into())
         } else {
-            let mut block_shape = self.block_shape.to_vec();
-            block_shape[0] = block.size() / block_shape.iter().skip(1).product::<usize>();
-            block.into().reshape(block_shape).map_err(TCError::from)
+            trace!("expand axes {axes:?} of {block:?}");
+            block.into().expand_dims(axes).map_err(TCError::from)
         }
     }
 
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
-        let source_blocks = self.source.read_blocks(txn_id).await?;
+        debug!(
+            "DenseExpand::read_blocks from {:?} and expand axes {:?}",
+            self.source,
+            self.transform.expand_axes()
+        );
 
-        let block_shape = self.block_shape;
+        let source_ndim = self.source.ndim();
+        let source_blocks = self.source.read_blocks(txn_id).await?;
+        let transform = self.transform;
+
         let blocks = source_blocks.map(move |result| {
             let block = result?;
+            assert!(block.ndim() <= source_ndim);
 
-            if block.shape() == &block_shape {
+            let offset = source_ndim - block.ndim();
+            let axes = transform
+                .expand_axes()
+                .iter()
+                .copied()
+                .filter(|x| *x >= offset)
+                .map(|x| x - offset)
+                .collect::<Axes>();
+
+            if axes.is_empty() {
+                trace!("no need to expand {block:?}");
                 Ok(block.into())
             } else {
-                let mut block_shape = block_shape.to_vec();
-                block_shape[0] = block.size() / block_shape.iter().skip(1).product::<usize>();
-                block.into().reshape(block_shape).map_err(TCError::from)
+                trace!("expand axes {axes:?} of {block:?}");
+                block.into().expand_dims(axes).map_err(TCError::from)
             }
         });
 
@@ -1051,7 +1089,6 @@ where
         Self::Expand(Box::new(DenseExpand {
             source: expand.source.into(),
             transform: expand.transform,
-            block_shape: expand.block_shape,
         }))
     }
 }
@@ -1084,7 +1121,7 @@ where
     T: CDatatype + DType,
 {
     pub fn new(left: L, right: R, block_op: Combine<T>, value_op: fn(T, T) -> T) -> TCResult<Self> {
-        if left.block_size() == right.block_size() && left.shape() == right.shape() {
+        if left.shape() == right.shape() && left.block_size() == right.block_size() {
             Ok(Self {
                 left,
                 right,
@@ -1134,6 +1171,11 @@ where
     }
 
     async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        debug!(
+            "DenseCombine::read_block {block_id} from {:?} and {:?}",
+            self.left, self.right
+        );
+
         let (left, right) = try_join!(
             self.left.read_block(txn_id, block_id),
             self.right.read_block(txn_id, block_id)
@@ -1143,7 +1185,14 @@ where
     }
 
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        debug!(
+            "DenseCombine::read_blocks from {:?} and {:?}",
+            self.left, self.right
+        );
+
         let op = self.block_op;
+        let block_axis = block_axis_for(self.shape(), self.block_size());
+        let block_shape = block_shape_for(block_axis, self.shape(), self.block_size());
 
         let (left, right) = try_join!(
             self.left.read_blocks(txn_id),
@@ -1151,8 +1200,11 @@ where
         )?;
 
         let blocks = left.zip(right).map(move |(l, r)| {
-            let l = l?;
-            let r = r?;
+            let (l, r) = (l?, r?);
+
+            debug_assert!(l.shape() == block_shape, "left block has the wrong shape");
+            debug_assert!(r.shape() == block_shape, "right block has the wrong shape");
+
             (op)(l.into(), r.into())
         });
 
@@ -1776,6 +1828,11 @@ where
     }
 
     async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        debug!(
+            "DenseConst::read_block {block_id} from source {:?}",
+            self.left
+        );
+
         self.left
             .read_block(txn_id, block_id)
             .map(move |result| result.and_then(|block| (self.block_op)(block.into(), self.right)))
@@ -1783,9 +1840,15 @@ where
     }
 
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        debug!("DenseConst::read_blocks with source {:?}", self.left);
+
         let left = self.left.read_blocks(txn_id).await?;
-        let blocks = left
-            .map(move |result| result.and_then(|block| (self.block_op)(block.into(), self.right)));
+        let blocks = left.map(move |result| {
+            result.and_then(|block| {
+                trace!("apply const op to {block:?}");
+                (self.block_op)(block.into(), self.right)
+            })
+        });
 
         Ok(Box::pin(blocks))
     }
@@ -2703,47 +2766,74 @@ impl<S: DenseInstance> DenseSlice<S> {
     }
 
     #[inline]
-    fn block_bounds(&self, block_id: u64) -> TCResult<(u64, Vec<ha_ndarray::AxisBound>)> {
-        let source_block_id = source_block_id_for(&self.block_map, block_id)?;
-
-        let block_axis = block_axis_for(self.shape(), self.block_size);
-        let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
-
-        let axis_bound = self.transform.range()[block_axis].clone();
-        let local_bound = match ha_ndarray::AxisBound::try_from(axis_bound)? {
-            ha_ndarray::AxisBound::At(i) => ha_ndarray::AxisBound::At(i),
-            ha_ndarray::AxisBound::In(start, stop, step) => {
-                let stride = block_shape[0];
-
-                if source_block_id == 0 {
-                    ha_ndarray::AxisBound::In(start, stride, step)
-                } else if source_block_id == self.block_map.size() as u64 - 1 {
-                    ha_ndarray::AxisBound::In(stop - (stop % stride), stop, step)
-                } else {
-                    let start = source_block_id as usize * stride;
-                    ha_ndarray::AxisBound::In(start, start + stride, step)
-                }
-            }
-            ha_ndarray::AxisBound::Of(indices) => {
-                if source_block_id < indices.len() as u64 {
-                    let i = indices[source_block_id as usize] as usize;
-                    ha_ndarray::AxisBound::At(i)
-                } else {
-                    return Err(bad_request!("block id {} is out of range", block_id));
-                }
-            }
-        };
-
-        let mut block_bounds = Vec::with_capacity(self.ndim());
-        for bound in self.transform.range().iter().take(block_axis).cloned() {
+    fn block_bounds_inner(
+        transform: &Slice,
+        block_axis: usize,
+        block_shape: &BlockShape,
+        num_blocks: u64,
+        source_block_id: u64,
+    ) -> TCResult<Vec<ha_ndarray::AxisBound>> {
+        let mut block_bounds = Vec::with_capacity(transform.source_shape().len());
+        for bound in transform.range().iter().skip(block_axis).cloned() {
             block_bounds.push(bound.try_into()?);
         }
 
-        if block_bounds.is_empty() {
-            block_bounds.push(local_bound);
-        } else {
-            block_bounds[0] = local_bound;
+        if block_bounds.len() < block_shape.len() {
+            let axis_bound = transform.range()[block_axis].clone();
+            let block_axis_bound = ha_ndarray::AxisBound::try_from(axis_bound)?;
+            trace!("block axis bound is {block_axis_bound:?}");
+            let local_bound = match block_axis_bound {
+                ha_ndarray::AxisBound::At(i) => ha_ndarray::AxisBound::At(i),
+                ha_ndarray::AxisBound::In(start, stop, step) => {
+                    let stride = block_shape[0];
+
+                    if source_block_id == 0 {
+                        ha_ndarray::AxisBound::In(start, stride, step)
+                    } else if source_block_id == num_blocks - 1 {
+                        ha_ndarray::AxisBound::In(stop - (stop % stride), stop, step)
+                    } else {
+                        let start = source_block_id as usize * stride;
+                        ha_ndarray::AxisBound::In(start, start + stride, step)
+                    }
+                }
+                ha_ndarray::AxisBound::Of(indices) => {
+                    if source_block_id < indices.len() as u64 {
+                        let i = indices[source_block_id as usize] as usize;
+                        ha_ndarray::AxisBound::At(i)
+                    } else {
+                        return Err(bad_request!("block id {} is out of range", source_block_id));
+                    }
+                }
+            };
+
+            trace!(
+                "local (block axis) bound for source block {source_block_id} is {local_bound:?}"
+            );
+
+            block_bounds.insert(0, local_bound);
         }
+
+        debug_assert_eq!(
+            block_shape.len(),
+            block_bounds.iter().filter(|bound| bound.size() > 0).count()
+        );
+
+        Ok(block_bounds)
+    }
+
+    #[inline]
+    fn block_bounds(&self, block_id: u64) -> TCResult<(u64, Vec<ha_ndarray::AxisBound>)> {
+        let source_block_id = source_block_id_for(&self.block_map, block_id)?;
+        let num_blocks = self.block_map.size() as u64;
+        let block_axis = block_axis_for(self.shape(), self.block_size);
+        let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
+        let block_bounds = Self::block_bounds_inner(
+            &self.transform,
+            block_axis,
+            &block_shape,
+            num_blocks,
+            source_block_id,
+        )?;
 
         Ok((source_block_id, block_bounds))
     }
@@ -2759,78 +2849,42 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
         Fut: Future<Output = TCResult<Block>>,
         Block: NDArrayTransform,
     {
-        let ndim = self.ndim();
-        let transform = self.transform;
-        let range = transform.range();
-        let block_map = self.block_map;
+        let block_axis = block_axis_for(self.shape(), self.block_size);
+        let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
+        let num_blocks = self.block_map.size() as u64;
+
         let source = self.source;
+        let transform = self.transform;
 
-        let block_axis = block_axis_for(transform.shape(), self.block_size);
-        let block_shape = block_shape_for(block_axis, transform.shape(), self.block_size);
-
-        let global_bound = ha_ndarray::AxisBound::try_from(range[block_axis].clone())?;
-        let local_bounds = match global_bound {
-            ha_ndarray::AxisBound::At(i) => {
-                debug_assert_eq!(block_map.size(), 1);
-                vec![ha_ndarray::AxisBound::At(i)]
-            }
-            ha_ndarray::AxisBound::In(start, stop, step) => {
-                let stride = block_shape[0];
-
-                if block_map.size() == 1 {
-                    vec![ha_ndarray::AxisBound::In(start, stop, step)]
-                } else {
-                    let start = start % stride;
-                    let stop = if stop % stride == 0 {
-                        stride
-                    } else {
-                        stop % stride
-                    };
-
-                    let mut local_bounds = Vec::with_capacity(block_map.size());
-                    local_bounds.push(ha_ndarray::AxisBound::In(start, stride, step));
-
-                    for _ in 1..(block_map.size() - 1) {
-                        local_bounds.push(ha_ndarray::AxisBound::In(0, stride, step));
-                    }
-
-                    local_bounds.push(ha_ndarray::AxisBound::In(0, stop, step));
-
-                    local_bounds
-                }
-            }
-            ha_ndarray::AxisBound::Of(indices) => {
-                indices.into_iter().map(ha_ndarray::AxisBound::At).collect()
-            }
-        };
-
-        let mut block_bounds = Vec::<ha_ndarray::AxisBound>::with_capacity(ndim);
-        for bound in range.iter().skip(block_axis).cloned() {
-            block_bounds.push(bound.try_into()?);
-        }
-
-        debug_assert_eq!(block_map.size(), local_bounds.len());
-
-        let blocks = futures::stream::iter(block_map.into_inner().into_iter().zip(local_bounds))
-            .map(move |(block_id, local_bound)| {
-                let mut block_bounds = block_bounds.to_vec();
-                let source = source.clone();
-
-                async move {
-                    let block = get_block(source, block_id).await?;
-
-                    if block_bounds.is_empty() {
-                        block_bounds.push(local_bound);
-                    } else {
-                        block_bounds[0] = local_bound;
-                    }
-
-                    debug!("slice {block_bounds:?} from {block:?}");
-
-                    block.slice(block_bounds).map_err(TCError::from)
-                }
+        let blocks = futures::stream::iter(self.block_map.into_inner())
+            .map(move |source_block_id| {
+                get_block(source.clone(), source_block_id)
+                    .map_ok(move |block| (source_block_id, block))
             })
-            .buffered(num_cpus::get());
+            .buffered(num_cpus::get())
+            .map(move |result| {
+                let (source_block_id, source_block) = result?;
+                let block_bounds = Self::block_bounds_inner(
+                    &transform,
+                    block_axis,
+                    &block_shape,
+                    num_blocks,
+                    source_block_id,
+                )?;
+
+                assert_eq!(source_block.ndim(), block_bounds.len());
+                debug_assert_eq!(
+                    block_bounds
+                        .iter()
+                        .map(|bound| bound.size())
+                        .filter(|dim| dim > &0)
+                        .collect::<BlockShape>(),
+                    block_shape
+                );
+
+                trace!("slice {block_bounds:?} from {source_block:?}");
+                source_block.slice(block_bounds).map_err(TCError::from)
+            });
 
         Ok(Box::pin(blocks))
     }
@@ -2861,12 +2915,34 @@ where
     }
 
     async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+        debug!(
+            "DenseSlice::read_block {block_id} from source {:?}",
+            self.source
+        );
+
+        let block_axis = block_axis_for(self.shape(), self.block_size);
+        let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
+
         let (source_block_id, block_bounds) = self.block_bounds(block_id)?;
         let source_block = self.source.read_block(txn_id, source_block_id).await?;
+
+        assert_eq!(source_block.ndim(), block_bounds.len());
+        debug_assert_eq!(
+            block_bounds
+                .iter()
+                .map(|bound| bound.size())
+                .filter(|dim| dim > &0)
+                .collect::<BlockShape>(),
+            block_shape
+        );
+
+        trace!("slice {block_bounds:?} from {source_block:?}");
         source_block.slice(block_bounds).map_err(TCError::from)
     }
 
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+        debug!("DenseSlice::read_blocks from source {:?}", self.source);
+
         let blocks = self
             .block_stream(move |source, block_id| async move {
                 source.read_block(txn_id, block_id).await

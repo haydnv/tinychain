@@ -5,7 +5,7 @@ use std::ops::{Bound, RangeBounds};
 
 use futures::future::{self, Future, TryFutureExt};
 use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
-use log::debug;
+use log::{debug, trace};
 use safecast::*;
 
 use tc_error::*;
@@ -1325,6 +1325,7 @@ where
         + TensorWrite
         + TensorWriteDual<Tensor<State::Txn, State::FE>>
         + TensorTransform
+        + fmt::Debug
         + Clone
         + Send
         + Sync,
@@ -1839,6 +1840,7 @@ where
         + TensorWrite
         + TensorWriteDual<Tensor<State::Txn, State::FE>>
         + TensorTransform
+        + fmt::Debug
         + Clone,
     Number: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TensorInstance
@@ -1860,6 +1862,7 @@ where
             cxt.create_dir_unique()?
         };
 
+        trace!("make a copy of {value:?} before writing it to {tensor:?}");
         // TODO: is there a more efficient way to do this?
         let store = fs::Dir::load(txn_id, store, false).await?;
         let value: TensorBase<_, _> = fs::CopyFrom::copy_from(txn, store, value.into()).await?;
@@ -1870,7 +1873,7 @@ where
     } else if value.matches::<Number>() {
         let value = Number::opt_cast_from(value).expect("element");
 
-        debug!("write {value:?} to {range:?}");
+        debug!("write {value:?} to {range:?} of {tensor:?}");
 
         if let Some(coord) = range.as_coord(tensor.shape()) {
             tensor.write_value_at(txn_id, coord, value).await

@@ -148,11 +148,21 @@ impl TCError {
         SI: fmt::Display,
         S: IntoIterator<Item = SI>,
     {
+        let stack = stack.into_iter().map(|msg| msg.to_string()).collect();
+
+        #[cfg(debug_assertions)]
+        match code {
+            ErrorKind::Internal | ErrorKind::MethodNotAllowed | ErrorKind::NotImplemented => {
+                panic!("{code}: {message} (cause: {stack:?})")
+            }
+            other => warn!("{other}: {message} (cause: {stack:?})"),
+        }
+
         Self {
             kind: code,
             data: ErrorData {
                 message: message.to_string(),
-                stack: stack.into_iter().map(|msg| msg.to_string()).collect(),
+                stack,
             },
         }
     }
@@ -218,28 +228,19 @@ impl std::error::Error for TCError {}
 
 impl From<pathlink::ParseError> for TCError {
     fn from(err: pathlink::ParseError) -> Self {
-        Self {
-            kind: ErrorKind::BadRequest,
-            data: err.into(),
-        }
+        Self::new(ErrorKind::BadRequest, err)
     }
 }
 
 impl From<ha_ndarray::Error> for TCError {
     fn from(err: ha_ndarray::Error) -> Self {
-        Self {
-            kind: ErrorKind::Internal,
-            data: err.to_string().into(),
-        }
+        Self::new(ErrorKind::Internal, err)
     }
 }
 
 impl From<txn_lock::Error> for TCError {
     fn from(err: txn_lock::Error) -> Self {
-        Self {
-            kind: ErrorKind::Conflict,
-            data: err.to_string().into(),
-        }
+        Self::new(ErrorKind::Conflict, err)
     }
 }
 

@@ -119,7 +119,7 @@ where
                         })
                         .map(|op| op.call(txn.clone(), State::from(args)))
                     })
-                    .try_buffer_unordered(num_cpus::get())
+                    .try_buffer_unordered(num_cpus::get()) // TODO: remove this parallelization
                     .try_fold((), |(), _| future::ready(Ok(())))
                     .await?;
 
