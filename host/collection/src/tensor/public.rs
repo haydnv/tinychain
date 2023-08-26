@@ -957,6 +957,8 @@ where
                     let r = Tensor::<_, _>::opt_cast_from(r).expect("tensor");
                     r.shape().validate()?;
 
+                    trace!("dual tensor operation on {:?} and {:?}", l, r);
+
                     if l.shape() == r.shape() {
                         (self.op)(l, r).map(State::from)
                     } else {
@@ -1073,47 +1075,29 @@ where
                 params.expect_empty()?;
 
                 let ndim = Ord::max(self.tensor.ndim(), right.ndim());
-                let (left, right) = if ndim > 2 {
-                    if self
-                        .tensor
-                        .shape()
-                        .iter()
-                        .rev()
-                        .take(2)
-                        .zip(right.shape().iter().rev().take(2))
-                        .all(|(l, r)| l == r)
-                    {
-                        Ok((self.tensor, right))
-                    } else {
-                        let batch_shape = broadcast_shape(
-                            &self.tensor.shape()[..self.tensor.ndim() - 2],
-                            &right.shape()[..right.ndim() - 2],
-                        )?;
+                let (left, right) = if ndim >= 2 {
+                    let batch_shape = broadcast_shape(
+                        &self.tensor.shape()[..self.tensor.ndim() - 2],
+                        &right.shape()[..right.ndim() - 2],
+                    )?;
 
-                        let mut left_shape = Vec::with_capacity(ndim);
-                        left_shape.extend_from_slice(&batch_shape);
-                        left_shape.extend(self.tensor.shape().iter().rev().take(2).rev());
-                        let left = self.tensor.broadcast(left_shape.into())?;
+                    let mut left_shape = Vec::with_capacity(ndim);
+                    left_shape.extend_from_slice(&batch_shape);
+                    left_shape.extend(self.tensor.shape().iter().rev().take(2).rev());
+                    let left = self.tensor.broadcast(left_shape.into())?;
 
-                        let mut right_shape = Vec::with_capacity(ndim);
-                        right_shape.extend(batch_shape.into_vec());
-                        right_shape.extend(right.shape().iter().rev().take(2).rev());
-                        let right = right.broadcast(right_shape.into())?;
+                    let mut right_shape = Vec::with_capacity(ndim);
+                    right_shape.extend(batch_shape.into_vec());
+                    right_shape.extend(right.shape().iter().rev().take(2).rev());
+                    let right = right.broadcast(right_shape.into())?;
 
-                        Ok((left, right))
-                    }
-                } else if self.tensor.ndim() < 2 {
+                    Ok((left, right))
+                } else {
                     Err(bad_request!(
-                        "invalid left matrix multiplicand: {:?}",
-                        self.tensor
-                    ))
-                } else if right.ndim() < 2 {
-                    Err(bad_request!(
-                        "invalid right matrix multiplicand: {:?}",
+                        "invalid matrix multiplicands: {:?} @ {:?}",
+                        self.tensor,
                         right
                     ))
-                } else {
-                    Ok((self.tensor, right))
                 }?;
 
                 left.matmul(right).map(Tensor::from).map(State::from)

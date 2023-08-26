@@ -9,6 +9,7 @@ use collate::Collator;
 use destream::{de, en};
 use futures::TryFutureExt;
 use ha_ndarray::{NDArray, Queue};
+use log::debug;
 use safecast::{AsType, CastFrom, CastInto, TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -1436,6 +1437,8 @@ where
     type MatMul = Self;
 
     fn matmul(self, other: Self) -> TCResult<Self::MatMul> {
+        debug!("{:?} @ {:?}", self, other);
+
         match self {
             Self::Dense(this) => match other {
                 Self::Dense(that) => this.into_view().matmul(that.into_view()).map(Self::from),

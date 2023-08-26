@@ -20,10 +20,10 @@ use tcgeneric::ThreadSafe;
 use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTrig, ComplexUnary};
 use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
-    autoqueue, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast,
-    TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal, TensorInstance,
-    TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce,
-    TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
+    autoqueue, broadcast_shape, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst,
+    TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal,
+    TensorInstance, TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead,
+    TensorReduce, TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
@@ -1086,10 +1086,22 @@ where
     fn matmul(self, other: Self) -> TCResult<Self::MatMul> {
         assert_eq!(self.ndim(), other.ndim());
 
-        let ndim = self.ndim();
-        let this = self.expand(vec![ndim])?;
-        let that = other.expand(vec![ndim - 1])?;
-        this.mul(that)?.sum(vec![ndim - 2], false)
+        // example shapes: [2, 3] @ [3, 180]
+        let ndim = self.ndim(); // 2
+        let this = self.expand(vec![ndim])?; // [2, 3] -> [2, 3, 1]
+        let that = other.expand(vec![ndim - 2])?; // [3, 180] -> [1, 3, 180]
+
+        trace!("{:?} @ {:?}", this, that);
+
+        let shape = broadcast_shape(this.shape(), that.shape())?;
+        let this = this.broadcast(shape.clone())?;
+        let that = that.broadcast(shape)?;
+
+        trace!("outer product is {:?} * {:?}", this, that);
+
+        let outer_product = this.mul(that)?; // [2, 3, 180]
+        let reduce_axis = outer_product.ndim() - 2;
+        outer_product.sum(vec![reduce_axis], false) // [2, 3, 180] -> [2, 180]
     }
 }
 

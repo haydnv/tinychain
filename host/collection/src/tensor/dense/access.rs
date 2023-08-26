@@ -2032,10 +2032,25 @@ where
 }
 
 #[async_trait]
-impl<L: TensorPermitRead, R: TensorPermitRead> TensorPermitRead for DenseMatMul<L, R> {
+impl<L, R> TensorPermitRead for DenseMatMul<L, R>
+where
+    L: TensorInstance + TensorPermitRead,
+    R: TensorInstance + TensorPermitRead,
+{
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
-        let mut left = self.left.read_permit(txn_id, range.clone()).await?;
-        let right = self.right.read_permit(txn_id, range.clone()).await?;
+        self.shape.validate_range(&range)?;
+
+        let left_range = range.iter().take(self.left.ndim() - 1).cloned().collect();
+
+        let mut right_range = range;
+        let elided_right = self.right.ndim() - 2;
+        if right_range.len() > elided_right {
+            right_range[elided_right] = AxisRange::all(self.right.shape()[elided_right]);
+        }
+
+        // always acquire these permits in-order to avoid the risk of a deadlock
+        let mut left = self.left.read_permit(txn_id, left_range).await?;
+        let right = self.right.read_permit(txn_id, right_range).await?;
         left.extend(right);
         Ok(left)
     }

@@ -1464,7 +1464,7 @@ impl<Txn: ThreadSafe, FE: ThreadSafe, T: CDatatype> SparseCompare<Txn, FE, T> {
             })
         } else {
             Err(bad_request!(
-                "cannot combine {:?} with {:?} (wrong shape)",
+                "cannot compare {:?} and {:?} (wrong shape)",
                 left,
                 right
             ))
@@ -1621,7 +1621,7 @@ impl<Txn: ThreadSafe, FE: ThreadSafe, T: CDatatype> SparseCompareLeft<Txn, FE, T
             })
         } else {
             Err(bad_request!(
-                "cannot combine {:?} with {:?} (wrong shape)",
+                "cannot compare {:?} with {:?} (wrong shape)",
                 left,
                 right
             ))
