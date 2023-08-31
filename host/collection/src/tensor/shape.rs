@@ -183,7 +183,7 @@ impl fmt::Debug for AxisRange {
             At(at) => write!(f, "{at}"),
             In(range, 1) => write!(f, "[{}, {})", range.start, range.end),
             In(range, step) => write!(f, "[{}, {})/{}", range.start, range.end, step),
-            Of(indices) if indices.is_empty() => f.write_str("[]"),
+            Of(indices) if indices.is_empty() => f.write_str("{}"),
             Of(indices) => {
                 f.write_str("{")?;
 
@@ -449,7 +449,7 @@ impl fmt::Debug for Range {
 pub struct Shape(Vec<u64>);
 
 impl Shape {
-    /// Return true if the given [`Range`] fit within this `Shape`.
+    /// Return true if the given [`Range`] fit within this [`Shape`].
     pub fn contains_range(&self, range: &Range) -> bool {
         if range.len() > self.len() {
             return false;
@@ -463,6 +463,26 @@ impl Shape {
                 AxisRange::At(i) => *i < dim,
                 AxisRange::In(range, _step) => range.start < dim && range.end <= dim,
                 AxisRange::Of(indices) => indices.iter().copied().all(|i| i < dim),
+            })
+    }
+
+    /// Return true if the given [`Range`] matches this [`Shape`] exactly.
+    pub fn is_covered_by(&self, range: &Range) -> bool {
+        if range.len() > self.len() {
+            return false;
+        }
+
+        range
+            .iter()
+            .zip(self)
+            .all(|(axis_range, dim)| match axis_range {
+                AxisRange::At(0) if *dim == 1 => true,
+                AxisRange::In(range, 1) if range.start == 0 && &range.end == dim => true,
+                AxisRange::Of(indices) => indices
+                    .iter()
+                    .enumerate()
+                    .all(|(i, idx)| (i as u64) == *idx),
+                _ => false,
             })
     }
 
@@ -517,6 +537,10 @@ impl Shape {
     pub fn validate_axes(&self, axes: &[usize], require_ndim: bool) -> Result<(), TCError> {
         if let Some(max) = axes.iter().max().copied() {
             if max >= self.len() {
+                #[cfg(debug_assertions)]
+                panic!("shape {self:?} has no axis {max}");
+
+                #[cfg(not(debug_assertions))]
                 return Err(bad_request!("shape {self:?} has no axis {max}"));
             }
         }

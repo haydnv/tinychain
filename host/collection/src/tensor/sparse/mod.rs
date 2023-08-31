@@ -1220,7 +1220,7 @@ where
             this,
             that,
             {
-                if range.is_empty() || range == Range::all(this.shape()) {
+                if this.shape().is_covered_by(&range) {
                     let mut guard = this.write().await;
                     guard.overwrite(txn_id, that.accessor).await
                 } else {
@@ -1231,7 +1231,7 @@ where
             },
             {
                 debug_assert_eq!(this.0.shape(), this.1.shape());
-                if range.is_empty() || range == Range::all(this.0.shape()) {
+                if this.0.shape().is_covered_by(&range) {
                     let (mut r_guard, mut i_guard) = join!(this.0.write(), this.1.write());
 
                     try_join!(
@@ -1255,7 +1255,7 @@ where
                 }
             },
             {
-                if range.is_empty() || range == Range::all(this.shape()) {
+                if this.shape().is_covered_by(&range) {
                     let mut guard = this.write().await;
                     guard.overwrite(txn_id, that.accessor).await
                 } else {
@@ -1886,11 +1886,7 @@ where
 
 #[inline]
 fn table_range(range: &Range) -> Result<b_table::Range<usize, Number>, TCError> {
-    if range == &Range::default() {
-        return Ok(b_table::Range::default());
-    }
-
-    let mut table_range = HashMap::new();
+    let mut table_range = HashMap::with_capacity(range.len());
 
     for (x, bound) in range.iter().enumerate() {
         match bound {

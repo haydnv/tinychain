@@ -1384,7 +1384,7 @@ where
     }
 
     fn slice(self, range: Range) -> TCResult<Self::Slice> {
-        if range.is_empty() || range == Range::all(self.shape()) {
+        if self.shape().is_covered_by(&range) {
             return Ok(self);
         }
 

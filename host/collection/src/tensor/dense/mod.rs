@@ -1362,7 +1362,7 @@ where
                 let _write_permit = this.write_permit(txn_id, range.clone()).await?;
                 let _read_permit = that.accessor.read_permit(txn_id, range.clone()).await?;
 
-                if range.is_empty() || range == Range::all(this.shape()) {
+                if this.shape().is_covered_by(&range) {
                     let guard = this.write().await;
                     guard.overwrite(txn_id, that.accessor).await
                 } else {
@@ -1379,7 +1379,7 @@ where
                 let _i_that_permit = that.1.accessor.read_permit(txn_id, range.clone()).await?;
 
                 debug_assert_eq!(this.0.shape(), this.1.shape());
-                if range.is_empty() || range == Range::all(this.0.shape()) {
+                if this.0.shape().is_covered_by(&range) {
                     let (r_guard, i_guard) = join!(this.0.write(), this.1.write());
 
                     try_join!(
@@ -1412,7 +1412,7 @@ where
                 let read_permit = that.accessor.read_permit(txn_id, Range::default()).await?;
                 trace!("acquired read permit {read_permit:?}");
 
-                if range.is_empty() || range == Range::all(this.shape()) {
+                if this.shape().is_covered_by(&range) {
                     let guard = this.write().await;
                     guard.overwrite(txn_id, that.accessor).await
                 } else {

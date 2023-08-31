@@ -2414,25 +2414,24 @@ where
         let coords = range.affected().map(|coord| coord.into_iter()).flatten();
         let coords = futures::stream::iter(coords).chunks(coord_block_size);
 
-        let source_blocks: Blocks<_, Array<Self::DType>> =
-            if range.is_empty() || range == Range::all(self.shape()) {
-                let source_blocks = self.source.read_blocks(txn_id).await?;
-                let blocks = coords
-                    .zip(source_blocks)
-                    .map(|(coords, values)| values.map(|values| (coords, values.into())));
+        let source_blocks: Blocks<_, Array<Self::DType>> = if self.shape().is_covered_by(&range) {
+            let source_blocks = self.source.read_blocks(txn_id).await?;
+            let blocks = coords
+                .zip(source_blocks)
+                .map(|(coords, values)| values.map(|values| (coords, values.into())));
 
-                Box::pin(blocks)
-            } else {
-                let source_blocks = DenseSlice::new(self.source, range)?
-                    .read_blocks(txn_id)
-                    .await?;
+            Box::pin(blocks)
+        } else {
+            let source_blocks = DenseSlice::new(self.source, range)?
+                .read_blocks(txn_id)
+                .await?;
 
-                let blocks = coords
-                    .zip(source_blocks)
-                    .map(|(coords, values)| values.map(|values| (coords, values.into())));
+            let blocks = coords
+                .zip(source_blocks)
+                .map(|(coords, values)| values.map(|values| (coords, values.into())));
 
-                Box::pin(blocks)
-            };
+            Box::pin(blocks)
+        };
 
         let zero = Self::DType::zero();
         let blocks = source_blocks.try_filter_map(move |(coords, values)| async move {
@@ -2930,7 +2929,7 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
 #[async_trait]
 impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for SparseReshape<S> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
-        if range.is_empty() || range == Range::all(self.transform.shape()) {
+        if self.transform.shape().is_covered_by(&range) {
             self.source.read_permit(txn_id, Range::default()).await
         } else {
             Err(bad_request!(

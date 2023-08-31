@@ -1,6 +1,7 @@
+use itertools::Itertools;
 use std::iter;
 
-use log::warn;
+use log::{trace, warn};
 
 use tc_error::*;
 
@@ -130,10 +131,9 @@ impl Expand {
         }
 
         expand.sort();
-        expand.dedup();
 
         let mut shape = Vec::with_capacity(source_shape.len() + expand.len());
-        shape.extend(source_shape.into_vec());
+        shape.extend_from_slice(&source_shape);
         for x in expand.iter().rev().copied() {
             shape.insert(x, 1);
         }
@@ -154,45 +154,63 @@ impl Expand {
     }
 
     pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
-        axes.into_iter()
-            .filter_map(|x| {
-                if self.expand.contains(&x) {
-                    None
-                } else {
-                    Some(x - self.expand.iter().filter(|e| **e < x).count())
-                }
-            })
-            .collect()
+        let mut axis_map = Vec::with_capacity(self.shape.len());
+        axis_map.extend(0..(self.shape.len() - self.expand.len()));
+
+        for x in self.expand.iter().copied().rev() {
+            axis_map.insert(x, x);
+        }
+
+        let source_axes = axes
+            .iter()
+            .copied()
+            .filter(|x| !self.expand.contains(x))
+            .map(|x| axis_map[x])
+            .unique()
+            .collect();
+
+        trace!(
+            "the inverse axes of {axes:?} are {source_axes:?} (expansion is {:?})",
+            self.expand
+        );
+
+        source_axes
     }
 
-    pub fn invert_range(&self, mut range: Range) -> Range {
+    pub fn invert_range(&self, range: Range) -> Range {
+        let mut source_range = range.clone();
         for x in self.expand.iter().copied().rev() {
-            let removed = if x < range.len() {
-                range.remove(x)
+            let removed = if x < source_range.len() {
+                source_range.remove(x)
             } else {
                 continue;
             };
 
-            if removed.is_index() || range.is_empty() {
+            if removed.is_index() || source_range.is_empty() {
                 // no-op
-            } else if x == range.len() {
-                let bound = match range.pop().unwrap() {
+            } else if x == source_range.len() {
+                let bound = match source_range.pop().unwrap() {
                     AxisRange::At(i) => AxisRange::In(i..i + 1, 1),
                     other => other,
                 };
 
-                range.push(bound);
+                source_range.push(bound);
             } else {
-                let bound = match range.remove(x) {
+                let bound = match source_range.remove(x) {
                     AxisRange::At(i) => AxisRange::In(i..i + 1, 1),
                     other => other,
                 };
 
-                range.insert(x, bound);
+                source_range.insert(x, bound);
             }
         }
 
-        range
+        trace!(
+            "the inverse of range {range:?} is {source_range:?} (expansion is {:?})",
+            self.expand
+        );
+
+        source_range
     }
 
     pub fn invert_coord(&self, mut coord: Coord) -> Coord {
@@ -435,7 +453,7 @@ impl Slice {
     pub fn invert_range(&self, range: Range) -> Range {
         debug_assert!(range.len() <= self.shape().len());
 
-        let range = if range.is_empty() || range == Range::all(self.shape()) {
+        let range = if self.shape().is_covered_by(&range) {
             return self.range.clone();
         } else {
             range.normalize(&self.shape)

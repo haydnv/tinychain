@@ -261,7 +261,7 @@ where
     async fn clear(&mut self, _txn_id: TxnId, range: Range) -> TCResult<()> {
         debug!("SparseFileWriteGuard::clear {range:?}");
 
-        if range == Range::default() || range == Range::all(&self.shape) {
+        if self.shape.is_covered_by(&range) {
             self.table.truncate().map_err(TCError::from).await
         } else {
             let range = table_range(&range)?;

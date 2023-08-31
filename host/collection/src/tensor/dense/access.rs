@@ -2517,7 +2517,7 @@ where
 #[async_trait]
 impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for DenseReshape<S> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
-        if range.is_empty() || range == Range::all(self.transform.shape()) {
+        if self.transform.shape().is_covered_by(&range) {
             self.read_permit(txn_id, Range::default()).await
         } else {
             Err(bad_request!(
