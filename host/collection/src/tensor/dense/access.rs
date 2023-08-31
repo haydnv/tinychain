@@ -532,7 +532,7 @@ where
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         self.shape().validate_coord(&coord)?;
-        let coord = self.transform.invert_coord(&coord);
+        let coord = self.transform.invert_coord(coord);
         self.source.read_value(txn_id, coord).await
     }
 }

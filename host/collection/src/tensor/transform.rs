@@ -22,9 +22,7 @@ impl Broadcast {
 
         if source_shape.len() > shape.len() {
             return Err(bad_request!(
-                "cannot broadcast {:?} into {:?}",
-                source_shape,
-                shape
+                "cannot broadcast {source_shape:?} into a lower-dimensional shape {shape:?}"
             ));
         } else if source_shape == shape {
             warn!(
@@ -35,20 +33,24 @@ impl Broadcast {
 
         let ndim = shape.len();
         let offset = ndim - source_shape.len();
-        let mut inverted_axes = Vec::with_capacity(shape.len());
-        let mut broadcast: Vec<bool> = iter::repeat(true).take(ndim).collect();
+        let broadcast = iter::repeat(true)
+            .take(offset)
+            .chain(
+                source_shape
+                    .iter()
+                    .zip(shape.iter().skip(offset))
+                    .map(|(dim, bdim)| dim == &1 && dim != bdim),
+            )
+            .collect::<Vec<bool>>();
 
-        for axis in offset..ndim {
-            if shape[axis] == source_shape[axis - offset] {
-                broadcast[axis] = false;
-                inverted_axes.push(axis);
-            } else if shape[axis] == 1 || source_shape[axis - offset] == 1 {
-                inverted_axes.push(axis - offset);
+        debug_assert_eq!(broadcast.len(), ndim);
+
+        for (dim, bdim) in source_shape.iter().rev().zip(shape.iter().rev()) {
+            if dim == &1 || dim == bdim {
+                // no-op
             } else {
                 return Err(bad_request!(
-                    "cannot broadcast {:?} into {:?}",
-                    source_shape,
-                    shape
+                    "cannot broadcast {source_shape:?} into {shape:?} ({dim} != {bdim})"
                 ));
             }
         }
@@ -61,7 +63,7 @@ impl Broadcast {
         })
     }
 
-    pub fn shape(&'_ self) -> &'_ Shape {
+    pub fn shape(&self) -> &Shape {
         &self.shape
     }
 
@@ -89,26 +91,27 @@ impl Broadcast {
             // can't broadcast a slice with shape []
             if let Some(AxisRange::At(i)) = source_range.pop() {
                 source_range.push(AxisRange::In(i..i + 1, 1));
+            } else {
+                unreachable!()
             }
         }
 
         Range::from(source_range)
     }
 
-    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
+    pub fn invert_coord(&self, mut coord: Coord) -> Coord {
         debug_assert_eq!(coord.len(), self.shape.len());
 
-        let source_ndim = self.source_shape.len();
-        let mut source_coord = Vec::with_capacity(source_ndim);
-        for axis in 0..source_ndim {
-            if self.broadcast[axis + self.offset] {
-                source_coord.push(0);
-            } else {
-                source_coord.push(coord[axis + self.offset]);
+        coord.drain(0..self.offset);
+        debug_assert_eq!(coord.len(), self.source_shape.len());
+
+        for (i, dim) in coord.iter_mut().zip(&self.source_shape) {
+            if dim == &0 {
+                *i = 1;
             }
         }
 
-        source_coord
+        coord
     }
 }
 
@@ -223,8 +226,8 @@ pub struct Reduce {
 }
 
 impl Reduce {
-    pub fn new(source_shape: Shape, axes: Vec<usize>, keepdims: bool) -> TCResult<Reduce> {
-        source_shape.validate_axes(&axes)?;
+    pub fn new(source_shape: Shape, axes: Axes, keepdims: bool) -> TCResult<Reduce> {
+        source_shape.validate_axes(&axes, false)?;
 
         for i in 0..(axes.len() - 1) {
             if axes[i] == axes[i + 1] {
@@ -266,8 +269,8 @@ impl Reduce {
         &self.shape
     }
 
-    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
-        let mut source_axes: Axes = (0..self.source_shape.len()).into_iter().collect();
+    pub fn invert_axes(&self, axes: Axes) -> Axes {
+        let mut source_axes = (0..self.source_shape.len()).into_iter().collect::<Axes>();
         for x in self.axes.iter().rev().copied() {
             source_axes.remove(x);
         }
@@ -430,11 +433,15 @@ impl Slice {
     }
 
     pub fn invert_range(&self, range: Range) -> Range {
+        debug_assert!(range.len() <= self.shape().len());
+
         let range = if range.is_empty() || range == Range::all(self.shape()) {
             return self.range.clone();
         } else {
             range.normalize(&self.shape)
         };
+
+        debug_assert_eq!(range.len(), self.shape().len());
 
         let mut source_range = Vec::with_capacity(self.shape.len());
         let mut axis = 0;
@@ -505,7 +512,7 @@ impl Slice {
             source_range.push(axis_range);
         }
 
-        source_range.extend(self.range.iter().skip(range.len()).cloned());
+        debug_assert_eq!(source_range.len(), self.source_shape.len());
 
         source_range.into()
     }
@@ -584,19 +591,7 @@ impl Transpose {
         let ndim = source_shape.len();
 
         let permutation = if let Some(axes) = permutation {
-            if axes.len() == source_shape.len()
-                && (0..source_shape.len())
-                    .into_iter()
-                    .all(|x| axes.contains(&x))
-            {
-                Ok(axes)
-            } else {
-                Err(bad_request!(
-                    "invalid permutation for shape {:?}: {:?}",
-                    source_shape,
-                    axes
-                ))
-            }
+            source_shape.validate_axes(&axes, true).map(|()| axes)
         } else {
             Ok((0..source_shape.len()).into_iter().rev().collect())
         }?;

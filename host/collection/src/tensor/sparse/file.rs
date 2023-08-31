@@ -159,7 +159,7 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         self.shape().validate_range(&range)?;
-        self.shape().validate_axes(&order)?;
+        self.shape().validate_axes(&order, true)?;
 
         trace!("SparseFile::elements in range {range:?} with order {order:?}");
 

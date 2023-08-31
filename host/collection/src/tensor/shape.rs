@@ -280,7 +280,7 @@ impl Range {
     ///
     /// Example:
     /// ```
-    /// # use tc_tensor::{Range, Shape};
+    /// # use tc_collection::tensor::{Range, Shape};
     /// let mut range = Range::from(&[0u64][..]);
     /// assert_eq!(range.to_shape(&Shape::from(vec![2, 3, 4])).unwrap(), Shape::from(vec![3, 4]));
     /// ```
@@ -514,20 +514,32 @@ impl Shape {
     }
 
     /// Return an [`Error`] if any of the given axes is out of range.
-    pub fn validate_axes(&self, axes: &[usize]) -> Result<(), TCError> {
-        match axes.iter().max() {
-            Some(max) if *max >= self.len() => {
+    pub fn validate_axes(&self, axes: &[usize], require_ndim: bool) -> Result<(), TCError> {
+        if let Some(max) = axes.iter().max().copied() {
+            if max >= self.len() {
+                return Err(bad_request!("shape {self:?} has no axis {max}"));
+            }
+        }
+
+        if (1..axes.len()).any(|i| axes[i..].contains(&axes[i - 1])) {
+            return Err(bad_request!("{axes:?} contains a duplicate axis"));
+        }
+
+        if require_ndim {
+            if !axes.is_empty() && axes.len() != self.len() {
                 #[cfg(debug_assertions)]
-                panic!("shape {self:?} has no axis {max}");
+                panic!("invalid permutation for {self:?}: {axes:?}");
 
                 #[cfg(not(debug_assertions))]
-                Err(bad_request!("shape {self:?} has no axis {max}"))
+                return Err(bad_request!("invalid permutation for {self:?}: {axes:?}"));
             }
-            _ => Ok(()),
         }
+
+        Ok(())
     }
 
     /// Return an [`Error`] if the given `Range` don't fit within this `Shape`.
+    #[inline]
     pub fn validate_range(&self, range: &Range) -> Result<(), TCError> {
         if self.contains_range(range) {
             Ok(())
@@ -541,6 +553,7 @@ impl Shape {
     }
 
     /// Return an [`Error`] if the given `coord` doesn't fit within this `Shape`.
+    #[inline]
     pub fn validate_coord(&self, coord: &[u64]) -> Result<(), TCError> {
         if self.contains_coord(coord) {
             Ok(())
@@ -582,6 +595,24 @@ impl<'a, D: Digest> Hash<D> for &'a Shape {
             hasher.update(hash);
         }
         hasher.finalize()
+    }
+}
+
+impl IntoIterator for Shape {
+    type Item = u64;
+    type IntoIter = <Vec<u64> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Shape {
+    type Item = &'a u64;
+    type IntoIter = <&'a [u64] as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.0).into_iter()
     }
 }
 

@@ -34,6 +34,7 @@ use super::{
 };
 
 pub use access::*;
+use itertools::Itertools;
 pub use schema::{IndexSchema, Schema};
 pub use view::*;
 
@@ -229,7 +230,7 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
         self,
         txn_id: TxnId,
         range: Range,
-        mut order: Axes,
+        order: Axes,
         axes: Axes,
     ) -> TCResult<TCBoxTryStream<'static, Coord>>
     where
@@ -237,8 +238,8 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
     {
         log::debug!("{:?} filled at {:?}...", self, axes);
 
-        self.shape().validate_axes(&axes)?;
-        self.shape().validate_axes(&order)?;
+        self.shape().validate_axes(&axes, false)?;
+        self.shape().validate_axes(&order, false)?;
 
         if axes.is_empty() {
             #[cfg(debug_assertions)]
@@ -254,10 +255,13 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
 
             Ok(Box::pin(filled_at))
         } else if axes.iter().zip(&order).all(|(x, o)| x == o) {
-            order.extend(axes.iter().copied());
-            order.dedup();
-
             let ndim = self.ndim();
+            let order = order
+                .into_iter() // make sure the selected axes are ordered
+                .chain(axes.iter().copied()) // then make sure all axes are present
+                .chain(0..ndim) // then remove duplicates
+                .unique()
+                .collect::<Axes>();
 
             let filled_at = self
                 .elements(txn_id, range, order)

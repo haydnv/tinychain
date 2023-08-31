@@ -610,7 +610,7 @@ where
         range: Range,
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
-        log::debug!("stream elements in range {range:?} with order {order:?}");
+        log::debug!("SparseBroadcast::elements in range {range:?} with order {order:?}");
 
         let ndim = self.ndim();
         let offset = ndim - self.inner.ndim();
@@ -622,7 +622,7 @@ where
         }
 
         self.shape.validate_range(&range)?;
-        self.shape.validate_axes(&order)?;
+        self.shape.validate_axes(&order, true)?;
 
         let (outer_range, inner_range) = self.invert_range(range.clone());
         let outer_range = outer_range.normalize(&self.shape()[..(self.ndim() - self.inner.ndim())]);
@@ -785,53 +785,29 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
         self,
         txn_id: TxnId,
         range: Range,
-        mut order: Axes,
+        order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         self.shape.validate_range(&range)?;
-        self.shape.validate_axes(&order)?;
+        self.shape.validate_axes(&order, true)?;
 
-        let axis = self.axis;
+        let order = if order.is_empty() {
+            (0..self.ndim()).into_iter().collect()
+        } else if order.iter().copied().enumerate().all(|(i, x)| i == x) {
+            order
+        } else {
+            return Err(not_implemented!("transpose a broadcasted sparse tensor"));
+        };
+
         let ndim = self.shape.len();
 
-        let (source_range, dim) = if range.len() > axis {
-            let bdim = match &range[axis] {
-                AxisRange::At(i) if *i < self.dim => Ok(1),
-                AxisRange::In(axis_range, 1) if axis_range.end > axis_range.start => {
-                    Ok(axis_range.end - axis_range.start)
-                }
-                bound => Err(bad_request!(
-                    "invalid bound for axis {}: {:?}",
-                    self.axis,
-                    bound
-                )),
-            }?;
-
+        let (source_range, dim) = if range.len() > self.axis {
+            let bdim = range[self.axis].dim();
             let mut source_range = range;
-            source_range[axis] = AxisRange::At(0);
+            source_range[self.axis] = AxisRange::At(0);
             (source_range, bdim)
         } else {
             (range, self.dim)
         };
-
-        let (source_order, inner_order) = if order
-            .iter()
-            .take(axis)
-            .copied()
-            .enumerate()
-            .all(|(o, x)| x == o)
-        {
-            let mut inner_order = Axes::with_capacity(ndim - axis);
-
-            while order.len() > axis {
-                inner_order.push(order.pop().expect("axis"));
-            }
-
-            Ok((order, inner_order))
-        } else {
-            Err(bad_request!(
-                "an outer broadcast of a sparse tensor does not support permutation"
-            ))
-        }?;
 
         if self.axis == 0 {
             let dim = self.shape()[self.axis];
@@ -840,7 +816,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
                 .map(move |outer_i| {
                     let source = source.clone();
                     let source_range = source_range.clone();
-                    let source_order = source_order.to_vec();
+                    let source_order = order.to_vec();
 
                     async move {
                         let source_elements =
@@ -859,10 +835,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
 
             Ok(Box::pin(elements))
         } else if self.axis == self.ndim() - 1 {
-            let source_elements = self
-                .source
-                .elements(txn_id, source_range, source_order)
-                .await?;
+            let source_elements = self.source.elements(txn_id, source_range, order).await?;
 
             // TODO: write a range to a slice of a coordinate block instead
             let elements = source_elements
@@ -870,7 +843,6 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
                     futures::stream::iter(0..dim).map(move |i| {
                         let mut coord = source_coord.to_vec();
                         *coord.last_mut().expect("x") = i;
-
                         Ok((coord, value))
                     })
                 })
@@ -878,22 +850,29 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
 
             Ok(Box::pin(elements))
         } else {
-            let source = self.source;
-            let order = Axes::default();
-            let axes = (0..axis).into_iter().collect();
-            let inner_range = source_range.iter().skip(axis).cloned().collect::<Vec<_>>();
-            let filled = source
+            let inner_range = source_range
+                .iter()
+                .skip(self.axis)
+                .cloned()
+                .collect::<Vec<_>>();
+
+            let filled = self
+                .source
                 .clone()
-                .filled_at(txn_id, source_range, order, axes)
+                .filled_at(
+                    txn_id,
+                    source_range,
+                    Axes::default(),
+                    (0..self.axis).into_iter().collect(),
+                )
                 .await?;
 
             let elements = filled
                 .map(move |result| {
                     let outer_coord = result?;
-                    debug_assert_eq!(outer_coord.len(), axis);
+                    debug_assert_eq!(outer_coord.len(), self.axis);
 
                     let inner_range = inner_range.to_vec();
-                    let inner_order = inner_order.to_vec();
 
                     let prefix = outer_coord
                         .iter()
@@ -903,18 +882,17 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
 
                     log::trace!("broadcast slice at {prefix:?} x{dim}");
 
-                    let slice = SparseSlice::new(source.clone(), prefix)?;
+                    let slice = SparseSlice::new(self.source.clone(), prefix)?;
 
                     let elements = futures::stream::iter(0..dim)
                         .map(move |i| {
                             let outer_coord = outer_coord.to_vec();
                             let inner_range = inner_range.to_vec().into();
-                            let inner_order = inner_order.to_vec();
                             let slice = slice.clone();
 
                             async move {
                                 let inner_elements =
-                                    slice.elements(txn_id, inner_range, inner_order).await?;
+                                    slice.elements(txn_id, inner_range, Axes::default()).await?;
 
                                 let elements =
                                     inner_elements.map_ok(move |(inner_coord, value)| {
@@ -924,7 +902,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
                                         coord.extend(outer_coord.iter().copied());
                                         coord.extend(inner_coord);
 
-                                        coord[axis] = i;
+                                        coord[self.axis] = i;
 
                                         (coord, value)
                                     });
@@ -2125,6 +2103,9 @@ where
     ) -> Result<Self::Blocks, TCError> {
         log::debug!("SparseCow::blocks in range {range:?} with order {order:?}");
 
+        self.shape().validate_range(&range)?;
+        self.shape().validate_axes(&order, true)?;
+
         let shape = self.source.shape().to_vec();
         let ndim = shape.len();
 
@@ -2564,7 +2545,7 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         self.shape().validate_range(&range)?;
-        self.shape().validate_axes(&order)?;
+        self.shape().validate_axes(&order, true)?;
 
         let mut source_range = range;
         for x in self.transform.expand_axes().iter().copied().rev() {
@@ -2755,7 +2736,7 @@ where
         }
 
         self.transform.shape().validate_range(&range)?;
-        self.transform.shape().validate_axes(&order)?;
+        self.transform.shape().validate_axes(&order, true)?;
 
         let source_range = self.transform.invert_range(range);
         let source_order = self.transform.invert_axes(order);
@@ -2865,7 +2846,7 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         self.shape().validate_range(&range)?;
-        self.shape().validate_axes(&order)?;
+        self.shape().validate_axes(&order, true)?;
 
         let source_range = if range.is_empty() {
             Ok(range)
@@ -2998,7 +2979,7 @@ where
     }
 
     fn source_order(&self, order: Axes) -> Result<Axes, TCError> {
-        self.shape().validate_axes(&order)?;
+        self.shape().validate_axes(&order, true)?;
 
         let mut source_axes = Vec::with_capacity(self.ndim());
         for (x, bound) in self.transform.range().iter().enumerate() {
@@ -3041,8 +3022,6 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         self.shape().validate_range(&range)?;
-        self.shape().validate_axes(&order)?;
-
         let source_order = self.source_order(order)?;
 
         let source_range = self.transform.invert_range(range);
@@ -3088,8 +3067,6 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         self.shape().validate_range(&range)?;
-        self.shape().validate_axes(&order)?;
-
         let source_order = self.source_order(order)?;
 
         let transform = self.transform;
@@ -3269,7 +3246,7 @@ where
         mut order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         self.shape().validate_range(&range)?;
-        self.shape().validate_axes(&order)?;
+        self.shape().validate_axes(&order, true)?;
 
         let range = range.normalize(self.shape());
         debug_assert_eq!(range.len(), self.ndim());
