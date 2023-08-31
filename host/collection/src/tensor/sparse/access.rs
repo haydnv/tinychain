@@ -22,7 +22,7 @@ use tcgeneric::{TCBoxTryFuture, ThreadSafe};
 
 use crate::tensor::block::Block;
 use crate::tensor::dense::{DenseAccess, DenseCacheFile, DenseInstance, DenseSlice};
-use crate::tensor::transform::{Expand, Reduce, Reshape, Slice, Transpose};
+use crate::tensor::transform::{Broadcast, Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
     autoqueue, strides_for, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
     TensorPermitRead, TensorPermitWrite,
@@ -498,15 +498,15 @@ where
 }
 
 pub struct SparseBroadcast<Txn, FE, T: CDatatype> {
-    shape: Shape,
-    inner: SparseAccess<Txn, FE, T>,
+    transform: Broadcast,
+    source: SparseAccess<Txn, FE, T>,
 }
 
 impl<Txn, FE, T: CDatatype> Clone for SparseBroadcast<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
-            shape: self.shape.clone(),
-            inner: self.inner.clone(),
+            transform: self.transform.clone(),
+            source: self.source.clone(),
         }
     }
 }
@@ -521,38 +521,17 @@ where
     where
         S: TensorInstance + Into<SparseAccess<Txn, FE, T>>,
     {
-        let source_shape = source.shape().to_vec();
-        log::debug!("SparseBroadcast::new {source_shape:?} into {shape:?}");
+        log::debug!("SparseBroadcast::new {:?} into {:?}", source.shape(), shape);
 
-        let mut inner = source.into();
-
-        let axes = (0..source_shape.len()).into_iter().rev();
-        let dims = source_shape
-            .into_iter()
-            .rev()
-            .zip(shape.iter().rev().copied());
-
-        for (x, (dim, bdim)) in axes.zip(dims) {
-            if dim == bdim {
-                // no-op
-            } else if dim == 1 {
-                let broadcast_axis = SparseBroadcastAxis::new(inner, x, bdim)?;
-                inner = SparseAccess::BroadcastAxis(Box::new(broadcast_axis));
-            } else {
-                return Err(bad_request!(
-                    "cannot broadcast {} into {} at axis {}",
-                    dim,
-                    bdim,
-                    x
-                ));
-            }
-        }
-
-        Ok(Self { shape, inner })
+        Broadcast::new(source.shape().clone(), shape).map(|transform| Self {
+            transform,
+            source: source.into(),
+        })
     }
 
+    // TODO: remove this method while implementing support for transposing a broadcasted tensor
     fn invert_range(&self, mut range: Range) -> (Range, Range) {
-        let offset = self.ndim() - self.inner.ndim();
+        let offset = self.ndim() - self.source.ndim();
 
         let inner_range = if range.len() > offset {
             range.drain(offset..).collect()
@@ -575,7 +554,7 @@ where
     }
 
     fn shape(&self) -> &Shape {
-        &self.shape
+        self.transform.shape()
     }
 }
 
@@ -612,20 +591,15 @@ where
     ) -> Result<Elements<Self::DType>, TCError> {
         log::debug!("SparseBroadcast::elements in range {range:?} with order {order:?}");
 
+        self.shape().validate_range(&range)?;
+        self.shape().validate_axes(&order, true)?;
+
         let ndim = self.ndim();
-        let offset = ndim - self.inner.ndim();
-
-        if offset == 0 {
-            return self.inner.elements(txn_id, range, order).await;
-        } else {
-            log::trace!("there are {offset} outer dimensions to broadcast");
-        }
-
-        self.shape.validate_range(&range)?;
-        self.shape.validate_axes(&order, true)?;
+        let offset = self.ndim() - self.source.ndim();
+        let source_shape = self.source.shape().to_vec();
 
         let (outer_range, inner_range) = self.invert_range(range.clone());
-        let outer_range = outer_range.normalize(&self.shape()[..(self.ndim() - self.inner.ndim())]);
+        let outer_range = outer_range.normalize(&self.shape()[..offset]);
 
         let inner_order = if order
             .iter()
@@ -641,11 +615,39 @@ where
             ))
         }?;
 
+        let axes = (0..source_shape.len()).into_iter().rev();
+        let dims = source_shape
+            .into_iter()
+            .rev()
+            .zip(self.transform.shape().iter().rev().copied());
+
+        let mut inner = self.source;
+
+        for (x, (dim, bdim)) in axes.zip(dims) {
+            if dim == bdim {
+                // no-op
+            } else if dim == 1 {
+                let broadcast_axis = SparseBroadcastAxis::new(inner, x, bdim)?;
+                inner = SparseAccess::BroadcastAxis(Box::new(broadcast_axis));
+            } else {
+                return Err(bad_request!(
+                    "cannot broadcast {} into {} at axis {}",
+                    dim,
+                    bdim,
+                    x
+                ));
+            }
+        }
+
+        if offset == 0 {
+            trace!("select elements in range {range:?} from {inner:?}");
+            return inner.elements(txn_id, range, order).await;
+        }
+
         log::trace!("constructing the cartesian product of outer broadcast {outer_range:?}...");
 
         let outer = outer_range.into_iter().multi_cartesian_product();
 
-        let inner = self.inner;
         let elements = futures::stream::iter(outer)
             .then(move |outer_coord| {
                 log::trace!("outer coord is {outer_coord:?}");
@@ -676,12 +678,9 @@ where
         Ok(Box::pin(elements))
     }
 
-    async fn read_value(&self, txn_id: TxnId, mut coord: Coord) -> Result<Self::DType, TCError> {
-        while coord.len() > self.inner.ndim() {
-            coord.remove(0);
-        }
-
-        self.inner.read_value(txn_id, coord).await
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
+        let source_coord = self.transform.invert_coord(coord);
+        self.source.read_value(txn_id, source_coord).await
     }
 }
 
@@ -693,9 +692,9 @@ where
     T: CDatatype + DType,
 {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
-        self.shape.validate_range(&range)?;
-        let (_outer_range, inner_range) = self.invert_range(range);
-        self.inner.read_permit(txn_id, inner_range).await
+        self.shape().validate_range(&range)?;
+        let source_range = self.transform.invert_range(range);
+        self.source.read_permit(txn_id, source_range).await
     }
 }
 
@@ -712,7 +711,12 @@ where
     T: CDatatype + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "broadcasted sparse tensor with shape {:?}", self.shape)
+        write!(
+            f,
+            "broadcast {:?} into {:?}",
+            self.source,
+            self.transform.shape()
+        )
     }
 }
 
