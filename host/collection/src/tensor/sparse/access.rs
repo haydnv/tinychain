@@ -592,18 +592,32 @@ where
         self.shape().validate_range(&range)?;
         self.shape().validate_axes(&order, true)?;
 
-        let axes = (0..self.source.ndim()).into_iter().rev();
-        let dims = self
-            .source
-            .shape()
-            .to_vec()
-            .into_iter()
-            .rev()
-            .zip(self.transform.shape().iter().rev().copied());
+        let (source, range, shape) = if order.iter().copied().enumerate().all(|(i, x)| i == x) {
+            (self.source, range, self.transform.shape().clone())
+        } else {
+            let range = order
+                .iter()
+                .copied()
+                .map(|x| {
+                    range
+                        .get(x)
+                        .cloned()
+                        .unwrap_or_else(|| AxisRange::all(self.shape()[x]))
+                })
+                .collect();
 
-        let mut inner = self.source;
+            let shape = order.iter().copied().map(|x| self.shape()[x]).collect();
 
-        for (x, (dim, bdim)) in axes.zip(dims) {
+            let source = SparseTranspose::new(self.source, Some(order)).map(SparseAccess::from)?;
+
+            (source, range, shape)
+        };
+
+        let dims = source.shape().to_vec().into_iter().zip(shape);
+
+        let mut inner = source;
+
+        for (x, (dim, bdim)) in dims.enumerate().rev() {
             if dim == bdim {
                 // no-op
             } else if dim == 1 {
@@ -619,7 +633,7 @@ where
             }
         }
 
-        inner.elements(txn_id, range, order).await
+        inner.elements(txn_id, range, Axes::default()).await
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
