@@ -40,18 +40,18 @@ class EinsumTests(HostTest):
 
     def test1D(self):
         A = np.array([1, 2, 3])
-        self.execute('i->i', A)
+        self.execute("i->i", A)
 
     def test2Dx1(self):
         A = np.array([[1, 1], [2, 2], [3, 3]])
-        self.execute('ij->i', A)
-        self.execute('ij->j', A)
-        self.execute('ij->ij', A)
-        self.execute('ij->ji', A)
+        self.execute("ij->i", A)
+        self.execute("ij->j", A)
+        self.execute("ij->ij", A)
+        self.execute("ij->ji", A)
 
     def test2Dto3D(self):
         A = np.array([[0, 1], [1, 2], [2, 3]])
-        self.execute('ij,ik->ijk', A, A)
+        self.execute("ij,ik->ijk", A, A)
 
     def test2Dx2(self):
         def _execute(A, B):
@@ -88,24 +88,20 @@ class EinsumTests(HostTest):
         _execute(A, B)
 
     def test3Dx2(self):
-        A = np.array([[1, 1, 1],
-                      [2, 2, 2],
-                      [5, 5, 5]])
+        A = np.array([[1, 1, 1], [2, 2, 2], [5, 5, 5]])
 
-        B = np.array([[0, 1, 0],
-                      [1, 1, 0],
-                      [1, 1, 1]])
+        B = np.array([[0, 1, 0], [1, 1, 0], [1, 1, 1]])
 
-        self.execute('ij,jk->ijk', A, B)
-        self.execute_dense('ij,jk->ik', A, B)
+        self.execute("ij,jk->ijk", A, B)
+        self.execute_dense("ij,jk->ik", A, B)
 
         A = np.arange(60).reshape(3, 4, 5)
         B = np.arange(24).reshape(4, 3, 2)
 
-        self.execute_dense('ijk,jil->il', A, B)
-        self.execute_dense('ijk,jil->kj', A, B)
-        self.execute_dense('ijk,jil->lkij', A, B)
-        self.execute_dense('ijk,jil->lij', A, B)
+        self.execute_dense("ijk,jil->il", A, B)
+        self.execute_dense("ijk,jil->kj", A, B)
+        self.execute_dense("ijk,jil->lkij", A, B)
+        self.execute_dense("ijk,jil->lij", A, B)
 
     def test2DRandom(self):
         rand_dim = lambda x: random.randint(1, x)
@@ -150,7 +146,7 @@ class EinsumTests(HostTest):
         #     print()
         #
         # print("expected", expected)
-        # print("actual", dense)
+        # print("actual", result)
 
         self.assertEqual(result, expected)
 
@@ -184,7 +180,9 @@ def expect_sparse(ndarray):
     coords = itertools.product(*[range(dim) for dim in shape])
     elements = [
         [list(coord), n]
-        for (coord, n) in zip(coords, (n for n in ndarray.flatten().tolist())) if n != 0]
+        for (coord, n) in zip(coords, (n for n in ndarray.flatten().tolist()))
+        if n != 0
+    ]
 
     return {
         str(tc.URI(tc.tensor.Sparse)): [
