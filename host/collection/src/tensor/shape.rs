@@ -285,9 +285,10 @@ impl Range {
     /// assert_eq!(range.to_shape(&Shape::from(vec![2, 3, 4])).unwrap(), Shape::from(vec![3, 4]));
     /// ```
     pub fn normalize(mut self, shape: &[u64]) -> Self {
-        assert!(self.len() <= shape.len());
+        assert!(shape.len() >= self.len());
 
-        for dim in shape[self.axes.len()..].iter().copied() {
+        self.axes.reserve(shape.len() - self.len());
+        for dim in shape[self.len()..].iter().copied() {
             self.axes.push(AxisRange::all(dim))
         }
 
@@ -476,7 +477,6 @@ impl Shape {
             .iter()
             .zip(self)
             .all(|(axis_range, dim)| match axis_range {
-                AxisRange::At(0) if *dim == 1 => true,
                 AxisRange::In(range, 1) if range.start == 0 && &range.end == dim => true,
                 AxisRange::Of(indices) => indices
                     .iter()

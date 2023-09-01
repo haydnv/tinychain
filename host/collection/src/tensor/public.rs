@@ -1336,6 +1336,7 @@ where
                 let shape = self.tensor.shape();
                 if range.is_coord(shape) {
                     let coord = range.as_coord(shape).expect("tensor coordinate");
+                    trace!("read coordinate {coord:?} of {:?}", self.tensor);
 
                     self.tensor
                         .read_value(*txn.id(), coord)
@@ -1343,6 +1344,7 @@ where
                         .map_ok(State::from)
                         .await
                 } else {
+                    trace!("read slice {range:?} of {:?}", self.tensor);
                     self.tensor.slice(range).map(Tensor::from).map(State::from)
                 }
             })

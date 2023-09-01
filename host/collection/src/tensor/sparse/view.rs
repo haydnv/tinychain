@@ -1385,6 +1385,7 @@ where
 
     fn slice(self, range: Range) -> TCResult<Self::Slice> {
         if self.shape().is_covered_by(&range) {
+            trace!("no need to slice {self:?} by {range:?}");
             return Ok(self);
         }
 

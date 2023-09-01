@@ -169,48 +169,37 @@ impl Expand {
             .unique()
             .collect();
 
-        trace!(
-            "the inverse axes of {axes:?} are {source_axes:?} (expansion is {:?})",
-            self.expand
-        );
-
         source_axes
     }
 
-    pub fn invert_range(&self, range: Range) -> Range {
-        let mut source_range = range.clone();
+    pub fn invert_range(&self, mut range: Range) -> Range {
         for x in self.expand.iter().copied().rev() {
-            let removed = if x < source_range.len() {
-                source_range.remove(x)
+            let removed = if x < range.len() {
+                range.remove(x)
             } else {
                 continue;
             };
 
-            if removed.is_index() || source_range.is_empty() {
+            if removed.is_index() || range.is_empty() {
                 // no-op
-            } else if x == source_range.len() {
-                let bound = match source_range.pop().unwrap() {
+            } else if x == range.len() {
+                let bound = match range.pop().unwrap() {
                     AxisRange::At(i) => AxisRange::In(i..i + 1, 1),
                     other => other,
                 };
 
-                source_range.push(bound);
+                range.push(bound);
             } else {
-                let bound = match source_range.remove(x) {
+                let bound = match range.remove(x) {
                     AxisRange::At(i) => AxisRange::In(i..i + 1, 1),
                     other => other,
                 };
 
-                source_range.insert(x, bound);
+                range.insert(x, bound);
             }
         }
 
-        trace!(
-            "the inverse of range {range:?} is {source_range:?} (expansion is {:?})",
-            self.expand
-        );
-
-        source_range
+        range
     }
 
     pub fn invert_coord(&self, mut coord: Coord) -> Coord {
@@ -231,6 +220,8 @@ impl Expand {
         for x in self.expand.iter().rev().copied() {
             coord.insert(x, 0);
         }
+
+        debug_assert_eq!(coord.len(), self.shape.len());
 
         coord
     }
@@ -454,48 +445,73 @@ impl Slice {
         debug_assert!(range.len() <= self.shape().len());
 
         let range = if self.shape().is_covered_by(&range) {
+            trace!(
+                "{range:?} covers {:?} exactly, returning {:?}...",
+                self.shape,
+                self.range
+            );
+
             return self.range.clone();
         } else {
             range.normalize(&self.shape)
         };
+
+        trace!("range normalized to {range:?}");
 
         debug_assert_eq!(range.len(), self.shape().len());
 
         let mut source_range = Vec::with_capacity(self.shape.len());
         let mut axis = 0;
 
-        for axis_range in self.range.iter() {
-            let axis_range = match axis_range {
+        for source_axis_range in self.range.iter() {
+            let axis_range = match source_axis_range {
                 AxisRange::At(i) => AxisRange::At(*i),
-                AxisRange::In(source_range, source_step) => match &range[axis] {
-                    AxisRange::At(i) => {
-                        debug_assert!(source_range.start + (i * source_step) < source_range.end);
-                        AxisRange::At(source_range.start + (i * source_step))
-                    }
-                    AxisRange::In(axis_range, step) => {
-                        debug_assert!(source_range.start + axis_range.start <= source_range.end);
-                        debug_assert!(source_range.start + axis_range.end <= source_range.end);
+                AxisRange::In(source_range, source_step) => {
+                    let axis_range = match &range[axis] {
+                        AxisRange::At(i) => {
+                            debug_assert!(
+                                source_range.start + (i * source_step) < source_range.end
+                            );
 
-                        let (source_start, source_end, source_step) = (
-                            axis_range.start + source_range.start,
-                            axis_range.end + source_range.start,
-                            step * source_step,
-                        );
+                            AxisRange::At(source_range.start + (i * source_step))
+                        }
+                        AxisRange::In(axis_range, step) => {
+                            debug_assert!(
+                                source_range.start + axis_range.start <= source_range.end
+                            );
 
-                        AxisRange::In(source_start..source_end, source_step)
-                    }
-                    AxisRange::Of(indices) => {
-                        let indices = indices
-                            .iter()
-                            .copied()
-                            .map(|i| source_range.start + i)
-                            .collect::<Vec<u64>>();
+                            debug_assert!(source_range.start + axis_range.end <= source_range.end);
 
-                        debug_assert!(indices.iter().copied().all(|i| i < source_range.end));
+                            let (source_start, source_end, source_step) = (
+                                axis_range.start + source_range.start,
+                                axis_range.end + source_range.start,
+                                step * source_step,
+                            );
 
-                        AxisRange::Of(indices)
-                    }
-                },
+                            AxisRange::In(source_start..source_end, source_step)
+                        }
+                        AxisRange::Of(indices) => {
+                            let indices = indices
+                                .iter()
+                                .copied()
+                                .map(|i| source_range.start + i)
+                                .collect::<Vec<u64>>();
+
+                            debug_assert!(indices.iter().copied().all(|i| i < source_range.end));
+
+                            AxisRange::Of(indices)
+                        }
+                    };
+
+                    trace!(
+                        "axis range {:?} within {:?} is {:?}",
+                        range[axis],
+                        source_axis_range,
+                        axis_range
+                    );
+
+                    axis_range
+                }
                 AxisRange::Of(source_indices) => match &range[axis] {
                     AxisRange::At(i) => AxisRange::At(source_indices[*i as usize]),
                     AxisRange::In(axis_range, step) => {
@@ -523,7 +539,7 @@ impl Slice {
                 },
             };
 
-            if !axis_range.is_index() {
+            if !source_axis_range.is_index() {
                 axis += 1;
             }
 
@@ -655,5 +671,15 @@ impl Transpose {
         }
 
         source_coord
+    }
+
+    pub fn map_coord(&self, source_coord: Coord) -> Coord {
+        debug_assert_eq!(source_coord.len(), self.permutation.len());
+
+        self.permutation
+            .iter()
+            .copied()
+            .map(|x| source_coord[x])
+            .collect()
     }
 }

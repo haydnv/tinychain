@@ -161,15 +161,21 @@ where
         self.shape().validate_range(&range)?;
         self.shape().validate_axes(&order, true)?;
 
-        trace!("SparseFile::elements in range {range:?} with order {order:?}");
+        debug!(
+            "SparseFile::elements in range {range:?} of {:?} with order {order:?}",
+            self.shape()
+        );
 
         let range = table_range(&range)?;
         let table = self.table.read().await;
 
-        trace!("acquired table read lock");
+        trace!("acquired table read lock, reading rows in range {range:?}");
 
         let rows = table.rows(range, &order, false, None)?;
-        let elements = rows.map_ok(unwrap_row).map_err(TCError::from);
+        let elements = rows
+            .inspect_ok(|row| trace!("row: {row:?}"))
+            .map_ok(unwrap_row)
+            .map_err(TCError::from);
 
         trace!("constructed table row stream");
 
