@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
-use freqfs::{DirLock, DirReadGuard, DirWriteGuard, FileLoad};
+use freqfs::{DirLock, FileLoad};
 use futures::{future, try_join, Stream, TryFutureExt, TryStreamExt};
 use log::{debug, trace};
 use safecast::AsType;
@@ -25,6 +25,7 @@ use super::{BTreeInstance, BTreeType, BTreeWrite, Key, Node, Range};
 const CANON: Label = label("canon");
 const DELETES: Label = label("deletes");
 const INSERTS: Label = label("inserts");
+const COMMITTED: Label = label("committed");
 
 type Version<FE> = b_tree::BTreeLock<BTreeSchema, ValueCollator, FE>;
 type VersionReadGuard<FE> = b_tree::BTreeReadGuard<BTreeSchema, ValueCollator, FE>;
@@ -33,6 +34,7 @@ type VersionWriteGuard<FE> = b_tree::BTreeWriteGuard<BTreeSchema, ValueCollator,
 type Semaphore = tc_transact::lock::Semaphore<b_tree::Collator<ValueCollator>, Arc<Range>>;
 
 struct Delta<FE> {
+    dir: DirLock<FE>,
     deletes: Version<FE>,
     inserts: Version<FE>,
 }
@@ -40,6 +42,7 @@ struct Delta<FE> {
 impl<FE> Clone for Delta<FE> {
     fn clone(&self) -> Self {
         Self {
+            dir: self.dir.clone(),
             deletes: self.deletes.clone(),
             inserts: self.inserts.clone(),
         }
@@ -50,35 +53,78 @@ impl<FE> Delta<FE>
 where
     FE: AsType<Node> + ThreadSafe,
 {
-    fn create(
-        schema: BTreeSchema,
-        collator: ValueCollator,
-        mut dir: DirWriteGuard<FE>,
-    ) -> TCResult<Self> {
-        let deletes = dir.create_dir(DELETES.to_string())?;
-        let inserts = dir.create_dir(INSERTS.to_string())?;
+    fn create(schema: BTreeSchema, collator: ValueCollator, dir: DirLock<FE>) -> TCResult<Self> {
+        let (deletes, inserts) = {
+            let mut dir = dir.try_write()?;
+
+            let deletes = dir.create_dir(DELETES.to_string())?;
+            let inserts = dir.create_dir(INSERTS.to_string())?;
+
+            (deletes, inserts)
+        };
 
         Ok(Self {
+            dir,
             deletes: Version::create(schema.clone(), collator.clone(), deletes)?,
             inserts: Version::create(schema, collator, inserts)?,
         })
     }
 
-    fn load(schema: BTreeSchema, collator: ValueCollator, dir: DirReadGuard<FE>) -> TCResult<Self> {
-        let deletes = dir
-            .get_dir(&*DELETES)
-            .cloned()
-            .ok_or_else(|| TCError::not_found(DELETES))?;
+    fn load_copy(source: &Self, dir: DirLock<FE>) -> TCResult<Self> {
+        let (deletes, inserts) = {
+            let dir = dir.try_read()?;
 
-        let inserts = dir
-            .get_dir(&*INSERTS)
-            .cloned()
-            .ok_or_else(|| TCError::not_found(INSERTS))?;
+            let deletes = dir
+                .get_dir(&*DELETES)
+                .cloned()
+                .ok_or_else(|| TCError::not_found(DELETES))?;
+
+            let inserts = dir
+                .get_dir(&*INSERTS)
+                .cloned()
+                .ok_or_else(|| TCError::not_found(INSERTS))?;
+
+            (deletes, inserts)
+        };
+
+        let deletes = Version::load(
+            source.deletes.schema().clone(),
+            source.deletes.collator().inner().clone(),
+            deletes,
+        )?;
+
+        let inserts = Version::load(
+            source.inserts.schema().clone(),
+            source.inserts.collator().inner().clone(),
+            inserts,
+        )?;
 
         Ok(Self {
+            dir,
+            deletes,
+            inserts,
+        })
+    }
+
+    fn load(schema: BTreeSchema, collator: ValueCollator, dir: DirLock<FE>) -> TCResult<Self> {
+        let (deletes, inserts) = {
+            let mut dir = dir.try_write()?;
+            debug_assert!(!dir.is_empty(), "committed version was not saved");
+
+            let deletes = dir.get_or_create_dir(DELETES.to_string())?;
+            let inserts = dir.get_or_create_dir(INSERTS.to_string())?;
+            (deletes, inserts)
+        };
+
+        Ok(Self {
+            dir,
             deletes: Version::load(schema.clone(), collator.clone(), deletes)?,
             inserts: Version::load(schema.clone(), collator.clone(), inserts)?,
         })
+    }
+
+    fn dir(&self) -> &DirLock<FE> {
+        &self.dir
     }
 
     async fn read(self) -> (VersionReadGuard<FE>, VersionReadGuard<FE>) {
@@ -137,7 +183,6 @@ struct State<FE> {
     commits: OrdHashSet<TxnId>,
     deltas: OrdHashMap<TxnId, Delta<FE>>,
     pending: OrdHashMap<TxnId, Delta<FE>>,
-    versions: DirLock<FE>,
     finalized: Option<TxnId>,
 }
 
@@ -149,6 +194,7 @@ where
     fn pending_version(
         &mut self,
         txn_id: TxnId,
+        dir: &freqfs::Dir<FE>,
         schema: &BTreeSchema,
         collator: &ValueCollator,
     ) -> TCResult<Delta<FE>> {
@@ -161,11 +207,15 @@ where
             Err(conflict!("{} has already been finalized", txn_id))
         } else {
             let dir = {
-                let mut versions = self.versions.try_write()?;
+                let pending = dir
+                    .get_dir(VERSIONS)
+                    .ok_or_else(|| internal!("missing pending versions dir"))?;
+
+                let mut versions = pending.try_write()?;
                 versions.create_dir(txn_id.to_string())?
             };
 
-            let version = Delta::create(schema.clone(), collator.clone(), dir.try_write()?)?;
+            let version = Delta::create(schema.clone(), collator.clone(), dir)?;
             self.pending.insert(txn_id, version.clone());
             Ok(version)
         }
@@ -203,17 +253,25 @@ impl<'a, Txn, FE> BTreeFile<Txn, FE>
 where
     FE: AsType<Node> + ThreadSafe,
 {
-    fn new(dir: DirLock<FE>, canon: Version<FE>, versions: DirLock<FE>) -> TCResult<Self> {
+    fn new(dir: DirLock<FE>, canon: Version<FE>, committed: DirLock<FE>) -> TCResult<Self> {
         let semaphore = Semaphore::new(canon.collator().clone());
 
         let deltas = {
             let mut deltas = OrdHashMap::new();
 
-            let versions = versions.try_read()?;
+            let committed = committed.try_read()?;
 
-            debug!("found {} B+Tree versions pending merge", versions.len());
+            debug!(
+                "found {} committed B+Tree versions pending merge",
+                committed.len()
+            );
 
-            for (name, version) in versions.iter() {
+            for (name, version) in committed.iter() {
+                if name.starts_with('.') {
+                    trace!("skip hidden commit dir entry {name}");
+                    continue;
+                }
+
                 let version = version
                     .as_dir()
                     .cloned()
@@ -221,7 +279,7 @@ where
 
                 let schema = canon.schema().clone();
                 let collator = canon.collator().inner().clone();
-                let version = Delta::load(schema, collator, version.try_read()?)?;
+                let version = Delta::load(schema, collator, version)?;
 
                 deltas.insert(name.parse()?, version);
             }
@@ -233,7 +291,6 @@ where
             commits: deltas.keys().copied().collect(),
             deltas,
             pending: OrdHashMap::new(),
-            versions,
             finalized: None,
         };
 
@@ -390,6 +447,7 @@ where
         let _permit = self.semaphore.write(txn_id, range.clone()).await?;
 
         let (deltas, pending) = {
+            let dir = self.dir.read().await;
             let mut state = self.state.write().expect("state");
 
             let deltas = state
@@ -400,7 +458,9 @@ where
                 .cloned()
                 .collect::<Vec<_>>();
 
-            let pending = state.pending_version(txn_id, self.schema(), self.collator().inner())?;
+            let pending =
+                state.pending_version(txn_id, &*dir, self.schema(), self.collator().inner())?;
+
             (deltas, pending)
         };
 
@@ -452,8 +512,9 @@ where
         trace!("BTreeFile::insert got permit");
 
         let delta = {
+            let dir = self.dir.read().await;
             let mut state = self.state.write().expect("state");
-            state.pending_version(txn_id, self.schema(), self.collator().inner())?
+            state.pending_version(txn_id, &*dir, self.schema(), self.collator().inner())?
         };
 
         trace!("BTreeFile::insert got pending delta");
@@ -480,8 +541,9 @@ where
             .await?;
 
         let delta = {
+            let dir = self.dir.read().await;
             let mut state = self.state.write().expect("state");
-            state.pending_version(txn_id, self.schema(), self.collator().inner())?
+            state.pending_version(txn_id, &*dir, self.schema(), self.collator().inner())?
         };
 
         let (mut inserts, mut deletes) = delta.write().await;
@@ -499,32 +561,51 @@ where
 impl<Txn, FE> Transact for BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe + for<'a> fs::FileSave<'a>,
+    FE: AsType<Node> + ThreadSafe + for<'a> fs::FileSave<'a> + Clone,
 {
     type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("BTreeFile::commit {}", txn_id);
 
-        let version = {
+        let pending = {
             let mut state = self.state.write().expect("state");
 
             if state.finalized.as_ref() > Some(&txn_id) {
                 panic!("cannot commit finalized version {}", txn_id);
             } else if !state.commits.insert(txn_id) {
+                // prevent any pending version being created at this txn
+                assert!(!state.pending.contains_key(&txn_id));
                 log::warn!("duplicate commit at {}", txn_id);
                 None
-            } else if let Some(pending) = state.pending.remove(&txn_id) {
-                state.deltas.insert(txn_id, pending.clone());
-                Some(pending)
             } else {
-                None
+                state.pending.remove(&txn_id)
             }
         };
 
-        if let Some(pending) = version {
-            trace!("commit new version at {txn_id}");
-            pending.commit().await;
+        if let Some(pending) = pending {
+            let committed = {
+                let dir = self.dir.read().await;
+                dir.get_dir(&*COMMITTED)
+                    .cloned()
+                    .expect("committed versions")
+            };
+
+            let mut committed = committed.write().await;
+
+            let dir = committed
+                .copy_dir_from(txn_id.to_string(), pending.dir())
+                .await
+                .expect("committed version copy");
+
+            let delta = Delta::load_copy(&pending, dir).expect("committed version");
+            delta.commit().await;
+
+            self.state
+                .write()
+                .expect("state")
+                .deltas
+                .insert(txn_id, delta);
         }
 
         self.semaphore.finalize(&txn_id, false);
@@ -616,21 +697,17 @@ where
         let dir = store.into_inner();
         let collator = ValueCollator::default();
 
-        let (canon, versions) = {
+        let (canon, committed) = {
             let mut dir = dir.write().await;
 
-            let versions = dir
-                .get_dir(&*VERSIONS)
-                .cloned()
-                .ok_or_else(|| internal!("missing versions dir"))?;
-
+            let committed = dir.create_dir(COMMITTED.to_string())?;
             let canon = dir.create_dir(CANON.to_string())?;
             let canon = Version::create(schema, collator, canon)?;
 
-            (canon, versions)
+            (canon, committed)
         };
 
-        Self::new(dir, canon, versions)
+        Self::new(dir, canon, committed)
     }
 
     async fn load(_txn_id: TxnId, schema: Self::Schema, store: Dir<FE>) -> TCResult<Self> {
@@ -639,21 +716,17 @@ where
         let dir = store.into_inner();
         let collator = ValueCollator::default();
 
-        let (canon, versions) = {
+        let (canon, committed) = {
             let mut dir = dir.write().await;
 
-            let versions = dir
-                .get_dir(&*VERSIONS)
-                .cloned()
-                .ok_or_else(|| internal!("missing versions dir"))?;
-
+            let committed = dir.get_or_create_dir(COMMITTED.to_string())?;
             let canon = dir.get_or_create_dir(CANON.to_string())?;
             let canon = Version::load(schema, collator, canon)?;
 
-            (canon, versions)
+            (canon, committed)
         };
 
-        Self::new(dir, canon, versions)
+        Self::new(dir, canon, committed)
     }
 
     fn dir(&self) -> Inner<FE> {
@@ -719,7 +792,11 @@ where
 
         let deletes = Version::create(schema.clone(), collator.clone(), deletes)?;
 
-        let delta = Delta { deletes, inserts };
+        let delta = Delta {
+            dir: version,
+            deletes,
+            inserts,
+        };
 
         let canon = Version::create(schema, collator, canon)?;
 
@@ -733,7 +810,6 @@ where
             dir,
             canon,
             state: Arc::new(RwLock::new(State {
-                versions,
                 deltas: OrdHashMap::new(),
                 commits: OrdHashSet::new(),
                 pending: std::iter::once((txn_id, delta)).collect(),
@@ -775,6 +851,7 @@ where
         let canon = self.canon.read().await;
 
         let (deltas, pending) = {
+            let dir = self.dir.read().await;
             let mut state = self.state.write().expect("state");
 
             let deltas = state
@@ -785,7 +862,7 @@ where
                 .cloned()
                 .collect::<Vec<_>>();
 
-            let pending = state.pending_version(txn_id, schema, collator)?;
+            let pending = state.pending_version(txn_id, &*dir, schema, collator)?;
 
             (deltas, pending)
         };
@@ -904,7 +981,11 @@ where
         let deletes = Version::create(schema.clone(), collator.clone(), deletes)
             .map_err(de::Error::custom)?;
 
-        let version = Delta { inserts, deletes };
+        let version = Delta {
+            dir: version,
+            inserts,
+            deletes,
+        };
 
         trace!("create canonical b_tree::BTreeLock");
         let canon = Version::create(schema, collator, canon).map_err(de::Error::custom)?;
@@ -920,7 +1001,6 @@ where
                 commits: OrdHashSet::with_capacity(0),
                 deltas: OrdHashMap::with_capacity(0),
                 pending: std::iter::once((txn_id, version)).collect(),
-                versions,
                 finalized: None,
             })),
             canon,
