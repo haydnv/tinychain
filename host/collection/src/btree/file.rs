@@ -109,7 +109,7 @@ where
     fn load(schema: BTreeSchema, collator: ValueCollator, dir: DirLock<FE>) -> TCResult<Self> {
         let (deletes, inserts) = {
             let mut dir = dir.try_write()?;
-            debug_assert!(!dir.is_empty(), "committed version was not saved");
+            debug_assert!(!dir.is_empty(), "failed to sync committed version");
 
             let deletes = dir.get_or_create_dir(DELETES.to_string())?;
             let inserts = dir.get_or_create_dir(INSERTS.to_string())?;
