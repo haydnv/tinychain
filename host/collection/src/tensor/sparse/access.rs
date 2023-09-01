@@ -20,7 +20,9 @@ use tc_value::{DType, Number, NumberType};
 use tcgeneric::{TCBoxTryFuture, ThreadSafe};
 
 use crate::tensor::block::Block;
-use crate::tensor::dense::{DenseAccess, DenseCacheFile, DenseInstance, DenseSlice};
+use crate::tensor::dense::{
+    DenseAccess, DenseCacheFile, DenseInstance, DenseSlice, DenseTranspose,
+};
 use crate::tensor::transform::{Broadcast, Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
     autoqueue, strides_for, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
@@ -2388,38 +2390,34 @@ where
         range: Range,
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
-        let ndim = self.ndim();
-
-        if !order.is_empty() {
-            if order.len() != ndim || order.iter().copied().zip(0..ndim).any(|(a, x)| a != x) {
-                return Err(bad_request!(
-                    "{:?} does not support permutation {:?}",
-                    self,
-                    order
-                ));
-            }
-        }
-
         self.shape().validate_range(&range)?;
+        self.shape().validate_axes(&order, true)?;
 
-        let coord_block_size = self.source.block_size() * ndim;
-
+        let is_slice = !self.shape().is_covered_by(&range);
         let range = range.normalize(self.shape());
+
+        let source = if order.iter().copied().enumerate().all(|(i, x)| i == x) {
+            Ok(self.source)
+        } else {
+            DenseTranspose::new(self.source, Some(order)).map(DenseAccess::from)
+        }?;
+
+        let ndim = source.ndim();
+        let coord_block_size = source.block_size() * ndim;
+
         let coords = range.affected().map(|coord| coord.into_iter()).flatten();
         let coords = futures::stream::iter(coords).chunks(coord_block_size);
 
-        let source_blocks: Blocks<_, Array<Self::DType>> = if self.shape().is_covered_by(&range) {
-            let source_blocks = self.source.read_blocks(txn_id).await?;
+        let source_blocks: Blocks<_, Array<Self::DType>> = if is_slice {
+            let source_blocks = DenseSlice::new(source, range)?.read_blocks(txn_id).await?;
+
             let blocks = coords
                 .zip(source_blocks)
                 .map(|(coords, values)| values.map(|values| (coords, values.into())));
 
             Box::pin(blocks)
         } else {
-            let source_blocks = DenseSlice::new(self.source, range)?
-                .read_blocks(txn_id)
-                .await?;
-
+            let source_blocks = source.read_blocks(txn_id).await?;
             let blocks = coords
                 .zip(source_blocks)
                 .map(|(coords, values)| values.map(|values| (coords, values.into())));
