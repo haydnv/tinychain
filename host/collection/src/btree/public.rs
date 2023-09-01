@@ -92,7 +92,7 @@ where
                 let store = {
                     let mut dir = txn.context().write().await;
                     let (_, cache) = dir.create_dir_unique()?;
-                    Dir::load(*txn.id(), cache).await?
+                    Dir::load(*txn.id(), cache, false).await?
                 };
 
                 BTreeFile::<State::Txn, State::FE>::create(*txn.id(), schema, store)

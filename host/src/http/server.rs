@@ -13,7 +13,7 @@ use serde::de::DeserializeOwned;
 use tc_error::*;
 use tc_fs::Gateway as GatewayInstance;
 use tc_state::State;
-use tc_transact::{IntoView, TxnId};
+use tc_transact::{IntoView, Transaction, TxnId};
 use tcgeneric::{NetworkTime, TCPathBuf};
 
 use crate::gateway::Gateway;
@@ -176,7 +176,8 @@ impl HTTPServer {
 
             &hyper::Method::PUT => {
                 let key = get_param(&mut params, "key")?.unwrap_or_default();
-                let value = destream_body(http_request.into_body(), encoding, txn.clone()).await?;
+                let sub_txn = txn.subcontext_unique().await?;
+                let value = destream_body(http_request.into_body(), encoding, sub_txn).await?;
                 let result = self
                     .gateway
                     .put(txn, path.into(), key, value)
@@ -190,7 +191,8 @@ impl HTTPServer {
             }
 
             &hyper::Method::POST => {
-                let data = destream_body(http_request.into_body(), encoding, txn.clone()).await?;
+                let sub_txn = txn.subcontext_unique().await?;
+                let data = destream_body(http_request.into_body(), encoding, sub_txn).await?;
                 self.gateway.post(txn, path.into(), data).await
             }
 

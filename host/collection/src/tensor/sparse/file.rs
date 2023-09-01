@@ -9,10 +9,11 @@ use freqfs::DirLock;
 use futures::future::TryFutureExt;
 use futures::stream::TryStreamExt;
 use ha_ndarray::{ArrayBase, CDatatype};
+use log::{debug, trace};
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
-use tc_transact::TxnId;
+use tc_transact::{fs, TxnId};
 use tc_value::{DType, Number, NumberCollator, NumberType};
 use tcgeneric::{ThreadSafe, Tuple};
 
@@ -60,9 +61,11 @@ impl<FE, T> SparseFile<FE, T> {
 impl<FE: AsType<Node> + ThreadSafe, T> SparseFile<FE, T> {
     pub async fn copy_from<O>(dir: DirLock<FE>, txn_id: TxnId, other: O) -> TCResult<Self>
     where
-        O: SparseInstance<DType = T>,
+        O: SparseInstance<DType = T> + fmt::Debug,
         T: Into<Number>,
     {
+        debug!("SparseFile::copy_from {other:?}");
+
         let this = Self::create(dir, other.shape().clone())?;
         let mut table = this.table.write().await;
         let mut elements = other
@@ -79,6 +82,8 @@ impl<FE: AsType<Node> + ThreadSafe, T> SparseFile<FE, T> {
     }
 
     pub fn create(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
+        debug!("SparseFile::create");
+
         let schema = Schema::new(shape);
         let collator = NumberCollator::default();
         let table = TableLock::create(schema, collator, dir)?;
@@ -90,6 +95,8 @@ impl<FE: AsType<Node> + ThreadSafe, T> SparseFile<FE, T> {
     }
 
     pub fn load(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
+        debug!("SparseFile::load");
+
         let schema = Schema::new(shape);
         let collator = NumberCollator::default();
         let table = TableLock::load(schema, collator, dir)?;
@@ -98,6 +105,13 @@ impl<FE: AsType<Node> + ThreadSafe, T> SparseFile<FE, T> {
             table,
             dtype: PhantomData,
         })
+    }
+
+    pub async fn sync(&self) -> TCResult<()>
+    where
+        FE: for<'a> fs::FileSave<'a>,
+    {
+        self.table.sync().map_err(TCError::from).await
     }
 }
 
@@ -145,12 +159,26 @@ where
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         self.shape().validate_range(&range)?;
-        self.shape().validate_axes(&order)?;
+        self.shape().validate_axes(&order, true)?;
+
+        debug!(
+            "SparseFile::elements in range {range:?} of {:?} with order {order:?}",
+            self.shape()
+        );
 
         let range = table_range(&range)?;
         let table = self.table.read().await;
+
+        trace!("acquired table read lock, reading rows in range {range:?}");
+
         let rows = table.rows(range, &order, false, None)?;
-        let elements = rows.map_ok(unwrap_row).map_err(TCError::from);
+        let elements = rows
+            .inspect_ok(|row| trace!("row: {row:?}"))
+            .map_ok(unwrap_row)
+            .map_err(TCError::from);
+
+        trace!("constructed table row stream");
+
         Ok(Box::pin(elements))
     }
 
@@ -178,6 +206,8 @@ where
     type Guard = SparseFileWriteGuard<'a, FE, T>;
 
     async fn write(&'a self) -> SparseFileWriteGuard<'a, FE, T> {
+        debug!("SparseFile::write");
+
         SparseFileWriteGuard {
             shape: self.table.schema().shape(),
             table: self.table.write().await,
@@ -235,7 +265,9 @@ where
     Number: From<T>,
 {
     async fn clear(&mut self, _txn_id: TxnId, range: Range) -> TCResult<()> {
-        if range == Range::default() || range == Range::all(&self.shape) {
+        debug!("SparseFileWriteGuard::clear {range:?}");
+
+        if self.shape.is_covered_by(&range) {
             self.table.truncate().map_err(TCError::from).await
         } else {
             let range = table_range(&range)?;

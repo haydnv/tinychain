@@ -5,7 +5,7 @@ use tc_scalar::Scalar;
 use tc_transact::fs;
 use tc_transact::public::{GetHandler, Handler, Route, StateInstance};
 use tc_value::{Number, NumberType, Value};
-use tcgeneric::{Map, PathSegment, TCPath, ThreadSafe, Tuple};
+use tcgeneric::{Map, PathSegment, TCPath, Tuple};
 
 use super::btree::{BTree, BTreeFile, BTreeInstance, BTreeSchema, Node as BTreeNode};
 use super::table::{TableFile, TableInstance, TableSchema};
@@ -17,7 +17,7 @@ where
     State: StateInstance
         + From<Collection<State::Txn, State::FE>>
         + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     TableFile<State::Txn, State::FE>:
         fs::Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
@@ -42,7 +42,7 @@ struct SchemaHandler<'a, Txn, FE> {
 impl<'a, State> Handler<'a, State> for SchemaHandler<'a, State::Txn, State::FE>
 where
     State: StateInstance,
-    State::FE: AsType<BTreeNode> + ThreadSafe,
+    State::FE: AsType<BTreeNode>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -80,12 +80,12 @@ where
         + From<Tuple<Value>>
         + From<u64>,
     State::Class: From<NumberType>,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
     BTree<State::Txn, State::FE>: TryCastFrom<State>,
     Map<Value>: TryFrom<State, Error = TCError>,
     Number: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
-    Tuple<State>: TryCastFrom<State>,
+    Tuple<State>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
     Value: TryCastFrom<State>,
     bool: TryCastFrom<State>,
@@ -122,14 +122,14 @@ where
         + From<Tuple<Value>>
         + From<u64>,
     State::Class: From<NumberType>,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
     BTree<State::Txn, State::FE>: TryCastFrom<State>,
     Collection<State::Txn, State::FE>: From<BTree<State::Txn, State::FE>>,
     Map<Value>: TryFrom<State, Error = TCError>,
     Number: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
-    Tuple<State>: TryCastFrom<State>,
+    Tuple<State>: TryFrom<State, Error = TCError>,
     Value: TryCastFrom<State>,
     bool: TryCastFrom<State>,
 {
@@ -154,7 +154,7 @@ where
         + From<Tensor<State::Txn, State::FE>>
         + From<Tuple<Value>>,
     State::Class: From<NumberType>,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
     BTreeFile<State::Txn, State::FE>:
         fs::Persist<State::FE, Schema = BTreeSchema, Txn = State::Txn>,
     TableFile<State::Txn, State::FE>:

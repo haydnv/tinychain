@@ -91,7 +91,7 @@ where
                 let store = {
                     let mut context = txn.context().write().await;
                     let (_, dir) = context.create_dir_unique()?;
-                    Dir::load(*txn.id(), dir).await?
+                    Dir::load(*txn.id(), dir, false).await?
                 };
 
                 TableFile::create(*txn.id(), schema, store)
@@ -111,7 +111,7 @@ struct ContainsHandler<Txn, FE> {
 impl<'a, State> Handler<'a, State> for ContainsHandler<State::Txn, State::FE>
 where
     State: StateInstance,
-    State::FE: AsType<Node> + ThreadSafe,
+    State::FE: AsType<Node>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -307,10 +307,10 @@ where
 impl<'a, State> Handler<'a, State> for TableHandler<State::Txn, State::FE>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Map<State>>,
-    State::FE: AsType<Node> + ThreadSafe,
+    State::FE: AsType<Node>,
     Map<Value>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
-    Tuple<State>: TryCastFrom<State>,
+    Tuple<State>: TryFrom<State, Error = TCError>,
     Value: TryCastFrom<State>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
@@ -341,23 +341,25 @@ where
     where
         'b: 'a,
     {
-        Some(Box::new(|txn, key, values| {
+        Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                debug!("Table PUT {:?} <- {:?}", key, values);
+                debug!("Table PUT {:?} <- {:?}", key, value);
 
                 match KeyOrRange::try_from_value(&self.table, key)? {
                     KeyOrRange::All => {
-                        let values = Map::<Value>::try_from(values)?;
+                        let values = Map::<Value>::try_from(value)?;
                         self.update(txn, Range::default(), values).await
                     }
                     KeyOrRange::Range(range) => {
-                        let values = Map::<Value>::try_from(values)?;
+                        let values = Map::<Value>::try_from(value)?;
                         self.update(txn, range, values).await
                     }
                     KeyOrRange::Key(key) => {
-                        let values = Tuple::<State>::try_cast_from(values, |s| {
-                            TCError::unexpected(s, "a Tuple of Values for a Table row")
-                        })?;
+                        let values = if value.is_tuple() {
+                            Tuple::<State>::try_from(value)?
+                        } else {
+                            Tuple::<State>::from(vec![value])
+                        };
 
                         let values = values
                             .into_iter()
@@ -480,10 +482,10 @@ impl<T> From<T> for SelectHandler<T> {
 impl<State> Route<State> for Table<State::Txn, State::FE>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<u64>,
-    State::FE: AsType<Node> + ThreadSafe,
+    State::FE: AsType<Node>,
     Map<Value>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
-    Tuple<State>: TryCastFrom<State>,
+    Tuple<State>: TryFrom<State, Error = TCError>,
     Value: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
@@ -494,10 +496,10 @@ where
 impl<State> Route<State> for TableFile<State::Txn, State::FE>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<u64>,
-    State::FE: AsType<Node> + ThreadSafe,
+    State::FE: AsType<Node>,
     Map<Value>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
-    Tuple<State>: TryCastFrom<State>,
+    Tuple<State>: TryFrom<State, Error = TCError>,
     Value: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
@@ -512,7 +514,7 @@ fn route<'a, State, T>(
 ) -> Option<Box<dyn Handler<'a, State> + 'a>>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<u64>,
-    State::FE: AsType<Node> + ThreadSafe,
+    State::FE: AsType<Node>,
     T: TableRead + TableOrder + TableSlice + TableStream + TableWrite + Clone + fmt::Debug,
     <T as TableSlice>::Slice: TableStream,
     Map<Value>: TryFrom<State, Error = TCError>,
@@ -522,7 +524,7 @@ where
         + From<<T as TableOrder>::OrderBy>
         + From<<T as TableStream>::Selection>
         + From<<T as TableSlice>::Slice>,
-    Tuple<State>: TryCastFrom<State>,
+    Tuple<State>: TryFrom<State, Error = TCError>,
     Value: TryCastFrom<State>,
 {
     if path.is_empty() {

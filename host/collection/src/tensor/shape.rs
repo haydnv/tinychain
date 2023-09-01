@@ -183,7 +183,7 @@ impl fmt::Debug for AxisRange {
             At(at) => write!(f, "{at}"),
             In(range, 1) => write!(f, "[{}, {})", range.start, range.end),
             In(range, step) => write!(f, "[{}, {})/{}", range.start, range.end, step),
-            Of(indices) if indices.is_empty() => f.write_str("[]"),
+            Of(indices) if indices.is_empty() => f.write_str("{}"),
             Of(indices) => {
                 f.write_str("{")?;
 
@@ -280,14 +280,15 @@ impl Range {
     ///
     /// Example:
     /// ```
-    /// # use tc_tensor::{Range, Shape};
+    /// # use tc_collection::tensor::{Range, Shape};
     /// let mut range = Range::from(&[0u64][..]);
     /// assert_eq!(range.to_shape(&Shape::from(vec![2, 3, 4])).unwrap(), Shape::from(vec![3, 4]));
     /// ```
     pub fn normalize(mut self, shape: &[u64]) -> Self {
-        assert!(self.len() <= shape.len());
+        assert!(shape.len() >= self.len());
 
-        for dim in shape[self.axes.len()..].iter().copied() {
+        self.axes.reserve(shape.len() - self.len());
+        for dim in shape[self.len()..].iter().copied() {
             self.axes.push(AxisRange::all(dim))
         }
 
@@ -361,6 +362,15 @@ impl IntoIterator for Range {
 
     fn into_iter(self) -> Self::IntoIter {
         self.axes.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Range {
+    type Item = &'a AxisRange;
+    type IntoIter = <&'a [AxisRange] as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.axes.as_slice().iter()
     }
 }
 
@@ -440,7 +450,7 @@ impl fmt::Debug for Range {
 pub struct Shape(Vec<u64>);
 
 impl Shape {
-    /// Return true if the given [`Range`] fit within this `Shape`.
+    /// Return true if the given [`Range`] fit within this [`Shape`].
     pub fn contains_range(&self, range: &Range) -> bool {
         if range.len() > self.len() {
             return false;
@@ -449,11 +459,30 @@ impl Shape {
         self.0
             .iter()
             .copied()
-            .zip(range.iter())
+            .zip(range)
             .all(|(dim, bound)| match bound {
                 AxisRange::At(i) => *i < dim,
                 AxisRange::In(range, _step) => range.start < dim && range.end <= dim,
                 AxisRange::Of(indices) => indices.iter().copied().all(|i| i < dim),
+            })
+    }
+
+    /// Return true if the given [`Range`] matches this [`Shape`] exactly.
+    pub fn is_covered_by(&self, range: &Range) -> bool {
+        if range.len() > self.len() {
+            return false;
+        }
+
+        range
+            .iter()
+            .zip(self)
+            .all(|(axis_range, dim)| match axis_range {
+                AxisRange::In(range, 1) if range.start == 0 && &range.end == dim => true,
+                AxisRange::Of(indices) => indices
+                    .iter()
+                    .enumerate()
+                    .all(|(i, idx)| (i as u64) == *idx),
+                _ => false,
             })
     }
 
@@ -505,20 +534,36 @@ impl Shape {
     }
 
     /// Return an [`Error`] if any of the given axes is out of range.
-    pub fn validate_axes(&self, axes: &[usize]) -> Result<(), TCError> {
-        match axes.iter().max() {
-            Some(max) if *max >= self.len() => {
+    pub fn validate_axes(&self, axes: &[usize], require_ndim: bool) -> Result<(), TCError> {
+        if let Some(max) = axes.iter().max().copied() {
+            if max >= self.len() {
                 #[cfg(debug_assertions)]
                 panic!("shape {self:?} has no axis {max}");
 
                 #[cfg(not(debug_assertions))]
-                Err(bad_request!("shape {self:?} has no axis {max}"))
+                return Err(bad_request!("shape {self:?} has no axis {max}"));
             }
-            _ => Ok(()),
         }
+
+        if (1..axes.len()).any(|i| axes[i..].contains(&axes[i - 1])) {
+            return Err(bad_request!("{axes:?} contains a duplicate axis"));
+        }
+
+        if require_ndim {
+            if !axes.is_empty() && axes.len() != self.len() {
+                #[cfg(debug_assertions)]
+                panic!("invalid permutation for {self:?}: {axes:?}");
+
+                #[cfg(not(debug_assertions))]
+                return Err(bad_request!("invalid permutation for {self:?}: {axes:?}"));
+            }
+        }
+
+        Ok(())
     }
 
     /// Return an [`Error`] if the given `Range` don't fit within this `Shape`.
+    #[inline]
     pub fn validate_range(&self, range: &Range) -> Result<(), TCError> {
         if self.contains_range(range) {
             Ok(())
@@ -532,6 +577,7 @@ impl Shape {
     }
 
     /// Return an [`Error`] if the given `coord` doesn't fit within this `Shape`.
+    #[inline]
     pub fn validate_coord(&self, coord: &[u64]) -> Result<(), TCError> {
         if self.contains_coord(coord) {
             Ok(())
@@ -573,6 +619,24 @@ impl<'a, D: Digest> Hash<D> for &'a Shape {
             hasher.update(hash);
         }
         hasher.finalize()
+    }
+}
+
+impl IntoIterator for Shape {
+    type Item = u64;
+    type IntoIter = <Vec<u64> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Shape {
+    type Item = &'a u64;
+    type IntoIter = <&'a [u64] as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.0).into_iter()
     }
 }
 

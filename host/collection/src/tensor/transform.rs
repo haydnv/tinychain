@@ -1,6 +1,7 @@
+use itertools::Itertools;
 use std::iter;
 
-use log::warn;
+use log::{trace, warn};
 
 use tc_error::*;
 
@@ -20,10 +21,10 @@ impl Broadcast {
         source_shape.validate()?;
         shape.validate()?;
 
-        if source_shape.is_empty() {
-            return Err(bad_request!("cannot broadcast an empty Tensor"));
-        } else if shape.is_empty() {
-            return Err(bad_request!("cannot broadcast into an empty Tensor"));
+        if source_shape.len() > shape.len() {
+            return Err(bad_request!(
+                "cannot broadcast {source_shape:?} into a lower-dimensional shape {shape:?}"
+            ));
         } else if source_shape == shape {
             warn!(
                 "broadcast a Tensor with shape {:?} into {:?}",
@@ -32,31 +33,25 @@ impl Broadcast {
         }
 
         let ndim = shape.len();
-        debug_assert!(source_shape.len() <= ndim);
-
-        if source_shape.len() > ndim {
-            return Err(bad_request!(
-                "cannot broadcast {:?} into {:?}",
-                source_shape,
-                shape
-            ));
-        }
-
         let offset = ndim - source_shape.len();
-        let mut inverted_axes = Vec::with_capacity(shape.len());
-        let mut broadcast: Vec<bool> = iter::repeat(true).take(ndim).collect();
+        let broadcast = iter::repeat(true)
+            .take(offset)
+            .chain(
+                source_shape
+                    .iter()
+                    .zip(shape.iter().skip(offset))
+                    .map(|(dim, bdim)| dim == &1 && dim != bdim),
+            )
+            .collect::<Vec<bool>>();
 
-        for axis in offset..ndim {
-            if shape[axis] == source_shape[axis - offset] {
-                broadcast[axis] = false;
-                inverted_axes.push(axis);
-            } else if shape[axis] == 1 || source_shape[axis - offset] == 1 {
-                inverted_axes.push(axis - offset);
+        debug_assert_eq!(broadcast.len(), ndim);
+
+        for (dim, bdim) in source_shape.iter().rev().zip(shape.iter().rev()) {
+            if dim == &1 || dim == bdim {
+                // no-op
             } else {
                 return Err(bad_request!(
-                    "cannot broadcast {:?} into {:?}",
-                    source_shape,
-                    shape
+                    "cannot broadcast {source_shape:?} into {shape:?} ({dim} != {bdim})"
                 ));
             }
         }
@@ -69,7 +64,7 @@ impl Broadcast {
         })
     }
 
-    pub fn shape(&'_ self) -> &'_ Shape {
+    pub fn shape(&self) -> &Shape {
         &self.shape
     }
 
@@ -97,26 +92,27 @@ impl Broadcast {
             // can't broadcast a slice with shape []
             if let Some(AxisRange::At(i)) = source_range.pop() {
                 source_range.push(AxisRange::In(i..i + 1, 1));
+            } else {
+                unreachable!()
             }
         }
 
         Range::from(source_range)
     }
 
-    pub fn invert_coord(&self, coord: &[u64]) -> Coord {
+    pub fn invert_coord(&self, mut coord: Coord) -> Coord {
         debug_assert_eq!(coord.len(), self.shape.len());
 
-        let source_ndim = self.source_shape.len();
-        let mut source_coord = Vec::with_capacity(source_ndim);
-        for axis in 0..source_ndim {
-            if self.broadcast[axis + self.offset] {
-                source_coord.push(0);
-            } else {
-                source_coord.push(coord[axis + self.offset]);
+        coord.drain(0..self.offset);
+        debug_assert_eq!(coord.len(), self.source_shape.len());
+
+        for (i, dim) in coord.iter_mut().zip(&self.source_shape) {
+            if dim == &0 {
+                *i = 1;
             }
         }
 
-        source_coord
+        coord
     }
 }
 
@@ -135,10 +131,9 @@ impl Expand {
         }
 
         expand.sort();
-        expand.dedup();
 
         let mut shape = Vec::with_capacity(source_shape.len() + expand.len());
-        shape.extend(source_shape.into_vec());
+        shape.extend_from_slice(&source_shape);
         for x in expand.iter().rev().copied() {
             shape.insert(x, 1);
         }
@@ -159,15 +154,22 @@ impl Expand {
     }
 
     pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
-        axes.into_iter()
-            .filter_map(|x| {
-                if self.expand.contains(&x) {
-                    None
-                } else {
-                    Some(x - self.expand.iter().filter(|e| **e < x).count())
-                }
-            })
-            .collect()
+        let mut axis_map = Vec::with_capacity(self.shape.len());
+        axis_map.extend(0..(self.shape.len() - self.expand.len()));
+
+        for x in self.expand.iter().copied().rev() {
+            axis_map.insert(x, x);
+        }
+
+        let source_axes = axes
+            .iter()
+            .copied()
+            .filter(|x| !self.expand.contains(x))
+            .map(|x| axis_map[x])
+            .unique()
+            .collect();
+
+        source_axes
     }
 
     pub fn invert_range(&self, mut range: Range) -> Range {
@@ -219,6 +221,8 @@ impl Expand {
             coord.insert(x, 0);
         }
 
+        debug_assert_eq!(coord.len(), self.shape.len());
+
         coord
     }
 }
@@ -231,8 +235,8 @@ pub struct Reduce {
 }
 
 impl Reduce {
-    pub fn new(source_shape: Shape, axes: Vec<usize>, keepdims: bool) -> TCResult<Reduce> {
-        source_shape.validate_axes(&axes)?;
+    pub fn new(source_shape: Shape, axes: Axes, keepdims: bool) -> TCResult<Reduce> {
+        source_shape.validate_axes(&axes, false)?;
 
         for i in 0..(axes.len() - 1) {
             if axes[i] == axes[i + 1] {
@@ -274,8 +278,8 @@ impl Reduce {
         &self.shape
     }
 
-    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
-        let mut source_axes: Axes = (0..self.source_shape.len()).into_iter().collect();
+    pub fn invert_axes(&self, axes: Axes) -> Axes {
+        let mut source_axes = (0..self.source_shape.len()).into_iter().collect::<Axes>();
         for x in self.axes.iter().rev().copied() {
             source_axes.remove(x);
         }
@@ -391,6 +395,7 @@ pub struct Slice {
 impl Slice {
     pub fn new(source_shape: Shape, range: Range) -> TCResult<Slice> {
         source_shape.validate_range(&range)?;
+        let range = range.normalize(&source_shape);
 
         if range.is_coord(source_shape.as_slice()) {
             return Err(bad_request!(
@@ -437,47 +442,76 @@ impl Slice {
     }
 
     pub fn invert_range(&self, range: Range) -> Range {
-        let range = if range.is_empty() || range == Range::all(self.shape()) {
+        debug_assert!(range.len() <= self.shape().len());
+
+        let range = if self.shape().is_covered_by(&range) {
+            trace!(
+                "{range:?} covers {:?} exactly, returning {:?}...",
+                self.shape,
+                self.range
+            );
+
             return self.range.clone();
         } else {
             range.normalize(&self.shape)
         };
 
+        trace!("range normalized to {range:?}");
+
+        debug_assert_eq!(range.len(), self.shape().len());
+
         let mut source_range = Vec::with_capacity(self.shape.len());
         let mut axis = 0;
 
-        for axis_range in self.range.iter() {
-            let axis_range = match axis_range {
+        for source_axis_range in self.range.iter() {
+            let axis_range = match source_axis_range {
                 AxisRange::At(i) => AxisRange::At(*i),
-                AxisRange::In(source_range, source_step) => match &range[axis] {
-                    AxisRange::At(i) => {
-                        debug_assert!(source_range.start + (i * source_step) < source_range.end);
-                        AxisRange::At(source_range.start + (i * source_step))
-                    }
-                    AxisRange::In(axis_range, step) => {
-                        debug_assert!(source_range.start + axis_range.start <= source_range.end);
-                        debug_assert!(source_range.start + axis_range.end <= source_range.end);
+                AxisRange::In(source_range, source_step) => {
+                    let axis_range = match &range[axis] {
+                        AxisRange::At(i) => {
+                            debug_assert!(
+                                source_range.start + (i * source_step) < source_range.end
+                            );
 
-                        let (source_start, source_end, source_step) = (
-                            axis_range.start + source_range.start,
-                            axis_range.end + source_range.start,
-                            step * source_step,
-                        );
+                            AxisRange::At(source_range.start + (i * source_step))
+                        }
+                        AxisRange::In(axis_range, step) => {
+                            debug_assert!(
+                                source_range.start + axis_range.start <= source_range.end
+                            );
 
-                        AxisRange::In(source_start..source_end, source_step)
-                    }
-                    AxisRange::Of(indices) => {
-                        let indices = indices
-                            .iter()
-                            .copied()
-                            .map(|i| source_range.start + i)
-                            .collect::<Vec<u64>>();
+                            debug_assert!(source_range.start + axis_range.end <= source_range.end);
 
-                        debug_assert!(indices.iter().copied().all(|i| i < source_range.end));
+                            let (source_start, source_end, source_step) = (
+                                axis_range.start + source_range.start,
+                                axis_range.end + source_range.start,
+                                step * source_step,
+                            );
 
-                        AxisRange::Of(indices)
-                    }
-                },
+                            AxisRange::In(source_start..source_end, source_step)
+                        }
+                        AxisRange::Of(indices) => {
+                            let indices = indices
+                                .iter()
+                                .copied()
+                                .map(|i| source_range.start + i)
+                                .collect::<Vec<u64>>();
+
+                            debug_assert!(indices.iter().copied().all(|i| i < source_range.end));
+
+                            AxisRange::Of(indices)
+                        }
+                    };
+
+                    trace!(
+                        "axis range {:?} within {:?} is {:?}",
+                        range[axis],
+                        source_axis_range,
+                        axis_range
+                    );
+
+                    axis_range
+                }
                 AxisRange::Of(source_indices) => match &range[axis] {
                     AxisRange::At(i) => AxisRange::At(source_indices[*i as usize]),
                     AxisRange::In(axis_range, step) => {
@@ -505,14 +539,14 @@ impl Slice {
                 },
             };
 
-            if !axis_range.is_index() {
+            if !source_axis_range.is_index() {
                 axis += 1;
             }
 
             source_range.push(axis_range);
         }
 
-        source_range.extend(self.range.iter().skip(range.len()).cloned());
+        debug_assert_eq!(source_range.len(), self.source_shape.len());
 
         source_range.into()
     }
@@ -591,19 +625,7 @@ impl Transpose {
         let ndim = source_shape.len();
 
         let permutation = if let Some(axes) = permutation {
-            if axes.len() == source_shape.len()
-                && (0..source_shape.len())
-                    .into_iter()
-                    .all(|x| axes.contains(&x))
-            {
-                Ok(axes)
-            } else {
-                Err(bad_request!(
-                    "invalid permutation for shape {:?}: {:?}",
-                    source_shape,
-                    axes
-                ))
-            }
+            source_shape.validate_axes(&axes, true).map(|()| axes)
         } else {
             Ok((0..source_shape.len()).into_iter().rev().collect())
         }?;
@@ -649,5 +671,15 @@ impl Transpose {
         }
 
         source_coord
+    }
+
+    pub fn map_coord(&self, source_coord: Coord) -> Coord {
+        debug_assert_eq!(source_coord.len(), self.permutation.len());
+
+        self.permutation
+            .iter()
+            .copied()
+            .map(|x| source_coord[x])
+            .collect()
     }
 }

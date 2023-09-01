@@ -71,9 +71,11 @@ impl<FE> Clone for Dir<FE> {
 }
 
 impl<FE: ThreadSafe + Clone> Dir<FE> {
-    /// Load a transactional [`Dir`] from the filesystem cache
-    pub async fn load(txn_id: TxnId, canon: freqfs::DirLock<FE>) -> TCResult<Self> {
-        txfs::Dir::load(txn_id, canon)
+    /// Load a transactional [`Dir`] from the filesystem cache.
+    ///
+    /// If `persist` is false, un-committed versions will be truncated (dropped).
+    pub async fn load(txn_id: TxnId, canon: freqfs::DirLock<FE>, persist: bool) -> TCResult<Self> {
+        txfs::Dir::load(txn_id, canon, persist)
             .map_ok(|inner| Self { inner })
             .map_err(TCError::from)
             .await
@@ -267,7 +269,10 @@ impl<FE, B> File<FE, B> {
     }
 
     /// Destructure this [`File`] into its underlying [`freqfs::DirLock`].
-    pub fn into_inner(self) -> Inner<FE> {
+    pub fn into_inner(self) -> Inner<FE>
+    where
+        FE: Send + Sync,
+    {
         self.inner.into_inner()
     }
 }

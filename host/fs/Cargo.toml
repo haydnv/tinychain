@@ -8,7 +8,7 @@ license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/haydnv/tinychain.git"
 
-keywords = ["tinychain", "transaction", "file", "dir", "directory", "filesystem"]
+keywords = ["tinychain", "transaction", "file", "directory", "filesystem"]
 categories = ["concurrency", "data-structures"]
 
 [dependencies]
@@ -17,7 +17,7 @@ async-trait = "0.1"
 bytes = "1.4"
 destream = "0.7"
 futures = "0.3"
-freqfs = { version = "~0.8.1", features = ["all"] }
+freqfs = { path = "../../../freqfs", features = ["all"] }
 get-size = "0.1"
 get-size-derive = "0.1"
 log = { version = "0.4", features = ["release_max_level_info"] }

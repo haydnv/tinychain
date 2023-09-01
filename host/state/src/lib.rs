@@ -867,6 +867,28 @@ impl TryFrom<State> for Map<Value> {
     }
 }
 
+impl TryFrom<State> for Tuple<State> {
+    type Error = TCError;
+
+    fn try_from(state: State) -> Result<Self, Self::Error> {
+        match state {
+            State::Map(map) => Ok(map
+                .into_iter()
+                .map(|(id, state)| State::Tuple(vec![State::from(id), state].into()))
+                .collect()),
+
+            State::Scalar(scalar) => {
+                let tuple = Tuple::<Scalar>::try_from(scalar)?;
+                Ok(tuple.into_iter().map(State::Scalar).collect())
+            }
+
+            State::Tuple(tuple) => Ok(tuple),
+
+            other => Err(TCError::unexpected(other, "a Tuple")),
+        }
+    }
+}
+
 impl<T: TryFrom<State> + TryFrom<Scalar>> TryFrom<State> for (Id, T)
 where
     TCError: From<<T as TryFrom<State>>::Error> + From<<T as TryFrom<Scalar>>::Error>,

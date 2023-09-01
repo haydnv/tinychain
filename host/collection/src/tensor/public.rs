@@ -5,7 +5,7 @@ use std::ops::{Bound, RangeBounds};
 
 use futures::future::{self, Future, TryFutureExt};
 use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
-use log::debug;
+use log::{debug, trace};
 use safecast::*;
 
 use tc_error::*;
@@ -19,7 +19,7 @@ use tcgeneric::{label, Id, Label, PathSegment, TCBoxTryFuture, ThreadSafe, Tuple
 
 use super::{
     broadcast, broadcast_shape, Axes, AxisRange, Dense, DenseBase, DenseCacheFile, DenseView, Node,
-    Range, Schema, Shape, Sparse, SparseBase, SparseView, Tensor, TensorBoolean,
+    Range, Schema, Shape, Sparse, SparseBase, SparseView, Tensor, TensorBase, TensorBoolean,
     TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert,
     TensorDiagonal, TensorInstance, TensorMatMul, TensorMath, TensorMathConst, TensorRead,
     TensorReduce, TensorTransform, TensorTrig, TensorType, TensorUnary, TensorUnaryBoolean,
@@ -117,7 +117,7 @@ impl ConcatenateHandler {
     ) -> TCResult<Tensor<State::Txn, State::FE>>
     where
         State: StateInstance,
-        State::FE: DenseCacheFile + AsType<Node> + Clone,
+        State::FE: DenseCacheFile + AsType<Node>,
         Tensor<State::Txn, State::FE>: TensorConvert<Dense = Dense<State::Txn, State::FE>>,
     {
         const ERR_OFF_AXIS: &str = "Tensors to concatenate must have the same off-axis dimensions";
@@ -190,7 +190,7 @@ impl ConcatenateHandler {
 impl<'a, State> Handler<'a, State> for ConcatenateHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Tensor<State::Txn, State::FE>: TensorConvert<Dense = Dense<State::Txn, State::FE>>,
     Vec<Tensor<State::Txn, State::FE>>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -240,7 +240,7 @@ struct ConstantHandler;
 impl<'a, State> Handler<'a, State> for ConstantHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + Clone,
+    State::FE: DenseCacheFile,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -266,7 +266,7 @@ struct CopyFromHandler;
 impl<'a, State> Handler<'a, State> for CopyFromHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
 {
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
@@ -390,7 +390,7 @@ struct CreateHandler {
 impl<'a, State> Handler<'a, State> for CreateHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -416,7 +416,7 @@ struct LoadHandler {
 impl<'a, State> Handler<'a, State> for LoadHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -517,7 +517,7 @@ struct EyeHandler;
 impl<'a, State> Handler<'a, State> for EyeHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Tensor<State::Txn, State::FE>: TensorWrite,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
@@ -616,7 +616,7 @@ struct RandomNormalHandler;
 impl<'a, State> Handler<'a, State> for RandomNormalHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + Clone,
+    State::FE: DenseCacheFile,
     Number: TryCastFrom<State>,
     Value: TryCastFrom<State>,
 {
@@ -677,7 +677,7 @@ struct RandomUniformHandler;
 impl<'a, State> Handler<'a, State> for RandomUniformHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + Clone,
+    State::FE: DenseCacheFile,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -704,7 +704,7 @@ struct RangeHandler;
 impl<'a, State> Handler<'a, State> for RangeHandler
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + Clone,
+    State::FE: DenseCacheFile,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -807,7 +807,7 @@ impl<T> From<T> for TransposeHandler<T> {
 impl<State> Route<State> for TensorType
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Vec<Tensor<State::Txn, State::FE>>: TryCastFrom<State>,
     Number: TryCastFrom<State>,
@@ -919,7 +919,7 @@ impl<Txn, FE> DualHandler<Txn, FE> {
 impl<'a, State> Handler<'a, State> for DualHandler<State::Txn, State::FE>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Number: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
 {
@@ -957,6 +957,8 @@ where
                     let r = Tensor::<_, _>::opt_cast_from(r).expect("tensor");
                     r.shape().validate()?;
 
+                    trace!("dual tensor operation on {:?} and {:?}", l, r);
+
                     if l.shape() == r.shape() {
                         (self.op)(l, r).map(State::from)
                     } else {
@@ -993,7 +995,7 @@ impl<Txn, FE> LogHandler<Txn, FE> {
 impl<'a, State> Handler<'a, State> for LogHandler<State::Txn, State::FE>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Number: TryCastFrom<State>,
 {
@@ -1060,7 +1062,7 @@ impl<Txn, FE> MatMulHandler<Txn, FE> {
 impl<'a, State> Handler<'a, State> for MatMulHandler<State::Txn, State::FE>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
 {
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
@@ -1073,47 +1075,29 @@ where
                 params.expect_empty()?;
 
                 let ndim = Ord::max(self.tensor.ndim(), right.ndim());
-                let (left, right) = if ndim > 2 {
-                    if self
-                        .tensor
-                        .shape()
-                        .iter()
-                        .rev()
-                        .take(2)
-                        .zip(right.shape().iter().rev().take(2))
-                        .all(|(l, r)| l == r)
-                    {
-                        Ok((self.tensor, right))
-                    } else {
-                        let batch_shape = broadcast_shape(
-                            &self.tensor.shape()[..self.tensor.ndim() - 2],
-                            &right.shape()[..right.ndim() - 2],
-                        )?;
+                let (left, right) = if ndim >= 2 {
+                    let batch_shape = broadcast_shape(
+                        &self.tensor.shape()[..self.tensor.ndim() - 2],
+                        &right.shape()[..right.ndim() - 2],
+                    )?;
 
-                        let mut left_shape = Vec::with_capacity(ndim);
-                        left_shape.extend_from_slice(&batch_shape);
-                        left_shape.extend(self.tensor.shape().iter().rev().take(2).rev());
-                        let left = self.tensor.broadcast(left_shape.into())?;
+                    let mut left_shape = Vec::with_capacity(ndim);
+                    left_shape.extend_from_slice(&batch_shape);
+                    left_shape.extend(self.tensor.shape().iter().rev().take(2).rev());
+                    let left = self.tensor.broadcast(left_shape.into())?;
 
-                        let mut right_shape = Vec::with_capacity(ndim);
-                        right_shape.extend(batch_shape.into_vec());
-                        right_shape.extend(right.shape().iter().rev().take(2).rev());
-                        let right = right.broadcast(right_shape.into())?;
+                    let mut right_shape = Vec::with_capacity(ndim);
+                    right_shape.extend(batch_shape.into_vec());
+                    right_shape.extend(right.shape().iter().rev().take(2).rev());
+                    let right = right.broadcast(right_shape.into())?;
 
-                        Ok((left, right))
-                    }
-                } else if self.tensor.ndim() < 2 {
+                    Ok((left, right))
+                } else {
                     Err(bad_request!(
-                        "invalid left matrix multiplicand: {:?}",
-                        self.tensor
-                    ))
-                } else if right.ndim() < 2 {
-                    Err(bad_request!(
-                        "invalid right matrix multiplicand: {:?}",
+                        "invalid matrix multiplicands: {:?} @ {:?}",
+                        self.tensor,
                         right
                     ))
-                } else {
-                    Ok((self.tensor, right))
                 }?;
 
                 left.matmul(right).map(Tensor::from).map(State::from)
@@ -1129,7 +1113,7 @@ struct NormHandler<State: StateInstance> {
 impl<State> NormHandler<State>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
 {
     async fn call(
         tensor: Tensor<State::Txn, State::FE>,
@@ -1171,7 +1155,7 @@ where
 impl<'a, State> Handler<'a, State> for NormHandler<State>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Value: TryCastFrom<State>,
     bool: TryCastFrom<State>,
 {
@@ -1325,6 +1309,7 @@ where
         + TensorWrite
         + TensorWriteDual<Tensor<State::Txn, State::FE>>
         + TensorTransform
+        + fmt::Debug
         + Clone
         + Send
         + Sync,
@@ -1351,6 +1336,7 @@ where
                 let shape = self.tensor.shape();
                 if range.is_coord(shape) {
                     let coord = range.as_coord(shape).expect("tensor coordinate");
+                    trace!("read coordinate {coord:?} of {:?}", self.tensor);
 
                     self.tensor
                         .read_value(*txn.id(), coord)
@@ -1358,6 +1344,7 @@ where
                         .map_ok(State::from)
                         .await
                 } else {
+                    trace!("read slice {range:?} of {:?}", self.tensor);
                     self.tensor.slice(range).map(Tensor::from).map(State::from)
                 }
             })
@@ -1370,7 +1357,7 @@ where
     {
         Some(Box::new(move |txn, key, value| {
             debug!("PUT Tensor: {} <- {:?}", key, value);
-            Box::pin(write::<State, T>(self.tensor, *txn.id(), key, value))
+            Box::pin(write::<State, T>(self.tensor, txn, key, value))
         }))
     }
 }
@@ -1459,7 +1446,7 @@ impl<State> Route<State> for Dense<State::Txn, State::FE>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>> + From<Tuple<Value>>,
     State::Class: From<NumberType>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Number: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -1474,7 +1461,7 @@ impl<State> Route<State> for DenseBase<State::Txn, State::FE>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>> + From<Tuple<Value>>,
     State::Class: From<NumberType>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Number: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -1489,7 +1476,7 @@ impl<State> Route<State> for DenseView<State::Txn, State::FE>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>> + From<Tuple<Value>>,
     State::Class: From<NumberType>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Number: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -1504,7 +1491,7 @@ impl<State> Route<State> for Sparse<State::Txn, State::FE>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>> + From<Tuple<Value>>,
     State::Class: From<NumberType>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Number: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -1519,7 +1506,7 @@ impl<State> Route<State> for SparseBase<State::Txn, State::FE>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>> + From<Tuple<Value>>,
     State::Class: From<NumberType>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Number: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -1534,7 +1521,7 @@ impl<State> Route<State> for SparseView<State::Txn, State::FE>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>> + From<Tuple<Value>>,
     State::Class: From<NumberType>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Number: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -1549,7 +1536,7 @@ impl<State> Route<State> for Tensor<State::Txn, State::FE>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>> + From<Tuple<Value>>,
     State::Class: From<NumberType>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Number: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -1567,7 +1554,7 @@ fn route<'a, State>(
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>> + From<Tuple<Value>>,
     State::Class: From<NumberType>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Number: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -1780,7 +1767,7 @@ pub struct Static;
 impl<State> Route<State> for Static
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
     Number: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -1808,7 +1795,7 @@ async fn constant<State>(
 ) -> TCResult<Dense<State::Txn, State::FE>>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + Clone,
+    State::FE: DenseCacheFile,
 {
     let store = create_dir(txn).await?;
     DenseBase::constant(store, *txn.id(), shape, value)
@@ -1822,17 +1809,16 @@ async fn create_sparse<State>(
 ) -> TCResult<Sparse<State::Txn, State::FE>>
 where
     State: StateInstance,
-    State::FE: AsType<Node> + ThreadSafe + Clone,
+    State::FE: AsType<Node>,
 {
-    let dtype = schema.dtype;
-    let schema = crate::tensor::sparse::Schema::new(schema.shape);
     let store = create_dir(txn).await?;
-    tc_transact::fs::Persist::create(*txn.id(), (dtype, schema), store)
+
+    tc_transact::fs::Persist::create(*txn.id(), schema, store)
         .map_ok(Sparse::Base)
         .await
 }
 
-async fn write<State, T>(tensor: T, txn_id: TxnId, key: Value, value: State) -> TCResult<()>
+async fn write<State, T>(tensor: T, txn: &State::Txn, key: Value, value: State) -> TCResult<()>
 where
     State: StateInstance,
     State::FE: DenseCacheFile + AsType<Node>,
@@ -1840,14 +1826,15 @@ where
         + TensorWrite
         + TensorWriteDual<Tensor<State::Txn, State::FE>>
         + TensorTransform
+        + fmt::Debug
         + Clone,
     Number: TryCastFrom<State>,
     Tensor<State::Txn, State::FE>: TensorInstance
         + TensorTransform<Broadcast = Tensor<State::Txn, State::FE>>
         + TryCastFrom<State>,
 {
-    debug!("write {value:?} to {key}");
     let range = cast_range(tensor.shape(), Scalar::Value(key))?;
+    let txn_id = *txn.id();
 
     if value.matches::<Tensor<_, _>>() {
         let value = Tensor::<_, _>::opt_cast_from(value).expect("tensor");
@@ -1856,9 +1843,23 @@ where
             value.broadcast(range.shape())?
         };
 
-        tensor.write(txn_id, range, value).await
+        let (_name, store) = {
+            let mut cxt = txn.context().write().await;
+            cxt.create_dir_unique()?
+        };
+
+        trace!("make a copy of {value:?} before writing it to {tensor:?}");
+        // TODO: is there a more efficient way to do this?
+        let store = fs::Dir::load(txn_id, store, false).await?;
+        let value: TensorBase<_, _> = fs::CopyFrom::copy_from(txn, store, value.into()).await?;
+
+        debug!("write {value:?} to {range:?}");
+
+        tensor.write(txn_id, range, value.into()).await
     } else if value.matches::<Number>() {
         let value = Number::opt_cast_from(value).expect("element");
+
+        debug!("write {value:?} to {range:?} of {tensor:?}");
 
         if let Some(coord) = range.as_coord(tensor.shape()) {
             tensor.write_value_at(txn_id, coord, value).await
@@ -1877,7 +1878,7 @@ where
 {
     let mut cxt = txn.context().write().await;
     let (_dir_name, dir) = cxt.create_dir_unique()?;
-    fs::Dir::load(*txn.id(), dir).await
+    fs::Dir::load(*txn.id(), dir, false).await
 }
 
 async fn create_tensor<State>(
@@ -1887,7 +1888,7 @@ async fn create_tensor<State>(
 ) -> TCResult<Tensor<State::Txn, State::FE>>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<Node> + Clone,
+    State::FE: DenseCacheFile + AsType<Node>,
 {
     match class {
         TensorType::Dense => {

@@ -5,20 +5,21 @@ use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use destream::de;
 use futures::TryFutureExt;
-use log::debug;
+use log::{debug, info};
 use safecast::{AsType, TryCastFrom};
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Persist, Restore};
-use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
+use tc_transact::{fs, AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
 
-use super::btree::{self, BTree, BTreeFile, BTreeInstance};
+use super::btree::{BTree, BTreeFile, BTreeInstance};
 use super::table::{Table, TableFile, TableInstance};
 use super::tensor::{
-    self, Dense, DenseCacheFile, Sparse, Tensor, TensorBase, TensorInstance, TensorType,
+    Dense, DenseBase, DenseCacheFile, Sparse, SparseBase, Tensor, TensorBase, TensorInstance,
+    TensorType,
 };
-use super::{Collection, CollectionType, CollectionView, Schema};
+use super::{BTreeNode, Collection, CollectionType, CollectionView, Schema, TensorNode};
 
 #[derive(Clone)]
 pub enum CollectionBase<Txn, FE> {
@@ -30,7 +31,7 @@ pub enum CollectionBase<Txn, FE> {
 impl<Txn, FE> CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<btree::Node> + ThreadSafe,
+    FE: AsType<BTreeNode> + ThreadSafe,
 {
     /// Get the [`Schema`] of this [`Collection`]
     pub fn schema(&self) -> Schema {
@@ -65,7 +66,7 @@ where
 impl<Txn, FE> Transact for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + ThreadSafe,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + for<'en> fs::FileSave<'en>,
 {
     type Commit = ();
 
@@ -98,7 +99,7 @@ where
 impl<T, FE> AsyncHash for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         Collection::from(self).hash(txn_id).await
@@ -109,13 +110,15 @@ where
 impl<Txn, FE> Persist<FE> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
-    btree::Node: freqfs::FileLoad,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    BTreeNode: freqfs::FileLoad,
 {
     type Txn = Txn;
     type Schema = Schema;
 
     async fn create(txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
+        debug!("create persistent mutable collection at {store:?}");
+
         match schema {
             Schema::BTree(schema) => {
                 BTreeFile::create(txn_id, schema, store)
@@ -127,23 +130,47 @@ where
                     .map_ok(Self::Table)
                     .await
             }
-            schema => Err(not_implemented!("create {:?}", schema)),
+            Schema::Dense(schema) => {
+                DenseBase::create(txn_id, schema, store)
+                    .map_ok(TensorBase::Dense)
+                    .map_ok(Self::Tensor)
+                    .await
+            }
+            Schema::Sparse(schema) => {
+                SparseBase::create(txn_id, schema.into(), store)
+                    .map_ok(TensorBase::Sparse)
+                    .map_ok(Self::Tensor)
+                    .await
+            }
         }
     }
 
     async fn load(txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
+        info!("load persistent mutable collection at {store:?}");
+
         match schema {
             Schema::BTree(schema) => {
-                BTreeFile::create(txn_id, schema, store)
+                BTreeFile::load(txn_id, schema, store)
                     .map_ok(Self::BTree)
                     .await
             }
             Schema::Table(schema) => {
-                TableFile::create(txn_id, schema, store)
+                TableFile::load(txn_id, schema, store)
                     .map_ok(Self::Table)
                     .await
             }
-            schema => Err(not_implemented!("load {:?}", schema)),
+            Schema::Dense(schema) => {
+                DenseBase::load(txn_id, schema, store)
+                    .map_ok(TensorBase::Dense)
+                    .map_ok(Self::Tensor)
+                    .await
+            }
+            Schema::Sparse(schema) => {
+                SparseBase::load(txn_id, schema.into(), store)
+                    .map_ok(TensorBase::Sparse)
+                    .map_ok(Self::Tensor)
+                    .await
+            }
         }
     }
 
@@ -160,8 +187,8 @@ where
 impl<Txn, FE> CopyFrom<FE, Collection<Txn, FE>> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
-    btree::Node: freqfs::FileLoad,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    BTreeNode: freqfs::FileLoad,
 {
     async fn copy_from(txn: &Txn, store: Dir<FE>, instance: Collection<Txn, FE>) -> TCResult<Self> {
         match instance {
@@ -188,8 +215,8 @@ where
 impl<Txn, FE> Restore<FE> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
-    btree::Node: freqfs::FileLoad,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    BTreeNode: freqfs::FileLoad,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         match (self, backup) {
@@ -231,7 +258,7 @@ impl<T, FE> TryCastFrom<Collection<T, FE>> for CollectionBase<T, FE> {
 impl<'en, T, FE> IntoView<'en, FE> for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
     Self: 'en,
 {
     type Txn = T;
@@ -257,7 +284,7 @@ pub struct CollectionVisitor<Txn, FE> {
 impl<Txn, FE> CollectionVisitor<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     pub fn new(txn: Txn) -> Self {
         Self {
@@ -312,7 +339,7 @@ where
 impl<T, FE> de::Visitor for CollectionVisitor<T, FE>
 where
     T: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     type Value = CollectionBase<T, FE>;
 
@@ -337,7 +364,7 @@ where
 impl<T, FE> de::FromStream for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
-    FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     type Context = T;
 

@@ -9,7 +9,7 @@ use futures::future::TryFutureExt;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::try_join;
 use ha_ndarray::*;
-use itertools::Itertools;
+use log::{debug, trace};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
 
@@ -20,8 +20,10 @@ use tc_value::{DType, Number, NumberType};
 use tcgeneric::{TCBoxTryFuture, ThreadSafe};
 
 use crate::tensor::block::Block;
-use crate::tensor::dense::{DenseAccess, DenseCacheFile, DenseInstance, DenseSlice};
-use crate::tensor::transform::{Expand, Reduce, Reshape, Slice, Transpose};
+use crate::tensor::dense::{
+    DenseAccess, DenseCacheFile, DenseInstance, DenseSlice, DenseTranspose,
+};
+use crate::tensor::transform::{Broadcast, Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
     autoqueue, strides_for, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
     TensorPermitRead, TensorPermitWrite,
@@ -303,7 +305,7 @@ pub enum SparseAccess<Txn, FE, T: CDatatype> {
     CompareLeft(Box<SparseCompareLeft<Txn, FE, T>>),
     Cond(Box<SparseCond<SparseAccess<Txn, FE, u8>, Self, Self>>),
     Cow(Box<SparseCow<FE, T, Self>>),
-    Dense(Box<SparseDense<DenseAccess<Txn, FE, T>>>),
+    Dense(Box<SparseDense<Txn, FE, T>>),
     Expand(Box<SparseExpand<Self>>),
     Reduce(Box<SparseReduce<Txn, FE, T>>),
     Reshape(Box<SparseReshape<Self>>),
@@ -497,15 +499,15 @@ where
 }
 
 pub struct SparseBroadcast<Txn, FE, T: CDatatype> {
-    shape: Shape,
-    inner: SparseAccess<Txn, FE, T>,
+    transform: Broadcast,
+    source: SparseAccess<Txn, FE, T>,
 }
 
 impl<Txn, FE, T: CDatatype> Clone for SparseBroadcast<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
-            shape: self.shape.clone(),
-            inner: self.inner.clone(),
+            transform: self.transform.clone(),
+            source: self.source.clone(),
         }
     }
 }
@@ -518,48 +520,26 @@ where
 {
     pub fn new<S>(source: S, shape: Shape) -> TCResult<Self>
     where
-        S: TensorInstance + Into<SparseAccess<Txn, FE, T>>,
+        S: TensorInstance + Into<SparseAccess<Txn, FE, T>> + fmt::Debug,
     {
-        let source_shape = source.shape().to_vec();
-        log::debug!("SparseBroadcast::new {source_shape:?} into {shape:?}");
+        log::debug!("SparseBroadcast::new {:?} into {:?}", source.shape(), shape);
 
-        let mut inner = source.into();
-
-        let axes = (0..source_shape.len()).into_iter().rev();
-        let dims = source_shape
-            .into_iter()
-            .rev()
-            .zip(shape.iter().rev().copied());
-
-        for (x, (dim, bdim)) in axes.zip(dims) {
-            if dim == bdim {
-                // no-op
-            } else if dim == 1 {
-                let broadcast_axis = SparseBroadcastAxis::new(inner, x, bdim)?;
-                inner = SparseAccess::BroadcastAxis(Box::new(broadcast_axis));
-            } else {
-                return Err(bad_request!(
-                    "cannot broadcast {} into {} at axis {}",
-                    dim,
-                    bdim,
-                    x
-                ));
-            }
-        }
-
-        Ok(Self { shape, inner })
-    }
-
-    fn invert_range(&self, mut range: Range) -> (Range, Range) {
-        let offset = self.ndim() - self.inner.ndim();
-
-        let inner_range = if range.len() > offset {
-            range.drain(offset..).collect()
+        let offset = if shape.len() >= source.ndim() {
+            Ok(shape.len() - source.ndim())
         } else {
-            Range::default()
-        };
+            Err(bad_request!("cannot broadcast {source:?} into {shape:?}"))
+        }?;
 
-        (range, inner_range)
+        let source = if offset == 0 {
+            Ok(source.into())
+        } else {
+            SparseExpand::new(source, vec![0; offset]).map(SparseAccess::from)
+        }?;
+
+        Broadcast::new(source.shape().clone(), shape).map(|transform| Self {
+            transform,
+            source: source.into(),
+        })
     }
 }
 
@@ -574,7 +554,7 @@ where
     }
 
     fn shape(&self) -> &Shape {
-        &self.shape
+        self.transform.shape()
     }
 }
 
@@ -609,78 +589,58 @@ where
         range: Range,
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
-        log::debug!("stream elements in range {range:?} with order {order:?}");
+        log::debug!("SparseBroadcast::elements in range {range:?} with order {order:?}");
 
-        let ndim = self.ndim();
-        let offset = ndim - self.inner.ndim();
+        self.shape().validate_range(&range)?;
+        self.shape().validate_axes(&order, true)?;
 
-        if offset == 0 {
-            return self.inner.elements(txn_id, range, order).await;
+        let (source, range, shape) = if order.iter().copied().enumerate().all(|(i, x)| i == x) {
+            (self.source, range, self.transform.shape().clone())
         } else {
-            log::trace!("there are {offset} outer dimensions to broadcast");
+            let range = order
+                .iter()
+                .copied()
+                .map(|x| {
+                    range
+                        .get(x)
+                        .cloned()
+                        .unwrap_or_else(|| AxisRange::all(self.shape()[x]))
+                })
+                .collect();
+
+            let shape = order.iter().copied().map(|x| self.shape()[x]).collect();
+
+            let source = SparseTranspose::new(self.source, Some(order)).map(SparseAccess::from)?;
+
+            (source, range, shape)
+        };
+
+        let dims = source.shape().to_vec().into_iter().zip(shape);
+
+        let mut inner = source;
+
+        for (x, (dim, bdim)) in dims.enumerate().rev() {
+            if dim == bdim {
+                // no-op
+            } else if dim == 1 {
+                let broadcast_axis = SparseBroadcastAxis::new(inner, x, bdim)?;
+                inner = SparseAccess::BroadcastAxis(Box::new(broadcast_axis));
+            } else {
+                return Err(bad_request!(
+                    "cannot broadcast {} into {} at axis {}",
+                    dim,
+                    bdim,
+                    x
+                ));
+            }
         }
 
-        self.shape.validate_range(&range)?;
-        self.shape.validate_axes(&order)?;
-
-        let (outer_range, inner_range) = self.invert_range(range.clone());
-        let outer_range = outer_range.normalize(&self.shape()[..(self.ndim() - self.inner.ndim())]);
-
-        let inner_order = if order
-            .iter()
-            .take(offset)
-            .copied()
-            .enumerate()
-            .all(|(o, x)| x == o)
-        {
-            Ok(order.iter().skip(offset).cloned().collect::<Axes>())
-        } else {
-            Err(bad_request!(
-                "an outer broadcast of a sparse tensor does not support permutation"
-            ))
-        }?;
-
-        log::trace!("constructing the cartesian product of outer broadcast {outer_range:?}...");
-
-        let outer = outer_range.into_iter().multi_cartesian_product();
-
-        let inner = self.inner;
-        let elements = futures::stream::iter(outer)
-            .then(move |outer_coord| {
-                log::trace!("outer coord is {outer_coord:?}");
-
-                let inner = inner.clone();
-                let inner_range = inner_range.to_vec();
-                let inner_order = inner_order.to_vec();
-
-                async move {
-                    let inner_elements = inner
-                        .elements(txn_id, inner_range.into(), inner_order)
-                        .await?;
-
-                    let elements = inner_elements.map_ok(move |(inner_coord, value)| {
-                        log::trace!("inner coord is {inner_coord:?}, value is {value:?}");
-
-                        let mut coord = Vec::with_capacity(ndim);
-                        coord.extend_from_slice(&outer_coord);
-                        coord.extend(inner_coord);
-                        (coord, value)
-                    });
-
-                    Result::<_, TCError>::Ok(elements)
-                }
-            })
-            .try_flatten();
-
-        Ok(Box::pin(elements))
+        inner.elements(txn_id, range, Axes::default()).await
     }
 
-    async fn read_value(&self, txn_id: TxnId, mut coord: Coord) -> Result<Self::DType, TCError> {
-        while coord.len() > self.inner.ndim() {
-            coord.remove(0);
-        }
-
-        self.inner.read_value(txn_id, coord).await
+    async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
+        let source_coord = self.transform.invert_coord(coord);
+        self.source.read_value(txn_id, source_coord).await
     }
 }
 
@@ -692,9 +652,9 @@ where
     T: CDatatype + DType,
 {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
-        self.shape.validate_range(&range)?;
-        let (_outer_range, inner_range) = self.invert_range(range);
-        self.inner.read_permit(txn_id, inner_range).await
+        self.shape().validate_range(&range)?;
+        let source_range = self.transform.invert_range(range);
+        self.source.read_permit(txn_id, source_range).await
     }
 }
 
@@ -711,7 +671,12 @@ where
     T: CDatatype + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "broadcasted sparse tensor with shape {:?}", self.shape)
+        write!(
+            f,
+            "broadcast {:?} into {:?}",
+            self.source,
+            self.transform.shape()
+        )
     }
 }
 
@@ -784,68 +749,49 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
         self,
         txn_id: TxnId,
         range: Range,
-        mut order: Axes,
+        order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
         self.shape.validate_range(&range)?;
-        self.shape.validate_axes(&order)?;
+        self.shape.validate_axes(&order, true)?;
 
-        let axis = self.axis;
+        let order = if order.is_empty() {
+            (0..self.ndim()).into_iter().collect()
+        } else if order.iter().copied().enumerate().all(|(i, x)| i == x) {
+            order
+        } else {
+            return Err(not_implemented!("transpose a broadcasted sparse tensor"));
+        };
+
         let ndim = self.shape.len();
 
-        let (source_range, dim) = if range.len() > axis {
-            let bdim = match &range[axis] {
-                AxisRange::At(i) if *i < self.dim => Ok(1),
-                AxisRange::In(axis_range, 1) if axis_range.end > axis_range.start => {
-                    Ok(axis_range.end - axis_range.start)
-                }
-                bound => Err(bad_request!(
-                    "invalid bound for axis {}: {:?}",
-                    self.axis,
-                    bound
-                )),
-            }?;
+        let axis_range = range
+            .get(self.axis)
+            .cloned()
+            .unwrap_or_else(|| AxisRange::all(self.shape()[self.axis]));
 
+        let (source_range, dim) = if range.len() > self.axis {
+            let bdim = range[self.axis].dim();
             let mut source_range = range;
-            source_range[axis] = AxisRange::At(0);
+            source_range[self.axis] = AxisRange::At(0);
             (source_range, bdim)
         } else {
             (range, self.dim)
         };
 
-        let (source_order, inner_order) = if order
-            .iter()
-            .take(axis)
-            .copied()
-            .enumerate()
-            .all(|(o, x)| x == o)
-        {
-            let mut inner_order = Axes::with_capacity(ndim - axis);
-
-            while order.len() > axis {
-                inner_order.push(order.pop().expect("axis"));
-            }
-
-            Ok((order, inner_order))
-        } else {
-            Err(bad_request!(
-                "an outer broadcast of a sparse tensor does not support permutation"
-            ))
-        }?;
-
         if self.axis == 0 {
-            let dim = self.shape()[self.axis];
             let source = self.source;
-            let elements = futures::stream::iter(0..dim)
+            let elements = futures::stream::iter(axis_range)
                 .map(move |outer_i| {
                     let source = source.clone();
                     let source_range = source_range.clone();
-                    let source_order = source_order.to_vec();
+                    let source_order = order.to_vec();
 
                     async move {
                         let source_elements =
                             source.elements(txn_id, source_range, source_order).await?;
 
                         let elements = source_elements.map_ok(move |(mut inner_coord, value)| {
+                            debug_assert_eq!(inner_coord.len(), ndim);
                             inner_coord[0] = outer_i;
                             (inner_coord, value)
                         });
@@ -858,18 +804,15 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
 
             Ok(Box::pin(elements))
         } else if self.axis == self.ndim() - 1 {
-            let source_elements = self
-                .source
-                .elements(txn_id, source_range, source_order)
-                .await?;
+            let source_elements = self.source.elements(txn_id, source_range, order).await?;
 
             // TODO: write a range to a slice of a coordinate block instead
             let elements = source_elements
                 .map_ok(move |(source_coord, value)| {
-                    futures::stream::iter(0..dim).map(move |i| {
+                    futures::stream::iter(axis_range.clone()).map(move |i| {
+                        debug_assert_eq!(source_coord.len(), ndim);
                         let mut coord = source_coord.to_vec();
                         *coord.last_mut().expect("x") = i;
-
                         Ok((coord, value))
                     })
                 })
@@ -877,22 +820,29 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
 
             Ok(Box::pin(elements))
         } else {
-            let source = self.source;
-            let order = Axes::default();
-            let axes = (0..axis).into_iter().collect();
-            let inner_range = source_range.iter().skip(axis).cloned().collect::<Vec<_>>();
-            let filled = source
+            let inner_range = source_range
+                .iter()
+                .skip(self.axis)
+                .cloned()
+                .collect::<Vec<_>>();
+
+            let filled = self
+                .source
                 .clone()
-                .filled_at(txn_id, source_range, order, axes)
+                .filled_at(
+                    txn_id,
+                    source_range,
+                    Axes::default(),
+                    (0..self.axis).into_iter().collect(),
+                )
                 .await?;
 
             let elements = filled
                 .map(move |result| {
                     let outer_coord = result?;
-                    debug_assert_eq!(outer_coord.len(), axis);
+                    debug_assert_eq!(outer_coord.len(), self.axis);
 
                     let inner_range = inner_range.to_vec();
-                    let inner_order = inner_order.to_vec();
 
                     let prefix = outer_coord
                         .iter()
@@ -902,28 +852,31 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
 
                     log::trace!("broadcast slice at {prefix:?} x{dim}");
 
-                    let slice = SparseSlice::new(source.clone(), prefix)?;
+                    let slice = SparseSlice::new(self.source.clone(), prefix)?;
 
-                    let elements = futures::stream::iter(0..dim)
+                    let elements = futures::stream::iter(axis_range.clone())
                         .map(move |i| {
                             let outer_coord = outer_coord.to_vec();
                             let inner_range = inner_range.to_vec().into();
-                            let inner_order = inner_order.to_vec();
                             let slice = slice.clone();
 
                             async move {
+                                trace!("stream over elements in slice {inner_range:?}");
+
                                 let inner_elements =
-                                    slice.elements(txn_id, inner_range, inner_order).await?;
+                                    slice.elements(txn_id, inner_range, Axes::default()).await?;
 
                                 let elements =
                                     inner_elements.map_ok(move |(inner_coord, value)| {
-                                        log::trace!("outer coord is {outer_coord:?}, i is {i}, inner coord is {inner_coord:?}");
+                                        log::trace!("outer coord is {outer_coord:?}, i is {i}, inner coord is {inner_coord:?}, ndim is {ndim}");
 
                                         let mut coord = Coord::with_capacity(ndim);
                                         coord.extend(outer_coord.iter().copied());
                                         coord.extend(inner_coord);
 
-                                        coord[axis] = i;
+                                        coord[self.axis] = i;
+
+                                        debug_assert_eq!(coord.len(), ndim);
 
                                         (coord, value)
                                     });
@@ -1070,6 +1023,8 @@ where
         let blocks = source_blocks
             .map(move |result| {
                 result.and_then(|(coords, (left, right))| {
+                    debug_assert_eq!(coords.ndim(), 2);
+                    debug_assert_eq!(coords.shape()[1], ndim);
                     (block_op)(left.into(), right.into()).map(|values| (coords, values))
                 })
             })
@@ -1220,7 +1175,9 @@ where
         let blocks = source_blocks
             .map(move |result| {
                 result.and_then(|(coords, (left, right))| {
-                    log::trace!("combine {left:?} and {right:?}");
+                    debug_assert_eq!(coords.ndim(), 2);
+                    debug_assert_eq!(coords.shape()[1], ndim);
+                    trace!("combine values {left:?} and {right:?} at {coords:?}");
                     (block_op)(left.into(), right.into()).map(|values| (coords, values))
                 })
             })
@@ -1463,7 +1420,7 @@ impl<Txn: ThreadSafe, FE: ThreadSafe, T: CDatatype> SparseCompare<Txn, FE, T> {
             })
         } else {
             Err(bad_request!(
-                "cannot combine {:?} with {:?} (wrong shape)",
+                "cannot compare {:?} and {:?} (wrong shape)",
                 left,
                 right
             ))
@@ -1620,7 +1577,7 @@ impl<Txn: ThreadSafe, FE: ThreadSafe, T: CDatatype> SparseCompareLeft<Txn, FE, T
             })
         } else {
             Err(bad_request!(
-                "cannot combine {:?} with {:?} (wrong shape)",
+                "cannot compare {:?} with {:?} (wrong shape)",
                 left,
                 right
             ))
@@ -2070,7 +2027,12 @@ impl<FE, T, S: Clone> Clone for SparseCow<FE, T, S> {
 }
 
 impl<FE, T, S> SparseCow<FE, T, S> {
-    pub fn create(source: S, filled: SparseFile<FE, T>, zeros: SparseFile<FE, T>) -> Self {
+    pub fn create(source: S, filled: SparseFile<FE, T>, zeros: SparseFile<FE, T>) -> Self
+    where
+        S: fmt::Debug,
+    {
+        debug!("create copy-on-write view of {source:?}");
+
         Self {
             source,
             filled,
@@ -2117,7 +2079,13 @@ where
         range: Range,
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
-        log::debug!("SparseCow::blocks in range {range:?} with order {order:?}");
+        log::debug!(
+            "SparseCow::blocks in range {range:?} of {:?} with order {order:?}",
+            self.shape()
+        );
+
+        self.shape().validate_range(&range)?;
+        self.shape().validate_axes(&order, true)?;
 
         let shape = self.source.shape().to_vec();
         let ndim = shape.len();
@@ -2125,6 +2093,29 @@ where
         let strides = strides_for(&shape, ndim);
         let strides = ArrayBase::<Arc<Vec<_>>>::new(vec![strides.len()], Arc::new(strides))?;
 
+        #[cfg(debug_assertions)]
+        let (source_blocks, filled_blocks, zero_blocks) = {
+            let source_blocks = self
+                .source
+                .blocks(txn_id, range.clone(), order.to_vec())
+                .await?;
+
+            log::trace!("constructed source block stream");
+
+            let filled_blocks = self
+                .filled
+                .blocks(txn_id, range.clone(), order.to_vec())
+                .await?;
+
+            log::trace!("constructed filled block stream");
+
+            let zero_blocks = self.zeros.blocks(txn_id, range, order).await?;
+            log::trace!("constructed zero block stream");
+
+            (source_blocks, filled_blocks, zero_blocks)
+        };
+
+        #[cfg(not(debug_assertions))]
         let (source_blocks, filled_blocks, zero_blocks) = try_join!(
             self.source.blocks(txn_id, range.clone(), order.to_vec()),
             self.filled.blocks(txn_id, range.clone(), order.to_vec()),
@@ -2148,6 +2139,8 @@ where
 
             Ok((coords, values))
         });
+
+        log::trace!("constructed SparseCow block stream");
 
         Ok(Box::pin(blocks))
     }
@@ -2219,11 +2212,13 @@ where
     S: SparseInstance<DType = T> + Clone,
     Number: From<T> + CastInto<T>,
 {
-    type Guard = SparseCowWriteGuard<'a, FE, Self, T>;
+    type Guard = SparseCowWriteGuard<'a, FE, T, S>;
 
     async fn write(&'a self) -> Self::Guard {
+        debug!("lock {self:?} for writing...");
+
         SparseCowWriteGuard {
-            source: self,
+            source: &self.source,
             filled: self.filled.write().await,
             zeros: self.zeros.write().await,
         }
@@ -2255,14 +2250,14 @@ where
     }
 }
 
-pub struct SparseCowWriteGuard<'a, FE, S, T> {
+pub struct SparseCowWriteGuard<'a, FE, T, S> {
     source: &'a S,
     filled: SparseFileWriteGuard<'a, FE, T>,
     zeros: SparseFileWriteGuard<'a, FE, T>,
 }
 
 #[async_trait]
-impl<'a, FE, S, T> SparseWriteGuard<T> for SparseCowWriteGuard<'a, FE, S, T>
+impl<'a, FE, T, S> SparseWriteGuard<T> for SparseCowWriteGuard<'a, FE, T, S>
 where
     FE: AsType<Node> + ThreadSafe,
     S: SparseInstance<DType = T> + Clone,
@@ -2270,8 +2265,15 @@ where
     Number: From<T>,
 {
     async fn clear(&mut self, txn_id: TxnId, range: Range) -> TCResult<()> {
+        debug!("clear {range:?} of COW guard with source {:?}", self.source);
+
         self.filled.clear(txn_id, range.clone()).await?;
+        trace!("cleared filled elements");
+
         self.zeros.clear(txn_id, range.clone()).await?;
+        trace!("cleared zero elements");
+
+        trace!("copying new zero elements from {:?}...", self.source);
 
         let mut elements = self
             .source
@@ -2282,6 +2284,8 @@ where
         while let Some((coord, value)) = elements.try_next().await? {
             self.zeros.write_value(txn_id, coord, value).await?;
         }
+
+        trace!("copied new zero elements");
 
         Ok(())
     }
@@ -2327,18 +2331,36 @@ where
     }
 }
 
-#[derive(Clone)]
-pub struct SparseDense<S> {
-    source: S,
+pub struct SparseDense<Txn, FE, T: CDatatype> {
+    source: DenseAccess<Txn, FE, T>,
 }
 
-impl<S> SparseDense<S> {
-    pub fn new(source: S) -> Self {
-        Self { source }
+impl<Txn, FE, T: CDatatype> Clone for SparseDense<Txn, FE, T> {
+    fn clone(&self) -> Self {
+        Self {
+            source: self.source.clone(),
+        }
     }
 }
 
-impl<S: TensorInstance> TensorInstance for SparseDense<S> {
+impl<Txn, FE, T: CDatatype> SparseDense<Txn, FE, T> {
+    pub fn new<S>(source: S) -> Self
+    where
+        S: Into<DenseAccess<Txn, FE, T>>,
+        T: CDatatype,
+    {
+        Self {
+            source: source.into(),
+        }
+    }
+}
+
+impl<Txn, FE, T> TensorInstance for SparseDense<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -2349,17 +2371,18 @@ impl<S: TensorInstance> TensorInstance for SparseDense<S> {
 }
 
 #[async_trait]
-impl<S> SparseInstance for SparseDense<S>
+impl<Txn, FE, T> SparseInstance for SparseDense<Txn, FE, T>
 where
-    S: DenseInstance + Clone,
-    S::Block: NDArrayTransform,
-    <S::Block as NDArrayTransform>::Slice:
-        NDArrayRead<DType = S::DType> + NDArrayTransform + Into<Array<S::DType>>,
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
+    T: CDatatype + DType + fmt::Debug,
+    Buffer<T>: de::FromStream<Context = ()>,
+    Number: From<T> + CastInto<T>,
 {
     type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<S::DType>>;
+    type ValueBlock = ArrayBase<Vec<T>>;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
-    type DType = S::DType;
+    type DType = T;
 
     async fn blocks(
         self,
@@ -2367,45 +2390,40 @@ where
         range: Range,
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
-        let ndim = self.ndim();
-
-        if !order.is_empty() {
-            if order.len() != ndim || order.iter().copied().zip(0..ndim).any(|(a, x)| a != x) {
-                return Err(bad_request!(
-                    "{:?} does not support permutation {:?}",
-                    self,
-                    order
-                ));
-            }
-        }
-
         self.shape().validate_range(&range)?;
+        self.shape().validate_axes(&order, true)?;
 
-        let coord_block_size = self.source.block_size() * ndim;
-
+        let is_slice = !self.shape().is_covered_by(&range);
         let range = range.normalize(self.shape());
+
+        let source = if order.iter().copied().enumerate().all(|(i, x)| i == x) {
+            Ok(self.source)
+        } else {
+            DenseTranspose::new(self.source, Some(order)).map(DenseAccess::from)
+        }?;
+
+        let ndim = source.ndim();
+        let coord_block_size = source.block_size() * ndim;
+
         let coords = range.affected().map(|coord| coord.into_iter()).flatten();
         let coords = futures::stream::iter(coords).chunks(coord_block_size);
 
-        let source_blocks: Blocks<_, Array<Self::DType>> =
-            if range.is_empty() || range == Range::all(self.shape()) {
-                let source_blocks = self.source.read_blocks(txn_id).await?;
-                let blocks = coords
-                    .zip(source_blocks)
-                    .map(|(coords, values)| values.map(|values| (coords, values.into())));
+        let source_blocks: Blocks<_, Array<Self::DType>> = if is_slice {
+            let source_blocks = DenseSlice::new(source, range)?.read_blocks(txn_id).await?;
 
-                Box::pin(blocks)
-            } else {
-                let source_blocks = DenseSlice::new(self.source, range)?
-                    .read_blocks(txn_id)
-                    .await?;
+            let blocks = coords
+                .zip(source_blocks)
+                .map(|(coords, values)| values.map(|values| (coords, values.into())));
 
-                let blocks = coords
-                    .zip(source_blocks)
-                    .map(|(coords, values)| values.map(|values| (coords, values.into())));
+            Box::pin(blocks)
+        } else {
+            let source_blocks = source.read_blocks(txn_id).await?;
+            let blocks = coords
+                .zip(source_blocks)
+                .map(|(coords, values)| values.map(|values| (coords, values.into())));
 
-                Box::pin(blocks)
-            };
+            Box::pin(blocks)
+        };
 
         let zero = Self::DType::zero();
         let blocks = source_blocks.try_filter_map(move |(coords, values)| async move {
@@ -2451,25 +2469,29 @@ where
 }
 
 #[async_trait]
-impl<S: TensorPermitRead> TensorPermitRead for SparseDense<S> {
+impl<Txn, FE, T> TensorPermitRead for SparseDense<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.source.read_permit(txn_id, range).await
     }
 }
 
-impl<Txn, FE, S, T> From<SparseDense<S>> for SparseAccess<Txn, FE, T>
-where
-    S: Into<DenseAccess<Txn, FE, T>>,
-    T: CDatatype,
-{
-    fn from(dense: SparseDense<S>) -> Self {
-        Self::Dense(Box::new(SparseDense {
-            source: dense.source.into(),
-        }))
+impl<Txn, FE, T: CDatatype> From<SparseDense<Txn, FE, T>> for SparseAccess<Txn, FE, T> {
+    fn from(dense: SparseDense<Txn, FE, T>) -> Self {
+        Self::Dense(Box::new(dense))
     }
 }
 
-impl<S: fmt::Debug> fmt::Debug for SparseDense<S> {
+impl<Txn, FE, T: CDatatype> fmt::Debug for SparseDense<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "sparse view of {:?}", self.source)
     }
@@ -2483,6 +2505,7 @@ pub struct SparseExpand<S> {
 
 impl<S: TensorInstance + fmt::Debug> SparseExpand<S> {
     pub fn new(source: S, axes: Axes) -> TCResult<Self> {
+        debug!("expand axes {axes:?} of {source:?}");
         Expand::new(source.shape().clone(), axes).map(|transform| Self { source, transform })
     }
 }
@@ -2521,21 +2544,15 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
         range: Range,
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
+        debug!("SparseExpand::elements in range {range:?} with order {order:?}");
+
         self.shape().validate_range(&range)?;
-        self.shape().validate_axes(&order)?;
+        self.shape().validate_axes(&order, true)?;
 
-        let mut source_range = range;
-        for x in self.transform.expand_axes().iter().copied().rev() {
-            if x < source_range.len() {
-                source_range.remove(x);
-            }
-        }
+        let source_range = self.transform.invert_range(range);
+        let source_order = self.transform.invert_axes(order);
 
-        let ndim = self.ndim();
-        let transform = self.transform;
-        let source_order = transform.invert_axes(order);
-
-        debug_assert_eq!(self.source.ndim() + 1, ndim);
+        trace!("source range is {source_range:?} and order is {source_order:?}");
 
         let source_elements = self
             .source
@@ -2543,7 +2560,7 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
             .await?;
 
         let elements = source_elements.map_ok(move |(source_coord, value)| {
-            let coord = transform.map_coord(source_coord);
+            let coord = self.transform.map_coord(source_coord);
             (coord, value)
         });
 
@@ -2713,7 +2730,7 @@ where
         }
 
         self.transform.shape().validate_range(&range)?;
-        self.transform.shape().validate_axes(&order)?;
+        self.transform.shape().validate_axes(&order, true)?;
 
         let source_range = self.transform.invert_range(range);
         let source_order = self.transform.invert_axes(order);
@@ -2823,7 +2840,7 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         self.shape().validate_range(&range)?;
-        self.shape().validate_axes(&order)?;
+        self.shape().validate_axes(&order, true)?;
 
         let source_range = if range.is_empty() {
             Ok(range)
@@ -2903,7 +2920,7 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
 #[async_trait]
 impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for SparseReshape<S> {
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
-        if range.is_empty() || range == Range::all(self.transform.shape()) {
+        if self.transform.shape().is_covered_by(&range) {
             self.source.read_permit(txn_id, Range::default()).await
         } else {
             Err(bad_request!(
@@ -2950,13 +2967,14 @@ where
     S: TensorInstance + fmt::Debug,
 {
     pub fn new(source: S, range: Range) -> TCResult<Self> {
-        log::debug!("SparseSlice::new range {range:?} of {source:?}");
-
-        Slice::new(source.shape().clone(), range).map(|transform| Self { source, transform })
+        debug!("SparseSlice::new range {range:?} of {source:?}");
+        let transform = Slice::new(source.shape().clone(), range)?;
+        trace!("SparseSlice shape is {:?}", transform.shape());
+        Ok(Self { source, transform })
     }
 
     fn source_order(&self, order: Axes) -> Result<Axes, TCError> {
-        self.shape().validate_axes(&order)?;
+        self.shape().validate_axes(&order, true)?;
 
         let mut source_axes = Vec::with_capacity(self.ndim());
         for (x, bound) in self.transform.range().iter().enumerate() {
@@ -2999,8 +3017,6 @@ where
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
         self.shape().validate_range(&range)?;
-        self.shape().validate_axes(&order)?;
-
         let source_order = self.source_order(order)?;
 
         let source_range = self.transform.invert_range(range);
@@ -3045,13 +3061,17 @@ where
         range: Range,
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
+        debug!("SparseSlice::elements in {range:?} with order {order:?}");
+
         self.shape().validate_range(&range)?;
-        self.shape().validate_axes(&order)?;
 
         let source_order = self.source_order(order)?;
 
-        let transform = self.transform;
-        let source_range = transform.invert_range(range);
+        let source_range = self.transform.invert_range(range);
+        trace!(
+            "the range within the source of {:?} is {source_range:?}",
+            self
+        );
 
         let source_elements = self
             .source
@@ -3059,7 +3079,7 @@ where
             .await?;
 
         let elements =
-            source_elements.map_ok(move |(coord, value)| (transform.map_coord(coord), value));
+            source_elements.map_ok(move |(coord, value)| (self.transform.map_coord(coord), value));
 
         Ok(Box::pin(elements))
     }
@@ -3122,9 +3142,9 @@ impl<S: fmt::Debug> fmt::Debug for SparseSlice<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "slice of {:?} with range {:?}",
+            "slice {:?} from {:?}",
+            self.transform.range(),
             self.source,
-            self.transform.range()
         )
     }
 }
@@ -3224,42 +3244,44 @@ where
         self,
         txn_id: TxnId,
         range: Range,
-        mut order: Axes,
+        order: Axes,
     ) -> Result<Self::Blocks, TCError> {
+        debug!("SparseTranspose::blocks in {range:?} with order {order:?}");
+
         self.shape().validate_range(&range)?;
-        self.shape().validate_axes(&order)?;
+        self.shape().validate_axes(&order, true)?;
 
         let range = range.normalize(self.shape());
         debug_assert_eq!(range.len(), self.ndim());
 
-        order.reserve(self.ndim());
-        for x in 0..self.ndim() {
-            if !order.contains(&x) {
-                order.push(x);
-            }
-        }
+        let order = if order.is_empty() {
+            (0..self.ndim()).into_iter().collect()
+        } else {
+            order
+        };
 
         let source_range = self.transform.invert_range(&range);
         let source_order = self.transform.invert_axes(order);
+
+        trace!("SparseTranspose source range is {source_range:?} and order is {source_order:?}");
 
         let source_blocks = self
             .source
             .blocks(txn_id, source_range, source_order)
             .await?;
 
-        let transform = self.transform;
         let blocks = source_blocks.map(move |result| {
             let (source_coords, values) = result?;
 
             let queue = autoqueue(&source_coords)?;
             let source_coords = source_coords.read(&queue)?.to_slice()?;
 
-            let ndim = transform.shape().len();
+            let ndim = self.transform.shape().len();
             let coords = source_coords
                 .into_vec()
                 .into_par_iter()
                 .chunks(ndim)
-                .map(|source_coord| transform.invert_coord(source_coord))
+                .map(|source_coord| self.transform.map_coord(source_coord))
                 .flatten()
                 .collect();
 
@@ -3366,6 +3388,8 @@ impl<S: SparseInstance<DType = T>, T: CDatatype + DType> SparseInstance for Spar
         range: Range,
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
+        debug!("SparseUnary::blocks in {range:?} with order {order:?}");
+
         let source_blocks = self.source.blocks(txn_id, range, order).await?;
         let blocks = source_blocks.map(move |result| {
             let (coords, values) = result?;
@@ -3766,6 +3790,8 @@ where
         range: Range,
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
+        debug!("SparseUnaryCast::blocks in range {range:?} with order {order:?}");
+
         let source_blocks = self.source.blocks(txn_id, range, order).await?;
         let blocks = source_blocks.map(move |result| {
             let (coords, values) = result?;

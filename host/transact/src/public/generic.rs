@@ -6,8 +6,8 @@ use std::ops::{Bound, Deref};
 use std::str::FromStr;
 
 use futures::future::TryFutureExt;
-use futures::stream::{FuturesOrdered, TryStreamExt};
-use futures::{future, stream, StreamExt};
+use futures::stream::{self, FuturesOrdered, StreamExt, TryStreamExt};
+use log::{debug, trace};
 use safecast::*;
 
 use tc_error::*;
@@ -112,16 +112,18 @@ where
                 let op: State = params.require(&label("op").into())?;
                 params.expect_empty()?;
 
-                stream::iter(self.source)
-                    .map(|args| {
+                let mut for_each = stream::iter(self.source)
+                    .map(move |args| {
                         Closure::try_cast_from(op.clone(), |state| {
                             bad_request!("not a closure: {state:?}")
                         })
-                        .map(|op| op.call(txn.clone(), State::from(args)))
+                        .map(|op| (op, args))
                     })
-                    .try_buffer_unordered(num_cpus::get())
-                    .try_fold((), |(), _| future::ready(Ok(())))
-                    .await?;
+                    .and_then(|(op, args)| op.call(txn.clone(), State::from(args)));
+
+                while let Some(_step) = for_each.try_next().await? {
+                    // no-op
+                }
 
                 Ok(State::default())
             })
@@ -504,7 +506,7 @@ struct TupleHandler<'a, T: Clone> {
 impl<'a, State, T> Handler<'a, State> for TupleHandler<'a, T>
 where
     State: StateInstance + From<T> + From<Tuple<T>>,
-    T: Instance + Clone,
+    T: Instance + Clone + fmt::Debug,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -512,6 +514,8 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
+                debug!("get {key:?} from {this:?}", this = self.tuple);
+
                 let len = self.tuple.len() as i64;
 
                 match key {
@@ -698,36 +702,31 @@ where
     {
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
-                if key.matches::<(i64, i64, usize)>() {
-                    let (start, stop, step): (i64, i64, usize) =
-                        key.opt_cast_into().expect("range");
+                debug!("construct range Tuple from {key:?}");
 
-                    Ok(State::from(
-                        (start..stop)
-                            .step_by(step)
-                            .into_iter()
-                            .map(Number::from)
-                            .collect::<Tuple<State>>(),
-                    ))
+                let (start, stop, step) = if key.matches::<(i64, i64, usize)>() {
+                    key.opt_cast_into().expect("range")
                 } else if key.matches::<(i64, i64)>() {
-                    let (start, stop): (i64, i64) = key.opt_cast_into().expect("range");
-                    Ok(State::from(
-                        (start..stop)
-                            .into_iter()
-                            .map(Number::from)
-                            .collect::<Tuple<State>>(),
-                    ))
+                    let (start, stop) = key.opt_cast_into().expect("range");
+                    (start, stop, 1)
                 } else if key.matches::<usize>() {
-                    let stop: usize = key.opt_cast_into().expect("range stop");
-                    Ok(State::from(
-                        (0..stop as u64)
-                            .into_iter()
-                            .map(Number::from)
-                            .collect::<Tuple<State>>(),
-                    ))
+                    let stop = key.opt_cast_into().expect("range end");
+                    (0, stop, 1)
                 } else {
-                    Err(TCError::unexpected(key, "a range"))
-                }
+                    return Err(bad_request!("invalid range: {key}"));
+                };
+
+                let tuple = if start <= stop {
+                    let range = (start..stop).step_by(step).into_iter();
+                    State::from(range.map(Number::from).collect::<Tuple<State>>())
+                } else {
+                    let range = (stop..start).step_by(step).into_iter().rev();
+                    State::from(range.map(Number::from).collect::<Tuple<State>>())
+                };
+
+                trace!("range is {tuple:?}");
+
+                Ok(tuple)
             })
         }))
     }
@@ -783,6 +782,8 @@ where
 
 #[inline]
 fn cast_range(range: (Bound<Value>, Bound<Value>), len: i64) -> TCResult<(usize, usize)> {
+    trace!("construct range from bounds {range:?} within {len}");
+
     #[inline]
     fn as_i64(v: Value) -> i64 {
         let n = Number::opt_cast_from(v).expect("start index");

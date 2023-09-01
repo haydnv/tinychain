@@ -29,7 +29,7 @@ class Value(Scalar, Compare, Order):
 
     def gte(self, other):
         from .number import Bool
-        return self._get("gte", other, Bool)
+        return self._get("ge", other, Bool)
 
     def lt(self, other):
         from .number import Bool
@@ -37,7 +37,7 @@ class Value(Scalar, Compare, Order):
 
     def lte(self, other):
         from .number import Bool
-        return self._get("lte", other, Bool)
+        return self._get("le", other, Bool)
 
 
 class Nil(Value):

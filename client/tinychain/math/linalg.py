@@ -5,10 +5,9 @@ from ..collection.tensor import einsum, Dense, Sparse, Tensor
 from ..decorators import closure, get as get_op, post
 from ..error import BadRequest
 from ..generic import Map, Tuple
-from ..scalar.number import Number, Bool, UInt, F32, Int
+from ..scalar.number import Number, UInt, F32, Int
 from ..scalar.ref import after, cond, while_loop, Get
 from ..scalar.value import Value, Version
-from ..state import Stream
 from ..uri import URI
 
 from .base import product
@@ -62,6 +61,7 @@ class PLUFactorization(Map):
         return UInt(self['num_permutations'])
 
 
+# TODO: replace Tuple.range with a Stream after re-implementing Stream
 class LinearAlgebra(Library):
     NAME = "linalg"
     VERSION = Version("0.0.0")
@@ -108,16 +108,17 @@ class LinearAlgebra(Library):
             @get_op
             def u_step(j: UInt) -> Map:
                 col = txn.u[:, i].copy() - (txn.q[:, j] * (a[:, i] * txn.q[:, j]).sum())
-                return after(txn.u[:, i].write(col), {})
+                return txn.u[:, i].write(col)
 
-            cxt.update_u = after(txn.u[:, i].write(a[:, i]), Stream.range(i).for_each(u_step))
+            cxt.update_u = after(txn.u[:, i].write(a[:, i]), Tuple.range(i).for_each(u_step))
             cxt.update_q = after(
                 cxt.update_u,
                 txn.q[:, i].write(txn.u[:, i] / norm(txn.u[:, i])))
 
             return after(cxt.update_q, {})
 
-        txn.update_q = Stream.range((1, UInt(txn.n))).for_each(q_step)
+        n = cond(txn.n <= txn.m, txn.n, txn.m)
+        txn.update_q = Tuple.range((1, n)).for_each(q_step)
         txn._q = Tensor(after(txn.update_q, txn.q))
         txn._r = Dense.zeros([txn.n, txn.m])
 
@@ -129,9 +130,9 @@ class LinearAlgebra(Library):
             def r_step_inner(j: UInt):
                 return txn._r[i, j].write((a[:, j] * txn._q[:, i]).sum())
 
-            return Stream.range((i, txn.m)).for_each(r_step_inner)
+            return Tuple.range((i, txn.m)).for_each(r_step_inner)
 
-        return after(Stream.range(txn.n).for_each(r_step), (txn._q, txn._r))
+        return after(Tuple.range(txn.n).for_each(r_step), (txn._q, txn._r))
 
     @post
     def plu(self, txn, x: Tensor) -> PLUFactorization:
@@ -265,7 +266,7 @@ class LinearAlgebra(Library):
             ]
 
         sign, determinants = after(
-            Stream.range((0, cxt.batch_size)).for_each(step),
+            Tuple.range((0, cxt.batch_size)).for_each(step),
             [cxt.sign_result, cxt.logdet_result])
 
         return Tensor(sign).reshape(cxt.batch_shape), Tensor(determinants).reshape(cxt.batch_shape)
@@ -364,7 +365,6 @@ class LinearAlgebra(Library):
         def matrix_svd(i: UInt) -> typing.Tuple[Tensor, Tensor, Tensor]:
             return self.svd_matrix(A=txn.matrices[i], l=l, epsilon=epsilon, max_iter=max_iter)
 
-        # TODO: replace Tuple.range with Stream.range after updating Tensor.concatenate to accept a Stream of Tensors
         txn.indices = Tuple.range(txn.num_matrices)
         txn.UsV_tuples = txn.indices.map(matrix_svd)
 

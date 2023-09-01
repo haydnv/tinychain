@@ -14,8 +14,8 @@ TENSOR_URI = str(tc.URI(tc.tensor.Dense))
 class LinearAlgebraTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        actor = rjwt.Actor('/')
-        cls.host = start_host(tc.math.NS, public_key=actor.public_key)
+        actor = rjwt.Actor("/")
+        cls.host = start_host(tc.math.NS, public_key=actor.public_key, request_ttl=30)
         cls.host.create_namespace(actor, tc.URI(tc.service.Library), tc.math.NS)
         cls.host.install(actor, tc.math.linalg.LinearAlgebra())
 
@@ -32,35 +32,49 @@ class LinearAlgebraTests(unittest.TestCase):
         matrix = np.random.random(n * m).reshape(n, m)
         tensor = tc.tensor.Dense.load((n, m), matrix.flatten().tolist(), tc.F32)
 
-        q, r = self.host.post(LIB_URI.append("qr"), {'a': tensor})
+        q, r = self.host.post(LIB_URI.append("qr"), {"a": tensor})
         q, r = load_np(q), load_np(r)
 
         reconstruction = q @ r
         error = np.sum(abs(reconstruction - matrix))
-        self.assertTrue(error < threshold)
+        self.assertTrue(error < threshold, f"error {error} > {threshold}")
 
     def testPLU(self):
-        x = np.array([1.0, 1.0, 1.0, 2.0, 3.0, 4.0, 12.0, 6.0, 7.0], dtype=np.float32).reshape((3, 3))
+        x = np.array(
+            [1.0, 1.0, 1.0, 2.0, 3.0, 4.0, 12.0, 6.0, 7.0], dtype=np.float32
+        ).reshape((3, 3))
 
-        plu = self.host.post(LIB_URI.append("plu"), {'x': tc.tensor.Dense.load([3, 3], x.flatten().tolist(), tc.F32)})
+        plu = self.host.post(
+            LIB_URI.append("plu"),
+            {"x": tc.tensor.Dense.load([3, 3], x.flatten().tolist(), tc.F32)},
+        )
 
-        p = load_np(plu['p'])
-        l = load_np(plu['l'])
-        u = load_np(plu['u'])
+        p = load_np(plu["p"])
+        l = load_np(plu["l"])
+        u = load_np(plu["u"])
 
         self.assertTrue((p @ l @ u == x).all())
-        self.assertTrue([
-            np.allclose(l, np.tril(l)),
-            np.allclose(u, np.triu(u)),
-            all([np.sum(p[i, :]) == np.sum(p[:, i]) == 1.0 for i in range(p.shape[0])]),
-        ])
+        self.assertTrue(
+            [
+                np.allclose(l, np.tril(l)),
+                np.allclose(u, np.triu(u)),
+                all(
+                    [
+                        np.sum(p[i, :]) == np.sum(p[:, i]) == 1.0
+                        for i in range(p.shape[0])
+                    ]
+                ),
+            ]
+        )
 
     def testSlogdet(self):
         x = np.random.randint(-100, 100, 64).reshape(4, 4, 4)
         expected_sign, expected_logdet = np.linalg.slogdet(x)
 
         x = tc.tensor.Dense.load(x.shape, x.flatten().tolist(), tc.F32)
-        actual_sign, actual_logdet = self.host.post(LIB_URI.append("slogdet"), tc.Map(x=x))
+        actual_sign, actual_logdet = self.host.post(
+            LIB_URI.append("slogdet"), tc.Map(x=x)
+        )
 
         actual_sign = load_np(actual_sign)
         actual_logdet = load_np(actual_logdet)
@@ -75,7 +89,10 @@ class LinearAlgebraTests(unittest.TestCase):
         tensor = tc.tensor.Dense.load((n, m), matrix.flatten().tolist(), tc.F32)
 
         start = time.time()
-        result = self.host.post(LIB_URI.append("svd"), tc.Map(A=tensor, l=n, epsilon=tc.F32(1e-7), max_iter=30))
+        result = self.host.post(
+            LIB_URI.append("svd"),
+            tc.Map(A=tensor, l=n, epsilon=tc.F32(1e-7), max_iter=30),
+        )
         elapsed = time.time() - start
 
         print(f"{n}x{m} SVD ran in {elapsed}s")
@@ -91,7 +108,10 @@ class LinearAlgebraTests(unittest.TestCase):
         tensor = tc.tensor.Dense.load((n, m), matrix.flatten().tolist(), tc.F32)
 
         start = time.time()
-        result = self.host.post(LIB_URI.append("svd"), tc.Map(A=tensor, l=n, epsilon=tc.F32(1e-7), max_iter=30))
+        result = self.host.post(
+            LIB_URI.append("svd"),
+            tc.Map(A=tensor, l=n, epsilon=tc.F32(1e-7), max_iter=30),
+        )
         elapsed = time.time() - start
 
         print(f"{n}x{m} SVD ran in {elapsed}s")
@@ -107,7 +127,10 @@ class LinearAlgebraTests(unittest.TestCase):
         tensor = tc.tensor.Dense.load((n, m), matrix.flatten().tolist(), tc.F32)
 
         start = time.time()
-        result = self.host.post(LIB_URI.append("svd"), tc.Map(A=tensor, l=n, epsilon=tc.F32(1e-7), max_iter=200))
+        result = self.host.post(
+            LIB_URI.append("svd"),
+            tc.Map(A=tensor, l=n, epsilon=tc.F32(1e-7), max_iter=200),
+        )
         elapsed = time.time() - start
 
         print(f"{n}x{m} SVD ran in {elapsed}s")
@@ -125,7 +148,9 @@ class LinearAlgebraTests(unittest.TestCase):
         tensor = tc.tensor.Dense.load(shape, matrices.flatten().tolist(), tc.F32)
 
         start = time.time()
-        result = self.host.post(LIB_URI.append("svd"), tc.Map(A=tensor, l=n, epsilon=1e-7, max_iter=10))
+        result = self.host.post(
+            LIB_URI.append("svd"), tc.Map(A=tensor, l=n, epsilon=1e-7, max_iter=10)
+        )
         elapsed = time.time() - start
 
         print(f"{num_matrices}x{n}x{m} SVD ran in {elapsed}s")
@@ -150,8 +175,8 @@ class LinearAlgebraTests(unittest.TestCase):
 
         start = time.time()
         result = self.host.post(
-            LIB_URI.append("svd"),
-            tc.Map(A=tensor, l=n, epsilon=1e-7, max_iter=30))
+            LIB_URI.append("svd"), tc.Map(A=tensor, l=n, epsilon=1e-7, max_iter=30)
+        )
 
         elapsed = time.time() - start
 
@@ -169,7 +194,7 @@ class LinearAlgebraTests(unittest.TestCase):
 
     def _check_svd(self, expected, actual, threshold=5e-4):
         (U, s, V) = actual
-        actual = (U @ (np.eye(s.shape[0], s.shape[0]) * s) @ V)
+        actual = U @ (np.eye(s.shape[0], s.shape[0]) * s) @ V
         self.assertTrue(abs(actual - expected).sum() < threshold)
 
     @classmethod
@@ -178,5 +203,6 @@ class LinearAlgebraTests(unittest.TestCase):
 
 
 def load_np(as_json, dtype=float):
-    shape = as_json[TENSOR_URI][0][0]
-    return np.array(as_json[TENSOR_URI][1], dtype).reshape(shape)
+    shape = as_json[TENSOR_URI][0][1]
+    as_np = np.array(as_json[TENSOR_URI][1], dtype).reshape(shape)
+    return as_np

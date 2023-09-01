@@ -26,7 +26,7 @@ clap = { version = "4.0", features = ["derive"] }
 destream = "0.7"
 destream_json = { version = "0.11", features = ["tokio-io"] }
 env_logger = "0.10"
-freqfs = { version = "~0.8.1", features = ["stream"] }
+freqfs = { path = "../../freqfs", features = ["logging", "stream"] }
 futures = "0.3"
 get-size = "0.1"
 get-size-derive = "0.1"
@@ -40,7 +40,7 @@ rjwt = "0.4"
 safecast = "0.2"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
-tbon = "0.5"
+tbon = { path = "../../tbon" }
 tc-chain = { path = "chain" }
 tc-collection = { path = "collection" }
 tc-error = { path = "error" }

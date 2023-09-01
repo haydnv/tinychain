@@ -6,14 +6,14 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
-use freqfs::{DirLock, DirWriteGuard, FileLoad};
+use freqfs::{DirLock, DirReadGuard, DirWriteGuard, FileLoad};
 use futures::{future, try_join, Stream, TryFutureExt, TryStreamExt};
 use log::{debug, trace};
 use safecast::AsType;
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Inner, Persist, Restore, VERSIONS};
-use tc_transact::{Transact, Transaction, TxnId};
+use tc_transact::{fs, Transact, Transaction, TxnId};
 use tc_value::ValueCollator;
 use tcgeneric::{label, Instance, Label, TCBoxTryStream, ThreadSafe};
 
@@ -64,6 +64,23 @@ where
         })
     }
 
+    fn load(schema: BTreeSchema, collator: ValueCollator, dir: DirReadGuard<FE>) -> TCResult<Self> {
+        let deletes = dir
+            .get_dir(&*DELETES)
+            .cloned()
+            .ok_or_else(|| TCError::not_found(DELETES))?;
+
+        let inserts = dir
+            .get_dir(&*INSERTS)
+            .cloned()
+            .ok_or_else(|| TCError::not_found(INSERTS))?;
+
+        Ok(Self {
+            deletes: Version::load(schema.clone(), collator.clone(), deletes)?,
+            inserts: Version::load(schema.clone(), collator.clone(), inserts)?,
+        })
+    }
+
     async fn read(self) -> (VersionReadGuard<FE>, VersionReadGuard<FE>) {
         // acquire these locks in order to avoid the risk of a deadlock
         let inserts = self.inserts.into_read().await;
@@ -106,6 +123,13 @@ where
         }
 
         Ok(keys)
+    }
+
+    async fn commit(&self)
+    where
+        FE: for<'a> fs::FileSave<'a>,
+    {
+        try_join!(self.deletes.sync(), self.inserts.sync()).expect("commit");
     }
 }
 
@@ -170,25 +194,6 @@ impl<Txn, FE> Clone for BTreeFile<Txn, FE> {
 }
 
 impl<Txn, FE> BTreeFile<Txn, FE> {
-    fn new(dir: DirLock<FE>, canon: Version<FE>, versions: DirLock<FE>) -> Self {
-        let semaphore = Semaphore::new(canon.collator().clone());
-        let state = State {
-            commits: OrdHashSet::new(),
-            deltas: OrdHashMap::new(),
-            pending: OrdHashMap::new(),
-            versions,
-            finalized: None,
-        };
-
-        Self {
-            dir,
-            state: Arc::new(RwLock::new(state)),
-            canon,
-            semaphore,
-            phantom: PhantomData,
-        }
-    }
-
     pub(super) fn collator(&self) -> &b_tree::Collator<ValueCollator> {
         self.canon.collator()
     }
@@ -198,6 +203,49 @@ impl<'a, Txn, FE> BTreeFile<Txn, FE>
 where
     FE: AsType<Node> + ThreadSafe,
 {
+    fn new(dir: DirLock<FE>, canon: Version<FE>, versions: DirLock<FE>) -> TCResult<Self> {
+        let semaphore = Semaphore::new(canon.collator().clone());
+
+        let deltas = {
+            let mut deltas = OrdHashMap::new();
+
+            let versions = versions.try_read()?;
+
+            debug!("found {} B+Tree versions pending merge", versions.len());
+
+            for (name, version) in versions.iter() {
+                let version = version
+                    .as_dir()
+                    .cloned()
+                    .ok_or_else(|| internal!("expected a B+Tree version dir but found a file"))?;
+
+                let schema = canon.schema().clone();
+                let collator = canon.collator().inner().clone();
+                let version = Delta::load(schema, collator, version.try_read()?)?;
+
+                deltas.insert(name.parse()?, version);
+            }
+
+            deltas
+        };
+
+        let state = State {
+            commits: deltas.keys().copied().collect(),
+            deltas,
+            pending: OrdHashMap::new(),
+            versions,
+            finalized: None,
+        };
+
+        Ok(Self {
+            dir,
+            state: Arc::new(RwLock::new(state)),
+            canon,
+            semaphore,
+            phantom: PhantomData,
+        })
+    }
+
     async fn into_keys(
         self,
         txn_id: TxnId,
@@ -451,21 +499,32 @@ where
 impl<Txn, FE> Transact for BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + for<'a> fs::FileSave<'a>,
 {
     type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("BTreeFile::commit {}", txn_id);
 
-        let mut state = self.state.write().expect("state");
+        let version = {
+            let mut state = self.state.write().expect("state");
 
-        if state.finalized.as_ref() > Some(&txn_id) {
-            panic!("cannot commit finalized version {}", txn_id);
-        } else if !state.commits.insert(txn_id) {
-            log::warn!("duplicate commit at {}", txn_id);
-        } else if let Some(pending) = state.pending.remove(&txn_id) {
-            state.deltas.insert(txn_id, pending);
+            if state.finalized.as_ref() > Some(&txn_id) {
+                panic!("cannot commit finalized version {}", txn_id);
+            } else if !state.commits.insert(txn_id) {
+                log::warn!("duplicate commit at {}", txn_id);
+                None
+            } else if let Some(pending) = state.pending.remove(&txn_id) {
+                state.deltas.insert(txn_id, pending.clone());
+                Some(pending)
+            } else {
+                None
+            }
+        };
+
+        if let Some(pending) = version {
+            trace!("commit new version at {txn_id}");
+            pending.commit().await;
         }
 
         self.semaphore.finalize(&txn_id, false);
@@ -559,13 +618,19 @@ where
 
         let (canon, versions) = {
             let mut dir = dir.write().await;
-            let versions = dir.create_dir(VERSIONS.to_string())?;
+
+            let versions = dir
+                .get_dir(&*VERSIONS)
+                .cloned()
+                .ok_or_else(|| internal!("missing versions dir"))?;
+
             let canon = dir.create_dir(CANON.to_string())?;
             let canon = Version::create(schema, collator, canon)?;
+
             (canon, versions)
         };
 
-        Ok(Self::new(dir, canon, versions))
+        Self::new(dir, canon, versions)
     }
 
     async fn load(_txn_id: TxnId, schema: Self::Schema, store: Dir<FE>) -> TCResult<Self> {
@@ -576,13 +641,19 @@ where
 
         let (canon, versions) = {
             let mut dir = dir.write().await;
-            let versions = dir.get_or_create_dir(VERSIONS.to_string())?;
+
+            let versions = dir
+                .get_dir(&*VERSIONS)
+                .cloned()
+                .ok_or_else(|| internal!("missing versions dir"))?;
+
             let canon = dir.get_or_create_dir(CANON.to_string())?;
             let canon = Version::load(schema, collator, canon)?;
+
             (canon, versions)
         };
 
-        Ok(Self::new(dir, canon, versions))
+        Self::new(dir, canon, versions)
     }
 
     fn dir(&self) -> Inner<FE> {
@@ -614,8 +685,14 @@ where
 
         let (canon, versions) = {
             let mut dir = dir.write().await;
+
+            let versions = dir
+                .get_dir(&*VERSIONS)
+                .cloned()
+                .ok_or_else(|| internal!("missing versions dir"))?;
+
             let canon = dir.create_dir(CANON.to_string())?;
-            let versions = dir.create_dir(VERSIONS.to_string())?;
+
             (canon, versions)
         };
 

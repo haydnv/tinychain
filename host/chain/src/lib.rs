@@ -136,8 +136,7 @@ where
         + AsType<BTreeNode>
         + AsType<ChainBlock>
         + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+        + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
@@ -168,7 +167,7 @@ where
 impl<State, T> AsyncHash for Chain<State, T>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe + Clone,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe,
     T: AsyncHash + Send + Sync,
 {
     async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
@@ -187,8 +186,7 @@ where
         + AsType<BTreeNode>
         + AsType<ChainBlock>
         + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+        + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + Transact + fmt::Debug,
 {
     type Commit = T::Commit;
@@ -219,8 +217,15 @@ where
 impl<State, T> Recover<State::FE> for Chain<State, T>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Scalar>,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe + Clone,
-    T: Route<State> + fmt::Debug,
+    State::FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<TensorNode>
+        + AsType<ChainBlock>
+        + for<'a> fs::FileSave<'a>,
+    T: Route<State> + fmt::Debug + Send + Sync,
+    Collection<State::Txn, State::FE>: TryCastFrom<State>,
+    Scalar: TryCastFrom<State>,
+    BTreeNode: freqfs::FileLoad,
 {
     type Txn = State::Txn;
 
@@ -236,7 +241,7 @@ where
 impl<State, T> fs::Persist<State::FE> for Chain<State, T>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + Clone,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + fmt::Debug,
 {
     type Txn = State::Txn;
@@ -295,7 +300,7 @@ where
 impl<State, T> fs::CopyFrom<State::FE, Self> for Chain<State, T>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + Clone,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + fmt::Debug,
 {
     async fn copy_from(
@@ -408,8 +413,7 @@ where
         + AsType<ChainBlock>
         + AsType<BTreeNode>
         + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+        + for<'a> fs::FileSave<'a>,
     T: Route<State> + de::FromStream<Context = State::Txn> + fmt::Debug,
     (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
@@ -456,8 +460,7 @@ where
         + AsType<ChainBlock>
         + AsType<BTreeNode>
         + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+        + for<'a> fs::FileSave<'a>,
     T: Route<State> + de::FromStream<Context = State::Txn> + fmt::Debug,
     (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
@@ -495,8 +498,7 @@ where
         + AsType<ChainBlock>
         + AsType<BTreeNode>
         + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+        + for<'a> fs::FileSave<'a>,
     T: Route<State> + de::FromStream<Context = State::Txn> + fmt::Debug,
     (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,

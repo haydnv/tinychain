@@ -10,7 +10,7 @@ use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::{join, try_join};
 use ha_ndarray::*;
-use log::debug;
+use log::{debug, trace};
 use safecast::{AsType, CastFrom, CastInto};
 
 use tc_error::*;
@@ -423,13 +423,13 @@ impl<Txn, FE, A> TensorConvert for DenseTensor<Txn, FE, A>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    A: DenseInstance + Clone,
+    A: DenseInstance + Into<DenseAccess<Txn, FE, A::DType>> + Clone,
     A::Block: NDArrayTransform,
     <A::Block as NDArrayTransform>::Slice:
         NDArrayRead<DType = A::DType> + NDArrayTransform + Into<Array<A::DType>>,
 {
     type Dense = Self;
-    type Sparse = SparseTensor<Txn, FE, SparseDense<A>>;
+    type Sparse = SparseTensor<Txn, FE, SparseDense<Txn, FE, A::DType>>;
 
     fn into_dense(self) -> Self::Dense {
         self
@@ -1362,7 +1362,7 @@ where
                 let _write_permit = this.write_permit(txn_id, range.clone()).await?;
                 let _read_permit = that.accessor.read_permit(txn_id, range.clone()).await?;
 
-                if range.is_empty() || range == Range::all(this.shape()) {
+                if this.shape().is_covered_by(&range) {
                     let guard = this.write().await;
                     guard.overwrite(txn_id, that.accessor).await
                 } else {
@@ -1379,7 +1379,7 @@ where
                 let _i_that_permit = that.1.accessor.read_permit(txn_id, range.clone()).await?;
 
                 debug_assert_eq!(this.0.shape(), this.1.shape());
-                if range.is_empty() || range == Range::all(this.0.shape()) {
+                if this.0.shape().is_covered_by(&range) {
                     let (r_guard, i_guard) = join!(this.0.write(), this.1.write());
 
                     try_join!(
@@ -1403,11 +1403,16 @@ where
                 }
             },
             {
-                // always acquire these permits in-order to avoid the risk of a deadlock
-                let _write_permit = this.write_permit(txn_id, range.clone()).await?;
-                let _read_permit = that.accessor.read_permit(txn_id, Range::default()).await?;
+                trace!("acquiring write permit on {this:?}[{range:?}]...");
 
-                if range.is_empty() || range == Range::all(this.shape()) {
+                // always acquire these permits in-order to avoid the risk of a deadlock
+                let write_permit = this.write_permit(txn_id, range.clone()).await?;
+                trace!("acquired write permit {write_permit:?}");
+
+                let read_permit = that.accessor.read_permit(txn_id, Range::default()).await?;
+                trace!("acquired read permit {read_permit:?}");
+
+                if this.shape().is_covered_by(&range) {
                     let guard = this.write().await;
                     guard.overwrite(txn_id, that.accessor).await
                 } else {
@@ -1428,7 +1433,7 @@ where
 impl<Txn, FE> Transact for DenseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile,
+    FE: DenseCacheFile + for<'en> fs::FileSave<'en>,
 {
     type Commit = ();
 
@@ -2009,7 +2014,8 @@ fn block_map_for(
 
 #[inline]
 fn block_shape_for(axis: usize, shape: &[u64], block_size: usize) -> BlockShape {
-    debug_assert!(!shape.is_empty());
+    assert_ne!(block_size, 0);
+    assert_ne!(shape.iter().product::<u64>(), 0, "invalid shape: {shape:?}");
 
     if axis == shape.len() - 1 {
         vec![block_size]

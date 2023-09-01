@@ -13,7 +13,7 @@ use itertools::Itertools;
 use safecast::{AsType, CastFrom};
 
 use tc_error::*;
-use tc_transact::TxnId;
+use tc_transact::{fs, TxnId};
 use tc_value::{DType, Number, NumberClass, NumberType};
 use tcgeneric::ThreadSafe;
 
@@ -46,6 +46,7 @@ impl<FE, T> Clone for DenseFile<FE, T> {
     }
 }
 
+// TODO: remove calls .to_string() in get_file after validating a fix in freqfs
 impl<FE, T> DenseFile<FE, T>
 where
     FE: DenseCacheFile + AsType<Buffer<T>>,
@@ -59,10 +60,11 @@ where
 
         let (block_size, num_blocks) = ideal_block_size_for(&shape);
 
-        debug_assert!(block_size > 0);
+        assert_ne!(block_size, 0);
 
         {
             let dtype_size = T::dtype().size();
+            debug_assert_ne!(dtype_size, 0);
 
             let mut dir = dir.write().await;
 
@@ -127,8 +129,17 @@ where
 
         let mut block_id = 0;
         while let Some(block) = source_blocks.try_next().await? {
-            let buffer = Buffer::from(block.into_inner());
+            let buffer = block.into_inner();
+
+            if block_id == num_blocks - 1 {
+                assert_ne!(buffer.len(), 0);
+                assert_eq!(block_size % buffer.len(), 0);
+            } else {
+                assert_eq!(block_size, buffer.len());
+            }
+
             let size_in_bytes = buffer.len() * T::dtype().size();
+            let buffer = Buffer::from(buffer);
             dir_guard.create_file(block_id.to_string(), buffer, size_in_bytes)?;
             block_id += 1;
         }
@@ -195,8 +206,15 @@ where
         let num_blocks = contents.len();
 
         if num_blocks == 0 {
+            #[cfg(debug_assertions)]
+            panic!(
+                "cannot load a dense tensor from an empty directory {}",
+                contents.path().display()
+            );
+
+            #[cfg(not(debug_assertions))]
             return Err(bad_request!(
-                "cannot load a dense tensor from an empty directory"
+                "cannot load a dense tensor from an empty directory",
             ));
         }
 
@@ -204,8 +222,8 @@ where
 
         let block_size = {
             let block = contents
-                .get_file(&0)
-                .ok_or_else(|| TCError::not_found("block 0"))?;
+                .get_file(&0.to_string())
+                .ok_or_else(|| internal!("tensor missing block 0"))?;
 
             let block: FileReadGuard<Buffer<T>> = block.read().await?;
             size += block.len() as u64;
@@ -217,8 +235,8 @@ where
 
         for block_id in 1..(num_blocks - 1) {
             let block = contents
-                .get_file(&block_id)
-                .ok_or_else(|| TCError::not_found(format!("block {block_id}")))?;
+                .get_file(&block_id.to_string())
+                .ok_or_else(|| internal!("tensor missing block {block_id}"))?;
 
             let block: FileReadGuard<Buffer<T>> = block.read().await?;
             if block.len() == block_size {
@@ -233,11 +251,11 @@ where
             }
         }
 
-        {
+        if num_blocks > 1 {
             let block_id = num_blocks - 1;
             let block = contents
-                .get_file(&block_id)
-                .ok_or_else(|| bad_request!("block {block_id}"))?;
+                .get_file(&block_id.to_string())
+                .ok_or_else(|| internal!("tensor missing block {block_id}"))?;
 
             let block: FileReadGuard<Buffer<T>> = block.read().await?;
             size += block.len() as u64;
@@ -334,6 +352,13 @@ where
             dtype: PhantomData,
         })
     }
+
+    pub(super) async fn commit(&self)
+    where
+        FE: for<'en> fs::FileSave<'en>,
+    {
+        self.dir.sync().await.expect("commit")
+    }
 }
 
 impl<FE> DenseFile<FE, f32>
@@ -403,12 +428,9 @@ where
 
     async fn read_block(&self, _txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
         let dir = self.dir.read().await;
-        let file = dir.get_file(&block_id).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("dense tensor block {}", block_id),
-            )
-        })?;
+        let file = dir
+            .get_file(&block_id.to_string())
+            .ok_or_else(|| internal!("tensor missing block {block_id}"))?;
 
         let buffer = file.read_owned().await?;
         let block_axis = block_axis_for(self.shape(), self.block_size);
@@ -420,16 +442,15 @@ where
     async fn read_blocks(self, _txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
         let shape = self.shape;
         let block_axis = block_axis_for(&shape, self.block_size);
+        let block_map = self.block_map.into_inner();
         let dir = self.dir.into_read().await;
 
-        let blocks = futures::stream::iter(self.block_map.into_inner())
+        log::debug!("read blocks {block_map:?} from dense file");
+
+        let blocks = futures::stream::iter(block_map)
             .map(move |block_id| {
-                dir.get_file(&block_id).cloned().ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!("dense tensor block {}", block_id),
-                    )
-                    .into()
+                dir.get_file(&block_id.to_string()).cloned().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, format!("tensor block {block_id}"))
                 })
             })
             .map_ok(|block| block.into_read())
@@ -469,12 +490,9 @@ where
 
     async fn write_block(&self, _txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
         let dir = self.dir.read().await;
-        let file = dir.get_file(&block_id).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("dense tensor block {}", block_id),
-            )
-        })?;
+        let file = dir
+            .get_file(&block_id.to_string())
+            .ok_or_else(|| internal!("tensor missing block {block_id}"))?;
 
         let buffer = file.write_owned().await?;
         let block_axis = block_axis_for(self.shape(), self.block_size);
@@ -490,12 +508,8 @@ where
 
         let blocks = futures::stream::iter(self.block_map.into_inner())
             .map(move |block_id| {
-                dir.get_file(&block_id).cloned().ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!("dense tensor block {}", block_id),
-                    )
-                    .into()
+                dir.get_file(&block_id.to_string()).cloned().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, format!("tensor block {block_id}"))
                 })
             })
             .map_ok(|block| block.into_write())
@@ -707,18 +721,43 @@ macro_rules! impl_visitor {
                 self,
                 mut array: A,
             ) -> Result<Self::Value, A::Error> {
+                let size = self.shape.iter().product::<u64>();
                 let mut contents = self.dir.write().await;
 
                 let (block_size, num_blocks) = ideal_block_size_for(&self.shape);
 
+                let zero = <$t>::zero();
                 let type_size = <$t>::dtype().size();
-                let mut buffer = Vec::<$t>::with_capacity(block_size);
+                let mut buffer = vec![zero; block_size];
                 for block_id in 0..num_blocks {
-                    let size = array.buffer(&mut buffer).await?;
-                    let block = Buffer::from(buffer.drain(..).collect::<Vec<$t>>());
+                    let buffered = array.buffer(&mut buffer).await?;
+
+                    let buffer = if block_id == num_blocks - 1 {
+                        let expected_block_size =
+                            (size - (block_size as u64 * block_id as u64)) as usize;
+
+                        if buffered == expected_block_size {
+                            Ok(buffer.drain(..).collect::<Vec<$t>>())
+                        } else {
+                            Err(de::Error::invalid_length(
+                                buffered,
+                                format!(
+                                    "a trailing Tensor block of {expected_block_size} elements"
+                                ),
+                            ))
+                        }
+                    } else if buffer.len() == block_size {
+                        Ok(buffer.drain(..).collect::<Vec<$t>>())
+                    } else {
+                        Err(de::Error::invalid_length(
+                            buffered,
+                            format!("a Tensor block of {block_size} elements"),
+                        ))
+                    }
+                    .map(Buffer::from)?;
 
                     contents
-                        .create_file(block_id.to_string(), block, size * type_size)
+                        .create_file(block_id.to_string(), buffer, buffered * type_size)
                         .map_err(de::Error::custom)?;
                 }
 

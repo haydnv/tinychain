@@ -9,7 +9,7 @@ use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::DirLock;
 use futures::{join, try_join, TryFutureExt};
 use ha_ndarray::{Array, Buffer, CDatatype};
-use log::debug;
+use log::{debug, trace};
 use safecast::{AsType, CastInto};
 
 use tc_error::*;
@@ -50,6 +50,36 @@ impl<FE, T> Clone for Delta<FE, T> {
     }
 }
 
+impl<FE, T> Delta<FE, T>
+where
+    FE: AsType<Node> + ThreadSafe,
+{
+    fn load(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
+        let dir = dir.try_read()?;
+
+        let filled = dir
+            .get_dir(&*FILLED)
+            .cloned()
+            .ok_or_else(|| TCError::not_found(FILLED))
+            .and_then(|dir| SparseFile::load(dir, shape.clone()))?;
+
+        let zeros = dir
+            .get_dir(&*ZEROS)
+            .cloned()
+            .ok_or_else(|| TCError::not_found(ZEROS))
+            .and_then(|dir| SparseFile::load(dir, shape))?;
+
+        Ok(Self { filled, zeros })
+    }
+
+    async fn commit(&self)
+    where
+        FE: for<'a> fs::FileSave<'a>,
+    {
+        try_join!(self.filled.sync(), self.zeros.sync()).expect("commit");
+    }
+}
+
 struct State<Txn, FE, T> {
     commits: OrdHashSet<TxnId>,
     deltas: OrdHashMap<TxnId, Delta<FE, T>>,
@@ -71,20 +101,25 @@ where
         txn_id: TxnId,
         canon: SparseAccess<Txn, FE, T>,
     ) -> TCResult<SparseAccess<Txn, FE, T>> {
+        debug!("construct latest Sparse version at {txn_id}");
+
         if self.finalized > Some(txn_id) {
             return Err(conflict!("sparse tensor is already finalized at {txn_id}"));
         }
 
         let mut version = canon.clone().into();
-        for (_version_id, delta) in self
+        for (version_id, delta) in self
             .deltas
             .iter()
             .take_while(|(version_id, _delta)| *version_id <= &txn_id)
         {
+            trace!("load a committed version at {version_id}");
             version = Version::create(version, delta.filled.clone(), delta.zeros.clone()).into();
         }
 
         if let Some(delta) = self.pending.get(&txn_id) {
+            trace!("load a pending version at {txn_id}");
+            assert!(!self.deltas.contains_key(&txn_id));
             version = Version::create(version, delta.filled.clone(), delta.zeros.clone()).into();
         }
 
@@ -97,28 +132,37 @@ where
         txn_id: TxnId,
         canon: SparseAccess<Txn, FE, T>,
     ) -> TCResult<Version<Txn, FE, T>> {
+        debug!("construct a pending Sparse version at {txn_id}");
+
         if self.commits.contains(&txn_id) {
             return Err(conflict!("{} has already been committed", txn_id));
         } else if self.finalized > Some(txn_id) {
             return Err(conflict!("sparse tensor is already finalized at {txn_id}"));
         }
 
+        assert!(!self.deltas.contains_key(&txn_id));
+
         let mut version = canon.clone().into();
-        for (_version_id, delta) in self
+        for (version_id, delta) in self
             .deltas
             .iter()
             .take_while(|(version_id, _delta)| *version_id < &txn_id)
         {
+            trace!("load a committed version at {version_id}");
             version = Version::create(version, delta.filled.clone(), delta.zeros.clone()).into();
         }
 
         if let Some(delta) = self.pending.get(&txn_id) {
+            trace!("load a pending version at {txn_id}");
+
             Ok(Version::create(
                 version,
                 delta.filled.clone(),
                 delta.zeros.clone(),
             ))
         } else {
+            trace!("create a new pending version at {txn_id}");
+
             let dir = {
                 let mut versions = self.versions.try_write()?;
                 versions.create_dir(txn_id.to_string())?
@@ -129,11 +173,15 @@ where
             let zeros = dir.create_dir(ZEROS.to_string())?;
             let filled = SparseFile::create(filled, canon.shape().clone())?;
             let zeros = SparseFile::create(zeros, canon.shape().clone())?;
-            let delta = Delta { filled, zeros };
 
-            self.pending.insert(txn_id, delta.clone());
+            let delta = Delta {
+                filled: filled.clone(),
+                zeros: zeros.clone(),
+            };
 
-            Ok(Version::create(version, delta.filled, delta.zeros))
+            self.pending.insert(txn_id, delta);
+
+            Ok(Version::create(version, filled, zeros))
         }
     }
 }
@@ -172,23 +220,44 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    fn new(dir: DirLock<FE>, canon: SparseFile<FE, T>, versions: DirLock<FE>) -> Self {
+    fn new(dir: DirLock<FE>, canon: SparseFile<FE, T>, versions: DirLock<FE>) -> TCResult<Self> {
         let semaphore = Semaphore::new(Arc::new(Collator::default()));
 
+        let deltas = {
+            let mut deltas = OrdHashMap::new();
+
+            let versions = versions.try_read()?;
+
+            debug!("found {} pending versions", versions.len());
+
+            for (name, dir) in versions.iter() {
+                let dir = dir.as_dir().ok_or_else(|| {
+                    internal!("expected a dense tensor version dir but found a file")
+                })?;
+
+                let shape = canon.schema().shape().clone();
+                let delta = Delta::load(dir.clone(), shape)?;
+
+                deltas.insert(name.parse()?, delta);
+            }
+
+            deltas
+        };
+
         let state = State {
-            commits: OrdHashSet::new(),
-            deltas: OrdHashMap::new(),
+            commits: deltas.keys().copied().collect(),
+            deltas,
             pending: OrdHashMap::new(),
             versions,
             finalized: None,
             phantom: PhantomData,
         };
 
-        Self {
+        Ok(Self {
             dir,
             state: Arc::new(RwLock::new(state)),
             canon: SparseVersion::new(canon, semaphore),
-        }
+        })
     }
 }
 
@@ -364,7 +433,7 @@ where
 impl<Txn, FE, T> Transact for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + for<'a> fs::FileSave<'a>,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
@@ -373,14 +442,27 @@ where
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("SparseTensor::commit {}", txn_id);
 
-        let mut state = self.state.write().expect("state");
+        let version = {
+            let mut state = self.state.write().expect("state");
 
-        if state.finalized.as_ref() > Some(&txn_id) {
-            panic!("cannot commit finalized version {}", txn_id);
-        } else if !state.commits.insert(txn_id) {
-            log::warn!("duplicate commit at {}", txn_id);
-        } else if let Some(delta) = state.pending.remove(&txn_id) {
-            state.deltas.insert(txn_id, delta);
+            if state.finalized.as_ref() > Some(&txn_id) {
+                panic!("cannot commit finalized version {}", txn_id);
+            } else if !state.commits.insert(txn_id) {
+                log::warn!("duplicate commit at {}", txn_id);
+                None
+            } else if let Some(delta) = state.pending.remove(&txn_id) {
+                trace!("commit version at {txn_id}");
+                state.deltas.insert(txn_id, delta.clone());
+                Some(delta)
+            } else {
+                None
+            }
+        };
+
+        if let Some(version) = version {
+            version.commit().await;
+        } else {
+            trace!("{self:?} was not modified at {txn_id}");
         }
 
         self.canon.commit(&txn_id);
@@ -462,6 +544,7 @@ impl<Txn, FE, T> fs::Persist<FE> for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe + Clone,
+    T: Send,
 {
     type Txn = Txn;
     type Schema = Schema;
@@ -469,13 +552,26 @@ where
     async fn create(_txn_id: TxnId, schema: Schema, store: fs::Dir<FE>) -> TCResult<Self> {
         let (dir, canon, versions) = fs_init(store).await?;
         let canon = SparseFile::create(canon, schema.shape().clone())?;
-        Ok(Self::new(dir, canon, versions))
+        Self::new(dir, canon, versions)
     }
 
     async fn load(_txn_id: TxnId, schema: Schema, store: fs::Dir<FE>) -> TCResult<Self> {
-        let (dir, canon, versions) = fs_init(store).await?;
-        let canon = SparseFile::load(canon, schema.shape().clone())?;
-        Ok(Self::new(dir, canon, versions))
+        let dir = store.into_inner();
+        let (canon, versions) = {
+            let mut dir = dir.write().await;
+            let versions = dir.get_or_create_dir(fs::VERSIONS.to_string())?;
+            let canon = dir.get_or_create_dir(CANON.to_string())?;
+            (canon, versions)
+        };
+
+        // handle the case that no canonical version was ever finalized
+        let canon = if canon.try_read()?.is_empty() {
+            SparseFile::create(canon, schema.shape().clone())
+        } else {
+            SparseFile::load(canon, schema.shape().clone())
+        }?;
+
+        Self::new(dir, canon, versions)
     }
 
     fn dir(&self) -> fs::Inner<FE> {
@@ -499,7 +595,7 @@ where
     ) -> TCResult<Self> {
         let (dir, canon, versions) = fs_init(store).await?;
         let canon = SparseFile::copy_from(canon, *txn.id(), other).await?;
-        Ok(Self::new(dir, canon, versions))
+        Self::new(dir, canon, versions)
     }
 }
 
@@ -513,6 +609,8 @@ where
     Number: From<T> + CastInto<T>,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
+        debug!("restore {self:?} from {backup:?}");
+
         // always acquire these permits in-order to avoid the risk of a deadlock
         let _write_permit = self.write_permit(txn_id, Range::default()).await?;
         let _read_permit = backup.read_permit(txn_id, Range::default()).await?;
@@ -523,7 +621,14 @@ where
         };
 
         let mut guard = version.write().await;
-        guard.overwrite(txn_id, backup.clone()).await
+
+        trace!("locked {version:?} for writing");
+
+        guard.overwrite(txn_id, backup.canon.clone()).await?;
+
+        trace!("restored {self:?} from {backup:?}");
+
+        Ok(())
     }
 }
 
@@ -543,14 +648,25 @@ where
     ) -> Result<Self, D::Error> {
         let (txn, shape) = cxt;
 
-        let (_dir_name, dir) = {
-            let mut cxt = txn.context().write().await;
-            cxt.create_dir_unique().map_err(de::Error::custom)?
+        let dir = txn.context().clone();
+
+        let (canon, versions) = {
+            let mut dir = dir.write().await;
+
+            let versions = dir
+                .create_dir(fs::VERSIONS.to_string())
+                .map_err(de::Error::custom)?;
+
+            let canon = dir
+                .create_dir(CANON.to_string())
+                .map_err(de::Error::custom)?;
+
+            (canon, versions)
         };
 
-        let (dir, canon, versions) = dir_init(dir).map_err(de::Error::custom).await?;
         let canon = SparseFile::from_stream((canon, shape), decoder).await?;
-        Ok(Self::new(dir, canon, versions))
+
+        Self::new(dir, canon, versions).map_err(de::Error::custom)
     }
 }
 
@@ -596,8 +712,8 @@ where
     }
 
     pub async fn end(self) -> TCResult<(SparseBase<Txn, FE, T>, SparseBase<Txn, FE, T>)> {
-        let re = SparseBase::new(self.re.0, self.re.1, self.re.2);
-        let im = SparseBase::new(self.im.0, self.im.1, self.im.2);
+        let re = SparseBase::new(self.re.0, self.re.1, self.re.2)?;
+        let im = SparseBase::new(self.im.0, self.im.1, self.im.2)?;
         Ok((re, im))
     }
 }
@@ -690,8 +806,14 @@ where
 {
     let (canon, versions) = {
         let mut dir = dir.write().await;
-        let versions = dir.create_dir(fs::VERSIONS.to_string())?;
+
+        let versions = dir
+            .get_dir(&*fs::VERSIONS)
+            .cloned()
+            .ok_or_else(|| internal!("missing versions dir"))?;
+
         let canon = dir.create_dir(CANON.to_string())?;
+
         (canon, versions)
     };
 

@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 
 use tc_collection::btree::Node as BTreeNode;
 use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
-use tc_collection::{Collection, CollectionBase, CollectionType, CollectionView};
+use tc_collection::{btree, Collection, CollectionBase, CollectionView, Schema};
 use tc_error::*;
 use tc_scalar::{OpRef, Scalar, TCRef};
 use tc_transact::fs;
@@ -38,8 +38,11 @@ impl<Txn, FE> StoreEntry<Txn, FE> {
     pub fn try_from_state<State>(state: State) -> TCResult<Self>
     where
         State: StateInstance<Txn = Txn, FE = FE>,
+        Txn: Transaction<FE>,
+        FE: DenseCacheFile + AsType<btree::Node> + AsType<TensorNode> + Clone,
         Collection<Txn, FE>: TryCastFrom<State>,
         Scalar: TryCastFrom<State>,
+        BTreeNode: freqfs::FileLoad,
     {
         if Collection::<_, _>::can_cast_from(&state) {
             state
@@ -140,18 +143,21 @@ impl<Txn, FE> Clone for Store<Txn, FE> {
     }
 }
 
-impl<Txn, FE> Store<Txn, FE>
-where
-    FE: ThreadSafe,
-    Txn: Transaction<FE>,
-{
+impl<Txn, FE> Store<Txn, FE> {
     pub fn new(dir: fs::Dir<FE>) -> Self {
         Self {
             dir,
             txn: PhantomData,
         }
     }
+}
 
+impl<Txn, FE> Store<Txn, FE>
+where
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    BTreeNode: freqfs::FileLoad,
+{
     pub async fn resolve(&self, txn_id: TxnId, scalar: Scalar) -> TCResult<StoreEntry<Txn, FE>> {
         debug!("History::resolve {:?}", scalar);
 
@@ -159,10 +165,17 @@ where
 
         if let Scalar::Ref(tc_ref) = scalar {
             if let TCRef::Op(OpRef::Get((OpSubject::Ref(hash, classpath), schema))) = *tc_ref {
-                let class = CollectionType::from_path(&classpath)
-                    .ok_or_else(|| internal!("invalid Collection type: {}", classpath))?;
+                let hash = hash.into_id();
+                let store = self.dir.get_dir(txn_id, &hash).await?;
+                let schema = Value::try_cast_from(schema, |s| {
+                    internal!("invalid schema for Collection: {s:?}")
+                })
+                .and_then(|schema| Schema::try_from((classpath, schema)))?;
 
-                Err(not_implemented!("resolve saved collection"))
+                <CollectionBase<Txn, FE> as fs::Persist<FE>>::load(txn_id, schema, store)
+                    .map_ok(Collection::from)
+                    .map_ok(StoreEntry::Collection)
+                    .await
             } else {
                 Err(internal!(
                     "invalid subject for historical Chain state {:?}",
@@ -173,13 +186,7 @@ where
             Ok(StoreEntry::Scalar(scalar))
         }
     }
-}
 
-impl<Txn, FE> Store<Txn, FE>
-where
-    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
-    Txn: Transaction<FE>,
-{
     pub async fn save_state(&self, txn: &Txn, state: StoreEntry<Txn, FE>) -> TCResult<Scalar> {
         debug!("chain data store saving state {:?}...", state);
 

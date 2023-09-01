@@ -26,13 +26,15 @@ use super::complex::ComplexRead;
 use super::dense::{DenseAccess, DenseAccessCast, DenseCacheFile, DenseSparse, DenseTensor};
 
 use super::{
-    Axes, AxisRange, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast,
-    TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorInstance, TensorMath,
-    TensorMathConst, TensorPermitRead, TensorRead, TensorReduce, TensorTransform, TensorType,
-    TensorUnary, TensorUnaryBoolean, TensorWrite, TensorWriteDual, IMAG, REAL,
+    Axes, AxisRange, Coord, Range, Schema as TensorSchema, Shape, TensorBoolean,
+    TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert,
+    TensorInstance, TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce,
+    TensorTransform, TensorType, TensorUnary, TensorUnaryBoolean, TensorWrite, TensorWriteDual,
+    IMAG, REAL,
 };
 
 pub use access::*;
+use itertools::Itertools;
 pub use schema::{IndexSchema, Schema};
 pub use view::*;
 
@@ -228,7 +230,7 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
         self,
         txn_id: TxnId,
         range: Range,
-        mut order: Axes,
+        order: Axes,
         axes: Axes,
     ) -> TCResult<TCBoxTryStream<'static, Coord>>
     where
@@ -236,8 +238,8 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
     {
         log::debug!("{:?} filled at {:?}...", self, axes);
 
-        self.shape().validate_axes(&axes)?;
-        self.shape().validate_axes(&order)?;
+        self.shape().validate_axes(&axes, false)?;
+        self.shape().validate_axes(&order, false)?;
 
         if axes.is_empty() {
             #[cfg(debug_assertions)]
@@ -253,10 +255,13 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
 
             Ok(Box::pin(filled_at))
         } else if axes.iter().zip(&order).all(|(x, o)| x == o) {
-            order.extend(axes.iter().copied());
-            order.dedup();
-
             let ndim = self.ndim();
+            let order = order
+                .into_iter() // make sure the selected axes are ordered
+                .chain(axes.iter().copied()) // then make sure all axes are present
+                .chain(0..ndim) // then remove duplicates
+                .unique()
+                .collect::<Axes>();
 
             let filled_at = self
                 .elements(txn_id, range, order)
@@ -1215,7 +1220,7 @@ where
             this,
             that,
             {
-                if range.is_empty() || range == Range::all(this.shape()) {
+                if this.shape().is_covered_by(&range) {
                     let mut guard = this.write().await;
                     guard.overwrite(txn_id, that.accessor).await
                 } else {
@@ -1226,7 +1231,7 @@ where
             },
             {
                 debug_assert_eq!(this.0.shape(), this.1.shape());
-                if range.is_empty() || range == Range::all(this.0.shape()) {
+                if this.0.shape().is_covered_by(&range) {
                     let (mut r_guard, mut i_guard) = join!(this.0.write(), this.1.write());
 
                     try_join!(
@@ -1250,7 +1255,7 @@ where
                 }
             },
             {
-                if range.is_empty() || range == Range::all(this.shape()) {
+                if this.shape().is_covered_by(&range) {
                     let mut guard = this.write().await;
                     guard.overwrite(txn_id, that.accessor).await
                 } else {
@@ -1271,7 +1276,7 @@ where
 impl<Txn, FE> Transact for SparseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
+    FE: AsType<Node> + ThreadSafe + for<'a> fs::FileSave<'a>,
 {
     type Commit = ();
 
@@ -1319,10 +1324,12 @@ where
     FE: AsType<Node> + ThreadSafe + Clone,
 {
     type Txn = Txn;
-    type Schema = (NumberType, Schema);
+    type Schema = TensorSchema;
 
     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
-        let (dtype, schema) = schema;
+        let dtype = schema.dtype;
+        let shape = schema.shape;
+        let schema = Schema::new(shape);
 
         match dtype {
             NumberType::Bool => {
@@ -1408,7 +1415,9 @@ where
     }
 
     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
-        let (dtype, schema) = schema;
+        let dtype = schema.dtype;
+        let shape = schema.shape;
+        let schema = Schema::new(shape);
 
         match dtype {
             NumberType::Bool => {
@@ -1715,18 +1724,14 @@ where
         dtype: NumberType,
         shape: Shape,
     ) -> Result<SparseBase<Txn, FE>, E> {
-        let (_name, store) = {
-            let mut cxt = self.txn.context().write().await;
-            cxt.create_dir_unique().map_err(de::Error::custom)?
-        };
+        let store = self.txn.context().clone();
 
         let txn_id = *self.txn.id();
-        let schema = Schema::new(shape);
-        let store = fs::Dir::load(txn_id, store)
+        let store = fs::Dir::load(txn_id, store, false)
             .map_err(de::Error::custom)
             .await?;
 
-        fs::Persist::create(txn_id, (dtype, schema), store)
+        fs::Persist::create(txn_id, (dtype, shape).into(), store)
             .map_err(de::Error::custom)
             .await
     }
@@ -1881,11 +1886,7 @@ where
 
 #[inline]
 fn table_range(range: &Range) -> Result<b_table::Range<usize, Number>, TCError> {
-    if range == &Range::default() {
-        return Ok(b_table::Range::default());
-    }
-
-    let mut table_range = HashMap::new();
+    let mut table_range = HashMap::with_capacity(range.len());
 
     for (x, bound) in range.iter().enumerate() {
         match bound {

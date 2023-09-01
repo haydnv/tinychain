@@ -9,6 +9,7 @@ use collate::Collator;
 use destream::{de, en};
 use futures::TryFutureExt;
 use ha_ndarray::{NDArray, Queue};
+use log::debug;
 use safecast::{AsType, CastFrom, CastInto, TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -1011,9 +1012,9 @@ where
             Self::Dense(this) => match other {
                 Self::Dense(that) => this.into_view().eq(that.into()).map(Self::from),
 
-                Self::Sparse(that) => that
+                Self::Sparse(that) => this
                     .into_view()
-                    .eq(this.into_view().into_sparse())
+                    .eq(that.into_view().into_dense())
                     .map(Self::from),
             },
             Self::Sparse(this) => match other {
@@ -1436,6 +1437,8 @@ where
     type MatMul = Self;
 
     fn matmul(self, other: Self) -> TCResult<Self::MatMul> {
+        debug!("{:?} @ {:?}", self, other);
+
         match self {
             Self::Dense(this) => match other {
                 Self::Dense(that) => this.into_view().matmul(that.into_view()).map(Self::from),
@@ -1860,7 +1863,7 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for TensorBase<Txn, FE> {
 impl<Txn, FE> Transact for TensorBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node>,
+    FE: DenseCacheFile + AsType<Node> + for<'en> fs::FileSave<'en>,
 {
     type Commit = ();
 
@@ -1897,6 +1900,7 @@ where
 
     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
         let (class, schema) = schema;
+
         match class {
             TensorType::Dense => {
                 DenseBase::create(txn_id, schema, store)
@@ -1904,9 +1908,7 @@ where
                     .await
             }
             TensorType::Sparse => {
-                let dtype = schema.dtype;
-                let schema = sparse::Schema::new(schema.shape);
-                SparseBase::create(txn_id, (dtype, schema), store)
+                SparseBase::create(txn_id, schema, store)
                     .map_ok(Self::Sparse)
                     .await
             }
@@ -1915,6 +1917,7 @@ where
 
     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
         let (class, schema) = schema;
+
         match class {
             TensorType::Dense => {
                 DenseBase::load(txn_id, schema, store)
@@ -1922,9 +1925,7 @@ where
                     .await
             }
             TensorType::Sparse => {
-                let dtype = schema.dtype;
-                let schema = sparse::Schema::new(schema.shape);
-                SparseBase::load(txn_id, (dtype, schema), store)
+                SparseBase::load(txn_id, schema, store)
                     .map_ok(Self::Sparse)
                     .await
             }

@@ -126,6 +126,14 @@ pub struct TCError {
 impl TCError {
     /// Returns a new error with the given code and message.
     pub fn new<I: fmt::Display>(code: ErrorKind, message: I) -> Self {
+        #[cfg(debug_assertions)]
+        match code {
+            ErrorKind::Internal | ErrorKind::MethodNotAllowed | ErrorKind::NotImplemented => {
+                panic!("{code}: {message}")
+            }
+            other => log::warn!("{other}: {message}"),
+        }
+
         Self {
             kind: code,
             data: message.into(),
@@ -139,11 +147,21 @@ impl TCError {
         SI: fmt::Display,
         S: IntoIterator<Item = SI>,
     {
+        let stack = stack.into_iter().map(|msg| msg.to_string()).collect();
+
+        #[cfg(debug_assertions)]
+        match code {
+            ErrorKind::Internal | ErrorKind::MethodNotAllowed | ErrorKind::NotImplemented => {
+                panic!("{code}: {message} (cause: {stack:?})")
+            }
+            other => log::warn!("{other}: {message} (cause: {stack:?})"),
+        }
+
         Self {
             kind: code,
             data: ErrorData {
                 message: message.to_string(),
-                stack: stack.into_iter().map(|msg| msg.to_string()).collect(),
+                stack,
             },
         }
     }
@@ -169,19 +187,11 @@ impl TCError {
             subject, path, method
         );
 
-        #[cfg(debug_assertions)]
-        panic!("{}", message);
-
-        #[cfg(not(debug_assertions))]
         Self::new(ErrorKind::MethodNotAllowed, message)
     }
 
     /// Error to indicate that the requested resource does not exist at the specified location
     pub fn not_found<I: fmt::Display>(locator: I) -> Self {
-        #[cfg(debug_assertions)]
-        panic!("not found: {locator}");
-
-        #[cfg(not(debug_assertions))]
         Self::new(ErrorKind::NotFound, locator)
     }
 
@@ -217,32 +227,19 @@ impl std::error::Error for TCError {}
 
 impl From<pathlink::ParseError> for TCError {
     fn from(err: pathlink::ParseError) -> Self {
-        Self {
-            kind: ErrorKind::BadRequest,
-            data: err.into(),
-        }
+        Self::new(ErrorKind::BadRequest, err)
     }
 }
 
 impl From<ha_ndarray::Error> for TCError {
     fn from(err: ha_ndarray::Error) -> Self {
-        #[cfg(debug_assertions)]
-        panic!("array math error: {err}");
-
-        #[cfg(not(debug_assertions))]
-        Self {
-            kind: ErrorKind::Internal,
-            data: err.to_string().into(),
-        }
+        Self::new(ErrorKind::Internal, err)
     }
 }
 
 impl From<txn_lock::Error> for TCError {
     fn from(err: txn_lock::Error) -> Self {
-        Self {
-            kind: ErrorKind::Conflict,
-            data: err.to_string().into(),
-        }
+        Self::new(ErrorKind::Conflict, err)
     }
 }
 
@@ -274,10 +271,6 @@ impl From<io::Error> for TCError {
             io::ErrorKind::InvalidInput => bad_request!("{}", cause),
             io::ErrorKind::NotFound => TCError::not_found(cause),
             io::ErrorKind::PermissionDenied => {
-                #[cfg(debug_assertions)]
-                panic!("host filesystem denied permission: {}", cause);
-
-                #[cfg(not(debug_assertions))]
                 bad_gateway!("host filesystem permission denied").consume(cause)
             }
             io::ErrorKind::WouldBlock => {
