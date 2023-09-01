@@ -423,13 +423,13 @@ impl<Txn, FE, A> TensorConvert for DenseTensor<Txn, FE, A>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    A: DenseInstance + Clone,
+    A: DenseInstance + Into<DenseAccess<Txn, FE, A::DType>> + Clone,
     A::Block: NDArrayTransform,
     <A::Block as NDArrayTransform>::Slice:
         NDArrayRead<DType = A::DType> + NDArrayTransform + Into<Array<A::DType>>,
 {
     type Dense = Self;
-    type Sparse = SparseTensor<Txn, FE, SparseDense<A>>;
+    type Sparse = SparseTensor<Txn, FE, SparseDense<Txn, FE, A::DType>>;
 
     fn into_dense(self) -> Self::Dense {
         self

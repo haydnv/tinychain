@@ -303,7 +303,7 @@ pub enum SparseAccess<Txn, FE, T: CDatatype> {
     CompareLeft(Box<SparseCompareLeft<Txn, FE, T>>),
     Cond(Box<SparseCond<SparseAccess<Txn, FE, u8>, Self, Self>>),
     Cow(Box<SparseCow<FE, T, Self>>),
-    Dense(Box<SparseDense<DenseAccess<Txn, FE, T>>>),
+    Dense(Box<SparseDense<Txn, FE, T>>),
     Expand(Box<SparseExpand<Self>>),
     Reduce(Box<SparseReduce<Txn, FE, T>>),
     Reshape(Box<SparseReshape<Self>>),
@@ -2329,18 +2329,36 @@ where
     }
 }
 
-#[derive(Clone)]
-pub struct SparseDense<S> {
-    source: S,
+pub struct SparseDense<Txn, FE, T: CDatatype> {
+    source: DenseAccess<Txn, FE, T>,
 }
 
-impl<S> SparseDense<S> {
-    pub fn new(source: S) -> Self {
-        Self { source }
+impl<Txn, FE, T: CDatatype> Clone for SparseDense<Txn, FE, T> {
+    fn clone(&self) -> Self {
+        Self {
+            source: self.source.clone(),
+        }
     }
 }
 
-impl<S: TensorInstance> TensorInstance for SparseDense<S> {
+impl<Txn, FE, T: CDatatype> SparseDense<Txn, FE, T> {
+    pub fn new<S>(source: S) -> Self
+    where
+        S: Into<DenseAccess<Txn, FE, T>>,
+        T: CDatatype,
+    {
+        Self {
+            source: source.into(),
+        }
+    }
+}
+
+impl<Txn, FE, T> TensorInstance for SparseDense<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -2351,17 +2369,18 @@ impl<S: TensorInstance> TensorInstance for SparseDense<S> {
 }
 
 #[async_trait]
-impl<S> SparseInstance for SparseDense<S>
+impl<Txn, FE, T> SparseInstance for SparseDense<Txn, FE, T>
 where
-    S: DenseInstance + Clone,
-    S::Block: NDArrayTransform,
-    <S::Block as NDArrayTransform>::Slice:
-        NDArrayRead<DType = S::DType> + NDArrayTransform + Into<Array<S::DType>>,
+    Txn: Transaction<FE>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
+    T: CDatatype + DType + fmt::Debug,
+    Buffer<T>: de::FromStream<Context = ()>,
+    Number: From<T> + CastInto<T>,
 {
     type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<S::DType>>;
+    type ValueBlock = ArrayBase<Vec<T>>;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
-    type DType = S::DType;
+    type DType = T;
 
     async fn blocks(
         self,
@@ -2452,25 +2471,29 @@ where
 }
 
 #[async_trait]
-impl<S: TensorPermitRead> TensorPermitRead for SparseDense<S> {
+impl<Txn, FE, T> TensorPermitRead for SparseDense<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
         self.source.read_permit(txn_id, range).await
     }
 }
 
-impl<Txn, FE, S, T> From<SparseDense<S>> for SparseAccess<Txn, FE, T>
-where
-    S: Into<DenseAccess<Txn, FE, T>>,
-    T: CDatatype,
-{
-    fn from(dense: SparseDense<S>) -> Self {
-        Self::Dense(Box::new(SparseDense {
-            source: dense.source.into(),
-        }))
+impl<Txn, FE, T: CDatatype> From<SparseDense<Txn, FE, T>> for SparseAccess<Txn, FE, T> {
+    fn from(dense: SparseDense<Txn, FE, T>) -> Self {
+        Self::Dense(Box::new(dense))
     }
 }
 
-impl<S: fmt::Debug> fmt::Debug for SparseDense<S> {
+impl<Txn, FE, T: CDatatype> fmt::Debug for SparseDense<Txn, FE, T>
+where
+    Txn: ThreadSafe,
+    FE: ThreadSafe,
+    T: CDatatype + DType,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "sparse view of {:?}", self.source)
     }
