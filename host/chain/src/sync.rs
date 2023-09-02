@@ -269,7 +269,7 @@ where
             .get_or_create_dir(BLOCKS.to_string())
             .and_then(|dir| dir.try_write_owned())?;
 
-        let pending = if let Some(file) = blocks_dir.get_file(&PENDING.to_string()) {
+        let pending = if let Some(file) = blocks_dir.get_file(&*PENDING) {
             file.clone()
         } else {
             let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
@@ -277,7 +277,7 @@ where
             blocks_dir.create_file(PENDING.to_string(), block, size_hint)?
         };
 
-        let committed = if let Some(file) = blocks_dir.get_file(&COMMITTED.to_string()) {
+        let committed = if let Some(file) = blocks_dir.get_file(&*COMMITTED) {
             file.clone()
         } else {
             let block = ChainBlock::new(null_hash().to_vec());

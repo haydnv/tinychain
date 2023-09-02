@@ -606,8 +606,7 @@ where
     ) -> TCResult<FileWriteGuardOwned<FE, Buffer<S::DType>>> {
         let mut dir = self.dir.write().await;
 
-        // TODO: remove this call to .to_string()
-        if let Some(buffer) = dir.get_file(&block_id.to_string()) {
+        if let Some(buffer) = dir.get_file(&block_id) {
             buffer.write_owned().map_err(TCError::from).await
         } else {
             let block = self.source.read_block(txn_id, block_id).await?;
@@ -657,8 +656,7 @@ where
 
         let dir = self.dir.read().await;
 
-        // TODO: remove this call to .to_string()
-        if let Some(block) = dir.get_file(&block_id.to_string()) {
+        if let Some(block) = dir.get_file(&block_id) {
             debug!("DenseCow::read_block {block_id} at {txn_id} found new block");
 
             let buffer: Buffer<S::DType> = block
