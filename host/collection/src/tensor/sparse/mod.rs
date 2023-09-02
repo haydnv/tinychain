@@ -1276,7 +1276,7 @@ where
 impl<Txn, FE> Transact for SparseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe + for<'a> fs::FileSave<'a>,
+    FE: AsType<Node> + ThreadSafe + for<'a> fs::FileSave<'a> + Clone,
 {
     type Commit = ();
 

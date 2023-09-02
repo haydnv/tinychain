@@ -33,10 +33,12 @@ use super::{Node, Schema, SparseInstance};
 const CANON: Label = label("canon");
 const FILLED: Label = label("filled");
 const ZEROS: Label = label("zeros");
+const COMMITTED: Label = label("committed");
 
 type Version<Txn, FE, T> = SparseCow<FE, T, SparseAccess<Txn, FE, T>>;
 
 struct Delta<FE, T> {
+    dir: DirLock<FE>,
     filled: SparseFile<FE, T>,
     zeros: SparseFile<FE, T>,
 }
@@ -44,6 +46,7 @@ struct Delta<FE, T> {
 impl<FE, T> Clone for Delta<FE, T> {
     fn clone(&self) -> Self {
         Delta {
+            dir: self.dir.clone(),
             filled: self.filled.clone(),
             zeros: self.zeros.clone(),
         }
@@ -55,21 +58,52 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     fn load(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
-        let dir = dir.try_read()?;
+        let (filled, zeros) = {
+            let mut contents = dir.try_write()?;
 
-        let filled = dir
-            .get_dir(&*FILLED)
-            .cloned()
-            .ok_or_else(|| TCError::not_found(FILLED))
-            .and_then(|dir| SparseFile::load(dir, shape.clone()))?;
+            debug_assert!(!contents.is_empty(), "failed to sync committed version");
 
-        let zeros = dir
-            .get_dir(&*ZEROS)
-            .cloned()
-            .ok_or_else(|| TCError::not_found(ZEROS))
-            .and_then(|dir| SparseFile::load(dir, shape))?;
+            let filled = contents
+                .get_or_create_dir(FILLED.to_string())
+                .map_err(TCError::from)
+                .and_then(|dir| SparseFile::load(dir, shape.clone()))?;
 
-        Ok(Self { filled, zeros })
+            let zeros = contents
+                .get_or_create_dir(ZEROS.to_string())
+                .map_err(TCError::from)
+                .and_then(|dir| SparseFile::load(dir, shape))?;
+
+            (filled, zeros)
+        };
+
+        Ok(Self { dir, filled, zeros })
+    }
+
+    fn load_copy(source: &Self, dir: DirLock<FE>) -> TCResult<Self> {
+        let (filled, zeros) = {
+            let dir = dir.try_read()?;
+
+            let filled = dir
+                .get_dir(&*FILLED)
+                .cloned()
+                .ok_or_else(|| TCError::not_found(FILLED))?;
+
+            let zeros = dir
+                .get_dir(&*ZEROS)
+                .cloned()
+                .ok_or_else(|| TCError::not_found(ZEROS))?;
+
+            (filled, zeros)
+        };
+
+        let filled = SparseFile::load(filled, source.filled.schema().shape().clone())?;
+        let zeros = SparseFile::load(zeros, source.filled.schema().shape().clone())?;
+
+        Ok(Self { dir, filled, zeros })
+    }
+
+    fn dir(&self) -> &DirLock<FE> {
+        &self.dir
     }
 
     async fn commit(&self)
@@ -84,7 +118,6 @@ struct State<Txn, FE, T> {
     commits: OrdHashSet<TxnId>,
     deltas: OrdHashMap<TxnId, Delta<FE, T>>,
     pending: OrdHashMap<TxnId, Delta<FE, T>>,
-    versions: DirLock<FE>,
     finalized: Option<TxnId>,
     phantom: PhantomData<Txn>,
 }
@@ -130,6 +163,7 @@ where
     fn pending_version(
         &mut self,
         txn_id: TxnId,
+        dir: &freqfs::Dir<FE>,
         canon: SparseAccess<Txn, FE, T>,
     ) -> TCResult<Version<Txn, FE, T>> {
         debug!("construct a pending Sparse version at {txn_id}");
@@ -164,17 +198,25 @@ where
             trace!("create a new pending version at {txn_id}");
 
             let dir = {
-                let mut versions = self.versions.try_write()?;
+                let pending = dir
+                    .get_dir(fs::VERSIONS)
+                    .ok_or_else(|| internal!("missing pending versions dir"))?;
+
+                let mut versions = pending.try_write()?;
                 versions.create_dir(txn_id.to_string())?
             };
 
-            let mut dir = dir.try_write()?;
-            let filled = dir.create_dir(FILLED.to_string())?;
-            let zeros = dir.create_dir(ZEROS.to_string())?;
-            let filled = SparseFile::create(filled, canon.shape().clone())?;
-            let zeros = SparseFile::create(zeros, canon.shape().clone())?;
+            let (filled, zeros) = {
+                let mut dir = dir.try_write()?;
+                let filled = dir.create_dir(FILLED.to_string())?;
+                let zeros = dir.create_dir(ZEROS.to_string())?;
+                let filled = SparseFile::create(filled, canon.shape().clone())?;
+                let zeros = SparseFile::create(zeros, canon.shape().clone())?;
+                (filled, zeros)
+            };
 
             let delta = Delta {
+                dir,
                 filled: filled.clone(),
                 zeros: zeros.clone(),
             };
@@ -220,17 +262,22 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    fn new(dir: DirLock<FE>, canon: SparseFile<FE, T>, versions: DirLock<FE>) -> TCResult<Self> {
+    fn new(dir: DirLock<FE>, canon: SparseFile<FE, T>, committed: DirLock<FE>) -> TCResult<Self> {
         let semaphore = Semaphore::new(Arc::new(Collator::default()));
 
         let deltas = {
             let mut deltas = OrdHashMap::new();
 
-            let versions = versions.try_read()?;
+            let committed = committed.try_read()?;
 
-            debug!("found {} pending versions", versions.len());
+            debug!("found {} committed versions pending merge", committed.len());
 
-            for (name, dir) in versions.iter() {
+            for (name, dir) in committed.iter() {
+                if name.starts_with('.') {
+                    trace!("skip hidden commit dir entry {name}");
+                    continue;
+                }
+
                 let dir = dir.as_dir().ok_or_else(|| {
                     internal!("expected a dense tensor version dir but found a file")
                 })?;
@@ -248,7 +295,6 @@ where
             commits: deltas.keys().copied().collect(),
             deltas,
             pending: OrdHashMap::new(),
-            versions,
             finalized: None,
             phantom: PhantomData,
         };
@@ -384,8 +430,9 @@ where
         let _write_permit = self.base.write_permit(txn_id, range.clone()).await?;
 
         let version = {
+            let dir = self.base.dir.read().await;
             let mut state = self.base.state.write().expect("sparse state");
-            state.pending_version(txn_id, self.base.canon.clone().into())?
+            state.pending_version(txn_id, &*dir, self.base.canon.clone().into())?
         };
 
         let mut guard = version.write().await;
@@ -401,8 +448,9 @@ where
         let _read_permit = other.read_permit(txn_id, Range::default()).await?;
 
         let version = {
+            let dir = self.base.dir.read().await;
             let mut state = self.base.state.write().expect("sparse state");
-            state.pending_version(txn_id, self.base.canon.clone().into())?
+            state.pending_version(txn_id, &*dir, self.base.canon.clone().into())?
         };
 
         let mut guard = version.write().await;
@@ -416,8 +464,9 @@ where
             .await?;
 
         let version = {
+            let dir = self.base.dir.read().await;
             let mut state = self.base.state.write().expect("sparse state");
-            state.pending_version(txn_id, self.base.canon.clone().into())?
+            state.pending_version(txn_id, &*dir, self.base.canon.clone().into())?
         };
 
         let mut version = version.write().await;
@@ -433,7 +482,7 @@ where
 impl<Txn, FE, T> Transact for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe + for<'a> fs::FileSave<'a>,
+    FE: AsType<Node> + ThreadSafe + for<'a> fs::FileSave<'a> + Clone,
     T: CDatatype + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
@@ -442,25 +491,46 @@ where
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("SparseTensor::commit {}", txn_id);
 
-        let version = {
+        let pending = {
             let mut state = self.state.write().expect("state");
 
             if state.finalized.as_ref() > Some(&txn_id) {
                 panic!("cannot commit finalized version {}", txn_id);
             } else if !state.commits.insert(txn_id) {
+                //
+                assert!(!state.pending.contains_key(&txn_id));
                 log::warn!("duplicate commit at {}", txn_id);
                 None
-            } else if let Some(delta) = state.pending.remove(&txn_id) {
-                trace!("commit version at {txn_id}");
-                state.deltas.insert(txn_id, delta.clone());
-                Some(delta)
             } else {
-                None
+                state.pending.remove(&txn_id)
             }
         };
 
-        if let Some(version) = version {
+        if let Some(pending) = pending {
+            trace!("commit new version at {txn_id}");
+
+            let committed = {
+                let dir = self.dir.read().await;
+                dir.get_dir(&*COMMITTED)
+                    .cloned()
+                    .expect("committed versions")
+            };
+
+            let mut committed = committed.write().await;
+
+            let dir = committed
+                .copy_dir_from(txn_id.to_string(), &pending.dir())
+                .await
+                .expect("committed version copy");
+
+            let version = Delta::load_copy(&pending, dir).expect("committed version");
             version.commit().await;
+
+            self.state
+                .write()
+                .expect("state")
+                .deltas
+                .insert(txn_id, version);
         } else {
             trace!("{self:?} was not modified at {txn_id}");
         }
@@ -550,18 +620,18 @@ where
     type Schema = Schema;
 
     async fn create(_txn_id: TxnId, schema: Schema, store: fs::Dir<FE>) -> TCResult<Self> {
-        let (dir, canon, versions) = fs_init(store).await?;
+        let (dir, canon, committed) = fs_init(store).await?;
         let canon = SparseFile::create(canon, schema.shape().clone())?;
-        Self::new(dir, canon, versions)
+        Self::new(dir, canon, committed)
     }
 
     async fn load(_txn_id: TxnId, schema: Schema, store: fs::Dir<FE>) -> TCResult<Self> {
         let dir = store.into_inner();
-        let (canon, versions) = {
+        let (canon, committed) = {
             let mut dir = dir.write().await;
-            let versions = dir.get_or_create_dir(fs::VERSIONS.to_string())?;
+            let committed = dir.get_or_create_dir(COMMITTED.to_string())?;
             let canon = dir.get_or_create_dir(CANON.to_string())?;
-            (canon, versions)
+            (canon, committed)
         };
 
         // handle the case that no canonical version was ever finalized
@@ -571,7 +641,7 @@ where
             SparseFile::load(canon, schema.shape().clone())
         }?;
 
-        Self::new(dir, canon, versions)
+        Self::new(dir, canon, committed)
     }
 
     fn dir(&self) -> fs::Inner<FE> {
@@ -616,8 +686,9 @@ where
         let _read_permit = backup.read_permit(txn_id, Range::default()).await?;
 
         let version = {
+            let dir = self.dir.read().await;
             let mut state = self.state.write().expect("sparse state");
-            state.pending_version(txn_id, self.canon.clone().into())?
+            state.pending_version(txn_id, &*dir, self.canon.clone().into())?
         };
 
         let mut guard = version.write().await;
@@ -804,18 +875,12 @@ async fn dir_init<FE>(dir: DirLock<FE>) -> TCResult<(DirLock<FE>, DirLock<FE>, D
 where
     FE: ThreadSafe + Clone,
 {
-    let (canon, versions) = {
+    let (canon, committed) = {
         let mut dir = dir.write().await;
-
-        let versions = dir
-            .get_dir(&*fs::VERSIONS)
-            .cloned()
-            .ok_or_else(|| internal!("missing versions dir"))?;
-
+        let committed = dir.create_dir(COMMITTED.to_string())?;
         let canon = dir.create_dir(CANON.to_string())?;
-
-        (canon, versions)
+        (canon, committed)
     };
 
-    Ok((dir, canon, versions))
+    Ok((dir, canon, committed))
 }
