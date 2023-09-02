@@ -1850,7 +1850,7 @@ where
 
         trace!("make a copy of {value:?} before writing it to {tensor:?}");
         // TODO: is there a more efficient way to do this?
-        let store = fs::Dir::load(txn_id, store, false).await?;
+        let store = fs::Dir::load(txn_id, store).await?;
         let value: TensorBase<_, _> = fs::CopyFrom::copy_from(txn, store, value.into()).await?;
 
         debug!("write {value:?} to {range:?}");
@@ -1878,7 +1878,7 @@ where
 {
     let mut cxt = txn.context().write().await;
     let (_dir_name, dir) = cxt.create_dir_unique()?;
-    fs::Dir::load(*txn.id(), dir, false).await
+    fs::Dir::load(*txn.id(), dir).await
 }
 
 async fn create_tensor<State>(

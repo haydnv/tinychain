@@ -96,7 +96,7 @@ where
 
         let history = {
             let dir = dir.get_or_create_dir(HISTORY.to_string())?;
-            fs::Dir::load(txn_id, dir, false).await?
+            fs::Dir::load(txn_id, dir).await?
         };
 
         let history = History::create(txn_id, (), history.into()).await?;
@@ -117,7 +117,7 @@ where
 
         let history = {
             let dir = dir.get_or_create_dir(HISTORY.to_string())?;
-            fs::Dir::load(txn_id, dir, true).await?
+            fs::Dir::load(txn_id, dir).await?
         };
 
         let history = History::load(txn_id, (), history.into()).await?;

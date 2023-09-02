@@ -91,7 +91,7 @@ where
                 let store = {
                     let mut context = txn.context().write().await;
                     let (_, dir) = context.create_dir_unique()?;
-                    Dir::load(*txn.id(), dir, false).await?
+                    Dir::load(*txn.id(), dir).await?
                 };
 
                 TableFile::create(*txn.id(), schema, store)

@@ -1727,7 +1727,7 @@ where
         let store = self.txn.context().clone();
 
         let txn_id = *self.txn.id();
-        let store = fs::Dir::load(txn_id, store, false)
+        let store = fs::Dir::load(txn_id, store)
             .map_err(de::Error::custom)
             .await?;
 

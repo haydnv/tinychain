@@ -619,13 +619,13 @@ where
     type Txn = Txn;
     type Schema = Schema;
 
-    async fn create(_txn_id: TxnId, schema: Schema, store: fs::Dir<FE>) -> TCResult<Self> {
+    async fn create(_txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
         let (dir, canon, committed) = fs_init(store).await?;
         let canon = SparseFile::create(canon, schema.shape().clone())?;
         Self::new(dir, canon, committed)
     }
 
-    async fn load(_txn_id: TxnId, schema: Schema, store: fs::Dir<FE>) -> TCResult<Self> {
+    async fn load(_txn_id: TxnId, schema: Schema, store: Dir<FE>) -> TCResult<Self> {
         let dir = store.into_inner();
         let (canon, committed) = {
             let mut dir = dir.write().await;
@@ -862,7 +862,7 @@ where
 }
 
 #[inline]
-async fn fs_init<FE>(store: fs::Dir<FE>) -> TCResult<(DirLock<FE>, DirLock<FE>, DirLock<FE>)>
+async fn fs_init<FE>(store: Dir<FE>) -> TCResult<(DirLock<FE>, DirLock<FE>, DirLock<FE>)>
 where
     FE: ThreadSafe + Clone,
 {

@@ -736,7 +736,7 @@ where
                 .create_dir(STORE.to_string())
                 .map_err(de::Error::custom)?;
 
-            let dir = fs::Dir::load(txn_id, dir, false)
+            let dir = fs::Dir::load(txn_id, dir)
                 .map_err(de::Error::custom)
                 .await?;
 
