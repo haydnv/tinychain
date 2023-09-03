@@ -17,23 +17,23 @@ opencl = ["ha-ndarray/opencl"]
 [dependencies]
 async-hash = "0.5"
 async-trait = "0.1"
-b-table = { path = "../../../b-table", features = ["all"] }
-b-tree = { path = "../../../b-tree", features = ["all"] }
+b-table = { version = "~0.1.1", features = ["all"] }
+b-tree = { version = "~0.2.1", features = ["all"] }
 collate = { version = "0.3", features = ["stream"] }
 destream = "0.7"
 ds-ext = "0.1"
 futures = "0.3"
-freqfs = { path = "../../../freqfs", features = ["logging"] }
-ha-ndarray = { path = "../../../ha-ndarray", features = ["freqfs", "stream"] }
+freqfs = { version = "0.8", features = ["logging"] }
+ha-ndarray = { version = "~0.1.1", features = ["freqfs", "stream"] }
 itertools = "0.11"
 log = { version = "0.4", features = ["release_max_level_info"] }
 num_cpus = "1.15"
 pin-project = "1.1"
 rayon = "1.7"
 safecast = "0.2"
-tc-error = { path = "../error" }
-tc-scalar = { path = "../scalar" }
-tc-transact = { path = "../transact" }
-tc-value = { path = "../value" }
-tcgeneric = { path = "../generic" }
+tc-error = "0.8"
+tc-scalar = "0.1"
+tc-transact = "0.17"
+tc-value = "0.9"
+tcgeneric = "0.7"
 tokio = { version = "1.32", features = ["sync"] }
