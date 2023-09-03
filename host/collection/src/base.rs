@@ -66,7 +66,11 @@ where
 impl<Txn, FE> Transact for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + for<'en> fs::FileSave<'en>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<TensorNode>
+        + for<'en> fs::FileSave<'en>
+        + Clone,
 {
     type Commit = ();
 

@@ -1433,7 +1433,7 @@ where
 impl<Txn, FE> Transact for DenseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + for<'en> fs::FileSave<'en>,
+    FE: DenseCacheFile + for<'en> fs::FileSave<'en> + Clone,
 {
     type Commit = ();
 

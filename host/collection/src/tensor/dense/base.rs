@@ -9,7 +9,7 @@ use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, FileWriteGuardOwned};
 use futures::{join, try_join};
 use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype};
-use log::{debug, warn};
+use log::{debug, trace, warn};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
 
@@ -19,6 +19,7 @@ use tc_transact::{fs, Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberClass, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
+use crate::finalize_dir;
 use crate::tensor::sparse::Node;
 use crate::tensor::{
     Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead, TensorPermitWrite,
@@ -33,12 +34,12 @@ use super::{
 };
 
 const CANON: Label = label("canon");
+const COMMITTED: Label = label("committed");
 
 struct State<Txn, FE, T> {
     commits: OrdHashSet<TxnId>,
     deltas: OrdHashMap<TxnId, DirLock<FE>>,
     pending: OrdHashMap<TxnId, DirLock<FE>>,
-    versions: DirLock<FE>,
     finalized: Option<TxnId>,
     dtype: PhantomData<(Txn, T)>,
 }
@@ -80,6 +81,7 @@ where
     fn pending_version(
         &mut self,
         txn_id: TxnId,
+        dir: &freqfs::Dir<FE>,
         canon: DenseAccess<Txn, FE, T>,
     ) -> TCResult<DenseCow<FE, DenseAccess<Txn, FE, T>>> {
         if self.commits.contains(&txn_id) {
@@ -102,7 +104,11 @@ where
             Ok(DenseCow::create(version, delta.clone()))
         } else {
             let delta = {
-                let mut versions = self.versions.try_write()?;
+                let pending = dir
+                    .get_dir(fs::VERSIONS)
+                    .ok_or_else(|| internal!("missing pending versions dir"))?;
+
+                let mut versions = pending.try_write()?;
                 versions.create_dir(txn_id.to_string())?
             };
 
@@ -206,16 +212,21 @@ where
     FE: AsType<Buffer<T>> + ThreadSafe,
     T: CDatatype,
 {
-    fn new(dir: DirLock<FE>, canon: DenseFile<FE, T>, versions: DirLock<FE>) -> TCResult<Self> {
+    fn new(dir: DirLock<FE>, canon: DenseFile<FE, T>, committed: DirLock<FE>) -> TCResult<Self> {
         let semaphore = Semaphore::new(Arc::new(Collator::default()));
 
         let deltas = {
             let mut deltas = OrdHashMap::new();
-            let versions = versions.try_read()?;
+            let committed = committed.try_read()?;
 
-            debug!("found {} pending versions", versions.len());
+            debug!("found {} committed versions pending merge", committed.len());
 
-            for (name, version) in versions.iter() {
+            for (name, version) in committed.iter() {
+                if name.starts_with('.') {
+                    trace!("skip hidden commit dir entry {name}");
+                    continue;
+                }
+
                 let version = version.as_dir().cloned().ok_or_else(|| {
                     internal!("expected a dense tensor version dir but found a file")
                 })?;
@@ -230,7 +241,6 @@ where
             commits: deltas.keys().copied().collect(),
             deltas,
             pending: OrdHashMap::new(),
-            versions,
             finalized: None,
             dtype: PhantomData,
         };
@@ -338,8 +348,9 @@ where
 
     async fn write_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
         let version = {
+            let dir = self.dir.read().await;
             let mut state = self.state.write().expect("dense state");
-            state.pending_version(txn_id, self.canon.clone().into())?
+            state.pending_version(txn_id, &*dir, self.canon.clone().into())?
         };
 
         version.write_block(txn_id, block_id).await
@@ -347,8 +358,9 @@ where
 
     async fn write_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>> {
         let version = {
+            let dir = self.dir.read().await;
             let mut state = self.state.write().expect("dense state");
-            state.pending_version(txn_id, self.canon.clone().into())?
+            state.pending_version(txn_id, &*dir, self.canon.clone().into())?
         };
 
         version.write_blocks(txn_id).await
@@ -389,8 +401,9 @@ where
         O: DenseInstance<DType = T> + TensorPermitRead,
     {
         let version = {
+            let dir = self.base.dir.read().await;
             let mut state = self.base.state.write().expect("dense state");
-            state.pending_version(txn_id, self.base.canon.clone().into())?
+            state.pending_version(txn_id, &*dir, self.base.canon.clone().into())?
         };
 
         let guard = version.write().await;
@@ -399,9 +412,10 @@ where
 
     async fn overwrite_value(&self, txn_id: TxnId, value: T) -> TCResult<()> {
         let version = {
+            let dir = self.base.dir.read().await;
             let mut state = self.base.state.write().expect("dense state");
             let canon = state.latest_version(txn_id, self.base.canon.clone().into())?;
-            state.pending_version(txn_id, canon)?
+            state.pending_version(txn_id, &*dir, canon)?
         };
 
         let guard = version.write().await;
@@ -410,9 +424,10 @@ where
 
     async fn write_value(&self, txn_id: TxnId, coord: Coord, value: T) -> TCResult<()> {
         let version = {
+            let dir = self.base.dir.read().await;
             let mut state = self.base.state.write().expect("dense state");
             let canon = state.latest_version(txn_id, self.base.canon.clone().into())?;
-            state.pending_version(txn_id, canon)?
+            state.pending_version(txn_id, &*dir, canon)?
         };
 
         let guard = version.write().await;
@@ -424,7 +439,7 @@ where
 impl<Txn, FE, T> Transact for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Buffer<T>> + for<'en> fs::FileSave<'en>,
+    FE: DenseCacheFile + AsType<Buffer<T>> + for<'en> fs::FileSave<'en> + Clone,
     T: CDatatype + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
@@ -433,24 +448,45 @@ where
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("DenseTensor::commit {}", txn_id);
 
-        let version = {
+        let pending = {
             let mut state = self.state.write().expect("state");
 
             if state.finalized.as_ref() > Some(&txn_id) {
                 panic!("cannot commit finalized version {}", txn_id);
             } else if !state.commits.insert(txn_id) {
+                // prevent any pending version being created at this txn
+                assert!(state.pending.contains_key(&txn_id));
                 warn!("duplicate commit at {}", txn_id);
                 None
-            } else if let Some(delta) = state.pending.remove(&txn_id) {
-                state.deltas.insert(txn_id, delta.clone());
-                Some(delta)
             } else {
-                None
+                state.pending.remove(&txn_id)
             }
         };
 
-        if let Some(version) = version {
-            version.sync().await.expect("commit version");
+        if let Some(pending) = pending {
+            trace!("commit new version at {txn_id}");
+
+            let committed = {
+                let dir = self.dir.read().await;
+                dir.get_dir(&*COMMITTED)
+                    .cloned()
+                    .expect("committed versions")
+            };
+
+            let mut committed = committed.write().await;
+
+            let dir = committed
+                .copy_dir_from(txn_id.to_string(), &pending)
+                .await
+                .expect("committed version copy");
+
+            dir.sync().await.expect("sync commit");
+
+            self.state
+                .write()
+                .expect("state")
+                .deltas
+                .insert(txn_id, dir);
         }
 
         self.canon.commit(&txn_id)
@@ -521,6 +557,8 @@ where
         }
 
         self.canon.finalize(txn_id).await;
+
+        finalize_dir(&self.dir, txn_id).await;
     }
 }
 
@@ -603,8 +641,9 @@ where
         let _read_permit = backup.read_permit(txn_id, Range::default()).await?;
 
         let version = {
+            let dir = self.dir.read().await;
             let mut state = self.state.write().expect("dense state");
-            state.pending_version(txn_id, self.canon.clone().into())?
+            state.pending_version(txn_id, &*dir, self.canon.clone().into())?
         };
 
         let guard = version.write().await;
@@ -833,15 +872,9 @@ where
 {
     let (canon, versions) = {
         let mut guard = dir.write().await;
-
-        let versions = guard
-            .get_dir(&*fs::VERSIONS)
-            .cloned()
-            .ok_or_else(|| internal!("missing versions dir"))?;
-
+        let committed = guard.get_or_create_dir(COMMITTED.to_string())?;
         let canon = guard.create_dir(CANON.to_string())?;
-
-        (canon, versions)
+        (canon, committed)
     };
 
     Ok((dir, canon, versions))

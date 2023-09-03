@@ -1863,7 +1863,7 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> TensorInstance for TensorBase<Txn, FE> {
 impl<Txn, FE> Transact for TensorBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node> + for<'en> fs::FileSave<'en>,
+    FE: DenseCacheFile + AsType<Node> + for<'en> fs::FileSave<'en> + Clone,
 {
     type Commit = ();
 

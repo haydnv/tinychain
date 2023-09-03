@@ -109,7 +109,7 @@ impl Builder {
         let cache = self.cache.clone().load(path).expect("cache dir");
 
         log::debug!("load {:?} into the transactional filesystem", cache);
-        tc_fs::Dir::load(txn_id, cache, true).await.expect("store")
+        tc_fs::Dir::load(txn_id, cache).await.expect("store")
     }
 
     async fn load_or_create<T>(
