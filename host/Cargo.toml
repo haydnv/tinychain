@@ -26,7 +26,7 @@ clap = { version = "4.0", features = ["derive"] }
 destream = "0.7"
 destream_json = { version = "0.11", features = ["tokio-io"] }
 env_logger = "0.10"
-freqfs = { path = "../../freqfs", features = ["logging", "stream"] }
+freqfs = { version = "~0.8.2", features = ["logging", "stream"] }
 futures = "0.3"
 get-size = "0.1"
 get-size-derive = "0.1"
@@ -40,15 +40,15 @@ rjwt = "0.4"
 safecast = "0.2"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
-tbon = { path = "../../tbon" }
-tc-chain = { path = "chain" }
-tc-collection = { path = "collection" }
-tc-error = { path = "error" }
-tc-fs = { path = "fs" }
-tc-scalar = { path = "scalar" }
-tc-state = { path = "state" }
-tc-transact = { path = "transact" }
-tc-value = { path = "value" }
-tcgeneric = { path = "generic" }
-tokio = { version = "1.29", features = ["rt-multi-thread", "signal"] }
+tbon = "0.5"
+tc-chain = "0.1"
+tc-collection = "0.1"
+tc-error = "0.8"
+tc-fs = "0.1"
+tc-scalar = "0.1"
+tc-state = "0.1"
+tc-transact = "0.17"
+tc-value = "0.9"
+tcgeneric = "0.7"
+tokio = { version = "1.32", features = ["rt-multi-thread", "signal"] }
 url = { version = "2.4" }
