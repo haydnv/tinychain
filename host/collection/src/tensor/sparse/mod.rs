@@ -1,3 +1,5 @@
+//! A sparse tensor
+
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;

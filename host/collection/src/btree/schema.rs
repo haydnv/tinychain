@@ -82,7 +82,7 @@ impl BTreeSchema {
         })
     }
 
-    /// Try to construct a [`TableSchema`] from its [`Value`] representation.
+    /// Try to construct a schema from its [`Value`] representation.
     pub fn try_cast_from_value(value: Value) -> TCResult<Self> {
         let columns = value.try_cast_into(|v| bad_request!("invalid BTree schema: {}", v))?;
         Self::new(columns)
@@ -250,7 +250,7 @@ impl fmt::Debug for BTreeSchema {
     }
 }
 
-/// A `Column` used in the schema of a [`BTree`].
+/// A `Column` used in the schema of a `BTree`.
 #[derive(Clone, Eq, PartialEq)]
 pub struct Column {
     pub name: Id,
@@ -265,7 +265,7 @@ impl Column {
         &self.name
     }
 
-    /// Get the [`Class`] of this column.
+    /// Get the class of this column.
     #[inline]
     pub fn dtype(&self) -> ValueType {
         self.dtype

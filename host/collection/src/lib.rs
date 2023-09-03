@@ -83,6 +83,7 @@ impl fmt::Debug for CollectionType {
     }
 }
 
+/// A mutable transactional collection of data.
 pub enum Collection<Txn, FE> {
     BTree(BTree<Txn, FE>),
     Table(Table<Txn, FE>),
@@ -108,6 +109,7 @@ where
     Txn: Transaction<FE>,
     FE: AsType<BTreeNode> + ThreadSafe,
 {
+    /// Return the [`Schema`] of this [`Collection`].
     pub fn schema(&self) -> Schema {
         match self {
             Self::BTree(btree) => btree.schema().clone().into(),

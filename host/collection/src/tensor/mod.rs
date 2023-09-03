@@ -1,4 +1,5 @@
-/// A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
+//! A [`Tensor`], an n-dimensional array of [`Number`]s which supports basic math and logic
+
 use std::marker::PhantomData;
 use std::ops::{Div, Rem};
 use std::{fmt, iter};
@@ -41,11 +42,13 @@ const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 
 const IDEAL_BLOCK_SIZE: usize = 65_536;
 
+/// The axes of a [`Tensor`]
 pub type Axes = Vec<usize>;
 
 /// A [`Tensor`] coordinate
 pub type Coord = Vec<u64>;
 
+/// The strides of a [`Tensor`]
 pub type Strides = Vec<u64>;
 
 type Semaphore = tc_transact::lock::Semaphore<Collator<u64>, Range>;
@@ -144,12 +147,16 @@ impl<'en> en::ToStream<'en> for Schema {
 }
 
 #[async_trait]
+/// Method to lock a tensor for reading.
 pub trait TensorPermitRead: Send + Sync {
+    /// Acquire a read lock on the given `range` of this tensor.
     async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>>;
 }
 
 #[async_trait]
+/// Method to lock a tensor for writing.
 pub trait TensorPermitWrite: Send + Sync {
+    /// Acquire a write lock on the given `range` of this tensor.
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>>;
 }
 
@@ -260,9 +267,11 @@ pub trait TensorBooleanConst {
     fn xor_const(self, other: Number) -> TCResult<Self::Combine>;
 }
 
+/// Method to cast a tensor into a different data type
 pub trait TensorCast {
     type Cast;
 
+    /// Cast this tensor into the given `dtype`.
     fn cast_into(self, dtype: NumberType) -> TCResult<Self::Cast>;
 }
 

@@ -510,7 +510,7 @@ impl Shape {
         self.0.iter().product()
     }
 
-    /// Return an [`Error`] if this `Shape` is empty or oversized.
+    /// Return an error if this `Shape` is empty or oversized.
     pub fn validate(&self) -> Result<(), TCError> {
         if self.0.is_empty() {
             return Err(bad_request!("invalid shape {:?}", self));
@@ -533,7 +533,7 @@ impl Shape {
         Ok(())
     }
 
-    /// Return an [`Error`] if any of the given axes is out of range.
+    /// Return an error if any of the given axes is out of range.
     pub fn validate_axes(&self, axes: &[usize], require_ndim: bool) -> Result<(), TCError> {
         if let Some(max) = axes.iter().max().copied() {
             if max >= self.len() {
@@ -562,7 +562,7 @@ impl Shape {
         Ok(())
     }
 
-    /// Return an [`Error`] if the given `Range` don't fit within this `Shape`.
+    /// Return an error if the given `Range` don't fit within this `Shape`.
     #[inline]
     pub fn validate_range(&self, range: &Range) -> Result<(), TCError> {
         if self.contains_range(range) {
@@ -576,7 +576,7 @@ impl Shape {
         }
     }
 
-    /// Return an [`Error`] if the given `coord` doesn't fit within this `Shape`.
+    /// Return an error if the given `coord` doesn't fit within this `Shape`.
     #[inline]
     pub fn validate_coord(&self, coord: &[u64]) -> Result<(), TCError> {
         if self.contains_coord(coord) {

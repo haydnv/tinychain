@@ -1,3 +1,5 @@
+//! A dense tensor
+
 use std::cmp::Ordering;
 use std::fmt;
 use std::marker::PhantomData;
