@@ -85,14 +85,16 @@ def outer_product(f_inputs, dimensions, tensors):
         labels = [labels[axis] for axis in permutation]
         tensor = tensor.transpose(permutation)
 
-        # TODO: replace tensor.expand_dims with tensor.unsqueeze in the calculation below
         i = 0
+        axes = []
         while i < len(dimensions):
             if i == len(labels) or labels[i] != f_output[i]:
-                tensor = tensor.expand_dims(i)
+                axes.append(i)
                 labels.insert(i, f_output[i])
             else:
                 i += 1
+
+        tensor = tensor.expand_dims(axes) if axes else tensor
 
         assert deref(tensor.ndim) == len(f_output)
         regularized.append(tensor)
@@ -112,13 +114,20 @@ def contract(op, dimensions, f_output):
         return op.sum()
 
     f_input = list(dimensions.keys())
-    axis = 0
+
+    axis_in = 0
+    axis_out = 0
+    sum_over = []
     while len(f_input) > len(f_output):
-        if f_input[axis] not in f_output:
-            op = op.sum(axis)
-            del f_input[axis]
+        if f_input[axis_out] not in f_output:
+            sum_over.append(axis_in)
+            del f_input[axis_out]
         else:
-            axis += 1
+            axis_out += 1
+
+        axis_in += 1
+
+    op = op.sum(sum_over) if sum_over else op
 
     if f_input == f_output:
         return op

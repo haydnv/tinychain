@@ -573,13 +573,11 @@ class SparseTests(HostTest):
         cxt.result = cxt.tensor.transpose()
 
         actual = self.host.post(ENDPOINT, cxt)
-        print("actual", actual)
 
         expected = np.zeros(shape)
         for coord, value in elements:
             expected[coord] = value
         expected = expect_sparse(tc.I32, reversed(shape), np.transpose(expected))
-        print("expected", expected)
 
         self.assertEqual(actual, expected)
 

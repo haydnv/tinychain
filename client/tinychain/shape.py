@@ -1,13 +1,12 @@
 import functools
 import operator
-import typing
+
+from collections.abc import Iterable
 
 from .generic import Tuple
 from .scalar.bound import Range
 from .scalar.number import Number, U64
-from .scalar.ref import deref, is_literal, get_ref
-from .state import State
-from .uri import URI
+from .scalar.ref import deref, is_literal
 
 
 class Shape(Tuple[U64]):
@@ -135,38 +134,46 @@ class Shape(Tuple[U64]):
 
         return Shape(shape)
 
-    def expand(self, axis=None):
+    def expand(self, axes=None):
         if not hasattr(self, "__len__"):
             raise RuntimeError(f"Shape.expand requires a literal number of dimensions")
         elif len(self) == 0:
             raise RuntimeError(f"cannot expand shape {self}")
 
-        if not is_literal(axis):
-            raise ValueError(f"Shape.expand requires a literal axis, not {axis}")
+        if not is_literal(axes):
+            raise ValueError(f"Shape.expand requires literal axes, not {axes}")
 
-        if axis is None:
-            return Shape(self + [1])
-        else:
+        axes = [-1] if axes is None else axes
+        axes = axes if isinstance(axes, Iterable) else [axes]
+        assert None not in axes
+
+        new_shape = list(self)
+        for axis in axes:
             axis = len(self) + axis if axis < 0 else axis
             assert axis >= 0
-            return Shape(self[:axis] + [1] + self[axis:])
+            new_shape = self[:axis] + [1] + self[axis:]
 
-    def reduce(self, axis=None, keepdims=False):
-        if not is_literal(axis):
-            raise ValueError(f"Shape.reduce requires a literal axis, not {axis}")
+        return new_shape
+
+    def reduce(self, axes=None, keepdims=False):
+        if not is_literal(axes):
+            raise ValueError(f"Shape.reduce requires literal axes, not {axes}")
 
         if not is_literal(keepdims):
             return ValueError(f"the keepdims parameter of Shape.reduce must be a literal, not {keepdims}")
 
-        if not keepdims and axis is None:
+        if not keepdims and axes is None:
             return Shape(tuple())
 
+        axes = axes if isinstance(axes, Iterable) else [axes]
+
         ndim = self.ndim(True, "reduce")
-        axis = ndim + axis if axis < 0 else axis
+        axes = set(ndim + axis if axis < 0 else axis for axis in axes)
+
         if keepdims:
-            return Shape(tuple(1 if x == axis else dim for x, dim in enumerate(self)))
+            return Shape(tuple(1 if x in axes else dim for x, dim in enumerate(self)))
         else:
-            return Shape(tuple(dim for x, dim in enumerate(self) if x != axis))
+            return Shape(tuple(dim for x, dim in enumerate(self) if x not in axes))
 
     def reshape(self, new_shape):
         if is_literal(new_shape):

@@ -27,6 +27,7 @@ use super::{
 };
 
 const AXES: Label = label("axes");
+const AXIS: Label = label("axis");
 const KEEPDIMS: Label = label("keepdims");
 const RIGHT: Label = label("r");
 const TENSOR: Label = label("tensor");
@@ -1182,8 +1183,8 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let axis = if params.contains_key::<Id>(&AXES.into()) {
-                    let axis = params.require(&AXES.into())?;
+                let axis = if params.contains_key::<Id>(&AXIS.into()) {
+                    let axis = params.require(&AXIS.into())?;
                     cast_axis(axis, self.tensor.ndim()).map(Some)?
                 } else {
                     None
@@ -1230,21 +1231,41 @@ impl<State, T: TensorReduce> ReduceHandler<State, T> {
 impl<State, T> ReduceHandler<State, T>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    T: TensorInstance + TensorReduce + Clone + Sync,
+    T: TensorInstance + TensorReduce + Clone + Sync + fmt::Debug,
     Tensor<State::Txn, State::FE>: From<<T as TensorReduce>::Reduce>,
 {
     async fn call(self, txn_id: TxnId, axes: Option<Axes>, keepdims: bool) -> TCResult<State> {
-        if axes.is_none() && keepdims {
-            Err(not_implemented!("reduce all axes but keep dimensions"))
-        } else if axes.is_none() || axes.as_ref().map(|x| x.len()) == Some(self.tensor.ndim()) {
+        debug!(
+            "reduce axes {axes:?} of {:?} (keepdims: {keepdims})",
+            self.tensor
+        );
+
+        let axes = axes.and_then(|axes| {
+            if (0..self.tensor.ndim())
+                .into_iter()
+                .all(|x| axes.contains(&x))
+            {
+                None
+            } else {
+                Some(axes)
+            }
+        });
+
+        if let Some(axes) = axes {
+            trace!("reduce axes {axes:?} of {:?}", self.tensor);
+
+            (self.reduce)(self.tensor, axes, keepdims)
+                .map(Tensor::from)
+                .map(State::from)
+        } else if !keepdims {
+            trace!("reduce all of {:?}", self.tensor);
+
             (self.reduce_all)(self.tensor, txn_id)
                 .map_ok(Value::from)
                 .map_ok(State::from)
                 .await
         } else {
-            (self.reduce)(self.tensor, axes.expect("axes"), keepdims)
-                .map(Tensor::from)
-                .map(State::from)
+            Err(not_implemented!("reduce all axes but keep dimensions"))
         }
     }
 }
@@ -1252,7 +1273,7 @@ where
 impl<'a, State, T> Handler<'a, State> for ReduceHandler<State, T>
 where
     State: StateInstance + From<Tensor<State::Txn, State::FE>>,
-    T: TensorInstance + TensorReduce + Clone + Sync,
+    T: TensorInstance + TensorReduce + Clone + Sync + fmt::Debug,
     Tensor<State::Txn, State::FE>: From<<T as TensorReduce>::Reduce>,
     Value: TryCastFrom<State>,
     bool: TryCastFrom<State>,
