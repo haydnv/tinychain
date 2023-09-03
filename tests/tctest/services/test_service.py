@@ -22,7 +22,7 @@ class TestService(tc.service.Service):
 
 class ServiceVersionTests(unittest.TestCase):
     def testCreateService(self):
-        actor = rjwt.Actor('/')
+        actor = rjwt.Actor("/")
 
         hosts = [
             start_host(NS, http_port=8702, public_key=actor.public_key, replicate=LEAD),
@@ -31,7 +31,23 @@ class ServiceVersionTests(unittest.TestCase):
 
         hosts[0].create_namespace(actor, tc.URI(tc.service.Service), NS, LEAD)
 
-        hosts.append(start_host(NS, http_port=8704, public_key=actor.public_key, replicate=LEAD))
+        print()
+        print()
+
+        endpoint = tc.URI(TestServiceV0).path()[:-2]
+
+        for i in range(len(hosts)):
+            print()
+            print(f"host {i} replicas", hosts[i].get(endpoint.append("replicas")))
+            print()
+
+        print()
+
+        hosts.append(
+            start_host(NS, http_port=8704, public_key=actor.public_key, replicate=LEAD)
+        )
+
+        print()
 
         hosts[0].install(actor, TestService())
 
@@ -39,7 +55,9 @@ class ServiceVersionTests(unittest.TestCase):
         for host in hosts:
             self.assertEqual(host.get(endpoint, "World"), "Hello, World!")
 
-        hosts.append(start_host(NS, http_port=8705, public_key=actor.public_key, replicate=LEAD))
+        hosts.append(
+            start_host(NS, http_port=8705, public_key=actor.public_key, replicate=LEAD)
+        )
 
         for host in hosts:
             self.assertEqual(host.get(endpoint, "World"), "Hello, World!")

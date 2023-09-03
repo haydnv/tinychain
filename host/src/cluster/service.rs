@@ -3,29 +3,31 @@
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt;
+use std::ops::Deref;
 
 use async_trait::async_trait;
-use destream::de::Error;
-use futures::future::{join_all, try_join_all, TryFutureExt};
-use futures::{join, try_join};
+use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
+use futures::join;
+use futures::stream::TryStreamExt;
+use log::{debug, info, trace};
 use safecast::{as_type, AsType};
 
+use tc_chain::{ChainType, Recover};
+use tc_collection::Schema as CollectionSchema;
 use tc_error::*;
+use tc_scalar::{OpRef, Refer, Scalar, Subject, TCRef};
+use tc_state::chain::Chain;
+use tc_state::collection::CollectionBase;
+use tc_state::object::{InstanceClass, ObjectType};
+use tc_state::State;
 use tc_transact::fs::*;
-use tc_transact::lock::TxnLock;
-use tc_transact::{Transact, Transaction};
-use tc_value::Version as VersionNumber;
+use tc_transact::lock::TxnMapLock;
+use tc_transact::public::ToState;
+use tc_transact::{Transact, Transaction, TxnId};
+use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, TCPathBuf};
 
-use crate::chain::{Chain, ChainType, Recover};
 use crate::cluster::{DirItem, Replica};
-use crate::collection::{CollectionBase, CollectionSchema};
-use crate::fs;
-use crate::object::{InstanceClass, ObjectType};
-use crate::scalar::value::Link;
-use crate::scalar::{OpRef, Refer, Scalar, Subject, TCRef};
-use crate::state::{State, ToState};
-use crate::transact::TxnId;
 use crate::txn::Txn;
 
 pub(super) const SCHEMA: Label = label("schemata");
@@ -40,11 +42,11 @@ pub enum Attr {
 as_type!(Attr, Chain, Chain<CollectionBase>);
 as_type!(Attr, Scalar, Scalar);
 
-impl fmt::Display for Attr {
+impl fmt::Debug for Attr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Chain(chain) => fmt::Display::fmt(chain, f),
-            Self::Scalar(scalar) => fmt::Display::fmt(scalar, f),
+            Self::Chain(chain) => fmt::Debug::fmt(chain, f),
+            Self::Scalar(scalar) => fmt::Debug::fmt(scalar, f),
         }
     }
 }
@@ -74,7 +76,7 @@ impl Instance for Version {
     }
 }
 
-impl ToState for Version {
+impl ToState<State> for Version {
     fn to_state(&self) -> State {
         State::Scalar(Scalar::Cluster(self.path.clone().into()))
     }
@@ -87,6 +89,8 @@ impl Replica for Version {
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
+        debug!("replicate {self:?} from {source}");
+
         for (name, attr) in self.attrs.iter() {
             if let Attr::Chain(chain) = attr {
                 let source = source.clone().append(name.clone());
@@ -100,14 +104,13 @@ impl Replica for Version {
     }
 }
 
-impl Persist<fs::Dir> for Version {
+#[async_trait]
+impl Persist<tc_fs::CacheBlock> for Version {
     type Txn = Txn;
-    type Schema = InstanceClass;
+    type Schema = (Link, Map<Scalar>);
 
-    fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let dir = fs::Dir::try_from(store)?;
-
-        let (link, proto) = schema.into_inner();
+    async fn create(txn_id: TxnId, schema: Self::Schema, dir: tc_fs::Dir) -> TCResult<Self> {
+        let (link, proto) = schema;
 
         let mut attrs = Map::new();
 
@@ -116,22 +119,15 @@ impl Persist<fs::Dir> for Version {
                 Scalar::Ref(tc_ref) => match *tc_ref {
                     TCRef::Op(OpRef::Get((chain_type, collection))) => {
                         let chain_type = resolve_type::<ChainType>(chain_type)?;
-
-                        let schema = TCRef::try_from(collection)?;
-                        let schema = CollectionSchema::from_scalar(schema)?;
-
-                        let store = dir
-                            .try_write(txn_id)
-                            .map(|lock| lock.create_store(name.clone()))?;
-
-                        let chain = Chain::create(txn_id, (chain_type, schema), store)?;
-
+                        let schema = try_cast_into_schema(collection)?;
+                        let store = dir.create_dir(txn_id, name.clone()).await?;
+                        let chain = Chain::create(txn_id, (chain_type, schema), store).await?;
                         Ok(Attr::Chain(chain))
                     }
-                    other => Err(TCError::invalid_type(other, "a Service attribute")),
+                    other => Err(TCError::unexpected(other, "a Service attribute")),
                 },
-                scalar if scalar.is_ref() => {
-                    Err(TCError::invalid_value(scalar, "a Service attribute"))
+                scalar if Refer::<State>::is_ref(&scalar) => {
+                    Err(TCError::unexpected(scalar, "a Service attribute"))
                 }
                 scalar => Ok(Attr::Scalar(scalar)),
             }?;
@@ -145,10 +141,10 @@ impl Persist<fs::Dir> for Version {
         })
     }
 
-    fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Store) -> TCResult<Self> {
-        let dir = fs::Dir::try_from(store)?;
+    async fn load(txn_id: TxnId, schema: Self::Schema, dir: tc_fs::Dir) -> TCResult<Self> {
+        debug!("cluster::service::Version::load {:?}", schema);
 
-        let (link, proto) = schema.into_inner();
+        let (link, proto) = schema;
 
         let mut attrs = Map::new();
 
@@ -157,22 +153,15 @@ impl Persist<fs::Dir> for Version {
                 Scalar::Ref(tc_ref) => match *tc_ref {
                     TCRef::Op(OpRef::Get((chain_type, collection))) => {
                         let chain_type = resolve_type::<ChainType>(chain_type)?;
-
-                        let schema = TCRef::try_from(collection)?;
-                        let schema = CollectionSchema::from_scalar(schema)?;
-
-                        let store = dir
-                            .try_write(txn_id)
-                            .map(|lock| lock.get_or_create_store(name.clone()))?;
-
-                        let chain = Chain::load(txn_id, (chain_type, schema), store)?;
-
+                        let schema = try_cast_into_schema(collection)?;
+                        let store = dir.get_or_create_dir(txn_id, name.clone()).await?;
+                        let chain = Chain::load(txn_id, (chain_type, schema), store).await?;
                         Ok(Attr::Chain(chain))
                     }
-                    other => Err(TCError::invalid_type(other, "a Service attribute")),
+                    other => Err(TCError::unexpected(other, "a Service attribute")),
                 },
-                scalar if scalar.is_ref() => {
-                    Err(TCError::invalid_value(scalar, "a Service attribute"))
+                scalar if Refer::<State>::is_ref(&scalar) => {
+                    Err(TCError::unexpected(scalar, "a Service attribute"))
                 }
                 scalar => Ok(Attr::Scalar(scalar)),
             }?;
@@ -186,7 +175,7 @@ impl Persist<fs::Dir> for Version {
         })
     }
 
-    fn dir(&self) -> <fs::Dir as Dir>::Inner {
+    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
         unimplemented!("cluster::service::Version::dir")
     }
 }
@@ -227,7 +216,9 @@ impl Transact for Version {
 }
 
 #[async_trait]
-impl Recover for Version {
+impl Recover<tc_fs::CacheBlock> for Version {
+    type Txn = Txn;
+
     async fn recover(&self, txn: &Txn) -> TCResult<()> {
         let recovery = self
             .attrs
@@ -241,7 +232,7 @@ impl Recover for Version {
     }
 }
 
-impl fmt::Display for Version {
+impl fmt::Debug for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a hosted Service")
     }
@@ -250,25 +241,36 @@ impl fmt::Display for Version {
 /// A stateful collection of [`Chain`]s and [`Scalar`] methods ([`Attr`]s)
 #[derive(Clone)]
 pub struct Service {
-    dir: fs::Dir,
-    schema: fs::File<VersionNumber, InstanceClass>,
-    versions: TxnLock<BTreeMap<VersionNumber, Version>>,
+    dir: tc_fs::Dir,
+    schema: tc_fs::File<(Link, Map<Scalar>)>,
+    versions: TxnMapLock<VersionNumber, Version>,
 }
 
 impl Service {
-    pub async fn get_version(&self, txn_id: TxnId, number: &VersionNumber) -> TCResult<Version> {
-        let versions = self.versions.read(txn_id).await?;
-
-        versions
-            .get(number)
-            .cloned()
-            .ok_or_else(|| TCError::not_found(format!("Service version {}", number)))
+    pub async fn get_version(
+        &self,
+        txn_id: TxnId,
+        number: &VersionNumber,
+    ) -> TCResult<impl Deref<Target = Version>> {
+        self.versions
+            .get(txn_id, number)
+            .map(|result| {
+                result
+                    .map_err(TCError::from)
+                    .and_then(|version| version.ok_or_else(|| TCError::not_found(number)))
+            })
+            .map_err(TCError::from)
+            .await
     }
 
     pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
         self.schema
-            .read(txn_id)
-            .map_ok(|file| file.block_ids().iter().last().cloned())
+            .block_ids(txn_id)
+            .map_ok(|block_ids| {
+                block_ids
+                    .last()
+                    .map(|id| id.as_str().parse().expect("version number"))
+            })
             .await
     }
 }
@@ -285,25 +287,20 @@ impl DirItem for Service {
         class: InstanceClass,
     ) -> TCResult<Version> {
         let (link, proto) = class.into_inner();
-
         let proto = validate(&link, &number, proto)?;
-        let schema = InstanceClass::extend(link, proto);
 
         let txn_id = *txn.id();
-        let (dir, mut schemata, mut versions) = try_join!(
-            self.dir.write(txn_id),
-            self.schema.write(txn_id),
-            self.versions.write(txn_id).map_err(TCError::from),
-        )?;
 
-        schemata
-            .create_block(number.clone(), schema.clone().into())
+        self.schema
+            .create_block(txn_id, number.into(), (link.clone(), proto.clone()))
             .await?;
 
-        let store = dir.create_store(number.clone().into());
-        let version = Version::create(txn_id, schema, store)?;
+        let store = self.dir.create_dir(txn_id, number.clone().into()).await?;
+        let version = Version::create(txn_id, (link, proto), store).await?;
 
-        versions.insert(number, version.clone());
+        self.versions
+            .insert(txn_id, number, version.clone())
+            .await?;
 
         Ok(version)
     }
@@ -314,23 +311,25 @@ impl Replica for Service {
     async fn state(&self, txn_id: TxnId) -> TCResult<State> {
         let mut map = Map::new();
 
-        let schema = self.schema.read(txn_id).await?;
-        for number in schema.block_ids() {
-            let version = schema.read_block(&number).await?;
-            map.insert(number.into(), InstanceClass::clone(&*version).into());
+        let mut blocks = self.schema.iter(txn_id).await?;
+        while let Some((number, version)) = blocks.try_next().await? {
+            let version = InstanceClass::from(version.clone());
+            map.insert(number.as_str().parse()?, State::Object(version.into()));
         }
 
         Ok(State::Map(map))
     }
 
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<()> {
-        let versions = self.versions.read(*txn.id()).await?;
-        for (number, version) in versions.iter() {
+        info!("replicate all versions of {self:?} from {source}");
+
+        for (number, version) in self.versions.iter(*txn.id()).await? {
+            let number = (&*number).clone();
+            let source = source.clone().append(number);
+
             // TODO: parallelize
-            let txn = txn.subcontext(number.clone().into()).await?;
-            version
-                .replicate(&txn, source.clone().append(number.clone()))
-                .await?;
+            let txn = txn.subcontext(number.into()).await?;
+            version.replicate(&txn, source).await?;
         }
 
         Ok(())
@@ -342,31 +341,34 @@ impl Transact for Service {
     type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
-        let (_schema, versions) = join!(self.schema.commit(txn_id), self.versions.commit(txn_id));
+        let (versions, _deltas) = self.versions.read_and_commit(txn_id).await;
 
-        if let Some(versions) = versions {
-            join_all(versions.iter().map(|(_name, version)| async move {
-                version.commit(txn_id).await;
-            }))
-            .await;
-        }
+        join_all(versions.iter().map(|(_name, version)| async move {
+            version.commit(txn_id).await;
+        }))
+        .await;
+
+        join!(self.schema.commit(txn_id), self.dir.commit(txn_id, false));
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        if let Some(versions) = self.versions.rollback(txn_id).await {
-            join_all(
-                versions
-                    .iter()
-                    .map(|(_, version)| async move { version.rollback(txn_id).await }),
-            )
-            .await;
-        }
+        let (versions, _deltas) = self.versions.read_and_rollback(*txn_id).await;
 
-        self.schema.rollback(txn_id).await;
+        join_all(
+            versions
+                .iter()
+                .map(|(_, version)| async move { version.rollback(txn_id).await }),
+        )
+        .await;
+
+        join!(
+            self.schema.rollback(txn_id),
+            self.dir.rollback(*txn_id, false)
+        );
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        if let Some(versions) = self.versions.finalize(txn_id).await {
+        if let Some(versions) = self.versions.read_and_finalize(*txn_id) {
             join_all(
                 versions
                     .iter()
@@ -375,34 +377,37 @@ impl Transact for Service {
             .await;
         }
 
-        self.schema.finalize(txn_id).await;
+        join!(self.schema.finalize(txn_id), self.dir.finalize(*txn_id));
     }
 }
 
 #[async_trait]
-impl Recover for Service {
+impl Recover<tc_fs::CacheBlock> for Service {
+    type Txn = Txn;
+
     async fn recover(&self, txn: &Txn) -> TCResult<()> {
-        let versions = self.versions.read(*txn.id()).await?;
-        let recovery = versions.values().map(|version| version.recover(txn));
+        let versions = self.versions.iter(*txn.id()).await?;
+        let recovery = versions.map(|(_id, version)| async move { version.recover(txn).await });
+
         try_join_all(recovery).await?;
+
         Ok(())
     }
 }
 
-impl Persist<fs::Dir> for Service {
+#[async_trait]
+impl Persist<tc_fs::CacheBlock> for Service {
     type Txn = Txn;
     type Schema = ();
 
-    fn create(txn_id: TxnId, _schema: (), store: fs::Store) -> TCResult<Self> {
-        let dir = fs::Dir::try_from(store)?;
-        let mut contents = dir.try_write(txn_id)?;
-        if contents.is_empty() {
-            let schema = contents.create_file(SCHEMA.into())?;
+    async fn create(txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
+        if dir.is_empty(txn_id).await? {
+            let schema = dir.create_file(txn_id, SCHEMA.into()).await?;
 
             Ok(Self {
                 dir,
                 schema,
-                versions: TxnLock::new("service", txn_id, BTreeMap::new()),
+                versions: TxnMapLock::new(txn_id),
             })
         } else {
             Err(bad_request!(
@@ -411,45 +416,51 @@ impl Persist<fs::Dir> for Service {
         }
     }
 
-    fn load(txn_id: TxnId, _schema: (), store: fs::Store) -> TCResult<Self> {
-        let dir = fs::Dir::try_from(store)?;
-        let (schema, mut versions) = {
-            let dir = dir.try_read(txn_id)?;
-            let schema: fs::File<VersionNumber, InstanceClass> = dir
-                .get_file(&SCHEMA.into())?
-                .ok_or_else(|| unexpected!("service missing schema file"))?;
+    async fn load(txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
+        debug!("load Service");
 
-            (schema, BTreeMap::new())
-        };
+        let schema = dir
+            .get_file::<(Link, Map<Scalar>)>(txn_id, &SCHEMA.into())
+            .await?;
 
-        let version_schema = schema.try_read(txn_id)?;
-        for number in version_schema.block_ids() {
-            let schema = version_schema
-                .try_read_block(number)
-                .map_err(|cause| unexpected!("a Service schema is not present in the cache--consider increasing the cache size").consume(cause))?;
+        let mut versions = BTreeMap::new();
 
-            // `get_or_create_store` here in case of a service with no persistent data
-            let store = dir
-                .try_write(txn_id)
-                .map(|dir| dir.get_or_create_store(number.clone().into()))?;
+        trace!("loading Service versions...");
 
-            let version = Version::load(txn_id, schema.clone(), store)?;
-            versions.insert(number.clone(), version);
+        let mut blocks = schema.iter(txn_id).await?;
+        while let Some((number, schema)) = blocks.try_next().await? {
+            let version_number = number.as_str().parse()?;
+            trace!("loading Service version {}...", version_number);
+
+            // `get_or_create_dir` here in case of a service with no persistent data
+            let store = dir.get_or_create_dir(txn_id, (*number).clone()).await?;
+
+            trace!(
+                "got transactional directory for Service version {}",
+                version_number
+            );
+
+            let schema = <(Link, Map<Scalar>)>::clone(&*schema);
+            let version = Version::load(txn_id, schema, store).await?;
+
+            versions.insert(version_number, version);
         }
+
+        std::mem::drop(blocks);
 
         Ok(Self {
             dir,
             schema,
-            versions: TxnLock::new("service", txn_id, versions),
+            versions: TxnMapLock::with_contents(txn_id, versions),
         })
     }
 
-    fn dir(&self) -> <fs::Dir as Dir>::Inner {
+    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
         self.dir.clone().into_inner()
     }
 }
 
-impl fmt::Display for Service {
+impl fmt::Debug for Service {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a versioned hosted Service")
     }
@@ -459,14 +470,17 @@ fn resolve_type<T: NativeClass>(subject: Subject) -> TCResult<T> {
     match subject {
         Subject::Link(link) if link.host().is_none() => T::from_path(link.path())
             .ok_or_else(|| bad_request!("{} is not a {}", link.path(), std::any::type_name::<T>())),
+
         Subject::Link(link) => Err(not_implemented!(
             "support for a user-defined Class of {} in a Service: {}",
             std::any::type_name::<T>(),
             link
         )),
-        subject => Err(TCError::invalid_type(
+
+        subject => Err(bad_request!(
+            "{} is not a {}",
             subject,
-            format!("a {}", std::any::type_name::<T>()),
+            std::any::type_name::<T>()
         )),
     }
 }
@@ -484,13 +498,13 @@ fn validate(
         if let Scalar::Op(op_def) = scalar {
             let op_def = if op_def.is_write() {
                 // make sure not to replicate ops internal to this OpDef
-                let op_def = op_def.reference_self(version_link.path());
+                let op_def = op_def.reference_self::<State>(version_link.path());
 
                 for (id, provider) in op_def.form() {
                     // make sure not to duplicate requests to other clusters
-                    if provider.is_inter_service_write(version_link.path()) {
+                    if Refer::<State>::is_inter_service_write(provider, version_link.path()) {
                         return Err(bad_request!(
-                            "replicated op {} may not perform inter-service writes: {}",
+                            "replicated op {} may not perform inter-service writes: {:?}",
                             id,
                             provider
                         ));
@@ -501,7 +515,7 @@ fn validate(
             } else {
                 // make sure to replicate all write ops internal to this OpDef
                 // by routing them through the kernel
-                op_def.dereference_self(version_link.path())
+                op_def.dereference_self::<State>(version_link.path())
             };
 
             // TODO: check that the Version does not reference any other Version of the same service
@@ -513,4 +527,16 @@ fn validate(
     }
 
     Ok(validated)
+}
+
+#[inline]
+fn try_cast_into_schema(collection: Scalar) -> TCResult<CollectionSchema> {
+    let schema = TCRef::try_from(collection)?;
+    if let TCRef::Op(OpRef::Get((classpath, schema))) = schema {
+        let classpath = TCPathBuf::try_from(classpath)?;
+        let schema = Value::try_from(schema)?;
+        (classpath, schema).try_into()
+    } else {
+        Err(bad_request!("invalid collection schema: {:?}", schema))
+    }
 }

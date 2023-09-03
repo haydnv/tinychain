@@ -4,12 +4,14 @@ import inspect
 import math
 import typing
 
+from collections.abc import Iterable
+
 from ...decorators import post
 from ...generic import autobox, resolve_class, Map
 from ...interface import Compare, Interface
 from ...math.interface import Boolean, Numeric, Trigonometric
 from ...math.operator import deref, is_one, is_zero, operator
-from ...math.operator import Abs, Exp, Log, Pow
+from ...math.operator import Abs, Cond, Exp, Log, Pow
 from ...math.operator import Add, Mul, MatMul, Div, Sub
 from ...math.operator import Sin, Sinh, Asin, Asinh, Cos, Cosh, Acos, Acosh, Tan, Tanh, Atan, Atanh
 from ...math.operator import LogicalAnd, LogicalNot, LogicalOr, LogicalXor
@@ -17,12 +19,12 @@ from ...scalar.bound import handle_bounds
 from ...scalar.number import Bool, F32, F64, Number, U64
 from ...scalar import ref
 from ...shape import Shape
-from ...state import Class, State, Stream
+from ...state import Class, State
 from ...uri import URI
 
 from ..base import Collection
 
-from .operator import Broadcast, Cast, Concatenate, Copy, Expand, Flip, Read, Reshape, Slice, Transpose
+from .operator import Broadcast, Cast, Concatenate, Copy, Expand, Read, Reshape, Slice, Transpose
 from .operator import Max, Min, Norm, Product, Sum
 
 
@@ -65,15 +67,6 @@ class NDArray(Interface):
 
         return self._get("any", rtype=Bool)
 
-    def argmax(self, axis=None):
-        """
-        Return the indices of the maximum values along the given `axis` of this :class:`NDArray`.
-
-        If no `axis` is given, the total offset will be returned.
-        """
-
-        return ref.Get(URI(self, "argmax"), axis)
-
     def broadcast(self, shape):
         """Broadcast this :class:`NDArray` into the given `shape`."""
 
@@ -89,39 +82,44 @@ class NDArray(Interface):
 
         return ref.Post(URI(Tensor) + "/copy_from", {"tensor": self})
 
-    def expand_dims(self, axis=-1):
-        """Expand the given `axis` of this :class:`NDArray`, or append a new axis if no `axis` is given."""
+    def expand_dims(self, axes=None):
+        """Expand the given `axes` of this :class:`NDArray`, or append a new axis if no `axes` are given."""
 
-        return ref.Get(URI(self, "expand_dims"), axis)
+        return ref.Get(URI(self, "expand_dims"), axes)
 
-    def flip(self, axis):
-        """Flip this :class:`NDArray` along the given `axis`"""
-
-        return self._get("flip", axis)
-
-    def max(self, axis=None):
+    def cond(self, then, or_else):
         """
-        Find the maxima of this :class:`NDArray` along the given `axis`, or the entire array if no `axis` is given.
+        Return a view of `then` and `or_else` depending on whether the corresponding element of this tensor is `True`.
+
+        `self`, `then`, and `or_else` must support broadcasting to the same shape.
         """
 
-        return ref.Get(URI(self, "max"), axis)
+        rtype = gcs(type(then), type(or_else))
+        return self._post("cond", {"then": then, "or_else": or_else}, rtype)
 
-    def min(self, axis=None):
+    def max(self, axes=None):
         """
-        Find the minima of this :class:`NDArray` along the given `axis`, or the entire array if no `axis` is given.
-        """
-
-        return ref.Get(URI(self, "min"), axis)
-
-    def mean(self, axis=None):
-        """
-        Return the average of this :class:`NDArray` along the given `axis`, or the total average if no `axis` is given.
+        Find the maxima of this :class:`NDArray` along the given `axes`, or the entire array if no `axes` are given.
         """
 
-        if axis is None:
+        return ref.Get(URI(self, "max"), axes)
+
+    def min(self, axes=None):
+        """
+        Find the minima of this :class:`NDArray` along the given `axes`, or the entire array if no `axes` are given.
+        """
+
+        return ref.Get(URI(self, "min"), axes)
+
+    def mean(self, axes=None):
+        """
+        Return the average of this :class:`NDArray` along the given `axes`, or the total average if no `axes` are given.
+        """
+
+        if axes is None:
             return self.sum() / self.size
         else:
-            return self.sum(axis) / self.shape[axis]
+            return self.sum(axes) / self.shape[axes]
 
     def logical_and(self, other):
         return Tensor(form=LogicalAnd(self, other))
@@ -148,15 +146,23 @@ class NDArray(Interface):
         it will be the vector norm along that `axis`.
         """
 
-        return ref.Post(URI(self, "norm"), _reduce_args(axis, keepdims))
+        args = {}
 
-    def product(self, axis=None):
+        if axis is not None:
+            args["axis"] = axis
+
+        if keepdims:
+            args["keepdims"] = keepdims
+
+        return ref.Post(URI(self, "norm"), args)
+
+    def product(self, axes=None):
         """
-        Calculate the product of this :class:`NDArray` along the given `axis`,
-        or the total product if no `axis` is given.
+        Calculate the product of this :class:`NDArray` along the given `axes`,
+        or the total product if no `axes` are given.
         """
 
-        return ref.Get(URI(self, "product"), axis)
+        return ref.Get(URI(self, "product"), axes)
 
     def reshape(self, shape):
         """Reshape this :class:`NDArray` into the given `shape`."""
@@ -168,23 +174,23 @@ class NDArray(Interface):
 
         return ref.Get(URI(self), handle_bounds(bounds))
 
-    def std(self, axis=None):
+    def std(self, axes=None):
         """
-        Return the standard deviation of this :class:`NDArray` along the given `axis`,
-        or the total standard deviation if no `axis` is given.
+        Return the standard deviation of this :class:`NDArray` along the given `axes`,
+        or the total standard deviation if no `axes` are given.
         """
 
-        if axis is None:
+        if axes is None:
             average = self.mean()
             size = self.size
             return (((self - average)**2).sum() / size)**0.5
         else:
-            raise NotImplementedError("std with axis")
+            raise NotImplementedError("std with axes")
 
-    def sum(self, axis=None, keepdims=False):
-        """Compute the sum of this :class:`NDArray` along the given `axis`, or the total sum if no `axis` is given."""
+    def sum(self, axes=None, keepdims=False):
+        """Compute the sum of this :class:`NDArray` along the given `axes`, or the total sum if no `axes` are given."""
 
-        return ref.Post(URI(self, "sum"), _reduce_args(axis, keepdims))
+        return ref.Post(URI(self, "sum"), _reduce_args(axes, keepdims))
 
     def transpose(self, permutation=None):
         """
@@ -276,7 +282,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
 
     @property
     def schema(self):
-        return self.shape, self.dtype
+        return self.dtype, self.shape
 
     @property
     def shape(self):
@@ -328,15 +334,18 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
             return Sparse.zeros_like(self)
 
         return Tensor(form=Exp(self))
-    
+
+    def cond(self, then, or_else):
+        return Tensor(form=Cond(self, (then, or_else)))
+
     def log(self, base=None):
         return Tensor(form=Log(self, base))
 
-    def max(self, axis=None):
-        return Tensor(form=NDArray.max(self, axis))
+    def max(self, axes=None):
+        return Tensor(form=NDArray.max(self, axes))
 
-    def min(self, axis=None):
-        return Tensor(form=NDArray.min(self, axis))
+    def min(self, axes=None):
+        return Tensor(form=NDArray.min(self, axes))
 
     def sin(self):
         return Tensor(form=Sin(self))
@@ -374,20 +383,15 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
     def atanh(self):
         return Tensor(form=Atanh(self))
 
-    def flip(self, axis):
-        """Flip the elements in this `Tensor` along the specified `axis`."""
-
-        return Tensor(form=Flip(self, axis))
-
     def eq(self, other):
         """Return a boolean `Tensor` with element-wise equality values."""
 
         return self._post("eq", {"r": other}, Tensor)
 
-    def expand_dims(self, axis=None):
-        """Return a view of this `Tensor` with an extra dimension of size 1 at the given axis."""
+    def expand_dims(self, axes=None):
+        """Return a view of this `Tensor` with extra dimensions of size 1 at the given axes."""
 
-        return Tensor(form=Expand(self, axis))
+        return Tensor(form=Expand(self, axes))
 
     def gt(self, other):
         """Return a boolean `Tensor` with element-wise greater-than values."""
@@ -397,7 +401,7 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
     def gte(self, other):
         """Return a boolean `Tensor` with element-wise greater-or-equal values."""
 
-        return self._post("gte", {"r": other}, Tensor)
+        return self._post("ge", {"r": other}, Tensor)
 
     def lt(self, other):
         """Return a boolean `Tensor` with element-wise less-than values."""
@@ -407,23 +411,23 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
     def lte(self, other):
         """Return a boolean `Tensor` with element-wise less-or-equal values."""
 
-        return self._post("lte", {"r": other}, Tensor)
+        return self._post("le", {"r": other}, Tensor)
 
-    def max(self, axis=None, keepdims=False):
+    def max(self, axes=None, keepdims=False):
         """
-        Return the maximum value of this `Tensor` along the given `axis`, or the overall maximum if no axis is given.
-        """
-
-        rtype = Number if axis is None else Tensor
-        return rtype(Max(self, axis, keepdims))
-
-    def min(self, axis=None, keepdims=False):
-        """
-        Return the minimum value of this `Tensor` along the given `axis`, or the overal minimum if no axis is given.
+        Return the maximum value of this `Tensor` along the given `axes`, or the overall maximum if no axes are given.
         """
 
-        rtype = Number if axis is None else Tensor
-        return rtype(Min(self, axis, keepdims))
+        rtype = Number if axes is None else Tensor
+        return rtype(Max(self, axes, keepdims))
+
+    def min(self, axes=None, keepdims=False):
+        """
+        Return the minimum value of this `Tensor` along the given `axes`, or the overal minimum if no axes are given.
+        """
+
+        rtype = Number if axes is None else Tensor
+        return rtype(Min(self, axes, keepdims))
 
     def mul(self, other):
         if ref.same_as(other, 1):
@@ -451,11 +455,11 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
 
         return Tensor(form=Pow(self, other))
 
-    def product(self, axis=None, keepdims=False):
-        """Calculate the product of this `Tensor` along the given `axis`, or the total product if no axis is given."""
+    def product(self, axes=None, keepdims=False):
+        """Calculate the product of this `Tensor` along the given `axes`, or the total product if no axes are given."""
 
-        rtype = Number if axis is None else Tensor
-        return rtype(Product(self, axis, keepdims))
+        rtype = Number if axes is None else Tensor
+        return rtype(Product(self, axes, keepdims))
 
     def reshape(self, shape, copy=True):
         """Return a view of this `Tensor` with the given `shape`."""
@@ -498,11 +502,11 @@ class Tensor(Collection, NDArray, Trigonometric, Boolean, Numeric, Compare, typi
 
         return Tensor(form=Sub(self, other))
 
-    def sum(self, axis=None, keepdims=False):
-        """Calculate the sum of this `Tensor` along the given `axis`, or the total sum if no axis is given."""
+    def sum(self, axes=None, keepdims=False):
+        """Calculate the sum of this `Tensor` along the given `axes`, or the total sum if no axes are given."""
 
-        rtype = Number if axis is None else Tensor
-        return rtype(Sum(self, axis, keepdims))
+        rtype = Number if axes is None else Tensor
+        return rtype(Sum(self, axes, keepdims))
 
     def transpose(self, permutation=None):
         """
@@ -548,7 +552,7 @@ class Dense(Tensor, typing.Generic[DType]):
         Call this method to initialize a persistent `Tensor` in a `Chain`.
         """
 
-        return cls[dtype].with_shape(shape)(form=ref.Get(URI(cls), (shape, dtype)))
+        return cls[dtype].with_shape(shape)(form=ref.Get(URI(cls), (dtype, shape)))
 
     @classmethod
     def load(cls, shape, data, dtype=F32):
@@ -563,7 +567,7 @@ class Dense(Tensor, typing.Generic[DType]):
                 dense = tc.tensor.Dense.load([1, 3], values, tc.I32)
         """
 
-        return cls[dtype].with_shape(shape)(form=ref.Get(URI(cls, "load"), ((shape, dtype), data)))
+        return cls[dtype].with_shape(shape)(form=ref.Get(URI(cls, "load"), ((dtype, shape), data)))
 
     @classmethod
     def constant(cls, shape, value):
@@ -679,9 +683,8 @@ class Dense(Tensor, typing.Generic[DType]):
 
         @post
         def step(cxt, tensor: Dense) -> Map:
-            from .functions import where
             cxt.new_dist = Dense.random_normal(shape, mean, std)
-            cxt.new_tensor = where((tensor >= minval).logical_and(tensor <= maxval), tensor, cxt.new_dist)
+            cxt.new_tensor = (tensor >= minval).logical_and(tensor <= maxval).cond(tensor, cxt.new_dist)
             return Map(tensor=cxt.new_tensor.copy())
 
         truncated = Map(ref.While(cond, step, Map(tensor=Dense.random_normal(shape, mean, std))))["tensor"]
@@ -708,12 +711,6 @@ class Dense(Tensor, typing.Generic[DType]):
             return Dense[dtype](form=Cast(self, dtype))
         except TypeError:
             return Dense(form=Cast(self, dtype))
-
-    def elements(self, bounds=None):
-        """Return a :class:`Stream` of the :class:`Number` elements of this `Dense` tensor."""
-
-        bounds = handle_bounds(bounds)
-        return self._get("elements", bounds, Stream)
 
     def sub(self, other):
         if ref.same_as(other, 0):
@@ -744,7 +741,7 @@ class Sparse(Tensor, typing.Generic[DType]):
         Call this method to initialize a persistent :class:`Tensor` in a :class:`Chain`.
         """
 
-        op_ref = ref.Get(URI(cls), (shape, dtype))
+        op_ref = ref.Get(URI(cls), (dtype, shape))
 
         try:
             return cls[dtype].with_shape(shape)(form=op_ref)
@@ -765,7 +762,7 @@ class Sparse(Tensor, typing.Generic[DType]):
                 sparse = tc.tensor.Sparse.load([2, 3, 4], zip(coords, values))
         """
 
-        op_ref = ref.Get(URI(cls, "load"), ((shape, dtype), data))
+        op_ref = ref.Get(URI(cls, "load"), ((dtype, shape), data))
 
         try:
             return cls[dtype].with_shape(shape)(form=op_ref)
@@ -790,7 +787,7 @@ class Sparse(Tensor, typing.Generic[DType]):
         If `dtype` is not specified, the data type will be :class:`F32`.
         """
 
-        op_ref = ref.Get(URI(cls), (shape, dtype))
+        op_ref = ref.Get(URI(cls), (dtype, shape))
 
         try:
             return cls[dtype].with_shape(shape)(form=op_ref)
@@ -820,16 +817,6 @@ class Sparse(Tensor, typing.Generic[DType]):
 
         return Sparse(form=Div(self, other))
 
-    def elements(self, bounds=None):
-        """
-        Return a :class:`Stream` of this tensor's `(coord, number)` coordinate-value elements.
-
-        `coord` is a :class:`Tuple` of :class:`U64` coordinates, and `number` is the element at `coord`.
-        """
-
-        bounds = handle_bounds(bounds)
-        return self._get("elements", bounds, Stream)
-
     def mul(self, other):
         if ref.same_as(other, 1):
             return self
@@ -837,13 +824,15 @@ class Sparse(Tensor, typing.Generic[DType]):
         return Sparse(form=Tensor.mul(self, other))
 
 
-def _reduce_args(axis=None, keepdims=False):
+def _reduce_args(axes=None, keepdims=False):
     args = {}
 
-    if axis is not None:
-        args["axis"] = axis
+    if axes is not None:
+        axes = axes if isinstance(axes, Iterable) else [axes]
+        assert None not in axes
+        args["axes"] = axes
 
-    if keepdims:
-        args["keepdims"] = keepdims
+        if keepdims:
+            args["keepdims"] = keepdims
 
     return args

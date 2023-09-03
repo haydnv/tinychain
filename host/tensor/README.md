@@ -1,3 +1,0 @@
-This crate is used internally by TinyChain to provide the Tensor data structure. You can enable it using the `tensor` feature (e.g. `cargo build --release --features=tensor`). It requires linking to [ArrayFire](http://arrayfire.com) version 3.8 in order to compile and run. You can download and install ArrayFire by following the instructions at [http://arrayfire.org/docs/installing.htm](http://arrayfire.org/docs/installing.htm). You'll also have follow the instructions for the [ArrayFire Rust crate](https://crates.io/crates/arrayfire) to set the `AF_PATH` and `LD_LIBRARY_PATH` environment variables.
-
-For more information on TinyChain, see [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)

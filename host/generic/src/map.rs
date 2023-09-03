@@ -6,7 +6,7 @@ use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
-use destream::de::{Decoder, Error, FromStream};
+use destream::de::{Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
 use get_size::GetSize;
 use get_size_derive::*;
@@ -17,7 +17,7 @@ use tc_error::*;
 
 use super::{Id, Tuple};
 
-/// A generic map whose keys are [`Id`]s, based on [`BTreeMap`]
+/// A generic map whose keys are [`Id`]s, based on [`OrdHashMap`]
 #[derive(Clone, GetSize)]
 pub struct Map<T> {
     inner: BTreeMap<Id, T>,
@@ -42,12 +42,12 @@ impl<T> Map<T> {
     /// Return an error if this [`Map`] is not empty.
     pub fn expect_empty(self) -> TCResult<()>
     where
-        T: fmt::Display,
+        T: fmt::Debug,
     {
         if self.is_empty() {
             Ok(())
         } else {
-            Err(TCError::invalid_length(0, "no parameters").consume(self))
+            Err(TCError::unexpected(self, "no parameters"))
         }
     }
 
@@ -62,10 +62,10 @@ impl<T> Map<T> {
     where
         P: TryCastFrom<T>,
         D: FnOnce() -> P,
-        T: fmt::Display,
+        T: fmt::Debug,
     {
         if let Some(param) = self.remove(name) {
-            P::try_cast_from(param, |p| TCError::invalid_value(p, name))
+            P::try_cast_from(param, |p| TCError::unexpected(p, name.as_str()))
         } else {
             Ok((default)())
         }
@@ -76,11 +76,11 @@ impl<T> Map<T> {
     pub fn or_default<P>(&mut self, name: &Id) -> TCResult<P>
     where
         P: Default + TryCastFrom<T>,
-        T: fmt::Display,
+        T: fmt::Debug,
     {
         if let Some(param) = self.remove(name) {
             P::try_cast_from(param, |p| {
-                TCError::invalid_value(p, std::any::type_name::<P>())
+                TCError::unexpected(p, std::any::type_name::<P>())
             })
         } else {
             Ok(P::default())
@@ -92,11 +92,11 @@ impl<T> Map<T> {
     pub fn require<P>(&mut self, name: &Id) -> TCResult<P>
     where
         P: TryCastFrom<T>,
-        T: fmt::Display,
+        T: fmt::Debug,
     {
         let param = self.remove(name).ok_or_else(|| TCError::not_found(name))?;
 
-        P::try_cast_from(param, |p| TCError::invalid_value(p, name))
+        P::try_cast_from(param, |p| TCError::unexpected(p, name.as_str()))
     }
 }
 
@@ -153,7 +153,7 @@ impl<T> IntoIterator for Map<T> {
 
 impl<'a, T> IntoIterator for &'a Map<T> {
     type Item = (&'a Id, &'a T);
-    type IntoIter = std::collections::btree_map::Iter<'a, Id, T>;
+    type IntoIter = <&'a BTreeMap<Id, T> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.inner.iter()
@@ -166,9 +166,11 @@ where
 {
     fn from_iter<I: IntoIterator<Item = (Id, F)>>(iter: I) -> Self {
         let mut inner = BTreeMap::new();
+
         for (id, f) in iter {
             inner.insert(id, f.cast_into());
         }
+
         Map { inner }
     }
 }
@@ -261,36 +263,16 @@ impl<F, T: TryCastFrom<F>> TryCastFrom<Map<F>> for BTreeMap<Id, T> {
 
 impl<T: fmt::Debug> fmt::Debug for Map<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.is_empty() {
-            return f.write_str("{}");
+        f.write_str("{")?;
+
+        for (i, (k, v)) in self.iter().enumerate() {
+            write!(f, "\t{}: {:?}", k, v)?;
+
+            if i < self.len() - 1 {
+                f.write_str(",\n")?;
+            }
         }
 
-        write!(
-            f,
-            "{{\n{}\n}}",
-            self.inner
-                .iter()
-                .map(|(k, v)| format!("\t{}: {:?}", k, v))
-                .collect::<Vec<String>>()
-                .join(",\n")
-        )
-    }
-}
-
-impl<T: fmt::Display> fmt::Display for Map<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.is_empty() {
-            return f.write_str("{}");
-        }
-
-        write!(
-            f,
-            "{{ {} }}",
-            self.inner
-                .iter()
-                .map(|(k, v)| format!("{}: {}", k, v))
-                .collect::<Vec<String>>()
-                .join(", ")
-        )
+        f.write_str("}")
     }
 }

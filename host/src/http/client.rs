@@ -8,13 +8,12 @@ use log::debug;
 use url::Url;
 
 use tc_error::*;
+use tc_state::State;
 use tc_transact::{IntoView, Transaction, TxnId};
-use tc_value::Value;
+use tc_value::{ToUrl, Value};
 use tcgeneric::label;
 
-use crate::gateway::ToUrl;
 use crate::http::Encoding;
-use crate::state::State;
 use crate::txn::Txn;
 
 const IDLE_TIMEOUT: u64 = 30;
@@ -60,6 +59,9 @@ impl crate::gateway::Client for Client {
 
             tbon::de::try_decode((), body)
                 .map_err(|cause| {
+                    #[cfg(debug_assertions)]
+                    log::warn!("upstream error: {cause}");
+
                     bad_gateway!("error decoding response from {}", link).consume(cause)
                 })
                 .await
@@ -87,6 +89,9 @@ impl crate::gateway::Client for Client {
         if response.status().is_success() {
             tbon::de::try_decode(txn, response.into_body())
                 .map_err(|cause| {
+                    #[cfg(debug_assertions)]
+                    log::warn!("upstream error: {cause}");
+
                     bad_gateway!("error decoding response from {}", link).consume(cause)
                 })
                 .await
@@ -112,7 +117,7 @@ impl crate::gateway::Client for Client {
 
         let body = req
             .body(Body::wrap_stream(body.map_err(|cause| {
-                unexpected!("TBON encoding error").consume(cause)
+                internal!("TBON encoding error").consume(cause)
             })))
             .expect("request body");
 
@@ -147,7 +152,7 @@ impl crate::gateway::Client for Client {
 
         let body = req
             .body(Body::wrap_stream(body.map_err(|cause| {
-                unexpected!("TBON encoding error").consume(cause)
+                internal!("TBON encoding error").consume(cause)
             })))
             .expect("request body");
 
@@ -160,7 +165,11 @@ impl crate::gateway::Client for Client {
         if response.status().is_success() {
             tbon::de::try_decode(txn, response.into_body())
                 .map_err(|cause| {
-                    bad_gateway!("error decoding response from {}: {}", link, params).consume(cause)
+                    #[cfg(debug_assertions)]
+                    log::warn!("upstream error: {cause}");
+
+                    bad_gateway!("error decoding response from {}: {:?}", link, params)
+                        .consume(cause)
                 })
                 .await
         } else {
@@ -201,7 +210,7 @@ fn build_url(link: &ToUrl<'_>, txn_id: &TxnId, key: &Value) -> TCResult<Url> {
 
     if key.is_some() {
         let key_json = serde_json::to_string(&key)
-            .map_err(|cause| unexpected!("unable to encode key {}", key).consume(cause))?;
+            .map_err(|cause| internal!("unable to encode key {}", key).consume(cause))?;
 
         url.query_pairs_mut().append_pair("key", &key_json);
     }

@@ -1,4 +1,4 @@
-from ..collection.tensor import where, Tensor
+from ..collection.tensor import Tensor
 from ..math.operator import derivative_of, Unary
 
 
@@ -11,14 +11,13 @@ def softmax(x, axis=0):
     return p / p.sum(axis)
 
 
-# TODO: should there be a general "Where" operator?
 class ReLU(Unary):
     def forward(self):
-        return where(self.subject > 0, self.subject, 0.)
+        return (self.subject > 0).cond(self.subject, 0.)
 
     def backward(self, variable=None):
         d = derivative_of(self.subject, variable)
-        return where(d > 0, d, 0.)
+        return (d > 0).cond(d, 0.)
 
 
 def relu(x):

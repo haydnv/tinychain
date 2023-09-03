@@ -1,6 +1,8 @@
 import itertools
 import logging
 
+from collections.abc import Iterable
+
 from ...math.operator import derivative_of, gradients, Gradients, Operator, Unary
 from ...scalar.number import Number
 from ...scalar.ref import deref, is_literal, same_as, After, Post
@@ -155,11 +157,11 @@ class Read(Operator):
 
 
 class Reduce(Operator):
-    def __init__(self, tensor, axis=None, keepdims=False):
-        Operator.__init__(self, tensor, _reduce_args(axis, keepdims))
+    def __init__(self, tensor, axes=None, keepdims=False):
+        Operator.__init__(self, tensor, _reduce_args(axes, keepdims))
 
     def __args__(self):
-        return self.subject, self.args.get("axis"), self.args.get("keepdims")
+        return self.subject, self.args.get("axes"), self.args.get("keepdims")
 
     @property
     def shape(self):
@@ -172,19 +174,27 @@ class Reduce(Operator):
         # here we explicitly backpropagate the loss to the subject of this op
         # so we know it will be multiplied by its derivative there; here we just need to set the correct shape
 
-        if self.args.get("axis") is None:
+        if "axes" not in self.args:
             from .base import Dense
             loss = loss * Dense.ones([1] * deref(self.subject.ndim))
             return gradients(self.subject, loss)
         elif not self.args.get("keepdims"):
-            return gradients(self.subject, loss.expand_dims(self.args["axis"]))
+            return gradients(self.subject, loss.expand_dims(self.args["axes"]))
         else:
             return gradients(self.subject, loss)
 
 
 class Norm(Operator):
     def __init__(self, tensor, axis=None, keepdims=False):
-        Operator.__init__(self, tensor, _reduce_args(axis, keepdims))
+        args = {}
+
+        if axis is not None:
+            args["axis"] = axis
+
+            if keepdims:
+                args["keepdims"] = keepdims
+
+        Operator.__init__(self, tensor, args)
 
     def __repr__(self):
         if self.args:
@@ -197,10 +207,10 @@ class Norm(Operator):
 
     @property
     def shape(self):
-        if self.args is None:
-            return self.subject.shape[:-2]
+        if self.args is not None and self.args.get("axis") is not None:
+            return self.subject.shape.reduce(axes=[self.args.get("axis")], keepdims=self.args.get("keepdims"))
         else:
-            return self.subject.shape.reduce(**self.args)
+            return self.subject.shape[:-2]
 
     def forward(self):
         from .base import NDArray
@@ -215,8 +225,8 @@ class Norm(Operator):
 
 class Max(Reduce):
     def __repr__(self):
-        if "axis" in self.args:
-            return f"max({self.subject}[{self.args['axis']}])"
+        if "axes" in self.args:
+            return f"max({self.subject}[{self.args['axes']}])"
         else:
             return f"max({self.subject})"
 
@@ -237,8 +247,8 @@ class Max(Reduce):
 
 class Min(Reduce):
     def __repr__(self):
-        if "axis" in self.args:
-            return f"min({self.subject}[{self.args['axis']}])"
+        if "axes" in self.args:
+            return f"min({self.subject}[{self.args['axes']}])"
         else:
             return f"min({self.subject})"
 
@@ -259,8 +269,8 @@ class Min(Reduce):
 
 class Product(Reduce):
     def __repr__(self):
-        if "axis" in self.args:
-            return f"product({self.subject}[{self.args['axis']}])"
+        if "axes" in self.args:
+            return f"product({self.subject}[{self.args['axes']}])"
         else:
             return f"product({self.subject})"
 
@@ -281,8 +291,8 @@ class Product(Reduce):
 
 class Sum(Reduce):
     def __repr__(self):
-        if "axis" in self.args:
-            return f"sum({self.subject}[{self.args['axis']}])"
+        if "axes" in self.args:
+            return f"sum({self.subject}[{self.args['axes']}])"
         else:
             return f"sum({self.subject})"
 
@@ -358,22 +368,6 @@ class Expand(Transform):
 
     def invert(self, loss):
         return loss.sum(self.args)
-
-
-class Flip(Transform):
-    def __repr__(self):
-        return f"{self.subject}.flip({self.args})"
-
-    @property
-    def shape(self):
-        return self.subject.shape
-
-    def forward(self):
-        from .base import NDArray
-        return NDArray.flip(self.subject, self.args)
-
-    def invert(self, loss):
-        return loss.flip(self.args)
 
 
 class Reshape(Transform):
@@ -520,11 +514,13 @@ class Transpose(Transform):
         return loss.transpose(inverse_permutation)
 
 
-def _reduce_args(axis=None, keepdims=False):
+def _reduce_args(axes=None, keepdims=False):
     args = {}
 
-    if axis is not None:
-        args["axis"] = axis
+    if axes is not None:
+        axes = axes if isinstance(axes, Iterable) else [axes]
+        assert None not in axes
+        args["axes"] = axes
 
     if keepdims:
         args["keepdims"] = keepdims

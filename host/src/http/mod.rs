@@ -7,11 +7,11 @@ use hyper::header::HeaderValue;
 
 use tc_error::*;
 
-mod client;
-mod server;
-
 pub use client::*;
 pub use server::*;
+
+mod client;
+mod server;
 
 trait Accept: Default + FromStr {
     fn parse_header(header: Option<&HeaderValue>) -> TCResult<Self> {

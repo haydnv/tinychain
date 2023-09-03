@@ -5,7 +5,7 @@ from ..json import to_json
 from ..scalar.bound import Range
 from ..scalar.number import UInt
 from ..scalar.ref import form_of, Ref
-from ..state import State, Stream
+from ..state import State
 from ..uri import URI
 
 from .base import Collection
@@ -31,7 +31,9 @@ class BTree(Collection):
         Return a slice of this `BTree` containing all keys which begin with the given prefix.
         """
 
-        if not isinstance(prefix, (Tuple, tuple)):
+        if isinstance(prefix, list):
+            prefix = tuple(prefix)
+        elif prefix is not None and not isinstance(prefix, (Tuple, tuple)):
             prefix = (prefix,)
 
         range = _handle_range(prefix)
@@ -47,15 +49,20 @@ class BTree(Collection):
         range = _handle_range(range)
         return self._get("count", range, UInt)
 
-    def delete(self, range=None):
+    def delete(self, prefix=None):
         """
         Delete the contents of this `BTree` within the specified range.
 
         If no range is specified, the entire contents of this `BTree` will be deleted.
         """
 
-        range = _handle_range(range)
-        return self._delete("", range)
+        if isinstance(prefix, list):
+            prefix = tuple(prefix)
+        elif prefix is not None and not isinstance(prefix, (Tuple, tuple)):
+            prefix = (prefix,)
+
+        prefix = _handle_range(prefix)
+        return self._delete("", prefix)
 
     def first(self):
         """
@@ -74,12 +81,6 @@ class BTree(Collection):
         """
 
         return self._put("", value=key)
-
-    def keys(self, range=None):
-        """Return a :class:`Stream` of the keys in this `BTree` within the given range (if specified)."""
-
-        range = _handle_range(range)
-        return self._get("keys", range, Stream)
 
     def reverse(self):
         """

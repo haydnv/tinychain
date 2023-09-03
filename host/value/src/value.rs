@@ -1,23 +1,20 @@
-//! A generic [`Value`] which supports collation
-
-use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
-use std::ops::Deref;
+use std::ops::{Bound, Deref};
 use std::str::FromStr;
 
 use async_hash::generic_array::GenericArray;
 use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
+use base64::engine::general_purpose::STANDARD_NO_PAD;
+use base64::Engine;
 use bytes::Bytes;
 use destream::de::Error as DestreamError;
-use destream::de::Visitor as DestreamVisitor;
 use destream::{de, en};
 use email_address_parser::EmailAddress;
 use get_size::GetSize;
-use log::debug;
-use safecast::{CastFrom, CastInto, TryCastFrom, TryCastInto};
+use safecast::{as_type, CastFrom, CastInto, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use uuid::Uuid;
@@ -25,422 +22,14 @@ use uuid::Uuid;
 use tc_error::*;
 use tcgeneric::*;
 
-use super::{Link, LinkHost, TCString, Version};
-
-pub use number_general::{
-    Boolean, BooleanType, Complex, ComplexType, Float, FloatInstance, FloatType, Int, IntType,
-    Number, NumberClass, NumberCollator, NumberInstance, NumberType, Trigonometry, UInt, UIntType,
-};
+use super::class::ValueType;
+use super::link::{Host, Link};
+use super::number::{Complex, Float, Number, NumberClass, NumberInstance};
+use super::string::TCString;
+use super::version::Version;
 
 const EMPTY_SEQ: [u8; 0] = [];
 const EXPECTING: &'static str = "a TinyChain value, e.g. 1 or \"two\" or [3]";
-const PREFIX: PathLabel = path_label(&["state", "scalar", "value"]);
-
-/// The class of a [`Value`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ValueType {
-    Bytes,
-    Email,
-    Id,
-    Link,
-    None,
-    Number(NumberType),
-    String,
-    Tuple,
-    Value,
-    Version,
-}
-
-impl ValueType {
-    pub fn size(&self) -> Option<usize> {
-        match self {
-            Self::Number(nt) => Some(nt.size()),
-            _ => None,
-        }
-    }
-
-    pub fn try_cast<V>(&self, value: V) -> TCResult<Value>
-    where
-        Value: From<V>,
-    {
-        let on_err = |v: &Value| bad_request!("cannot cast into {} from {}", self, v);
-        let value = Value::from(value);
-
-        match self {
-            Self::Bytes => match value {
-                Value::Bytes(bytes) => Ok(Value::Bytes(bytes)),
-                Value::Number(_) => Err(not_implemented!("cast into Bytes from Number")),
-                Value::String(s) => {
-                    Bytes::try_cast_from(s, |s| bad_request!("cannot cast into Bytes from {}", s))
-                        .map(Vec::from)
-                        .map(Value::Bytes)
-                }
-                other => Err(bad_request!("cannot cast into Bytes from {}", other)),
-            },
-            Self::Email => match value {
-                Value::Email(email) => Ok(Value::Email(email)),
-
-                Value::Id(id) => parse_email(id.as_str())
-                    .map(Value::Email)
-                    .ok_or_else(|| bad_request!("cannot cast into Email from {}", id)),
-
-                Value::String(s) => parse_email(&s)
-                    .map(Value::Email)
-                    .ok_or_else(|| bad_request!("cannot cast into Email from {}", s)),
-
-                other => Err(bad_request!("cannot cast into Email from {}", other)),
-            },
-            Self::Id => value.try_cast_into(on_err).map(Value::Id),
-            Self::Link => value.try_cast_into(on_err).map(Value::String),
-            Self::None => Ok(Value::None),
-            Self::Number(nt) => value
-                .try_cast_into(|v| bad_request!("cannot cast into Number from {}", v))
-                .map(|n| nt.cast(n))
-                .map(Value::Number),
-
-            Self::String => value.try_cast_into(on_err).map(Value::String),
-            Self::Tuple => value.try_cast_into(on_err).map(Value::Tuple),
-            Self::Value => Ok(value),
-            Self::Version => match value {
-                Value::Id(id) => id.as_str().parse().map(Value::Version),
-                Value::String(s) => s.parse().map(Value::Version),
-                Value::Tuple(t) => {
-                    let (maj, min, rev) =
-                        t.try_cast_into(|t| bad_request!("invalid semantic version {}", t))?;
-
-                    Ok(Value::Version(Version::from((maj, min, rev))))
-                }
-                Value::Version(v) => Ok(Value::Version(v)),
-                other => Err(bad_request!("cannot cast into Version from {}", other)),
-            },
-        }
-    }
-}
-
-impl Default for ValueType {
-    fn default() -> Self {
-        Self::Value
-    }
-}
-
-impl Class for ValueType {}
-
-impl NativeClass for ValueType {
-    fn from_path(path: &[PathSegment]) -> Option<Self> {
-        debug!("ValueType::from_path {}", TCPath::from(path));
-
-        use ComplexType as CT;
-        use FloatType as FT;
-        use IntType as IT;
-        use NumberType as NT;
-        use UIntType as UT;
-
-        if path.len() >= 3 && &path[..3] == &PREFIX[..] {
-            if path.len() == 3 {
-                Some(Self::default())
-            } else if path.len() == 4 {
-                match path[3].as_str() {
-                    "bytes" => Some(Self::Bytes),
-                    "email" => Some(Self::Email),
-                    "id" => Some(Self::Id),
-                    "link" => Some(Self::Link),
-                    "number" => Some(Self::Number(NT::Number)),
-                    "none" => Some(Self::None),
-                    "string" => Some(Self::String),
-                    "tuple" => Some(Self::Tuple),
-                    "version" => Some(Self::Version),
-                    _ => None,
-                }
-            } else if path.len() == 5 && &path[3] == "number" {
-                match path[4].as_str() {
-                    "bool" => Some(Self::Number(NT::Bool)),
-                    "complex" => Some(Self::Number(NT::Complex(CT::Complex))),
-                    "float" => Some(Self::Number(NT::Float(FT::Float))),
-                    "int" => Some(Self::Number(NT::Int(IT::Int))),
-                    "uint" => Some(Self::Number(NT::UInt(UT::UInt))),
-                    _ => None,
-                }
-            } else if path.len() == 6 && &path[3] == "number" {
-                match path[4].as_str() {
-                    "complex" => match path[5].as_str() {
-                        "32" => Some(Self::Number(NT::Complex(CT::C32))),
-                        "64" => Some(Self::Number(NT::Complex(CT::C64))),
-                        _ => None,
-                    },
-                    "float" => match path[5].as_str() {
-                        "32" => Some(Self::Number(NT::Float(FT::F32))),
-                        "64" => Some(Self::Number(NT::Float(FT::F64))),
-                        _ => None,
-                    },
-                    "int" => match path[5].as_str() {
-                        "16" => Some(Self::Number(NT::Int(IT::I16))),
-                        "32" => Some(Self::Number(NT::Int(IT::I32))),
-                        "64" => Some(Self::Number(NT::Int(IT::I64))),
-                        _ => None,
-                    },
-                    "uint" => match path[5].as_str() {
-                        "8" => Some(Self::Number(NT::UInt(UT::U8))),
-                        "16" => Some(Self::Number(NT::UInt(UT::U16))),
-                        "32" => Some(Self::Number(NT::UInt(UT::U32))),
-                        "64" => Some(Self::Number(NT::UInt(UT::U64))),
-                        _ => None,
-                    },
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    fn path(&self) -> TCPathBuf {
-        let prefix = TCPathBuf::from(PREFIX);
-
-        match self {
-            Self::Bytes => prefix.append(label("bytes")),
-            Self::Email => prefix.append(label("email")),
-            Self::Id => prefix.append(label("id")),
-            Self::Link => prefix.append(label("link")),
-            Self::None => prefix.append(label("none")),
-            Self::Number(nt) => {
-                const N8: Label = label("8");
-                const N16: Label = label("16");
-                const N32: Label = label("32");
-                const N64: Label = label("64");
-
-                let prefix = prefix.append(label("number"));
-                use NumberType as NT;
-                match nt {
-                    NT::Bool => prefix.append(label("bool")),
-                    NT::Complex(ct) => {
-                        let prefix = prefix.append(label("complex"));
-                        use ComplexType as CT;
-                        match ct {
-                            CT::C32 => prefix.append(N32),
-                            CT::C64 => prefix.append(N64),
-                            CT::Complex => prefix,
-                        }
-                    }
-                    NT::Float(ft) => {
-                        let prefix = prefix.append(label("float"));
-                        use FloatType as FT;
-                        match ft {
-                            FT::F32 => prefix.append(N32),
-                            FT::F64 => prefix.append(N64),
-                            FT::Float => prefix,
-                        }
-                    }
-                    NT::Int(it) => {
-                        let prefix = prefix.append(label("int"));
-                        use IntType as IT;
-                        match it {
-                            IT::I8 => prefix.append(N16),
-                            IT::I16 => prefix.append(N16),
-                            IT::I32 => prefix.append(N32),
-                            IT::I64 => prefix.append(N64),
-                            IT::Int => prefix,
-                        }
-                    }
-                    NT::UInt(ut) => {
-                        let prefix = prefix.append(label("uint"));
-                        use UIntType as UT;
-                        match ut {
-                            UT::U8 => prefix.append(N8),
-                            UT::U16 => prefix.append(N16),
-                            UT::U32 => prefix.append(N32),
-                            UT::U64 => prefix.append(N64),
-                            UT::UInt => prefix,
-                        }
-                    }
-                    NT::Number => prefix,
-                }
-            }
-            Self::String => prefix.append(label("string")),
-            Self::Tuple => prefix.append(label("tuple")),
-            Self::Value => prefix,
-            Self::Version => prefix.append(label("version")),
-        }
-    }
-}
-
-impl Ord for ValueType {
-    fn cmp(&self, other: &Self) -> Ordering {
-        use Ordering::*;
-
-        match (self, other) {
-            (Self::Number(l), Self::Number(r)) => l.cmp(r),
-            (l, r) if l == r => Equal,
-
-            (Self::Value, _) => Greater,
-            (_, Self::Value) => Less,
-
-            (Self::Tuple, _) => Greater,
-            (_, Self::Tuple) => Less,
-
-            (Self::Link, _) => Greater,
-            (_, Self::Link) => Less,
-
-            (Self::String, _) => Greater,
-            (_, Self::String) => Less,
-
-            (Self::Email, _) => Greater,
-            (_, Self::Email) => Less,
-
-            (Self::Id, _) => Greater,
-            (_, Self::Id) => Less,
-
-            (Self::Bytes, _) => Greater,
-            (_, Self::Bytes) => Less,
-
-            (Self::Number(_), _) => Greater,
-            (_, Self::Number(_)) => Less,
-
-            (Self::Version, _) => Greater,
-            (_, Self::Version) => Less,
-
-            (Self::None, Self::None) => Equal,
-        }
-    }
-}
-
-impl PartialOrd for ValueType {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl From<NumberType> for ValueType {
-    fn from(nt: NumberType) -> ValueType {
-        ValueType::Number(nt)
-    }
-}
-
-impl TryCastFrom<Value> for ValueType {
-    fn can_cast_from(value: &Value) -> bool {
-        match value {
-            Value::Link(l) if l.host().is_none() => Self::from_path(l.path()).is_some(),
-            Value::String(s) => {
-                if let Ok(path) = TCPathBuf::from_str(s.as_str()) {
-                    Self::from_path(&path).is_some()
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(value: Value) -> Option<Self> {
-        if let Some(path) = TCPathBuf::opt_cast_from(value) {
-            Self::from_path(&path)
-        } else {
-            None
-        }
-    }
-}
-
-impl TryFrom<ValueType> for NumberType {
-    type Error = TCError;
-
-    fn try_from(vt: ValueType) -> TCResult<NumberType> {
-        match vt {
-            ValueType::Number(nt) => Ok(nt),
-            other => Err(TCError::invalid_type(other, "a Number class")),
-        }
-    }
-}
-
-#[async_trait]
-impl de::FromStream for ValueType {
-    type Context = ();
-
-    async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
-        debug!("ValueType::from_stream");
-        decoder.decode_any(ValueTypeVisitor).await
-    }
-}
-
-impl<'en> en::IntoStream<'en> for ValueType {
-    fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        use en::EncodeMap;
-        let mut map = encoder.encode_map(Some(1))?;
-        map.encode_entry(self.path(), Map::<Value>::default())?;
-        map.end()
-    }
-}
-
-impl<'en> en::ToStream<'en> for ValueType {
-    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
-        use en::EncodeMap;
-        let mut map = encoder.encode_map(Some(1))?;
-        map.encode_entry(self.path(), Map::<Value>::default())?;
-        map.end()
-    }
-}
-
-impl fmt::Display for ValueType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Bytes => f.write_str("type Bytes"),
-            Self::Email => f.write_str("type Email"),
-            Self::Id => f.write_str("type Id"),
-            Self::Link => f.write_str("type Link"),
-            Self::None => f.write_str("type None"),
-            Self::Number(nt) => write!(f, "type {}", nt),
-            Self::String => f.write_str("type String"),
-            Self::Tuple => f.write_str("type Tuple<Value>"),
-            Self::Value => f.write_str("type Value"),
-            Self::Version => f.write_str("type Version"),
-        }
-    }
-}
-
-struct ValueTypeVisitor;
-
-impl ValueTypeVisitor {
-    fn visit_path<E: DestreamError>(self, path: TCPathBuf) -> Result<ValueType, E> {
-        ValueType::from_path(&path)
-            .ok_or_else(|| DestreamError::invalid_value(path, Self::expecting()))
-    }
-}
-
-#[async_trait]
-impl DestreamVisitor for ValueTypeVisitor {
-    type Value = ValueType;
-
-    fn expecting() -> &'static str {
-        "a Value type"
-    }
-
-    fn visit_string<E: DestreamError>(self, v: String) -> Result<Self::Value, E> {
-        let path: TCPathBuf = v.parse().map_err(DestreamError::custom)?;
-        self.visit_path(path)
-    }
-
-    async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
-        if let Some(path) = access.next_key::<TCPathBuf>(()).await? {
-            if let Ok(list) = access.next_value::<Tuple<Value>>(()).await {
-                if list.is_empty() {
-                    self.visit_path(path)
-                } else {
-                    Err(DestreamError::invalid_value(list, "empty list"))
-                }
-            } else if let Ok(map) = access.next_value::<Map<Value>>(()).await {
-                if map.is_empty() {
-                    self.visit_path(path)
-                } else {
-                    Err(DestreamError::invalid_value(map, "empty map"))
-                }
-            } else {
-                Err(de::Error::custom("invalid Value class"))
-            }
-        } else {
-            Err(DestreamError::invalid_length(0, Self::expecting()))
-        }
-    }
-}
 
 /// A generic value enum
 #[derive(Clone)]
@@ -479,7 +68,7 @@ impl Value {
         if self.is_none() {
             Ok(())
         } else {
-            Err(TCError::invalid_value(self, Value::None))
+            Err(TCError::unexpected(self, "none"))
         }
     }
 
@@ -539,6 +128,15 @@ impl Default for Value {
     }
 }
 
+as_type!(Value, Bytes, Vec<u8>);
+as_type!(Value, Email, EmailAddress);
+as_type!(Value, Id, Id);
+as_type!(Value, Link, Link);
+as_type!(Value, Number, Number);
+as_type!(Value, String, TCString);
+as_type!(Value, Tuple, Tuple<Value>);
+as_type!(Value, Version, Version);
+
 impl PartialEq<Value> for Value {
     fn eq(&self, other: &Value) -> bool {
         match (self, other) {
@@ -555,7 +153,7 @@ impl PartialEq<Value> for Value {
 
             (Self::String(this), that) => match that {
                 Self::Email(that) => this == &that.to_string(),
-                Self::Link(that) => that == this,
+                Self::Link(that) => that == this.as_str(),
                 Self::Number(that) => {
                     if let Ok(this) = Number::from_str(this) {
                         &this == that
@@ -569,7 +167,7 @@ impl PartialEq<Value> for Value {
 
             (this, Self::String(that)) => match this {
                 Self::Email(this) => that == &this.to_string(),
-                Self::Link(this) => this == that,
+                Self::Link(this) => this == that.as_str(),
                 Self::Number(this) => {
                     if let Ok(that) = Number::from_str(that) {
                         this == &that
@@ -640,7 +238,10 @@ impl Serialize for Value {
         match self {
             Self::Bytes(bytes) => {
                 let mut map = serializer.serialize_map(Some(1))?;
-                map.serialize_entry(&self.class().path().to_string(), &base64::encode(&bytes))?;
+                map.serialize_entry(
+                    &self.class().path().to_string(),
+                    &STANDARD_NO_PAD.encode(&bytes),
+                )?;
                 map.end()
             }
             Self::Email(email) => {
@@ -785,27 +386,9 @@ impl From<Bytes> for Value {
     }
 }
 
-impl From<Id> for Value {
-    fn from(id: Id) -> Self {
-        Self::Id(id)
-    }
-}
-
-impl From<LinkHost> for Value {
-    fn from(host: LinkHost) -> Self {
+impl From<Host> for Value {
+    fn from(host: Host) -> Self {
         Self::Link(host.into())
-    }
-}
-
-impl From<Link> for Value {
-    fn from(link: Link) -> Self {
-        Self::Link(link)
-    }
-}
-
-impl From<Number> for Value {
-    fn from(n: Number) -> Self {
-        Self::Number(n)
     }
 }
 
@@ -824,21 +407,15 @@ impl From<TCPathBuf> for Value {
     }
 }
 
-impl From<Tuple<Value>> for Value {
-    fn from(tuple: Tuple<Value>) -> Self {
-        Self::Tuple(tuple)
-    }
-}
-
 impl From<Vec<Value>> for Value {
     fn from(tuple: Vec<Value>) -> Self {
         Self::Tuple(tuple.into())
     }
 }
 
-impl From<Version> for Value {
-    fn from(version: Version) -> Self {
-        Self::Version(version)
+impl From<String> for Value {
+    fn from(s: String) -> Self {
+        Self::String(s.into())
     }
 }
 
@@ -879,7 +456,35 @@ impl TryFrom<Value> for bool {
             Value::Id(id) if &id == "false" => Ok(false),
             Value::String(s) if &s == "true" => Ok(true),
             Value::String(s) if &s == "false" => Ok(false),
-            other => Err(TCError::invalid_value(other, "a boolean")),
+            other => Err(TCError::unexpected(other, "a boolean")),
+        }
+    }
+}
+
+impl TryFrom<Value> for Id {
+    type Error = TCError;
+
+    fn try_from(value: Value) -> TCResult<Self> {
+        match value {
+            Value::Number(number) => number.to_string().parse().map_err(TCError::from),
+            Value::Id(id) => Ok(id),
+            Value::String(string) => string.parse().map_err(TCError::from),
+            other => Err(TCError::unexpected(other, "an Id")),
+        }
+    }
+}
+
+impl TryFrom<Value> for Map<Value> {
+    type Error = TCError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Tuple(tuple) => tuple
+                .into_iter()
+                .map(|item| -> TCResult<(Id, Value)> { item.try_into() })
+                .collect(),
+
+            other => Err(TCError::unexpected(other, "a Map")),
         }
     }
 }
@@ -894,14 +499,14 @@ impl TryFrom<Value> for Number {
             Value::Id(id) => id
                 .as_str()
                 .parse()
-                .map_err(|cause| TCError::invalid_value(id, " a Number").consume(cause)),
+                .map_err(|cause| TCError::unexpected(id, " a Number").consume(cause)),
 
             Value::String(s) => s
                 .as_str()
                 .parse()
-                .map_err(|cause| TCError::invalid_value(s, " a Number").consume(cause)),
+                .map_err(|cause| TCError::unexpected(s, " a Number").consume(cause)),
 
-            other => Err(TCError::invalid_type(other, "a Number")),
+            other => Err(TCError::unexpected(other, "a Number")),
         }
     }
 }
@@ -912,7 +517,61 @@ impl TryFrom<Value> for Tuple<Value> {
     fn try_from(value: Value) -> TCResult<Self> {
         match value {
             Value::Tuple(tuple) => Ok(tuple),
-            other => Err(TCError::invalid_type(other, "a Tuple")),
+            other => Err(TCError::unexpected(other, "a Tuple")),
+        }
+    }
+}
+
+impl<T: TryFrom<Value>> TryFrom<Value> for (Id, T)
+where
+    TCError: From<T::Error>,
+{
+    type Error = TCError;
+
+    fn try_from(value: Value) -> TCResult<Self> {
+        match value {
+            Value::Tuple(mut tuple) if tuple.len() == 2 => {
+                let value = tuple.pop().expect("value");
+                let key = tuple.pop().expect("key");
+                Ok((Id::try_from(key)?, value.try_into()?))
+            }
+            other => Err(TCError::unexpected(other, "a map item")),
+        }
+    }
+}
+
+impl TryCastFrom<Value> for Bound<Value> {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::None => true,
+            Value::Tuple(tuple) if tuple.len() == 2 => match &tuple[0] {
+                Value::String(bound) => bound == "in" || bound == "ex",
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Bound<Value>> {
+        match value {
+            Value::None => Some(Bound::Unbounded),
+            Value::Tuple(mut tuple) if tuple.len() == 2 => {
+                let value = tuple.pop().expect("value");
+                let bound = tuple.pop().expect("bound");
+                match &bound {
+                    Value::String(bound) => {
+                        if bound == "in" {
+                            Some(Bound::Included(value))
+                        } else if bound == "ex" {
+                            Some(Bound::Excluded(value))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
         }
     }
 }
@@ -987,6 +646,42 @@ impl TryCastFrom<Value> for Id {
     }
 }
 
+impl TryCastFrom<Value> for Host {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Link(link) => link.host().is_some() && link.path().is_empty(),
+            Value::String(s) => s.parse::<Host>().is_ok(),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Link(link) if link.path().is_empty() => link.into_host(),
+            Value::String(s) => s.parse().ok(),
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<Value> for Link {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Link(_) => true,
+            Value::String(s) => s.parse::<Link>().is_ok(),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Link(link) => Some(link),
+            Value::String(s) => s.parse().ok(),
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<Value> for Number {
     fn can_cast_from(value: &Value) -> bool {
         match value {
@@ -994,7 +689,7 @@ impl TryCastFrom<Value> for Number {
             Value::Email(_) => false,
             Value::Id(id) => f64::from_str(id.as_str()).is_ok(),
             Value::Link(_) => false,
-            Value::None => true,
+            Value::None => false,
             Value::Number(_) => true,
             Value::Tuple(t) if t.len() == 1 => Self::can_cast_from(&t[0]),
             Value::Tuple(t) if t.len() == 2 => {
@@ -1015,7 +710,7 @@ impl TryCastFrom<Value> for Number {
                 .map(Self::Float)
                 .ok(),
             Value::Link(_) => None,
-            Value::None => Some(false.into()),
+            Value::None => None,
             Value::Number(n) => Some(n),
             Value::Tuple(mut t) if t.len() == 1 => Self::opt_cast_from(t.pop().unwrap()),
             Value::Tuple(mut t) if t.len() == 2 => {
@@ -1038,6 +733,28 @@ impl TryCastFrom<Value> for Number {
             Value::Tuple(_) => None,
             Value::String(s) => Number::from_str(&s).ok(),
             Value::Version(_) => None,
+        }
+    }
+}
+
+impl TryCastFrom<Value> for String {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Link(_) => true,
+            Value::Id(_) => true,
+            Value::Number(_) => true,
+            Value::String(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Link(link) => Some(link.to_string()),
+            Value::Id(id) => Some(id.to_string()),
+            Value::Number(n) => Some(n.to_string()),
+            Value::String(s) => Some(s.into()),
+            _ => None,
         }
     }
 }
@@ -1257,21 +974,25 @@ impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Bytes(bytes) => write!(f, "({} bytes)", bytes.len()),
-            Self::Id(id) => write!(f, "{}: {:?}", ValueType::Id, id.as_str()),
-            Self::Email(email) => write!(f, "{}: {:?}", ValueType::Email, email),
-            Self::Link(link) => write!(f, "{}: {:?}", ValueType::Link, link),
+            Self::Id(id) => write!(f, "{:?} ({})", id.as_str(), ValueType::Id),
+            Self::Email(email) => write!(f, "{:?} ({})", email, ValueType::Email),
+            Self::Link(link) => write!(f, "{:?} ({})", link, ValueType::Link),
             Self::None => f.write_str("None"),
             Self::Number(n) => fmt::Debug::fmt(n, f),
-            Self::String(s) => write!(f, "{}: {}", ValueType::String, s),
-            Self::Tuple(t) => write!(
-                f,
-                "{}: ({})",
-                ValueType::Tuple,
-                t.iter()
-                    .map(|v| format!("{:?}", v))
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            ),
+            Self::String(s) => write!(f, "{} ({})", s, ValueType::String),
+            Self::Tuple(t) => {
+                f.write_str("(")?;
+
+                for i in 0..t.len() {
+                    write!(f, "{:?}", t[i])?;
+
+                    if i < t.len() - 1 {
+                        f.write_str(", ")?;
+                    }
+                }
+
+                f.write_str(")")
+            }
             Self::Version(v) => fmt::Debug::fmt(v, f),
         }
     }
@@ -1322,7 +1043,8 @@ impl ValueVisitor {
         return match class {
             VT::Bytes => {
                 let encoded = map.next_value::<&str>()?;
-                base64::decode(encoded)
+                STANDARD_NO_PAD
+                    .decode(encoded)
                     .map(Value::Bytes)
                     .map_err(serde::de::Error::custom)
             }
@@ -1380,7 +1102,10 @@ impl ValueVisitor {
             return if map.is_empty() {
                 Ok(Value::Link(class.path().into()))
             } else {
-                Err(de::Error::invalid_value(map, "a Value class"))
+                Err(de::Error::invalid_value(
+                    format!("{:?}", map),
+                    "a Value class",
+                ))
             };
         }
 

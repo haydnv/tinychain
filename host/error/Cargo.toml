@@ -1,6 +1,6 @@
 [package]
 name = "tc-error"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "TinyChain's generic error struct"
@@ -12,7 +12,10 @@ keywords = ["tinychain", "error", "service", "mesh"]
 categories = ["rust-patterns"]
 
 [dependencies]
-destream = "0.6"
+destream = "0.7"
+ha-ndarray = "~0.1.1"
 log = { version = "0.4", features = ["release_max_level_info"] }
+pathlink = "0.1"
 serde = "1.0"
-txn_lock = "~0.5.1"
+txn_lock = "0.7"
+txfs = "0.1"

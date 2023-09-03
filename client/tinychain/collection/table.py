@@ -2,17 +2,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Type
 
-from ..decorators import closure, delete, get
 from ..error import BadRequest
 from ..generic import Map, Tuple
 from ..json import to_json
 from ..scalar.bound import Range
 from ..scalar.number import Bool, UInt
 from ..scalar.ref import If, Ref, form_of
-from ..state import State, Stream
+from ..state import State
 from ..uri import URI
 from .base import Collection, Column
-from .btree import BTree
 
 if TYPE_CHECKING:
     from ..service import Model
@@ -69,42 +67,15 @@ class Table(Collection):
 
         return self._get("columns", rtype=Tuple)
 
-    def count(self, where=None):
-        """Return the number of rows in the given slice of this `Table` (or the entire `Table` if no bounds are given)."""
+    def count(self):
+        """Return the number of rows in the given slice of this `Table`."""
 
-        if where is None:
-            return self._get("count", rtype=UInt)
-        else:
-            return self.where(where).count()
+        return self._get("count", rtype=UInt)
 
-    def delete(self, where={}):
-        """
-        Delete all contents of this `Table` matching the specified where clause.
-
-        If no where clause is specified, all contents of this `Table` will be deleted.
-        """
-
-        delete_row = delete(lambda cxt, key: self.delete_row(key))
-        if URI(self).id():
-            delete_row = closure(self)(delete_row)
-
-        to_delete = self.where(where) if where else self
-        return to_delete.select(self.key_names()).rows().for_each(delete_row)
-
-    def delete_row(self, key):
-        """Delete the row with the given key from this `Table`, if it exists."""
+    def delete(self, key):
+        """Delete the row of this `Table` with the given `key`."""
 
         return self._delete("", key)
-
-    def group_by(self, columns):
-        """Return a :class:`Stream` of the unique values of the given columns."""
-
-        return self.order_by(columns).select(columns).rows().aggregate()
-
-    def index(self):
-        """Build a :class:`BTree` index with the values of the given columns."""
-
-        return BTree.copy_from(self.columns(), self.rows())
 
     def insert(self, key, values=[]):
         """
@@ -147,27 +118,20 @@ class Table(Collection):
 
         return self._get("order", (columns, reverse), Table)
 
-    def rows(self, where={}):
-        """Return a :class:`Stream` of the rows in this `Table`."""
-
-        where = _handle_bounds(where)
-        return self._post("rows", where, Stream)
-
     def select(self, columns):
         """Return a `Table` containing only the specified columns."""
 
         return self._get("select", columns, Table)
 
-    def update(self, values, where={}):
-        """Update the specified rows of this table with the given `values`."""
+    def truncate(self):
+        """Delete all rows in this :class:`Table`."""
 
-        update_row = closure(self)(get(lambda cxt, key: self.update_row(key, values)))
-        return self.where(where).select(self.key_names()).index().keys().for_each(update_row)
+        return self.delete("")
 
-    def update_row(self, key, values):
-        """Update the specified row with the given `values`."""
+    def update(self, **values):
+        """Update the rows of this table with the given `values`."""
 
-        return self._put("", key, values)
+        return self._put("", values)
 
     def upsert(self, key, values):
         """
@@ -178,22 +142,40 @@ class Table(Collection):
 
         return self._put("", key, values)
 
-    def where(self, bounds):
+    def where(self, **bounds):
         """
         Return a slice of this `Table` whose column values fall within the specified range.
 
         If there is no index which supports the given range, this will raise a :class:`BadRequest` error.
         """
 
-        bounds = _handle_bounds(bounds)
-        return self._post("", {"bounds": bounds}, Table)
+        if not bounds:
+            return self
+
+        parent = self
+        bounds = handle_bounds(bounds)
+
+        class WriteableView(Table):
+            def delete(self, key):
+                return RuntimeError(f"cannot delete the row at {key} from a slice {self} of a table {parent}")
+
+            def update(self, **values):
+                return parent._put("", [(col, bounds[col]) for col in bounds], values)
+
+            def upsert(self, key, values):
+                return RuntimeError(f"cannot upsert ({key}, {values}) into a slice {self} of a table {parent}")
+
+            def truncate(self):
+                return parent._delete("", [(col, bounds[col]) for col in bounds])
+
+        return self._get("", [(col, bounds[col]) for col in bounds], WriteableView)
 
 
-def _handle_bounds(bounds):
+def handle_bounds(bounds):
     if bounds is None:
         return {}
     elif isinstance(bounds, State):
-        return _handle_bounds(form_of(bounds))
+        return handle_bounds(form_of(bounds))
     elif isinstance(bounds, (Ref, URI)):
         return bounds
 
@@ -203,12 +185,15 @@ def _handle_bounds(bounds):
     }
 
 
+# TODO: move to the graph package
 def create_schema(modelclass: Type[Model]) -> Schema:
-    """Create a table schema for the given model. A key for the table is auto
-    generated using the `class_name` function, then suffixed with '_id'. Each
-    attribute of the model will be considered as a column if it is of type
-    Column or Model.
     """
+    Create a table schema for the given model.
+
+    A key for the table is auto generated using the `class_name` function, then suffixed with '_id'.
+    Each attribute of the model will be considered as a column if it is of type :class:`Column` or :class:`Model`.
+    """
+
     values = []
     indices = []
     base_attributes = set()
@@ -232,4 +217,5 @@ def create_schema(modelclass: Type[Model]) -> Schema:
     schema = Schema(modelclass.key(), values)
     for i in indices:
         schema.create_index(*i)
+
     return schema

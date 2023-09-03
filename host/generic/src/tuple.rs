@@ -23,6 +23,16 @@ pub struct Tuple<T> {
 }
 
 impl<T> Tuple<T> {
+    pub fn new() -> Self {
+        Self { inner: Vec::new() }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            inner: Vec::with_capacity(capacity),
+        }
+    }
+
     pub fn into_inner(self) -> Vec<T> {
         self.inner
     }

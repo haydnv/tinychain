@@ -2,19 +2,19 @@ use std::convert::TryInto;
 use std::fmt;
 
 use async_trait::async_trait;
-use destream::de::Error;
 use log::debug;
 use safecast::TryCastFrom;
 
 use tc_error::*;
+use tc_scalar::{OpRefType, Scalar, ScalarType};
+use tc_state::object::InstanceClass;
+use tc_state::{State, StateType};
+use tc_transact::public::Public;
 use tc_transact::TxnId;
 use tc_value::{Link, Value};
 use tcgeneric::{Map, NativeClass, PathSegment, TCPath, TCPathBuf};
 
-use crate::object::InstanceClass;
-use crate::route::{Public, Static};
-use crate::scalar::{OpRefType, Scalar, ScalarType};
-use crate::state::{State, StateType};
+use crate::public::Static;
 use crate::txn::Txn;
 
 use super::Dispatch;
@@ -25,6 +25,8 @@ pub struct System;
 #[async_trait]
 impl Dispatch for System {
     async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
+        debug!("System::get {path}: {key}", path = TCPath::from(path));
+
         if path.is_empty() {
             if key.is_some() {
                 Err(TCError::not_found(format!(
@@ -36,12 +38,12 @@ impl Dispatch for System {
                 Err(forbidden!("access to /"))
             }
         } else if let Some(class) = ScalarType::from_path(path) {
-            debug!("cast {} into {}", key, class);
+            debug!("cast {} into {:?}", key, class);
 
             Scalar::from(key)
                 .into_type(class)
                 .map(State::Scalar)
-                .ok_or_else(|| bad_request!("cannot case into an instance of {}", class))
+                .ok_or_else(|| bad_request!("cannot case into an instance of {:?}", class))
         } else {
             Static.get(txn, path, key).await
         }
@@ -89,13 +91,13 @@ impl Dispatch for System {
             let extends = Link::from(TCPathBuf::from(path.to_vec()));
 
             let proto =
-                data.try_into_map(|state| TCError::invalid_type(state, "a class prototype"))?;
+                data.try_into_map(|state| TCError::unexpected(state, "a class prototype"))?;
 
             let proto = proto
                 .into_iter()
                 .map(|(key, state)| {
                     Scalar::try_cast_from(state, |s| {
-                        TCError::invalid_type(s, "a Scalar Class attribute")
+                        TCError::unexpected(s, "a Scalar Class attribute")
                     })
                     .map(|scalar| (key, scalar))
                 })
@@ -131,7 +133,7 @@ impl Dispatch for System {
     }
 }
 
-impl fmt::Display for System {
+impl fmt::Debug for System {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("the system dispatcher")
     }

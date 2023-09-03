@@ -1,11 +1,9 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use destream::de::Error;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
@@ -13,12 +11,13 @@ use hyper::{Body, Response};
 use serde::de::DeserializeOwned;
 
 use tc_error::*;
-use tc_transact::{IntoView, TxnId};
+use tc_fs::Gateway as GatewayInstance;
+use tc_state::State;
+use tc_transact::{IntoView, Transaction, TxnId};
 use tcgeneric::{NetworkTime, TCPathBuf};
 
 use crate::gateway::Gateway;
-use crate::state::State;
-use crate::txn::*;
+use crate::txn::Txn;
 
 use super::{Accept, Encoding};
 
@@ -26,11 +25,11 @@ type GetParams = HashMap<String, String>;
 
 /// TinyChain's HTTP server. Should only be used through a [`Gateway`].
 pub struct HTTPServer {
-    gateway: Arc<Gateway>,
+    gateway: Gateway,
 }
 
 impl HTTPServer {
-    pub fn new(gateway: Arc<Gateway>) -> Self {
+    pub fn new(gateway: Gateway) -> Self {
         Self { gateway }
     }
 
@@ -72,7 +71,7 @@ impl HTTPServer {
                 Ok(response) => Body::wrap_stream(response.chain(delimiter(b"\n"))),
                 Err(cause) => {
                     return Ok(transform_error(
-                        unexpected!("JSON encoding error").consume(cause),
+                        internal!("JSON encoding error").consume(cause),
                         Encoding::Json,
                     ))
                 }
@@ -80,13 +79,13 @@ impl HTTPServer {
             Encoding::Tbon => match tbon::en::encode(view) {
                 Ok(response) => {
                     let response =
-                        response.map_err(|cause| unexpected!("TBON encoding error").consume(cause));
+                        response.map_err(|cause| internal!("TBON encoding error").consume(cause));
 
                     Body::wrap_stream(response)
                 }
                 Err(cause) => {
                     return Ok(transform_error(
-                        unexpected!("TBON encoding error").consume(cause),
+                        internal!("TBON encoding error").consume(cause),
                         Encoding::Tbon,
                     ))
                 }
@@ -156,7 +155,7 @@ impl HTTPServer {
             TxnId::new(NetworkTime::now())
         };
 
-        let txn = self.gateway.new_txn(txn_id, token).await?;
+        let txn = self.gateway.clone().new_txn(txn_id, token).await?;
         Ok((params, txn, accept_encoding, content_type))
     }
 
@@ -177,7 +176,8 @@ impl HTTPServer {
 
             &hyper::Method::PUT => {
                 let key = get_param(&mut params, "key")?.unwrap_or_default();
-                let value = destream_body(http_request.into_body(), encoding, txn.clone()).await?;
+                let sub_txn = txn.subcontext_unique().await?;
+                let value = destream_body(http_request.into_body(), encoding, sub_txn).await?;
                 let result = self
                     .gateway
                     .put(txn, path.into(), key, value)
@@ -191,7 +191,8 @@ impl HTTPServer {
             }
 
             &hyper::Method::POST => {
-                let data = destream_body(http_request.into_body(), encoding, txn.clone()).await?;
+                let sub_txn = txn.subcontext_unique().await?;
+                let data = destream_body(http_request.into_body(), encoding, sub_txn).await?;
                 self.gateway.post(txn, path.into(), data).await
             }
 
@@ -203,7 +204,7 @@ impl HTTPServer {
                     .await
             }
 
-            other => Err(TCError::method_not_allowed(other, self, path)),
+            other => Err(TCError::method_not_allowed(other, "HTTP server", path)),
         }
     }
 }
@@ -237,12 +238,6 @@ impl crate::gateway::Server for HTTPServer {
     }
 }
 
-impl fmt::Display for HTTPServer {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("HTTP server")
-    }
-}
-
 async fn destream_body(body: hyper::Body, encoding: Encoding, txn: Txn) -> TCResult<State> {
     const ERR_DESERIALIZE: &str = "error deserializing HTTP request body";
 
@@ -265,9 +260,8 @@ fn get_param<T: DeserializeOwned>(
     name: &str,
 ) -> TCResult<Option<T>> {
     if let Some(param) = params.remove(name) {
-        let val: T = serde_json::from_str(&param).map_err(|cause| {
-            TCError::invalid_value(param, format!("URI parameter {}", name)).consume(cause)
-        })?;
+        let val: T = serde_json::from_str(&param)
+            .map_err(|cause| TCError::unexpected(param, name).consume(cause))?;
 
         Ok(Some(val))
     } else {

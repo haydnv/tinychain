@@ -8,17 +8,18 @@ use futures::join;
 use log::{debug, info};
 
 use tc_error::*;
-use tc_transact::{Transact, Transaction, TxnId};
+use tc_fs::hypothetical;
+use tc_state::chain::BlockChain;
+use tc_state::State;
+use tc_transact::public::{Public, Route};
+use tc_transact::{RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath};
 
-use crate::chain::BlockChain;
 use crate::cluster::{Cluster, Dir, DirEntry, Replica};
-use crate::route::{Public, Route};
-use crate::state::State;
-use crate::txn::Txn;
+use crate::txn::{Hypothetical, Txn};
 
-use super::{hypothetical, Dispatch, Hypothetical};
+use super::Dispatch;
 
 /// The type of the class directory
 pub type Class = Cluster<Dir<crate::cluster::Class>>;
@@ -73,22 +74,22 @@ impl UserSpace {
 #[async_trait]
 impl<T: Transact + Clone + Send + Sync + 'static> Dispatch for Cluster<Dir<T>>
 where
-    Cluster<BlockChain<T>>: Route,
+    Cluster<BlockChain<T>>: Route<State>,
     BlockChain<T>: Replica,
     Dir<T>: Replica,
-    Self: Route,
+    Self: Route<State>,
 {
     async fn get(&self, txn: &Txn, path: &[PathSegment], key: Value) -> TCResult<State> {
         let (suffix, cluster) = self.lookup(*txn.id(), path)?;
-        debug!("GET {}: {} from {}", TCPath::from(suffix), key, cluster);
+        debug!("GET {}: {} from {:?}", TCPath::from(suffix), key, cluster);
         Public::get(&cluster, txn, suffix, key).await
     }
 
     async fn put(&self, txn: &Txn, path: &[PathSegment], key: Value, value: State) -> TCResult<()> {
-        info!("PUT {}: {} <- {}", TCPath::from(path), key, value);
+        info!("PUT {}: {} <- {:?}", TCPath::from(path), key, value);
         let (suffix, cluster) = self.lookup(*txn.id(), path)?;
         debug!(
-            "cluster is {}, endpoint is {}",
+            "cluster is {:?}, endpoint is {}",
             cluster,
             TCPath::from(suffix)
         );
@@ -107,7 +108,12 @@ where
     async fn post(&self, txn: &Txn, path: &[PathSegment], data: State) -> TCResult<State> {
         let params: Map<State> = data.try_into()?;
         let (suffix, cluster) = self.lookup(*txn.id(), path)?;
-        debug!("POST {}: {} to {}", TCPath::from(suffix), params, cluster);
+        debug!(
+            "POST {}: {:?} to {:?}",
+            TCPath::from(suffix),
+            params,
+            cluster
+        );
 
         if suffix.is_empty() && params.is_empty() {
             // it's a commit message
@@ -224,8 +230,8 @@ async fn execute_post<T>(
     params: Map<State>,
 ) -> TCResult<State>
 where
-    T: Replica + Transact + Send + Sync + fmt::Display,
-    Cluster<T>: Route,
+    T: Replica + Transact + Send + Sync + fmt::Debug,
+    Cluster<T>: Route<State>,
 {
     let txn = maybe_claim_leadership(cluster, txn).await?;
 
@@ -243,8 +249,8 @@ async fn execute_put<T>(
     value: State,
 ) -> TCResult<()>
 where
-    T: Replica + Transact + Send + Sync + fmt::Display,
-    Cluster<T>: Route,
+    T: Replica + Transact + Send + Sync + fmt::Debug,
+    Cluster<T>: Route<State>,
 {
     let txn = maybe_claim_leadership(cluster, txn).await?;
 
@@ -253,7 +259,7 @@ where
 
         if !txn.is_leader(cluster.path()) {
             info!(
-                "{} successfully replicated PUT {}",
+                "{:?} successfully replicated PUT {:?}",
                 cluster,
                 TCPath::from(path)
             );
@@ -262,7 +268,7 @@ where
         }
 
         info!(
-            "{} is leading replication of PUT {}",
+            "{:?} is leading replication of PUT {}",
             cluster,
             TCPath::from(path)
         );
@@ -285,8 +291,8 @@ async fn execute_delete<T>(
     key: Value,
 ) -> TCResult<()>
 where
-    T: Replica + Transact + Send + Sync + fmt::Display,
-    Cluster<T>: Route,
+    T: Replica + Transact + Send + Sync + fmt::Debug,
+    Cluster<T>: Route<State>,
 {
     let txn = maybe_claim_leadership(cluster, txn).await?;
 
@@ -325,22 +331,22 @@ fn execute<'a, T, R, Fut, F>(
     handler: F,
 ) -> Pin<Box<dyn Future<Output = TCResult<R>> + Send + 'a>>
 where
-    T: Replica + Transact + Send + Sync + fmt::Display,
+    T: Replica + Transact + Send + Sync + fmt::Debug,
     R: Send + Sync,
     Fut: Future<Output = TCResult<R>> + Send,
     F: FnOnce(Txn, &'a Cluster<T>) -> Fut + Send + 'a,
-    Cluster<T>: Route,
+    Cluster<T>: Route<State>,
 {
     Box::pin(async move {
         if let Some(owner) = txn.owner() {
             if owner.path() == cluster.path() {
-                debug!("{} owns this transaction, no need to notify", cluster);
+                debug!("{:?} owns this transaction, no need to notify", cluster);
             } else if txn.is_leader(cluster.path()) {
                 txn.put(owner, Value::default(), cluster.schema().self_link())
                     .await?;
             } else {
                 debug!(
-                    "{} is not leading this transaction, no need to notify owner",
+                    "{:?} is not leading this transaction, no need to notify owner",
                     cluster
                 );
             }
@@ -353,11 +359,11 @@ where
 
             match &result {
                 Ok(_) => {
-                    debug!("commit {}", cluster);
+                    debug!("commit {:?}", cluster);
                     cluster.distribute_commit(&txn).await?;
                 }
                 Err(cause) => {
-                    info!("rollback {} due to {}", cluster, cause);
+                    info!("rollback {:?} due to {}", cluster, cause);
                     cluster.distribute_rollback(&txn).await;
                 }
             }

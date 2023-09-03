@@ -5,6 +5,8 @@ use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
+use base64::engine::general_purpose::STANDARD_NO_PAD;
+use base64::Engine;
 use bytes::Bytes;
 use collate::{Collate, Collator};
 use destream::{de, en};
@@ -60,6 +62,12 @@ impl Deref for TCString {
     }
 }
 
+impl PartialEq<Id> for TCString {
+    fn eq(&self, other: &Id) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
 impl PartialEq<String> for TCString {
     fn eq(&self, other: &String) -> bool {
         self.as_str() == other.as_str()
@@ -99,7 +107,7 @@ impl From<Number> for TCString {
 impl TryCastFrom<TCString> for Bytes {
     fn can_cast_from(value: &TCString) -> bool {
         if value.ends_with('=') {
-            base64::decode(&value.0).is_ok()
+            STANDARD_NO_PAD.decode(&value.0).is_ok()
         } else {
             hex::decode(&value.0).is_ok()
         }
@@ -107,7 +115,7 @@ impl TryCastFrom<TCString> for Bytes {
 
     fn opt_cast_from(value: TCString) -> Option<Self> {
         if value.ends_with('=') {
-            base64::decode(&value.0).ok().map(Self::from)
+            STANDARD_NO_PAD.decode(&value.0).ok().map(Self::from)
         } else {
             hex::decode(&value.0).ok().map(Self::from)
         }
@@ -176,7 +184,7 @@ impl fmt::Display for TCString {
 }
 
 /// A [`Collator`] for [`TCString`] values.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Eq, PartialEq)]
 pub struct StringCollator {
     collator: Collator<String>,
 }
@@ -184,7 +192,7 @@ pub struct StringCollator {
 impl Collate for StringCollator {
     type Value = TCString;
 
-    fn compare(&self, left: &Self::Value, right: &Self::Value) -> Ordering {
-        self.collator.compare(&left.0, &right.0)
+    fn cmp(&self, left: &Self::Value, right: &Self::Value) -> Ordering {
+        self.collator.cmp(&left.0, &right.0)
     }
 }

@@ -14,27 +14,34 @@ class TableTests(HostTest):
     def testCreate(self):
         cxt = tc.Context()
         cxt.table = tc.table.Table(SCHEMA)
-        cxt.result = tc.after(cxt.table.insert(("name",), (0,)), cxt.table.count())
 
-        count = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(count, 1)
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, expected(SCHEMA, []))
 
     def testDelete(self):
-        count = 2
+        count = 10
         values = [(v,) for v in range(count)]
         keys = [(num2words(i),) for i in range(count)]
 
         cxt = tc.Context()
         cxt.table = tc.table.Table(SCHEMA)
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
-        cxt.delete = tc.after(cxt.inserts, cxt.table.delete())
-        cxt.result = tc.after(cxt.delete, cxt.table)
+        cxt.delete = tc.after(cxt.inserts, cxt.table.delete(("one",)))
+        cxt.result = tc.after(cxt.delete, cxt.table.count())
 
         result = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(result, expected(SCHEMA, []))
+        self.assertEqual(result, count - 1)
 
     def testInsert(self):
-        for x in range(0, 100, 10):
+        cxt = tc.Context()
+        cxt.table = tc.table.Table(SCHEMA)
+        cxt.upsert = cxt.table.upsert((num2words(1),), (1,))
+        cxt.result = tc.after(cxt.upsert, cxt.table.count())
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, 1)
+
+        for x in range(0, 20, 5):
             keys = list(range(x))
             random.shuffle(keys)
 
@@ -75,7 +82,7 @@ class TableTests(HostTest):
 
         expected = {
             str(tc.URI(tc.table.Table)): [
-                tc.to_json(tc.table.Schema([tc.Column("name", tc.String, 512)])),
+                tc.to_json(tc.table.Schema([], [tc.Column("name", tc.String, 512)])),
                 list(sorted(keys))
             ]
         }
@@ -83,46 +90,86 @@ class TableTests(HostTest):
         actual = self.host.post(ENDPOINT, cxt)
 
         self.assertEqual(actual, expected)
-
-
-class SparseTests(HostTest):
-    def testSlice(self):
-        schema = tc.table.Schema([
-            tc.Column("0", tc.U64),
-            tc.Column("1", tc.U64),
-            tc.Column("2", tc.U64),
-            tc.Column("3", tc.U64),
-        ], [
-            tc.Column("value", tc.Number),
-        ])
-
-        for i in range(4):
-            schema.create_index(str(i), [str(i)])
-
-        data = [
-            ([0, 0, 1, 0], 1),
-            ([0, 1, 2, 0], 2),
-            ([1, 0, 0, 0], 3),
-            ([1, 0, 1, 0], 3),
-        ]
+    @unittest.skip
+    def testAggregate(self):
+        count = 10
+        values = [(v % 2,) for v in range(count)]
+        keys = [(num2words(i),) for i in range(count)]
 
         cxt = tc.Context()
-        cxt.table = tc.table.Table(schema)
-        cxt.inserts = [cxt.table.insert(coord, [value]) for (coord, value) in data]
-        cxt.result = tc.after(cxt.inserts, cxt.table.where({
-            "0": slice(2),
-            "1": slice(3),
-            "2": slice(4),
-            "3": slice(1)
-        }))
+        cxt.table = tc.table.Table.load(SCHEMA, [k + v for k, v in zip(keys, values)])
+        cxt.result = cxt.table.aggregate(["views"], lambda group: tc.Tuple(group.count()))
 
-        expect = expected(schema, [coord + [value] for coord, value in data])
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, expect)
+        self.assertEqual(actual, [[[0], 5], [[1], 5]])
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.host.stop()
+    def testTruncateSlice(self):
+        count = 50
+        values = [[v] for v in range(count)]
+        keys = [[num2words(i)] for i in range(count)]
+        remaining = sorted([k + v for k, v in zip(keys, values) if v[0] >= 40])
+
+        cxt = tc.Context()
+        cxt.table = tc.table.Table(SCHEMA)
+        cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
+        cxt.delete = tc.after(cxt.inserts, cxt.table.where(views=slice(40)).truncate())
+        cxt.result = tc.after(cxt.delete, cxt.table)
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, expected(SCHEMA, remaining))
+
+    def testUpdateSlice(self):
+        count = 50
+        values = [[v] for v in range(count)]
+        keys = [[num2words(i)] for i in range(count)]
+
+        cxt = tc.Context()
+        cxt.table = tc.table.Table.load(SCHEMA, [k + v for k, v in zip(keys, values)])
+        cxt.update = cxt.table.where(views=slice(10)).update(views=0)
+        cxt.result = tc.after(cxt.update, cxt.table.where(views=slice(1)).count())
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, 10)
+
+    def testOrderBy(self):
+        count = 50
+        values = [(v,) for v in range(count)]
+        keys = [(num2words(i),) for i in range(count)]
+        rows = list(reversed([list(k + v) for k, v in zip(keys, values)]))
+
+        cxt = tc.Context()
+        cxt.table = tc.table.Table(SCHEMA)
+        cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
+        cxt.result = tc.after(cxt.inserts, cxt.table.order_by(["views"], True))
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, expected(SCHEMA, rows))
+
+    def testSlice(self):
+        count = 50
+        values = [(v,) for v in range(count)]
+        keys = [(num2words(i),) for i in range(count)]
+
+        cxt = tc.Context()
+        cxt.table = tc.table.Table(SCHEMA)
+        cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
+        cxt.result = tc.after(cxt.inserts, cxt.table.where(name="one"))
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, expected(SCHEMA, [["one", 1]]))
+
+    def testSliceAuxiliaryIndex(self):
+        count = 50
+        values = [(v,) for v in range(count)]
+        keys = [(num2words(i),) for i in range(count)]
+
+        cxt = tc.Context()
+        cxt.table = tc.table.Table(SCHEMA)
+        cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
+        cxt.result = tc.after(cxt.inserts, cxt.table.where(views=slice(10, 20)))
+
+        result = self.host.post(ENDPOINT, cxt)
+        self.assertEqual(result, expected(SCHEMA, list([[num2words(i), i] for i in range(10, 20)])))
 
 
 def expected(schema, rows):

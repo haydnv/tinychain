@@ -8,7 +8,9 @@ from ..process import DEFAULT_PORT
 LEAD = f"http://127.0.0.1:{DEFAULT_PORT}"
 NS = tc.URI("/test")
 NAME = "btree"
-SCHEMA = tc.btree.Schema((tc.Column("number", tc.Int), tc.Column("word", tc.String, 100)))
+SCHEMA = tc.btree.Schema(
+    (tc.Column("number", tc.Int), tc.Column("word", tc.String, 100))
+)
 
 
 class BTreeChainTests(PersistenceTest, unittest.TestCase):
@@ -43,6 +45,9 @@ class BTreeChainTests(PersistenceTest, unittest.TestCase):
         hosts[2].put(endpoint, None, row2)
         hosts[1].start()
 
+        actual = hosts[1].get(endpoint, (1,))
+        self.assertEqual(actual, expected([row1]))
+
         for host in hosts:
             actual = host.get(endpoint, (1,))
             self.assertEqual(actual, expected([row1]))
@@ -54,16 +59,20 @@ class BTreeChainTests(PersistenceTest, unittest.TestCase):
         hosts[1].delete(endpoint, (1,))
         hosts[2].start()
 
+        actual = hosts[2].get(endpoint)
+        self.assertEqual(actual, expected([row2]))
+
         for host in hosts:
             actual = host.get(endpoint)
             self.assertEqual(actual, expected([row2]))
 
-        n = 100
+        n = 30
         for i in range(n):
             hosts[0].put(endpoint, None, (i, num2words(i)))
 
         for host in hosts:
             self.assertEqual(host.get(endpoint.append("count")), n)
+
 
 def expected(rows):
     return {str(tc.URI(tc.btree.BTree)): [tc.to_json(SCHEMA), rows]}

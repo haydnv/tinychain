@@ -1,29 +1,31 @@
 //! A replicated, versioned, stateless [`Library`]
 
-use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::ops::Deref;
 
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::future::TryFutureExt;
+use futures::join;
+use futures::TryStreamExt;
 use get_size::GetSize;
 use get_size_derive::*;
-use log::{error, info};
 use safecast::{AsType, TryCastFrom};
 
 use tc_error::*;
-use tc_transact::fs::{BlockData, Dir, File, FileRead, FileWrite, Persist};
+use tc_scalar::{OpDef, Scalar};
+use tc_state::object::ObjectType;
+use tc_state::State;
+use tc_transact::fs::Persist;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
-use tcgeneric::{Instance, Map, PathSegment};
+use tcgeneric::{label, Instance, Label, Map, PathSegment};
 
-use crate::fs;
-use crate::object::ObjectType;
-use crate::scalar::{OpDef, Scalar};
-use crate::state::State;
 use crate::txn::Txn;
 
 use super::DirItem;
+
+pub(super) const LIB: Label = label("lib");
 
 /// A version of a [`Library`]
 #[derive(Clone, GetSize)]
@@ -105,48 +107,43 @@ impl<'en> en::ToStream<'en> for Version {
     }
 }
 
-impl BlockData for Version {
-    fn ext() -> &'static str {
-        "lib"
-    }
-}
-
-impl fmt::Display for Version {
+impl fmt::Debug for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "library version {}", self.lib)
+        write!(f, "library version {:?}", self.lib)
     }
 }
 
 /// A versioned collection of [`Scalar`]s
 #[derive(Clone)]
 pub struct Library {
-    file: fs::File<VersionNumber, Version>,
+    dir: tc_fs::Dir,
+    versions: tc_fs::File<Map<Scalar>>,
 }
 
 impl Library {
     pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
-        self.file
-            .read(txn_id)
-            .map_ok(|file| file.block_ids().iter().last().cloned())
-            .await
+        let block_ids = self.versions.block_ids(txn_id).await?;
+
+        Ok(block_ids
+            .last()
+            .map(|id| id.as_str().parse().expect("version number")))
     }
 
     pub async fn get_version(
         &self,
         txn_id: TxnId,
         number: &VersionNumber,
-    ) -> TCResult<fs::BlockReadGuard<Version>> {
-        let file = self.file.read(txn_id).await?;
-        file.read_block(number).await
+    ) -> TCResult<impl Deref<Target = Map<Scalar>>> {
+        self.versions.read_block(txn_id, &(*number).into()).await
     }
 
     pub async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
-        let file = self.file.read(txn_id).await?;
+        let mut blocks = self.versions.iter(txn_id).await?;
 
         let mut map = Map::new();
-        for number in file.block_ids() {
-            let block = file.read_block(number).await?;
-            map.insert(number.clone().into(), (&*block).clone().into());
+        while let Some((number, block)) = blocks.try_next().await? {
+            let number = number.as_str().parse()?;
+            map.insert(number, (&*block).clone().into());
         }
 
         Ok(State::Map(map))
@@ -164,66 +161,58 @@ impl DirItem for Library {
         number: VersionNumber,
         schema: Map<Scalar>,
     ) -> TCResult<Version> {
-        let mut file = self.file.write(*txn.id()).await?;
-        if file.contains(&number) {
-            error!("duplicate library version {}", number);
+        let version = validate(schema)?;
 
-            Err(bad_request!("{} already has a version {}", self, number))
-        } else {
-            info!("create new library version {}", number);
-            let version = Version::from(validate(schema)?);
-            file.create_block(number, version.clone())
-                .map_ok(|_| ())
-                .await?;
+        self.versions
+            .create_block(*txn.id(), number.into(), version.clone())
+            .map_ok(|_| ())
+            .await?;
 
-            Ok(version)
-        }
+        Ok(version.into())
     }
 }
 
 #[async_trait]
 impl Transact for Library {
-    type Commit = <fs::File<VersionNumber, Version> as Transact>::Commit;
+    type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
-        self.file.commit(txn_id).await
+        join!(self.dir.commit(txn_id, false), self.versions.commit(txn_id));
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        self.file.rollback(txn_id).await
+        join!(
+            self.dir.rollback(*txn_id, false),
+            self.versions.rollback(txn_id)
+        );
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.file.finalize(txn_id).await
+        join!(self.dir.finalize(*txn_id), self.versions.finalize(txn_id));
     }
 }
 
-impl Persist<fs::Dir> for Library {
+#[async_trait]
+impl Persist<tc_fs::CacheBlock> for Library {
     type Txn = Txn;
     type Schema = ();
 
-    fn create(txn_id: TxnId, _schema: (), store: fs::Store) -> TCResult<Self> {
-        let file = super::dir::File::try_from(store)?;
-        let versions = file.try_read(txn_id)?;
-        if versions.is_empty() {
-            Ok(Self { file })
-        } else {
-            Err(bad_request!(
-                "cannot create a new library from a non-empty file"
-            ))
-        }
+    async fn create(txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
+        let versions = dir.create_file(txn_id, LIB.into()).await?;
+        Ok(Self { dir, versions })
     }
 
-    fn load(_txn_id: TxnId, _schema: (), store: fs::Store) -> TCResult<Self> {
-        store.try_into().map(|file| Self { file })
+    async fn load(txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
+        let versions = dir.get_file(txn_id, &LIB.into()).await?;
+        Ok(Self { dir, versions })
     }
 
-    fn dir(&self) -> <fs::Dir as Dir>::Inner {
-        self.file.clone().into_inner()
+    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
+        self.dir.clone().into_inner()
     }
 }
 
-impl fmt::Display for Library {
+impl fmt::Debug for Library {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("library")
     }

@@ -47,7 +47,7 @@ docker build --build-arg "CRATE=--git=https://github.com/haydnv/tinychain.git" .
 
 # --address=0.0.0.0 tells the TinyChain process inside the Docker container to listen on any address
 # you can also add other startup parameters like --http_port, --cache_size, --help, etc
-docker run -d -p 127.0.0.1:8702:8702/tcp <image ID> /tinychain --address=0.0.0.0
+docker run -d -p 127.0.0.1:8702:8702/tcp <image ID> /tinychain --data_dir=/data --address=0.0.0.0
 ```
 
 Check that your Dockerized TinyChain host is up and running by visiting [http://localhost:8702/state/scalar/value/string?key=%22Hello,%20World!%22](http://localhost:8702/state/scalar/value/string?key=%22Hello,%20World!%22) in your browser.
@@ -79,4 +79,3 @@ By contributing code to the TinyChain project, you represent that you own the co
 ## Code of Conduct
 
 This project follows the [IndieWeb code of conduct](https://indieweb.org/code-of-conduct).
-

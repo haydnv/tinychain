@@ -62,7 +62,9 @@ class Range(object):
 
     @staticmethod
     def from_slice(s):
-        return Range(In(s.start), Ex(s.stop))
+        start = None if s.start is None else In(s.start)
+        stop = None if s.stop is None else Ex(s.stop)
+        return Range(start, stop)
 
     def to_slice(self):
         start = self.start.value if self.start else None
