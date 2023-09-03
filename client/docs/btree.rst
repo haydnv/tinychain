@@ -3,3 +3,4 @@
 
 .. automodule:: tinychain.collection.btree
     :members:
+    :show-inheritance:

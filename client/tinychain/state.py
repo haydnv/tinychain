@@ -108,7 +108,7 @@ class Object(State):
     __uri__ = URI(State) + "/object"
 
 
-T = typing.TypeVar("T", bound=type[State])
+T = typing.TypeVar("T")
 
 
 class Class(Object, typing.Generic[T]):

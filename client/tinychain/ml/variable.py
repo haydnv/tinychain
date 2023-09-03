@@ -8,7 +8,7 @@ from ..scalar.number import Number
 from ..scalar.ref import form_of
 
 
-DType = typing.TypeVar("DType", bound=type[Number])
+DType = typing.TypeVar("DType")
 
 
 # TODO: support Sparse and Number variable types
