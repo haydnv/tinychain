@@ -1,3 +1,5 @@
+//! Public API endpoints for a [`Collection`]
+
 use safecast::{AsType, CastInto, TryCastFrom};
 use tc_error::TCError;
 use tc_scalar::Scalar;

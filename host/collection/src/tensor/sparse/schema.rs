@@ -1,3 +1,5 @@
+//! Tensor schema types
+
 use std::{fmt, io};
 
 use tc_error::*;

@@ -1,3 +1,5 @@
+//! Public API endpoints for a [`Tensor`].
+
 use std::convert::TryInto;
 use std::fmt;
 use std::marker::PhantomData;
@@ -1783,6 +1785,7 @@ where
     }
 }
 
+/// Static API handler
 pub struct Static;
 
 impl<State> Route<State> for Static

@@ -14,6 +14,7 @@ use crate::btree::{BTreeSchema as IndexSchema, Column};
 use crate::table::{Key, Range};
 
 #[derive(Clone, Eq, PartialEq)]
+/// The schema of a table
 pub struct TableSchema {
     key: Vec<Id>,
     values: Vec<Id>,

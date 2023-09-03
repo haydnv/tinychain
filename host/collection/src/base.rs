@@ -22,6 +22,7 @@ use super::tensor::{
 use super::{BTreeNode, Collection, CollectionType, CollectionView, Schema, TensorNode};
 
 #[derive(Clone)]
+/// The base type of a mutable transactional collection of data.
 pub enum CollectionBase<Txn, FE> {
     BTree(BTreeFile<Txn, FE>),
     Table(TableFile<Txn, FE>),
@@ -33,7 +34,7 @@ where
     Txn: Transaction<FE>,
     FE: AsType<BTreeNode> + ThreadSafe,
 {
-    /// Get the [`Schema`] of this [`Collection`]
+    /// Return the [`Schema`] of this [`Collection`]
     pub fn schema(&self) -> Schema {
         match self {
             Self::BTree(btree) => btree.schema().clone().into(),

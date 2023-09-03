@@ -17,7 +17,7 @@ async-trait = "0.1"
 bytes = "1.4"
 destream = "0.7"
 futures = "0.3"
-freqfs = { path = "../../../freqfs", features = ["all"] }
+freqfs = { version = "~0.8.2", features = ["all"] }
 get-size = "0.1"
 get-size-derive = "0.1"
 log = { version = "0.4", features = ["release_max_level_info"] }
@@ -25,12 +25,12 @@ num_cpus = "1.15"
 rjwt = "0.4"
 safecast = "0.2"
 tbon = "0.5"
-tcgeneric = { path = "../generic" }
-tc-chain = { path = "../chain" }
-tc-collection = { path = "../collection" }
-tc-error = { path = "../error" }
-tc-scalar = { path = "../scalar" }
-tc-transact = { path = "../transact" }
-tc-value = { path = "../value" }
-tokio = { version = "1.29", features = ["rt-multi-thread", "signal"] }
+tcgeneric = "0.7"
+tc-chain = "0.1"
+tc-collection = "0.1"
+tc-error = "0.8"
+tc-scalar = "0.1"
+tc-transact = "0.17"
+tc-value = "0.9"
+tokio = { version = "1.32", features = ["rt-multi-thread", "signal"] }
 tokio-util = { version = "0.7", features = ["io"] }

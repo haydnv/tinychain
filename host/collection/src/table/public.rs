@@ -1,3 +1,5 @@
+//! Public API endpoints for a [`Table`]
+
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;

@@ -1,3 +1,5 @@
+//! Public API endpoints for a [`BTree`]
+
 use std::iter::FromIterator;
 use std::ops::Bound;
 

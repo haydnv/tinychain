@@ -1,6 +1,6 @@
 [package]
 name = "tc-value"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "TinyChain's representation of a value which can be collated and stored."
@@ -26,10 +26,10 @@ handlebars = "4.3"
 hex = "0.4"
 log = { version = "0.4", features = [] }
 number-general = { version = "0.10", features = ["hash", "serde", "stream"] }
-pathlink = { path = "../../../pathlink", features = ["all"] }
+pathlink = { version = "0.1", features = ["all"] }
 safecast = "0.2"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0", features = [] }
-tcgeneric = { path = "../generic" }
-tc-error = { path = "../error" }
+tcgeneric = "0.7"
+tc-error = "0.8"
 uuid = { version = "1.4", features = ["v4"] }
