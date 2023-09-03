@@ -19,12 +19,6 @@ RUN apt-get install -y gnupg2 ca-certificates apt-utils software-properties-comm
 
 RUN apt-get install -y build-essential
 
-RUN apt-key adv --fetch-key https://repo.arrayfire.com/GPG-PUB-KEY-ARRAYFIRE-2020.PUB
+RUN . $HOME/.cargo/env && cargo install tinychain $CRATE
 
-RUN echo "deb [arch=amd64] https://repo.arrayfire.com/ubuntu focal main" | tee /etc/apt/sources.list.d/arrayfire.list
-
-RUN apt-get update && apt-get install -y arrayfire
-
-RUN . $HOME/.cargo/env && cargo install tinychain --features=tensor $CRATE
-
-RUN ln -s $HOME/.cargo/bin/tinychain tinychain
+RUN ln -s $HOME/.cargo/bin/tinychain tinychain --data_dir=/tmp/data
