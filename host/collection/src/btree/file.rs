@@ -17,6 +17,8 @@ use tc_transact::{fs, Transact, Transaction, TxnId};
 use tc_value::ValueCollator;
 use tcgeneric::{label, Instance, Label, TCBoxTryStream, ThreadSafe};
 
+use crate::finalize_dir;
+
 use super::schema::BTreeSchema;
 use super::slice::BTreeSlice;
 use super::stream::Keys;
@@ -678,6 +680,8 @@ where
         }
 
         self.semaphore.finalize(txn_id, true);
+
+        finalize_dir(&self.dir, txn_id).await;
     }
 }
 

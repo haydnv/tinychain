@@ -316,3 +316,14 @@ impl<'en> en::IntoStream<'en> for CollectionView<'en> {
         map.end()
     }
 }
+
+async fn finalize_dir<FE: Send + Sync>(dir: &freqfs::DirLock<FE>, txn_id: &TxnId) {
+    let dir = dir.read().await;
+
+    let versions = dir
+        .get_dir(tc_transact::fs::VERSIONS)
+        .expect("transactional versions directory");
+
+    let mut versions = versions.write().await;
+    versions.delete(txn_id);
+}

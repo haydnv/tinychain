@@ -19,6 +19,7 @@ use tc_transact::{fs, Transact, Transaction, TxnId};
 use tc_value::{DType, Number, NumberType};
 use tcgeneric::{label, Instance, Label, ThreadSafe};
 
+use crate::finalize_dir;
 use crate::tensor::dense::DenseCacheFile;
 use crate::tensor::sparse::{Blocks, Elements};
 use crate::tensor::{
@@ -606,6 +607,8 @@ where
         }
 
         self.canon.finalize(txn_id);
+
+        finalize_dir(&self.dir, txn_id).await;
     }
 }
 

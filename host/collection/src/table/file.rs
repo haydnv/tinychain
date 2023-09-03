@@ -19,6 +19,7 @@ use tc_value::{Value, ValueCollator};
 use tcgeneric::{label, Id, Instance, Label, Map, TCBoxTryStream, ThreadSafe};
 
 use crate::btree::{BTreeSchema as IndexSchema, BTreeSchema, Node};
+use crate::finalize_dir;
 use crate::table::TableUpdate;
 
 use super::stream::Rows;
@@ -860,6 +861,8 @@ where
         }
 
         self.semaphore.finalize(txn_id, true);
+
+        finalize_dir(&self.dir, txn_id).await;
     }
 }
 
