@@ -31,7 +31,7 @@ export PYTHONPATH=$PYTHONPATH:/<path to your clone of the repo>/client
 Then, try running the client tests to make sure you've got everything configured correctly:
 
 ```
-python3 tests/client
+python3 -m tests.tctest.client
 ```
 
 There are some more tests in the `tests/host` directory--don't worry about those yet. They require starting multiple hosts programmatically, which is covered in the next section on "Rust Development".
@@ -59,7 +59,7 @@ Now that you have your own host running, you can run your client tests against i
 export TC_HOST=http://127.0.0.1:8702
 
 # run the tests
-python3 tests/client
+python3 -m tests.tctest.client
 ```
 
 ## Rust Development
@@ -67,7 +67,7 @@ python3 tests/client
 If you need to make changes to the TinyChain host software itself, you'll need to run it locally. Follow the steps in the "Manual Install" section of `INSTALL.md` to set up Rust and ArrayFire, then check that you've gotten everything set up correctly by running the host tests:
 
 ```bash
-python3 tests/host
+python3 -m tests.tctest.host
 ```
 
 If you have any problems, first check that you have all your environment variables set correctly. If `PYTHONPATH`, `AF_PATH`, and `LD_LIBRARY_PATH` are all set correctly and your installation still doesn't behave as expected, [create an issue](https://github.com/haydnv/tinychain/issues) to get help.
