@@ -21,4 +21,6 @@ RUN apt-get install -y build-essential
 
 RUN . $HOME/.cargo/env && cargo install tinychain $CRATE
 
-RUN ln -s $HOME/.cargo/bin/tinychain tinychain --data_dir=/tmp/data
+RUN ln -s $HOME/.cargo/bin/tinychain tinychain
+
+RUN mkdir -p /tmp/data
