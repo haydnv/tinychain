@@ -26,8 +26,8 @@ class DataStructures(tc.service.Service):
         table_schema = tc.table.Schema([("x", tc.I32)], [("y", tc.I32)]).create_index("y", ["y"])
         self.table = chain_type(tc.table.Table(table_schema))
 
-        self.tensor1 = chain_type(tc.tensor.Dense(([100, 50], tc.F32)))
-        self.tensor2 = chain_type(tc.tensor.Dense(([50, 1], tc.F32)))
+        self.tensor1 = chain_type(tc.tensor.Dense((tc.F32, [100, 50])))
+        self.tensor2 = chain_type(tc.tensor.Dense((tc.F32, [50, 1])))
 
         tc.service.Service.__init__(self)
 
@@ -37,7 +37,7 @@ class DataStructures(tc.service.Service):
 
     @tc.post
     def btree_multi(self, start: tc.UInt, stop: tc.UInt):
-        return tc.Stream.range((start, stop)).for_each(tc.get(lambda i: self.btree.insert([i])))
+        return tc.Tuple.range((start, stop)).for_each(tc.get(lambda i: self.btree.insert([i])))
 
     @tc.put
     def table_upsert(self, value: tc.UInt):

@@ -34,7 +34,7 @@ class ServiceVersionTests(unittest.TestCase):
         print()
         print()
 
-        endpoint = tc.URI(TestServiceV0).path()[:-2]
+        endpoint = tc.URI(TestService).path()[:-2]
 
         for i in range(len(hosts)):
             print()
