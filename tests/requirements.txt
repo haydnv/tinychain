@@ -8,7 +8,7 @@ idna==3.3
 isort==5.10.1
 mypy-extensions==0.4.3
 num2words==0.5.10
-numpy==1.22.4
+numpy==1.26
 pathspec==0.9.0
 platformdirs==2.5.2
 requests==2.31.0
