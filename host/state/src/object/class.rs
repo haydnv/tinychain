@@ -8,13 +8,13 @@ use async_trait::async_trait;
 use destream::{de, en};
 use get_size::GetSize;
 use get_size_derive::*;
-use safecast::{CastFrom, TryCastFrom};
+use safecast::*;
 
 use tc_scalar::*;
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, NativeClass, PathLabel};
 
-use crate::StateType;
+use crate::{State, StateType};
 
 use super::ObjectType;
 
@@ -160,6 +160,7 @@ impl TryCastFrom<Scalar> for InstanceClass {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
             Scalar::Ref(tc_ref) => Self::can_cast_from(&**tc_ref),
+            Scalar::Tuple(tuple) => tuple.matches::<(Link, Map<Scalar>)>(),
             Scalar::Value(value) => Self::can_cast_from(value),
             _ => false,
         }
@@ -168,6 +169,10 @@ impl TryCastFrom<Scalar> for InstanceClass {
     fn opt_cast_from(scalar: Scalar) -> Option<Self> {
         match scalar {
             Scalar::Ref(tc_ref) => Self::opt_cast_from(*tc_ref),
+            Scalar::Tuple(tuple) => {
+                let (extends, proto) = tuple.opt_cast_into()?;
+                Some(Self::cast_from((extends, proto)))
+            }
             Scalar::Value(value) => Self::opt_cast_from(value),
             _ => None,
         }
@@ -184,6 +189,18 @@ impl CastFrom<InstanceClass> for Scalar {
                 class.proto,
             )))))
         }
+    }
+}
+
+impl CastFrom<InstanceClass> for (Link, Map<State>) {
+    fn cast_from(class: InstanceClass) -> Self {
+        let proto = class
+            .proto
+            .into_iter()
+            .map(|(key, scalar)| (key, State::Scalar(scalar)))
+            .collect();
+
+        (class.extends, proto)
     }
 }
 
@@ -280,7 +297,11 @@ impl<'en> en::IntoStream<'en> for InstanceClass {
 
 impl fmt::Debug for InstanceClass {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a Class")
+        write!(
+            f,
+            "Class which extends {} with prototype {:?}",
+            self.extends, self.proto
+        )
     }
 }
 

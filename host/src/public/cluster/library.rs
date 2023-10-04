@@ -1,4 +1,4 @@
-use log::debug;
+use log::{debug, trace};
 use safecast::TryCastFrom;
 
 use tc_error::*;
@@ -82,6 +82,11 @@ impl<'a> Handler<'a, State> for LibraryHandler<'a> {
                     let (version, classes) = extract_classes(version)?;
 
                     if !classes.is_empty() && txn.is_leader(link.path()) {
+                        debug!(
+                            "library defines {} classes to host under /class",
+                            classes.len()
+                        );
+
                         let mut class_path = TCPathBuf::from(CLASS);
                         class_path.extend(link.path()[1..].iter().cloned());
 
@@ -190,6 +195,9 @@ impl<'a> Handler<'a, State> for DirHandler<'a, Library> {
                         .await
                 } else {
                     if txn.is_leader(parent_dir_path) {
+                        debug!("library depends on {} classes", classes.len());
+                        trace!("replicate classes {classes:?} at {name} in {class_dir_path}...");
+
                         txn.put(
                             class_dir_path,
                             name.clone(),

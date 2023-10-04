@@ -51,11 +51,12 @@ impl Replica for BlockChain<crate::cluster::Class> {
         let latest_version = self.subject().latest(*txn.id()).await?;
         for (number, version) in classes {
             let number: VersionNumber = number.as_str().parse()?;
-            if let Some(latest) = latest_version {
-                if number > latest {
-                    self.put(txn, &[], number.into(), version.into()).await?;
-                }
-            } else {
+
+            if latest_version
+                .map(|latest| number > latest)
+                .unwrap_or(false)
+            {
+                debug!("replicating new class set version {number}: {version:?}");
                 self.put(txn, &[], number.into(), version.into()).await?;
             }
         }
