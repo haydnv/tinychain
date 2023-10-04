@@ -1,6 +1,6 @@
 [package]
 name = "tc-fs"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "TinyChain's transactional filesystem interface layer"

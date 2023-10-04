@@ -86,37 +86,45 @@ impl TxnServer {
     where
         G: Gateway,
     {
-        let mut active = self.active.write().await;
+        let expired = {
+            let mut active = self.active.write().await;
 
-        let expired = active
-            .iter()
-            .filter(|(_, active)| active.expires() <= &now)
-            .map(|(txn_id, _)| txn_id)
-            .copied()
-            .collect::<Vec<TxnId>>();
+            let expired = active
+                .iter()
+                .filter(|(_, active)| active.expires() <= &now)
+                .map(|(txn_id, _)| txn_id)
+                .copied()
+                .collect::<Vec<TxnId>>();
+
+            for txn_id in &expired {
+                active.remove(txn_id);
+            }
+
+            expired
+        };
+
+        if expired.is_empty() {
+            return;
+        }
+
+        debug!("TxnServer::finalize_expired");
+
+        for txn_id in expired.iter().copied() {
+            gateway.finalize(txn_id).await;
+        }
+
+        let mut workspace = self.workspace.write().await;
 
         for txn_id in expired {
-            assert!(active.remove(&txn_id).is_some());
-
-            gateway.finalize(txn_id).await;
-
-            let workspace = {
-                let workspace = self.workspace.read().await;
-                workspace.get_dir(&txn_id).cloned()
-            };
-
-            if let Some(workspace) = workspace {
-                workspace
-                    .write()
-                    .await
-                    .truncate_and_sync()
-                    .await
-                    .expect("finalize txn workspace");
-            }
+            workspace.delete(&txn_id).await;
         }
+
+        workspace.sync().await.expect("sync workspace dir");
     }
 
     async fn txn_dir(&self, txn_id: TxnId) -> TCResult<DirLock<CacheBlock>> {
+        debug!("TxnServer::txn_dir");
+
         let mut workspace = self.workspace.write().await;
 
         workspace

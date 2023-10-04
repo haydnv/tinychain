@@ -13,7 +13,7 @@ use destream::ArrayAccess;
 use futures::future::TryFutureExt;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use log::debug;
-use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
+use safecast::*;
 
 use tc_chain::{ChainType, ChainVisitor};
 use tc_collection::btree::BTreeType;
@@ -1168,6 +1168,7 @@ impl TryCastFrom<State> for InstanceClass {
         match state {
             State::Object(Object::Class(_)) => true,
             State::Scalar(scalar) => Self::can_cast_from(scalar),
+            State::Tuple(tuple) => tuple.matches::<(Link, Map<Scalar>)>(),
             _ => false,
         }
     }
@@ -1176,6 +1177,10 @@ impl TryCastFrom<State> for InstanceClass {
         match state {
             State::Object(Object::Class(class)) => Some(class),
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            State::Tuple(tuple) => {
+                let (extends, proto) = tuple.opt_cast_into()?;
+                Some(Self::cast_from((extends, proto)))
+            }
             _ => None,
         }
     }

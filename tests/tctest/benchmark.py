@@ -1,11 +1,9 @@
 import os.path
 import shutil
 
-import aiohttp
 import argparse
 import asyncio
 import inspect
-import json
 import logging
 import random
 import time
@@ -72,6 +70,7 @@ class Benchmark(object):
             yield item
 
     async def run(self, requests, concurrency):
+        requests = [pause_and_run(request) for request in requests]
         responses = []
 
         start = time.time()
@@ -142,3 +141,9 @@ async def main(benchmarks):
             benchmark.stop()
             # clean the workspace again after running a benchmark
             shutil.rmtree(WORKSPACE)
+
+
+async def pause_and_run(task, pause_length = None):
+    pause_length = (random.random() / 10) if pause_length is None else pause_length
+    await asyncio.sleep(pause_length)
+    return await task

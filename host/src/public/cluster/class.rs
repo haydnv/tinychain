@@ -1,9 +1,9 @@
 use log::debug;
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::{CastInto, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_scalar::OpRefType;
-use tc_state::object::InstanceClass;
+use tc_state::object::{InstanceClass, Object};
 use tc_state::State;
 use tc_transact::public::{
     DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route,
@@ -165,7 +165,7 @@ impl<'a> Handler<'a, State> for DirHandler<'a, Class> {
     {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                debug!("create new Class directory entry at {}", key);
+                debug!("create new Class directory entry at {key} with classes {value:?}");
 
                 let name = PathSegment::try_cast_from(key, |v| {
                     TCError::unexpected(v, "a path segment for a Class directory entry")
@@ -176,9 +176,23 @@ impl<'a> Handler<'a, State> for DirHandler<'a, Class> {
                         let link = value.opt_cast_into().expect("class dir link");
                         (link, None)
                     } else {
-                        let (link, classes): (Link, Map<State>) = value.try_cast_into(|s| {
-                            TCError::unexpected(s, "a tuple (Link, (Class...)) but found")
-                        })?;
+                        // TODO: is there a better way to implement this?
+                        let (link, classes) = match value {
+                            State::Object(Object::Class(class)) => Ok(class.cast_into()),
+                            State::Scalar(scalar) => scalar.try_cast_into(|s| {
+                                bad_request!(
+                                    "invalid class set {name}: {s:?}, expected (Link, (Class...))"
+                                )
+                            }),
+                            State::Tuple(tuple) => tuple.try_cast_into(|s| {
+                                bad_request!(
+                                    "invalid class set {name}: {s:?}, expected (Link, (Class...))"
+                                )
+                            }),
+                            other => Err(bad_request!(
+                                "invalid class set {name}: {other:?}, expected (Link, (Class...))"
+                            )),
+                        }?;
 
                         let classes = classes
                             .into_iter()
