@@ -19,7 +19,10 @@ pub use tc_error::*;
 pub mod cluster;
 pub mod gateway;
 pub mod kernel;
-pub mod txn;
+pub mod txn {
+    pub type Hypothetical = tc_fs::hypothetical::Hypothetical<tc_state::State>;
+    pub type Txn = tc_fs::Txn<tc_state::State>;
+}
 
 mod http;
 mod public;
