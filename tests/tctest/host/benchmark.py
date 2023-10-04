@@ -78,8 +78,6 @@ async def start_and_install_deps(chain_type, actor, **flags):
 
     host = start_local_host_async(NS, **flags)
 
-    uri = tc.URI(tc.ml.NeuralNets)
-
     start = time.time()
     response = await host.create_namespace(actor, tc.URI(tc.service.Library), tc.ml.NS, LEAD)
     assert response.status == 200, await response.text()
@@ -179,7 +177,7 @@ class ConcurrentWriteBenchmarks(benchmark.Benchmark):
 
 class LoadBenchmarks(benchmark.Benchmark):
     CONCURRENCY = 100
-    SCALES = [1, 5, 10, 100, 1000]
+    SCALES = [1, 5, 10, 100]
 
     def __init__(self):
         self._base_path = tc.URI(DataStructures).path()
