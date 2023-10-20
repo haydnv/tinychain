@@ -78,4 +78,4 @@ By contributing code to the TinyChain project, you represent that you own the co
 
 ## Code of Conduct
 
-This project follows the [IndieWeb code of conduct](https://indieweb.org/code-of-conduct).
+This project follows the [Contributor Covenant](https://www.contributor-covenant.org/) code of conduct.
