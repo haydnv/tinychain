@@ -1,8 +1,10 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::iter::FromIterator;
+use std::mem::size_of;
 use std::ops::{Bound, Deref};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use async_hash::generic_array::GenericArray;
 use async_hash::{Digest, Hash, Output};
@@ -17,6 +19,7 @@ use get_size::GetSize;
 use safecast::{as_type, CastFrom, CastInto, TryCastFrom, TryCastInto};
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, SerializeMap, Serializer};
+use smallvec::SmallVec;
 use uuid::Uuid;
 
 use tc_error::*;
@@ -34,8 +37,8 @@ const EXPECTING: &'static str = "a TinyChain value, e.g. 1 or \"two\" or [3]";
 /// A generic value enum
 #[derive(Clone)]
 pub enum Value {
-    Bytes(Vec<u8>),
-    Email(EmailAddress),
+    Bytes(Arc<[u8]>),
+    Email(Arc<EmailAddress>),
     Link(Link),
     Id(Id),
     None,
@@ -49,7 +52,11 @@ impl GetSize for Value {
     fn get_size(&self) -> usize {
         match self {
             Self::Bytes(bytes) => bytes.get_size(),
-            Self::Email(email) => email.get_local_part().get_size() + email.get_domain().get_size(),
+            Self::Email(email) => {
+                size_of::<Arc<EmailAddress>>()
+                    + email.get_local_part().get_size()
+                    + email.get_domain().get_size()
+            }
             Self::Link(link) => link.get_size(),
             Self::Id(id) => id.get_size(),
             Self::None => 0,
@@ -128,8 +135,8 @@ impl Default for Value {
     }
 }
 
-as_type!(Value, Bytes, Vec<u8>);
-as_type!(Value, Email, EmailAddress);
+as_type!(Value, Bytes, Arc<[u8]>);
+as_type!(Value, Email, Arc<EmailAddress>);
 as_type!(Value, Id, Id);
 as_type!(Value, Link, Link);
 as_type!(Value, Number, Number);
@@ -155,7 +162,7 @@ impl PartialEq<Value> for Value {
                 Self::Email(that) => this == &that.to_string(),
                 Self::Link(that) => that == this.as_str(),
                 Self::Number(that) => {
-                    if let Ok(this) = Number::from_str(this) {
+                    if let Ok(this) = Number::from_str(this.as_str()) {
                         &this == that
                     } else {
                         false
@@ -169,7 +176,7 @@ impl PartialEq<Value> for Value {
                 Self::Email(this) => that == &this.to_string(),
                 Self::Link(this) => this == that.as_str(),
                 Self::Number(this) => {
-                    if let Ok(that) = Number::from_str(that) {
+                    if let Ok(that) = Number::from_str(that.as_str()) {
                         this == &that
                     } else {
                         false
@@ -336,7 +343,7 @@ impl<'en> en::IntoStream<'en> for Value {
         use en::EncodeMap;
 
         match self {
-            Self::Bytes(bytes) => encoder.encode_bytes(bytes),
+            Self::Bytes(bytes) => encoder.encode_bytes(bytes.to_vec()),
             Self::Email(ref email) => {
                 let mut map = encoder.encode_map(Some(1))?;
                 map.encode_entry(self.class().path().to_string(), email.to_string())?;
@@ -382,7 +389,7 @@ impl From<bool> for Value {
 
 impl From<Bytes> for Value {
     fn from(bytes: Bytes) -> Self {
-        Self::Bytes(bytes.into())
+        Self::Bytes(Vec::from(bytes).into())
     }
 }
 
@@ -468,7 +475,7 @@ impl TryFrom<Value> for Id {
         match value {
             Value::Number(number) => number.to_string().parse().map_err(TCError::from),
             Value::Id(id) => Ok(id),
-            Value::String(string) => string.parse().map_err(TCError::from),
+            Value::String(string) => string.as_str().parse().map_err(TCError::from),
             other => Err(TCError::unexpected(other, "an Id")),
         }
     }
@@ -576,6 +583,28 @@ impl TryCastFrom<Value> for Bound<Value> {
     }
 }
 
+impl TryCastFrom<Value> for Arc<[u8]> {
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Bytes(_) => true,
+            Value::Tuple(tuple) => SmallVec::<[u8; 32]>::can_cast_from(tuple),
+            Value::String(_) => true,
+            Value::None => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Bytes(bytes) => Some(bytes),
+            Value::Tuple(tuple) => Vec::opt_cast_from(tuple).map(Arc::from),
+            Value::String(s) => Some(s.as_str().as_bytes().to_vec().into()),
+            Value::None => Some(Arc::new([])),
+            _ => None,
+        }
+    }
+}
+
 impl TryCastFrom<Value> for Bytes {
     fn can_cast_from(value: &Value) -> bool {
         match value {
@@ -589,7 +618,7 @@ impl TryCastFrom<Value> for Bytes {
 
     fn opt_cast_from(value: Value) -> Option<Bytes> {
         match value {
-            Value::Bytes(bytes) => Some(bytes.into()),
+            Value::Bytes(bytes) => Some(bytes.to_vec().into()),
             Value::Tuple(tuple) => Vec::<u8>::opt_cast_from(tuple).map(Bytes::from),
             Value::String(s) => Self::opt_cast_from(s),
             Value::None => Some(Bytes::new()),
@@ -598,12 +627,12 @@ impl TryCastFrom<Value> for Bytes {
     }
 }
 
-impl TryCastFrom<Value> for EmailAddress {
+impl TryCastFrom<Value> for Arc<EmailAddress> {
     fn can_cast_from(value: &Value) -> bool {
         match value {
             Value::Email(_) => true,
             Value::Id(id) => parse_email(id.as_str()).is_some(),
-            Value::String(s) => parse_email(s).is_some(),
+            Value::String(s) => parse_email(s.as_str()).is_some(),
             _ => false,
         }
     }
@@ -611,8 +640,8 @@ impl TryCastFrom<Value> for EmailAddress {
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
             Value::Email(email) => Some(email),
-            Value::Id(id) => parse_email(id.as_str()),
-            Value::String(s) => parse_email(&s),
+            Value::Id(id) => parse_email(id.as_str()).map(Arc::new),
+            Value::String(s) => parse_email(s.as_str()).map(Arc::new),
             _ => None,
         }
     }
@@ -626,7 +655,7 @@ impl TryCastFrom<Value> for Id {
                 Number::Float(_) | Number::Complex(_) => false,
                 n => Self::can_cast_from(&n.to_string()),
             },
-            Value::String(s) => Self::can_cast_from(s),
+            Value::String(s) => s.as_str().parse::<Id>().is_ok(),
             Value::Version(_) => true,
             _ => false,
         }
@@ -639,7 +668,7 @@ impl TryCastFrom<Value> for Id {
                 Number::Float(_) | Number::Complex(_) => None,
                 n => Self::opt_cast_from(n.to_string()),
             },
-            Value::String(s) => Self::opt_cast_from(s),
+            Value::String(s) => s.as_str().parse().ok(),
             Value::Version(version) => Self::opt_cast_from(version.to_string()),
             _ => None,
         }
@@ -650,7 +679,7 @@ impl TryCastFrom<Value> for Host {
     fn can_cast_from(value: &Value) -> bool {
         match value {
             Value::Link(link) => link.host().is_some() && link.path().is_empty(),
-            Value::String(s) => s.parse::<Host>().is_ok(),
+            Value::String(s) => s.as_str().parse::<Host>().is_ok(),
             _ => false,
         }
     }
@@ -658,7 +687,7 @@ impl TryCastFrom<Value> for Host {
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
             Value::Link(link) if link.path().is_empty() => link.into_host(),
-            Value::String(s) => s.parse().ok(),
+            Value::String(s) => s.as_str().parse().ok(),
             _ => None,
         }
     }
@@ -668,7 +697,7 @@ impl TryCastFrom<Value> for Link {
     fn can_cast_from(value: &Value) -> bool {
         match value {
             Value::Link(_) => true,
-            Value::String(s) => s.parse::<Link>().is_ok(),
+            Value::String(s) => s.as_str().parse::<Link>().is_ok(),
             _ => false,
         }
     }
@@ -676,7 +705,7 @@ impl TryCastFrom<Value> for Link {
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
             Value::Link(link) => Some(link),
-            Value::String(s) => s.parse().ok(),
+            Value::String(s) => s.as_str().parse().ok(),
             _ => None,
         }
     }
@@ -696,7 +725,7 @@ impl TryCastFrom<Value> for Number {
                 Self::can_cast_from(&t[0]) && Self::can_cast_from(&t[1])
             }
             Value::Tuple(_) => false,
-            Value::String(s) => f64::from_str(&s).is_ok(),
+            Value::String(s) => f64::from_str(s.as_str()).is_ok(),
             Value::Version(_) => false,
         }
     }
@@ -731,7 +760,7 @@ impl TryCastFrom<Value> for Number {
                 }
             }
             Value::Tuple(_) => None,
-            Value::String(s) => Number::from_str(&s).ok(),
+            Value::String(s) => Number::from_str(s.as_str()).ok(),
             Value::Version(_) => None,
         }
     }
@@ -753,7 +782,7 @@ impl TryCastFrom<Value> for String {
             Value::Link(link) => Some(link.to_string()),
             Value::Id(id) => Some(id.to_string()),
             Value::Number(n) => Some(n.to_string()),
-            Value::String(s) => Some(s.into()),
+            Value::String(s) => Some(s.to_string()),
             _ => None,
         }
     }
@@ -786,7 +815,7 @@ impl TryCastFrom<Value> for Uuid {
         match value {
             Value::Bytes(bytes) => bytes.len() == 16,
             Value::Id(id) => Uuid::from_str(id.as_str()).is_ok(),
-            Value::String(s) => Uuid::from_str(s).is_ok(),
+            Value::String(s) => Uuid::from_str(s.as_str()).is_ok(),
             _ => false,
         }
     }
@@ -798,7 +827,7 @@ impl TryCastFrom<Value> for Uuid {
                 Some(Uuid::from_bytes(bytes))
             }
             Value::Id(id) => id.as_str().parse().ok(),
-            Value::String(s) => s.parse().ok(),
+            Value::String(s) => s.as_str().parse().ok(),
             _ => None,
         }
     }
@@ -807,7 +836,7 @@ impl TryCastFrom<Value> for Uuid {
 impl TryCastFrom<Value> for Version {
     fn can_cast_from(value: &Value) -> bool {
         match value {
-            Value::String(s) => Version::from_str(s).is_ok(),
+            Value::String(s) => Version::from_str(s.as_str()).is_ok(),
             Value::Tuple(t) => <(u32, u32, u32) as TryCastFrom<Tuple<Value>>>::can_cast_from(t),
             Value::Version(_) => true,
             _ => false,
@@ -816,7 +845,7 @@ impl TryCastFrom<Value> for Version {
 
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
-            Value::String(s) => Version::from_str(&s).ok(),
+            Value::String(s) => Version::from_str(s.as_str()).ok(),
 
             Value::Tuple(t) => t
                 .opt_cast_into()
@@ -835,7 +864,7 @@ macro_rules! cast_real {
             fn can_cast_from(value: &Value) -> bool {
                 match value {
                     Value::Number(_) => true,
-                    Value::String(s) => Self::from_str(s).is_ok(),
+                    Value::String(s) => Self::from_str(s.as_str()).is_ok(),
                     _ => false,
                 }
             }
@@ -843,7 +872,7 @@ macro_rules! cast_real {
             fn opt_cast_from(value: Value) -> Option<Self> {
                 match value {
                     Value::Number(n) => n.opt_cast_into(),
-                    Value::String(s) => Self::from_str(&s).ok(),
+                    Value::String(s) => Self::from_str(s.as_str()).ok(),
                     _ => None,
                 }
             }
@@ -869,7 +898,7 @@ impl TryCastFrom<Value> for TCPathBuf {
         match value {
             Value::Id(_) => true,
             Value::Link(link) => link.host().is_none(),
-            Value::String(s) => Self::from_str(s).is_ok(),
+            Value::String(s) => Self::from_str(s.as_str()).is_ok(),
             _ => false,
         }
     }
@@ -878,7 +907,7 @@ impl TryCastFrom<Value> for TCPathBuf {
         match value {
             Value::Id(id) => Some(Self::from(id)),
             Value::Link(link) if link.host().is_none() => Some(link.into_path()),
-            Value::String(s) => Self::from_str(&s).ok(),
+            Value::String(s) => Self::from_str(s.as_str()).ok(),
             _ => None,
         }
     }
@@ -936,11 +965,31 @@ impl<T1: TryCastFrom<Value>, T2: TryCastFrom<Value>, T3: TryCastFrom<Value>> Try
 
 impl<T: Clone + TryCastFrom<Value>> TryCastFrom<Value> for Map<T> {
     fn can_cast_from(value: &Value) -> bool {
-        Vec::<(Id, T)>::can_cast_from(value)
+        SmallVec::<[(Id, T); 32]>::can_cast_from(value)
     }
 
     fn opt_cast_from(value: Value) -> Option<Self> {
-        Vec::<(Id, T)>::opt_cast_from(value).map(|entries| entries.into_iter().collect())
+        SmallVec::<[(Id, T); 32]>::opt_cast_from(value).map(|entries| entries.into_iter().collect())
+    }
+}
+
+impl<const N: usize, T> TryCastFrom<Value> for SmallVec<[T; N]>
+where
+    T: TryCastFrom<Value>,
+    [T; N]: smallvec::Array<Item = T>,
+{
+    fn can_cast_from(value: &Value) -> bool {
+        match value {
+            Value::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(value: Value) -> Option<Self> {
+        match value {
+            Value::Tuple(tuple) => Self::opt_cast_from(tuple),
+            _ => None,
+        }
     }
 }
 
@@ -1007,7 +1056,7 @@ impl fmt::Display for Value {
             Self::Link(link) => fmt::Display::fmt(link, f),
             Self::None => f.write_str("None"),
             Self::Number(n) => fmt::Display::fmt(n, f),
-            Self::String(s) => f.write_str(s),
+            Self::String(s) => f.write_str(s.as_str()),
             Self::Tuple(t) => write!(
                 f,
                 "({})",
@@ -1043,19 +1092,25 @@ impl ValueVisitor {
         return match class {
             VT::Bytes => {
                 let encoded = map.next_value::<&str>()?;
+
                 STANDARD_NO_PAD
                     .decode(encoded)
+                    .map(Arc::from)
                     .map(Value::Bytes)
                     .map_err(serde::de::Error::custom)
             }
             VT::Email => {
                 let email: &str = map.next_value()?;
-                parse_email(email).map(Value::Email).ok_or_else(|| {
-                    serde::de::Error::custom(format!(
-                        "invalid value: {}, expected an email address",
-                        email
-                    ))
-                })
+
+                parse_email(email)
+                    .map(Arc::new)
+                    .map(Value::Email)
+                    .ok_or_else(|| {
+                        serde::de::Error::custom(format!(
+                            "invalid value: {}, expected an email address",
+                            email
+                        ))
+                    })
             }
             VT::Id => {
                 let id: &str = map.next_value()?;
@@ -1117,6 +1172,7 @@ impl ValueVisitor {
             VT::Email => {
                 let email: String = map.next_value(()).await?;
                 parse_email(&email)
+                    .map(Arc::new)
                     .map(Value::Email)
                     .ok_or_else(|| de::Error::invalid_value(email, "an email address"))
             }
@@ -1300,7 +1356,7 @@ impl destream::de::Visitor for ValueVisitor {
             }
         }
 
-        Ok(Value::Bytes(bytes))
+        Ok(Value::Bytes(bytes.into()))
     }
 
     fn visit_bool<E: DestreamError>(self, b: bool) -> Result<Self::Value, E> {
