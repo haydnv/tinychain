@@ -15,6 +15,7 @@ use get_size::GetSize;
 use get_size_derive::*;
 use safecast::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use smallvec::SmallVec;
 
 /// A generic tuple type, based on [`Vec`]
 #[derive(Clone, Default, Eq, PartialEq, GetSize)]
@@ -121,15 +122,19 @@ impl<'a, T> IntoIterator for &'a Tuple<T> {
     }
 }
 
-impl<F, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for Vec<T> {
+impl<const N: usize, F, T> TryCastFrom<Tuple<F>> for SmallVec<[T; N]>
+    where
+        T: TryCastFrom<F>,
+        [T; N]: smallvec::Array<Item = T>,
+{
     fn can_cast_from(tuple: &Tuple<F>) -> bool {
         tuple.iter().all(T::can_cast_from)
     }
 
     fn opt_cast_from(tuple: Tuple<F>) -> Option<Self> {
-        let mut cast: Vec<T> = Vec::with_capacity(tuple.len());
+        let mut cast = SmallVec::<[T; N]>::with_capacity(tuple.len());
         for val in tuple.inner.into_iter() {
-            if let Some(val) = val.opt_cast_into() {
+            if let Some(val) = T::opt_cast_from(val) {
                 cast.push(val)
             } else {
                 return None;
@@ -139,6 +144,26 @@ impl<F, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for Vec<T> {
         Some(cast)
     }
 }
+
+impl<F, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for Vec<T> {
+    fn can_cast_from(tuple: &Tuple<F>) -> bool {
+        tuple.iter().all(T::can_cast_from)
+    }
+
+    fn opt_cast_from(tuple: Tuple<F>) -> Option<Self> {
+        let mut cast = Vec::with_capacity(tuple.len());
+        for val in tuple.inner.into_iter() {
+            if let Some(val) = T::opt_cast_from(val) {
+                cast.push(val)
+            } else {
+                return None;
+            }
+        }
+
+        Some(cast)
+    }
+}
+
 
 impl<F, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for (T,) {
     fn can_cast_from(source: &Tuple<F>) -> bool {

@@ -3,6 +3,7 @@
 pub extern crate uuid;
 
 use std::cmp::Ordering;
+use std::sync::Arc;
 
 use collate::{Collate, Collator};
 
@@ -36,7 +37,7 @@ mod version;
 /// [`Collate`] support for [`Value`]
 #[derive(Default, Clone, Eq, PartialEq)]
 pub struct ValueCollator {
-    bytes: Collator<Vec<u8>>,
+    bytes: Collator<Arc<[u8]>>,
     link: Collator<Link>,
     number: NumberCollator,
     string: StringCollator,

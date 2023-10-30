@@ -1,6 +1,6 @@
 [package]
 name = "tc-value"
-version = "0.9.0"
+version = "0.10.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "TinyChain's representation of a value which can be collated and stored."
@@ -12,12 +12,12 @@ keywords = ["tinychain", "scalar", "value", "collate"]
 categories = ["data-structures"]
 
 [dependencies]
-async-hash = "0.5"
+async-hash = { path = "../../../async-hash", features = ["smallvec"] }
 async-trait = "0.1"
 base64 = "0.21"
 bytes = "1.0"
-collate = "0.3"
-destream = "0.7"
+collate = { path = "../../../collate" }
+destream = { version = "~0.7.2", features = ["smallvec"] }
 email-address-parser = "2.0"
 futures = "0.3"
 get-size = "0.1"
@@ -25,11 +25,12 @@ get-size-derive = "0.1"
 handlebars = "4.3"
 hex = "0.4"
 log = { version = "0.4", features = [] }
-number-general = { version = "0.10", features = ["hash", "serde", "stream"] }
-pathlink = { version = "0.1", features = ["all"] }
+number-general = { path = "../../../number-general", features = ["all"] }
+pathlink = { path = "../../../pathlink", features = ["all"] }
 safecast = "0.2"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0", features = [] }
-tcgeneric = "0.7"
-tc-error = "0.8"
-uuid = { version = "1.4", features = ["v4"] }
+smallvec = { version = "1.11", features = ["serde"] }
+tcgeneric = { path = "../generic" }
+tc-error = { path = "../error" }
+uuid = { version = "1.5", features = ["v4"] }

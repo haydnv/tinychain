@@ -13,9 +13,9 @@ categories = ["rust-patterns"]
 
 [dependencies]
 destream = "0.7"
-ha-ndarray = "~0.1.1"
+ha-ndarray = { path = "../../../ha-ndarray" }
 log = { version = "0.4", features = ["release_max_level_info"] }
-pathlink = "0.1"
+pathlink = { path = "../../../pathlink" }
 serde = "1.0"
-txn_lock = "0.7"
-txfs = "0.1"
+txn_lock = { path = "../../../txn_lock" }
+txfs = { path = "../../../txfs" }

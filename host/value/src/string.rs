@@ -2,7 +2,8 @@
 
 use std::cmp::Ordering;
 use std::fmt;
-use std::ops::Deref;
+use std::mem::size_of;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
@@ -23,12 +24,18 @@ use tcgeneric::Id;
 use super::{Link, Number};
 
 /// A TinyChain String
-#[derive(Clone, Default, Eq, PartialEq)]
-pub struct TCString(String);
+#[derive(Clone, Eq, PartialEq)]
+pub struct TCString(Arc<str>);
 
 impl GetSize for TCString {
     fn get_size(&self) -> usize {
-        self.0.get_size()
+        size_of::<Arc<str>>() + self.0.as_bytes().len()
+    }
+}
+
+impl Default for TCString {
+    fn default() -> Self {
+        Self::from(String::default())
     }
 }
 
@@ -48,17 +55,14 @@ impl TCString {
     /// See the [`handlebars`] documentation for a complete description of the formatting options.
     pub fn render<T: Serialize>(&self, data: T) -> TCResult<TCString> {
         Handlebars::new()
-            .render_template(&self.0, &json!(data))
-            .map(Self)
+            .render_template(self.0.as_ref(), &json!(data))
+            .map(Self::from)
             .map_err(|cause| bad_request!("template render error").consume(cause))
     }
-}
 
-impl Deref for TCString {
-    type Target = String;
-
-    fn deref(&self) -> &String {
-        &self.0
+    /// Borrow this [`TCString`] as a `str`.
+    pub fn as_str(&self) -> &str {
+        self.0.as_ref()
     }
 }
 
@@ -82,59 +86,43 @@ impl PartialEq<str> for TCString {
 
 impl From<String> for TCString {
     fn from(s: String) -> Self {
-        Self(s)
+        Self(s.into())
     }
 }
 
 impl From<Id> for TCString {
     fn from(id: Id) -> Self {
-        Self(id.to_string())
+        Self(id.into_inner())
     }
 }
 
 impl From<Link> for TCString {
     fn from(link: Link) -> Self {
-        Self(link.to_string())
+        Self::from(link.to_string())
     }
 }
 
 impl From<Number> for TCString {
     fn from(n: Number) -> Self {
-        Self(n.to_string())
+        Self::from(n.to_string())
     }
 }
 
 impl TryCastFrom<TCString> for Bytes {
     fn can_cast_from(value: &TCString) -> bool {
-        if value.ends_with('=') {
-            STANDARD_NO_PAD.decode(&value.0).is_ok()
+        if value.as_str().ends_with('=') {
+            STANDARD_NO_PAD.decode(value.as_str()).is_ok()
         } else {
-            hex::decode(&value.0).is_ok()
+            hex::decode(value.as_str()).is_ok()
         }
     }
 
     fn opt_cast_from(value: TCString) -> Option<Self> {
-        if value.ends_with('=') {
-            STANDARD_NO_PAD.decode(&value.0).ok().map(Self::from)
+        if value.as_str().ends_with('=') {
+            STANDARD_NO_PAD.decode(value.as_str()).ok().map(Self::from)
         } else {
-            hex::decode(&value.0).ok().map(Self::from)
+            hex::decode(value.as_str()).ok().map(Self::from)
         }
-    }
-}
-
-impl TryCastFrom<TCString> for Id {
-    fn can_cast_from(value: &TCString) -> bool {
-        Self::can_cast_from(&value.0)
-    }
-
-    fn opt_cast_from(value: TCString) -> Option<Self> {
-        Self::opt_cast_from(value.0)
-    }
-}
-
-impl From<TCString> for String {
-    fn from(string: TCString) -> String {
-        string.0
     }
 }
 
@@ -143,25 +131,25 @@ impl de::FromStream for TCString {
     type Context = ();
 
     async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
-        String::from_stream(cxt, decoder).map_ok(Self).await
+        String::from_stream(cxt, decoder).map_ok(Self::from).await
     }
 }
 
 impl<'en> en::IntoStream<'en> for TCString {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        self.0.into_stream(encoder)
+        encoder.encode_str(self.as_str())
     }
 }
 
 impl<'en> en::ToStream<'en> for TCString {
     fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
-        self.0.to_stream(encoder)
+        encoder.encode_str(self.as_str())
     }
 }
 
 impl<'de> Deserialize<'de> for TCString {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        String::deserialize(deserializer).map(Self)
+        String::deserialize(deserializer).map(Self::from)
     }
 }
 
@@ -186,7 +174,7 @@ impl fmt::Display for TCString {
 /// A [`Collator`] for [`TCString`] values.
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct StringCollator {
-    collator: Collator<String>,
+    collator: Collator<Arc<str>>,
 }
 
 impl Collate for StringCollator {

@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -58,6 +59,7 @@ impl ValueType {
                 Value::String(s) => {
                     Bytes::try_cast_from(s, |s| bad_request!("cannot cast into Bytes from {}", s))
                         .map(Vec::from)
+                        .map(Arc::from)
                         .map(Value::Bytes)
                 }
                 other => Err(bad_request!("cannot cast into Bytes from {}", other)),
@@ -66,14 +68,19 @@ impl ValueType {
                 Value::Email(email) => Ok(Value::Email(email)),
 
                 Value::Id(id) => parse_email(id.as_str())
+                    .map(Arc::new)
                     .map(Value::Email)
-                    .ok_or_else(|| bad_request!("cannot cast into Email from {}", id)),
+                    .ok_or_else(|| bad_request!("cannot cast into an email address from {}", id)),
 
-                Value::String(s) => parse_email(&s)
+                Value::String(s) => parse_email(s.as_str())
+                    .map(Arc::new)
                     .map(Value::Email)
-                    .ok_or_else(|| bad_request!("cannot cast into Email from {}", s)),
+                    .ok_or_else(|| bad_request!("cannot cast into an email address from {}", s)),
 
-                other => Err(bad_request!("cannot cast into Email from {}", other)),
+                other => Err(bad_request!(
+                    "cannot cast into an email address from {}",
+                    other
+                )),
             },
             Self::Id => value.try_cast_into(on_err).map(Value::Id),
             Self::Link => value.try_cast_into(on_err).map(Value::String),
@@ -88,7 +95,7 @@ impl ValueType {
             Self::Value => Ok(value),
             Self::Version => match value {
                 Value::Id(id) => id.as_str().parse().map(Value::Version),
-                Value::String(s) => s.parse().map(Value::Version),
+                Value::String(s) => s.as_str().parse().map(Value::Version),
                 Value::Tuple(t) => {
                     let (maj, min, rev) =
                         t.try_cast_into(|t| bad_request!("invalid semantic version {}", t))?;
