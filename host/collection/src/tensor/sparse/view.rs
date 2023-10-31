@@ -8,6 +8,7 @@ use ha_ndarray::{Array, Buffer, CDatatype, NDArrayBoolean, NDArrayRead};
 use log::trace;
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
+use smallvec::{smallvec, SmallVec};
 
 use tc_error::*;
 use tc_transact::lock::PermitRead;
@@ -178,8 +179,8 @@ where
                 .map(|(r, i)| Number::Complex((r, i).into()));
 
             let elements = coords
-                .into_par_iter()
-                .chunks(ndim)
+                .par_chunks(ndim)
+                .map(Coord::from_slice)
                 .zip(values)
                 .map(Ok)
                 .collect::<Vec<TCResult<_>>>();
@@ -1088,8 +1089,8 @@ where
 
         // example shapes: [2, 3] @ [3, 180]
         let ndim = self.ndim(); // 2
-        let this = self.expand(vec![ndim])?; // [2, 3] -> [2, 3, 1]
-        let that = other.expand(vec![ndim - 2])?; // [3, 180] -> [1, 3, 180]
+        let this = self.expand(smallvec![ndim])?; // [2, 3] -> [2, 3, 1]
+        let that = other.expand(smallvec![ndim - 2])?; // [3, 180] -> [1, 3, 180]
 
         trace!("{:?} @ {:?}", this, that);
 
@@ -1101,7 +1102,7 @@ where
 
         let outer_product = this.mul(that)?; // [2, 3, 180]
         let reduce_axis = outer_product.ndim() - 2;
-        outer_product.sum(vec![reduce_axis], false) // [2, 3, 180] -> [2, 180]
+        outer_product.sum(smallvec![reduce_axis], false) // [2, 3, 180] -> [2, 180]
     }
 }
 
@@ -1333,12 +1334,12 @@ where
         match self {
             Self::Bool(this) => this.expand(axes).map(sparse_from).map(Self::Bool),
             Self::C32((re, im)) => {
-                let re = re.expand(axes.to_vec()).map(sparse_from)?;
+                let re = re.expand(axes.clone()).map(sparse_from)?;
                 let im = im.expand(axes).map(sparse_from)?;
                 Ok(Self::C32((re, im)))
             }
             Self::C64((re, im)) => {
-                let re = re.expand(axes.to_vec()).map(sparse_from)?;
+                let re = re.expand(axes.clone()).map(sparse_from)?;
                 let im = im.expand(axes).map(sparse_from)?;
                 Ok(Self::C64((re, im)))
             }
@@ -1413,7 +1414,7 @@ where
         }
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Axes>) -> TCResult<Self::Transpose> {
         if let Some(permutation) = &permutation {
             if permutation.len() == self.ndim()
                 && permutation.iter().copied().enumerate().all(|(i, x)| i == x)
@@ -1640,7 +1641,11 @@ impl<Txn: ThreadSafe, FE: ThreadSafe> TensorUnaryBoolean for SparseView<Txn, FE>
 
 #[async_trait]
 impl<Txn: ThreadSafe, FE: ThreadSafe> TensorPermitRead for SparseView<Txn, FE> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         view_dispatch!(
             self,
             this,

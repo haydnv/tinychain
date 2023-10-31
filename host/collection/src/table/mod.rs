@@ -32,10 +32,10 @@ mod stream;
 mod view;
 
 /// The key of a row in a table
-pub type Key = Vec<Value>;
+pub type Key = b_tree::Key<Value>;
 
 /// The values of a row in a table
-pub type Values = Vec<Value>;
+pub type Values = b_table::Row<Value>;
 
 /// A range of an individual column
 pub type ColumnRange = b_table::ColumnRange<Value>;
@@ -44,7 +44,7 @@ pub type ColumnRange = b_table::ColumnRange<Value>;
 pub type Range = b_table::Range<Id, Value>;
 
 /// A row in a table
-pub type Row = Vec<Value>;
+pub type Row = b_table::Row<Value>;
 
 const PATH: PathLabel = path_label(&["state", "collection", "table"]);
 
@@ -116,7 +116,7 @@ pub trait TableOrder: TableInstance {
 #[async_trait]
 pub trait TableRead: TableInstance {
     /// Read the row with the given `key` from this table, if present.
-    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Row>>;
+    async fn read(&self, txn_id: TxnId, key: &[Value]) -> TCResult<Option<Row>>;
 }
 
 /// Methods for slicing a table
@@ -183,10 +183,10 @@ where
 #[async_trait]
 pub trait TableWrite: TableInstance {
     /// Delete the given row from this table, if present.
-    async fn delete(&self, txn_id: TxnId, key: Key) -> TCResult<()>;
+    async fn delete(&self, txn_id: TxnId, key: Vec<Value>) -> TCResult<()>;
 
     /// Insert or update the given row.
-    async fn upsert(&self, txn_id: TxnId, key: Key, values: Values) -> TCResult<()>;
+    async fn upsert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()>;
 }
 
 /// A relational database table, or a view of one
@@ -278,7 +278,7 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Row>> {
+    async fn read(&self, txn_id: TxnId, key: &[Value]) -> TCResult<Option<Row>> {
         match self {
             Self::Selection(selection) => selection.read(txn_id, key).await,
             Self::Slice(slice) => slice.read(txn_id, key).await,
@@ -394,7 +394,7 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    async fn delete(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+    async fn delete(&self, txn_id: TxnId, key: Vec<Value>) -> TCResult<()> {
         if let Self::Table(table) = self {
             table.delete(txn_id, key).await
         } else {
@@ -402,7 +402,7 @@ where
         }
     }
 
-    async fn upsert(&self, txn_id: TxnId, key: Key, values: Values) -> TCResult<()> {
+    async fn upsert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
         if let Self::Table(table) = self {
             table.upsert(txn_id, key, values).await
         } else {

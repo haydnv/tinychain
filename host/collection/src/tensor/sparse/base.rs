@@ -11,6 +11,7 @@ use futures::{join, try_join, TryFutureExt};
 use ha_ndarray::{Array, Buffer, CDatatype};
 use log::{debug, trace};
 use safecast::{AsType, CastInto};
+use smallvec::SmallVec;
 
 use tc_error::*;
 use tc_transact::fs::{Dir, Persist};
@@ -264,7 +265,7 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     fn new(dir: DirLock<FE>, canon: SparseFile<FE, T>, committed: DirLock<FE>) -> TCResult<Self> {
-        let semaphore = Semaphore::new(Arc::new(Collator::default()));
+        let semaphore = Semaphore::new(Collator::default());
 
         let deltas = {
             let mut deltas = OrdHashMap::new();
@@ -341,7 +342,11 @@ where
     FE: Send + Sync,
     T: CDatatype + DType,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.canon.read_permit(txn_id, range).await
     }
 }
@@ -459,10 +464,7 @@ where
     }
 
     async fn write_value(&mut self, txn_id: TxnId, coord: Coord, value: T) -> TCResult<()> {
-        let _permit = self
-            .base
-            .write_permit(txn_id, coord.to_vec().into())
-            .await?;
+        let _permit = self.base.write_permit(txn_id, coord.clone().into()).await?;
 
         let version = {
             let dir = self.base.dir.read().await;
@@ -832,7 +834,7 @@ where
         let txn_id = *self.txn.id();
         while let Some((coord, (r, i))) = seq.next_element::<(Coord, (T, T))>(()).await? {
             try_join!(
-                guard_re.write_value(txn_id, coord.to_vec(), r),
+                guard_re.write_value(txn_id, coord.clone(), r),
                 guard_im.write_value(txn_id, coord, i)
             )
             .map_err(de::Error::custom)?;

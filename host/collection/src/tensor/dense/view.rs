@@ -7,6 +7,7 @@ use ha_ndarray::NDArrayRead;
 use log::trace;
 use rayon::prelude::*;
 use safecast::{AsType, CastInto};
+use smallvec::{smallvec, SmallVec};
 
 use tc_error::*;
 use tc_transact::lock::PermitRead;
@@ -1274,10 +1275,10 @@ where
                     || (that.block_size() as u64) < right_matrix_size =>
             {
                 let ndim = this.ndim();
-                let this = this.expand(vec![ndim])?;
-                let that = that.expand(vec![ndim - 1])?;
+                let this = this.expand(smallvec![ndim])?;
+                let that = that.expand(smallvec![ndim - 1])?;
                 let product = this.mul(that)?;
-                product.sum(vec![ndim - 2], false)
+                product.sum(smallvec![ndim - 2], false)
             }
             (this, that)
                 if this.size() / (this.block_size() as u64)
@@ -1555,12 +1556,12 @@ where
         match self {
             Self::Bool(this) => this.expand(axes).map(dense_from).map(Self::Bool),
             Self::C32((re, im)) => {
-                let re = re.expand(axes.to_vec()).map(dense_from)?;
+                let re = re.expand(axes.clone()).map(dense_from)?;
                 let im = im.expand(axes).map(dense_from)?;
                 Ok(Self::C32((re, im)))
             }
             Self::C64((re, im)) => {
-                let re = re.expand(axes.to_vec()).map(dense_from)?;
+                let re = re.expand(axes.clone()).map(dense_from)?;
                 let im = im.expand(axes).map(dense_from)?;
                 Ok(Self::C64((re, im)))
             }
@@ -1634,7 +1635,7 @@ where
         }
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Axes>) -> TCResult<Self::Transpose> {
         if let Some(permutation) = &permutation {
             if permutation.len() == self.ndim()
                 && permutation.iter().copied().enumerate().all(|(i, x)| i == x)
@@ -1875,7 +1876,11 @@ where
 
 #[async_trait]
 impl<Txn: ThreadSafe, FE: ThreadSafe> TensorPermitRead for DenseView<Txn, FE> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         view_dispatch!(
             self,
             this,

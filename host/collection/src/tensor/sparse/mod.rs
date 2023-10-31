@@ -8,6 +8,7 @@ use std::ops::Bound;
 use std::pin::Pin;
 
 use async_trait::async_trait;
+use b_table::Row;
 use collate::Collate;
 use destream::de;
 use futures::{join, try_join, Stream, StreamExt, TryFutureExt, TryStreamExt};
@@ -66,7 +67,8 @@ mod reduce {
                 .await?;
 
             while let Some(actual) = filled_at.try_next().await? {
-                if affected.next() != Some(actual) {
+                let expected = affected.next().expect("coord");
+                if actual.as_slice() != expected.as_slice() {
                     return Ok(false);
                 }
             }
@@ -101,7 +103,9 @@ mod reduce {
 
             // TODO: use a type-specific collator
             let collator = NumberCollator::default();
-            let blocks = accessor.blocks(txn_id, Range::default(), vec![]).await?;
+            let blocks = accessor
+                .blocks(txn_id, Range::default(), Axes::default())
+                .await?;
 
             blocks
                 .map(|result| {
@@ -129,7 +133,9 @@ mod reduce {
 
             // TODO: use a type-specific collator
             let collator = NumberCollator::default();
-            let blocks = accessor.blocks(txn_id, Range::default(), vec![]).await?;
+            let blocks = accessor
+                .blocks(txn_id, Range::default(), Axes::default())
+                .await?;
 
             blocks
                 .map(|result| {
@@ -162,7 +168,9 @@ mod reduce {
                 log::trace!("all elements in {accessor:?} are filled...");
             }
 
-            let blocks = accessor.blocks(txn_id, Range::default(), vec![]).await?;
+            let blocks = accessor
+                .blocks(txn_id, Range::default(), Axes::default())
+                .await?;
 
             let product: A::DType = blocks
                 .map(|result| {
@@ -187,7 +195,9 @@ mod reduce {
         Box::pin(async move {
             let _permit = accessor.read_permit(txn_id, Range::default()).await?;
 
-            let blocks = accessor.blocks(txn_id, Range::default(), vec![]).await?;
+            let blocks = accessor
+                .blocks(txn_id, Range::default(), Axes::default())
+                .await?;
 
             blocks
                 .map(|result| {
@@ -794,7 +804,7 @@ where
     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
         let _permit = self
             .accessor
-            .read_permit(txn_id, coord.to_vec().into())
+            .read_permit(txn_id, coord.clone().into())
             .await?;
 
         self.accessor
@@ -1195,7 +1205,7 @@ where
                 let (mut r_guard, mut i_guard) = join!(this.0.write(), this.1.write());
 
                 try_join!(
-                    r_guard.write_value(txn_id, coord.to_vec(), r_value.cast_into()),
+                    r_guard.write_value(txn_id, coord.clone(), r_value.cast_into()),
                     i_guard.write_value(txn_id, coord, i_value.cast_into())
                 )?;
 
@@ -1877,7 +1887,7 @@ where
 }
 
 #[inline]
-fn unwrap_row<T>(mut row: Vec<Number>) -> (Coord, T)
+fn unwrap_row<T>(mut row: Row<Number>) -> (Coord, T)
 where
     Number: CastInto<T> + CastInto<u64>,
 {

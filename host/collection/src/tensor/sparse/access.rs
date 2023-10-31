@@ -4,6 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use b_tree::Key;
 use destream::de;
 use futures::future::TryFutureExt;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
@@ -12,6 +13,7 @@ use ha_ndarray::*;
 use log::{debug, trace};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
+use smallvec::{smallvec, SmallVec};
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
@@ -56,7 +58,7 @@ pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
     {
         let mut zeros = {
             let table = zeros.into_table().read().await;
-            table.into_rows()
+            table.into_rows().await?
         };
 
         while let Some(row) = zeros.try_next().await? {
@@ -66,7 +68,7 @@ pub trait SparseWriteGuard<T: CDatatype + DType>: Send + Sync {
 
         let mut filled = {
             let table = filled.into_table().read().await;
-            table.into_rows()
+            table.into_rows().await?
         };
 
         while let Some(row) = filled.try_next().await? {
@@ -257,7 +259,11 @@ where
 
 #[async_trait]
 impl<Txn: ThreadSafe, FE: ThreadSafe> TensorPermitRead for SparseAccessCast<Txn, FE> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         access_cast_dispatch!(self, this, this.read_permit(txn_id, range).await)
     }
 }
@@ -438,7 +444,11 @@ where
     FE: ThreadSafe,
     T: CDatatype + DType,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         match self {
             Self::Base(base) => base.read_permit(txn_id, range).await,
             Self::Broadcast(broadcast) => broadcast.read_permit(txn_id, range).await,
@@ -533,7 +543,7 @@ where
         let source = if offset == 0 {
             Ok(source.into())
         } else {
-            SparseExpand::new(source, vec![0; offset]).map(SparseAccess::from)
+            SparseExpand::new(source, smallvec![0; offset]).map(SparseAccess::from)
         }?;
 
         Broadcast::new(source.shape().clone(), shape).map(|transform| Self {
@@ -651,7 +661,11 @@ where
     FE: ThreadSafe,
     T: CDatatype + DType,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.shape().validate_range(&range)?;
         let source_range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, source_range).await
@@ -693,7 +707,8 @@ impl<S: TensorInstance + fmt::Debug> SparseBroadcastAxis<S> {
         log::debug!("SparseBroadcastAxis::new: broadcast axis {axis} of {source:?} into {dim}");
 
         let shape = if axis < source.ndim() {
-            let mut shape = source.shape().to_vec();
+            let mut shape = source.shape().clone();
+
             if shape[axis] == 1 {
                 shape[axis] = dim;
                 Ok(shape)
@@ -712,7 +727,7 @@ impl<S: TensorInstance + fmt::Debug> SparseBroadcastAxis<S> {
             source,
             axis,
             dim,
-            shape: shape.into(),
+            shape,
         })
     }
 }
@@ -784,7 +799,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
                 .map(move |outer_i| {
                     let source = source.clone();
                     let source_range = source_range.clone();
-                    let source_order = order.to_vec();
+                    let source_order = order.clone();
 
                     async move {
                         let source_elements =
@@ -811,7 +826,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
                 .map_ok(move |(source_coord, value)| {
                     futures::stream::iter(axis_range.clone()).map(move |i| {
                         debug_assert_eq!(source_coord.len(), ndim);
-                        let mut coord = source_coord.to_vec();
+                        let mut coord = source_coord.clone();
                         *coord.last_mut().expect("x") = i;
                         Ok((coord, value))
                     })
@@ -824,7 +839,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
                 .iter()
                 .skip(self.axis)
                 .cloned()
-                .collect::<Vec<_>>();
+                .collect::<SmallVec<[_; 8]>>();
 
             let filled = self
                 .source
@@ -842,7 +857,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
                     let outer_coord = result?;
                     debug_assert_eq!(outer_coord.len(), self.axis);
 
-                    let inner_range = inner_range.to_vec();
+                    let inner_range = inner_range.clone();
 
                     let prefix = outer_coord
                         .iter()
@@ -856,8 +871,8 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
 
                     let elements = futures::stream::iter(axis_range.clone())
                         .map(move |i| {
-                            let outer_coord = outer_coord.to_vec();
-                            let inner_range = inner_range.to_vec().into();
+                            let outer_coord = outer_coord.clone();
+                            let inner_range = inner_range.clone().into();
                             let slice = slice.clone();
 
                             async move {
@@ -908,7 +923,7 @@ impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for SparseBroadcastAxis<
         &self,
         txn_id: TxnId,
         mut range: Range,
-    ) -> TCResult<Vec<PermitRead<Range>>> {
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.shape.validate_range(&range)?;
 
         if range.len() > self.axis {
@@ -1048,7 +1063,7 @@ where
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         let (left, right) = try_join!(
-            self.left.read_value(txn_id, coord.to_vec()),
+            self.left.read_value(txn_id, coord.clone()),
             self.right.read_value(txn_id, coord)
         )?;
 
@@ -1063,7 +1078,11 @@ where
     R: TensorPermitRead,
     T: CDatatype,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         // always acquire these locks in-order to avoid the risk of a deadlock
         let mut left = self.left.read_permit(txn_id, range.clone()).await?;
         let right = self.right.read_permit(txn_id, range).await?;
@@ -1201,7 +1220,7 @@ where
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         let (left, right) = try_join!(
-            self.left.read_value(txn_id, coord.to_vec()),
+            self.left.read_value(txn_id, coord.clone()),
             self.right.read_value(txn_id, coord)
         )?;
 
@@ -1216,7 +1235,11 @@ where
     R: TensorPermitRead,
     T: CDatatype,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         // always acquire these locks in-order to avoid the risk of a deadlock
         let mut left = self.left.read_permit(txn_id, range.clone()).await?;
         let right = self.right.read_permit(txn_id, range).await?;
@@ -1349,7 +1372,11 @@ where
     S: TensorPermitRead,
     T: CDatatype,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.left.read_permit(txn_id, range).await
     }
 }
@@ -1495,7 +1522,7 @@ where
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         let (left, right) = try_join!(
-            self.left.read_value(txn_id, coord.to_vec()),
+            self.left.read_value(txn_id, coord.clone()),
             self.right.read_value(txn_id, coord)
         )?;
 
@@ -1510,7 +1537,11 @@ where
     FE: ThreadSafe,
     T: CDatatype,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         // always acquire these in-order to avoid the risk of a deadlock
         let mut left = self.left.read_permit(txn_id, range.clone()).await?;
         let right = self.right.read_permit(txn_id, range).await?;
@@ -1652,7 +1683,7 @@ where
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         let (left, right) = try_join!(
-            self.left.read_value(txn_id, coord.to_vec()),
+            self.left.read_value(txn_id, coord.clone()),
             self.right.read_value(txn_id, coord)
         )?;
 
@@ -1667,7 +1698,11 @@ where
     FE: ThreadSafe,
     T: CDatatype,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         // always acquire these locks in-order to avoid the risk of a deadlock
         let mut left = self.left.read_permit(txn_id, range.clone()).await?;
         let right = self.right.read_permit(txn_id, range.clone()).await?;
@@ -1811,7 +1846,11 @@ where
     FE: ThreadSafe,
     T: CDatatype,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.left.read_permit(txn_id, range).await
     }
 }
@@ -1906,11 +1945,12 @@ where
         let ndim = shape.len();
 
         let strides = strides_for(&shape, ndim);
-        let strides = ArrayBase::<Arc<Vec<_>>>::new(vec![strides.len()], Arc::new(strides))?;
+        let strides =
+            ArrayBase::<Arc<Vec<_>>>::new(vec![strides.len()], Arc::new(strides.into_vec()))?;
 
         let (cond, then, or_else) = try_join!(
-            self.cond.blocks(txn_id, range.clone(), order.to_vec()),
-            self.then.blocks(txn_id, range.clone(), order.to_vec()),
+            self.cond.blocks(txn_id, range.clone(), order.clone()),
+            self.then.blocks(txn_id, range.clone(), order.clone()),
             self.or_else.blocks(txn_id, range, order)
         )?;
 
@@ -1944,8 +1984,8 @@ where
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         let (cond, then, or_else) = try_join!(
-            self.cond.read_value(txn_id, coord.to_vec()),
-            self.then.read_value(txn_id, coord.to_vec()),
+            self.cond.read_value(txn_id, coord.clone()),
+            self.then.read_value(txn_id, coord.clone()),
             self.or_else.read_value(txn_id, coord)
         )?;
 
@@ -1964,7 +2004,11 @@ where
     Then: TensorPermitRead,
     OrElse: TensorPermitRead,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         // always acquire these locks in-order to reduce the risk of a deadlock
         let mut permit = self.cond.read_permit(txn_id, range.clone()).await?;
 
@@ -2091,20 +2135,21 @@ where
         let ndim = shape.len();
 
         let strides = strides_for(&shape, ndim);
-        let strides = ArrayBase::<Arc<Vec<_>>>::new(vec![strides.len()], Arc::new(strides))?;
+        let strides =
+            ArrayBase::<Arc<Vec<_>>>::new(vec![strides.len()], Arc::new(strides.into_vec()))?;
 
         #[cfg(debug_assertions)]
         let (source_blocks, filled_blocks, zero_blocks) = {
             let source_blocks = self
                 .source
-                .blocks(txn_id, range.clone(), order.to_vec())
+                .blocks(txn_id, range.clone(), order.clone())
                 .await?;
 
             log::trace!("constructed source block stream");
 
             let filled_blocks = self
                 .filled
-                .blocks(txn_id, range.clone(), order.to_vec())
+                .blocks(txn_id, range.clone(), order.clone())
                 .await?;
 
             log::trace!("constructed filled block stream");
@@ -2159,7 +2204,7 @@ where
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         self.shape().validate_coord(&coord)?;
 
-        let key = coord.iter().copied().map(Number::from).collect();
+        let key = coord.iter().copied().map(Number::from).collect::<Key<_>>();
 
         {
             let zeros = self.zeros.table().read().await;
@@ -2170,7 +2215,7 @@ where
 
         {
             let filled = self.filled.table().read().await;
-            if let Some(mut row) = filled.get_row(key).await? {
+            if let Some(mut row) = filled.get_row(&key).await? {
                 let value = row.pop().expect("value");
                 return Ok(value.cast_into());
             }
@@ -2187,7 +2232,11 @@ where
     T: CDatatype + DType,
     S: TensorPermitRead,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.source.read_permit(txn_id, range).await
     }
 }
@@ -2324,7 +2373,7 @@ where
         };
 
         try_join!(
-            self.filled.write_value(txn_id, coord.to_vec(), value),
+            self.filled.write_value(txn_id, coord.clone(), value),
             self.zeros.write_value(txn_id, coord, inverse)
         )
         .map(|_| ())
@@ -2475,7 +2524,11 @@ where
     FE: ThreadSafe,
     T: CDatatype + DType,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.source.read_permit(txn_id, range).await
     }
 }
@@ -2576,7 +2629,11 @@ impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
 
 #[async_trait]
 impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for SparseExpand<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, range).await
@@ -2772,7 +2829,11 @@ where
     FE: ThreadSafe,
     T: CDatatype + DType,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, range).await
@@ -2919,7 +2980,11 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
 
 #[async_trait]
 impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for SparseReshape<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         if self.transform.shape().is_covered_by(&range) {
             self.source.read_permit(txn_id, Range::default()).await
         } else {
@@ -3040,9 +3105,8 @@ where
             let coords = source_coords
                 .to_slice()?
                 .as_ref()
-                .par_iter()
-                .copied()
                 .chunks(source_ndim)
+                .map(Coord::from_slice)
                 .map(|source_coord| transform.map_coord(source_coord))
                 .flatten()
                 .collect();
@@ -3093,7 +3157,11 @@ where
 
 #[async_trait]
 impl<S: TensorPermitRead> TensorPermitRead for SparseSlice<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, range).await
@@ -3278,9 +3346,9 @@ where
 
             let ndim = self.transform.shape().len();
             let coords = source_coords
-                .into_vec()
-                .into_par_iter()
+                .as_ref()
                 .chunks(ndim)
+                .map(Coord::from_slice)
                 .map(|source_coord| self.transform.map_coord(source_coord))
                 .flatten()
                 .collect();
@@ -3313,7 +3381,11 @@ where
 
 #[async_trait]
 impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for SparseTranspose<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(&range);
         self.source.read_permit(txn_id, range).await
@@ -3420,7 +3492,11 @@ impl<S: SparseInstance<DType = T>, T: CDatatype + DType> SparseInstance for Spar
 
 #[async_trait]
 impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for SparseUnary<S, T> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.source.read_permit(txn_id, range).await
     }
 }
@@ -3830,7 +3906,11 @@ where
     FE: ThreadSafe,
     T: CDatatype,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         let source = &self.source;
         access_cast_dispatch!(source, this, this.read_permit(txn_id, range).await)
     }
@@ -3940,10 +4020,14 @@ where
     FE: Send + Sync,
     T: CDatatype + DType,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.semaphore
             .read(txn_id, range)
-            .map_ok(|permit| vec![permit])
+            .map_ok(|permit| smallvec![permit])
             .map_err(TCError::from)
             .await
     }
@@ -4010,9 +4094,8 @@ fn block_elements<T: CDatatype, C: NDArrayRead<DType = u64>, V: NDArrayRead<DTyp
 
             let tuples = coords
                 .as_ref()
-                .into_par_iter()
-                .copied()
-                .chunks(ndim)
+                .par_chunks(ndim)
+                .map(Coord::from_slice)
                 .zip(values.as_ref().into_par_iter().copied())
                 .map(Ok)
                 .collect::<Vec<_>>();
@@ -4128,11 +4211,11 @@ where
     debug_assert_eq!(&shape, right.shape());
 
     let strides = strides_for(&shape, shape.len());
-    let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides))?;
+    let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides.to_vec()))?;
     let dims = ArrayBase::<Arc<Vec<u64>>>::new(vec![shape.len()], Arc::new(shape.to_vec()))?;
 
     let (left_blocks, right_blocks) = try_join!(
-        left.blocks(txn_id, range.clone(), order.to_vec()),
+        left.blocks(txn_id, range.clone(), order.clone()),
         right.blocks(txn_id, range, order)
     )?;
 
@@ -4169,12 +4252,12 @@ where
     debug_assert_eq!(&shape, right.shape());
 
     let ndim = shape.len();
-    let strides = strides_for(&shape, ndim);
+    let strides = strides_for(&shape, ndim).to_vec();
     let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![ndim], Arc::new(strides))?;
     let dims = ArrayBase::<Arc<Vec<u64>>>::new(vec![ndim], Arc::new(shape.to_vec()))?;
 
     let (left_blocks, right_blocks) = try_join!(
-        left.blocks(txn_id, range.clone(), order.to_vec()),
+        left.blocks(txn_id, range.clone(), order.clone()),
         right.blocks(txn_id, range, order)
     )?;
 

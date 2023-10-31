@@ -649,7 +649,7 @@ where
     async fn read_value(self, txn_id: TxnId, coord: Coord) -> TCResult<Number> {
         let _permit = self
             .accessor
-            .read_permit(txn_id, coord.to_vec().into())
+            .read_permit(txn_id, coord.clone().into())
             .await?;
 
         self.accessor
@@ -1318,7 +1318,7 @@ where
             self,
             this,
             {
-                let _permit = this.write_permit(txn_id, coord.to_vec().into()).await?;
+                let _permit = this.write_permit(txn_id, coord.clone().into()).await?;
                 let guard = this.write().await;
                 guard.write_value(txn_id, coord, value.cast_into()).await
             },
@@ -1326,20 +1326,20 @@ where
                 let (r_value, i_value) = Complex::cast_from(value).into();
 
                 // always acquire these locks in-order in order to avoid a deadlock
-                let _r_permit = this.0.write_permit(txn_id, coord.to_vec().into()).await?;
-                let _i_permit = this.1.write_permit(txn_id, coord.to_vec().into()).await?;
+                let _r_permit = this.0.write_permit(txn_id, coord.clone().into()).await?;
+                let _i_permit = this.1.write_permit(txn_id, coord.clone().into()).await?;
 
                 let (r_guard, i_guard) = join!(this.0.write(), this.1.write());
 
                 try_join!(
-                    r_guard.write_value(txn_id, coord.to_vec(), r_value.cast_into()),
+                    r_guard.write_value(txn_id, coord.clone(), r_value.cast_into()),
                     i_guard.write_value(txn_id, coord, i_value.cast_into())
                 )?;
 
                 Ok(())
             },
             {
-                let _permit = this.write_permit(txn_id, coord.to_vec().into()).await?;
+                let _permit = this.write_permit(txn_id, coord.clone().into()).await?;
                 let guard = this.write().await;
                 guard.write_value(txn_id, coord, value.cast_into()).await
             }

@@ -14,7 +14,7 @@ use safecast::AsType;
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Inner, Persist, Restore, VERSIONS};
 use tc_transact::{fs, Transact, Transaction, TxnId};
-use tc_value::ValueCollator;
+use tc_value::{Value, ValueCollator};
 use tcgeneric::{label, Instance, Label, TCBoxTryStream, ThreadSafe};
 
 use crate::finalize_dir;
@@ -33,7 +33,7 @@ type Version<FE> = b_tree::BTreeLock<BTreeSchema, ValueCollator, FE>;
 type VersionReadGuard<FE> = b_tree::BTreeReadGuard<BTreeSchema, ValueCollator, FE>;
 type VersionWriteGuard<FE> = b_tree::BTreeWriteGuard<BTreeSchema, ValueCollator, FE>;
 
-type Semaphore = tc_transact::lock::Semaphore<b_tree::Collator<ValueCollator>, Arc<Range>>;
+type Semaphore = tc_transact::lock::Semaphore<b_tree::Collator<ValueCollator>, Range>;
 
 struct Delta<FE> {
     dir: DirLock<FE>,
@@ -147,7 +147,7 @@ where
         self,
         mut keys: TCBoxTryStream<'a, Key>,
         collator: b_tree::Collator<ValueCollator>,
-        range: Arc<Range>,
+        range: Range,
         reverse: bool,
     ) -> TCResult<TCBoxTryStream<'a, Key>> {
         trace!("merge delta");
@@ -159,15 +159,25 @@ where
         if inserted.is_empty(&range).await? {
             trace!("no inserts to merge");
         } else {
-            let inserted = inserted.keys(range.clone(), reverse).map_err(TCError::from);
-            keys = Box::pin(collate::try_merge(collator.clone(), keys, inserted));
+            let inserted = inserted.keys(range.clone(), reverse).await?;
+
+            keys = Box::pin(collate::try_merge(
+                collator.clone(),
+                keys,
+                inserted.map_err(TCError::from),
+            ));
         }
 
         if deleted.is_empty(&range).await? {
             trace!("no deletes to merge");
         } else {
-            let deleted = deleted.keys(range, reverse).map_err(TCError::from);
-            keys = Box::pin(collate::try_diff(collator.clone(), keys, deleted));
+            let deleted = deleted.keys(range, reverse).await?;
+
+            keys = Box::pin(collate::try_diff(
+                collator.clone(),
+                keys,
+                deleted.map_err(TCError::from),
+            ));
         }
 
         Ok(keys)
@@ -308,7 +318,7 @@ where
     async fn into_keys(
         self,
         txn_id: TxnId,
-        range: Arc<Range>,
+        range: Range,
         reverse: bool,
     ) -> TCResult<TCBoxTryStream<'a, Key>> {
         trace!("BTreeFile::into_keys {:?}", range);
@@ -338,9 +348,9 @@ where
 
         trace!("BTreeFile::into_keys got a list of delta versions");
 
-        let keys = canon.keys(range.clone(), reverse).map_err(TCError::from);
+        let keys = canon.keys(range.clone(), reverse).await?;
 
-        let mut keys: TCBoxTryStream<'static, Key> = Box::pin(keys);
+        let mut keys: TCBoxTryStream<'static, Key> = Box::pin(keys.map_err(TCError::from));
 
         for delta in deltas {
             trace!("BTreeFile::into_keys merging delta version...");
@@ -364,7 +374,7 @@ where
     pub(super) async fn into_stream(
         self,
         txn_id: TxnId,
-        range: Arc<Range>,
+        range: Range,
         reverse: bool,
     ) -> TCResult<Keys<'a>> {
         debug!("BTreeFile::into_stream");
@@ -426,8 +436,7 @@ where
     {
         debug!("BTreeFile::keys");
 
-        self.into_stream(txn_id, Arc::new(Range::default()), false)
-            .await
+        self.into_stream(txn_id, Range::default(), false).await
     }
 
     fn slice(self, range: Range, reverse: bool) -> TCResult<Self::Slice> {
@@ -445,7 +454,7 @@ where
     async fn delete(&self, txn_id: TxnId, range: Range) -> TCResult<()> {
         debug!("BTreeFile::delete {:?}", range);
 
-        let range = Arc::new(self.schema().validate_range(range)?);
+        let range = self.schema().validate_range(range)?;
         let _permit = self.semaphore.write(txn_id, range.clone()).await?;
 
         let (deltas, pending) = {
@@ -467,8 +476,8 @@ where
         };
 
         let canon = self.canon.read().await;
-        let mut keys: TCBoxTryStream<Key> =
-            Box::pin(canon.keys(range.clone(), false).map_err(TCError::from));
+        let keys = canon.keys(range.clone(), false).await?;
+        let mut keys: TCBoxTryStream<Key> = Box::pin(keys.map_err(TCError::from));
 
         for delta in deltas {
             let collator = self.collator().clone();
@@ -484,31 +493,35 @@ where
             inserts.truncate().await?;
 
             while let Some(key) = keys.try_next().await? {
-                deletes.insert(key).await?;
+                deletes.insert(key.into_vec()).await?;
             }
         } else {
             let inserts = pending.inserts.read().await;
             let mut deletes = pending.deletes.write().await;
 
             let collator = self.collator().clone();
-            let inserted = inserts.keys(range, false).map_err(TCError::from);
-            keys = Box::pin(collate::try_merge(collator, keys, inserted));
+            let inserted = inserts.keys(range, false).await?;
+            keys = Box::pin(collate::try_merge(
+                collator,
+                keys,
+                inserted.map_err(TCError::from),
+            ));
 
             while let Some(key) = keys.try_next().await? {
-                deletes.insert(key).await?;
+                deletes.insert(key.into_vec()).await?;
             }
         }
 
         Ok(())
     }
 
-    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
-        let key = b_tree::Schema::validate(self.schema(), key)?;
+    async fn insert(&self, txn_id: TxnId, key: Vec<Value>) -> TCResult<()> {
+        let key = b_tree::Schema::validate_key(self.schema(), key)?;
         debug!("BTreeFile::insert {:?} at {}", key, txn_id);
 
         let _permit = self
             .semaphore
-            .write(txn_id, Arc::new(Range::from_prefix(key.clone())))
+            .write(txn_id, Range::from_prefix(key.clone()))
             .await?;
 
         trace!("BTreeFile::insert got permit");
@@ -537,10 +550,7 @@ where
     where
         S: Stream<Item = TCResult<Key>> + Send + Unpin,
     {
-        let _permit = self
-            .semaphore
-            .write(txn_id, Arc::new(Range::default()))
-            .await?;
+        let _permit = self.semaphore.write(txn_id, Range::default()).await?;
 
         let delta = {
             let dir = self.dir.read().await;
@@ -552,7 +562,7 @@ where
 
         while let Some(key) = keys.try_next().await? {
             deletes.delete(&key).await?;
-            inserts.insert(key).await?;
+            inserts.insert(key.into_vec()).await?;
         }
 
         Ok(())
@@ -790,7 +800,7 @@ where
         {
             let mut inserts = inserts.write().await;
             while let Some(key) = keys.try_next().await? {
-                inserts.insert(key).await?;
+                inserts.insert(key.into_vec()).await?;
             }
         }
 
@@ -804,11 +814,8 @@ where
 
         let canon = Version::create(schema, collator, canon)?;
 
-        let semaphore = Semaphore::with_reservation(
-            txn_id,
-            canon.collator().clone(),
-            Arc::new(Range::default()),
-        );
+        let semaphore =
+            Semaphore::with_reservation(txn_id, canon.collator().clone(), Range::default());
 
         Ok(Self {
             dir,
@@ -835,10 +842,7 @@ where
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         debug!("BTreeFile::restore");
 
-        let _permit = self
-            .semaphore
-            .write(txn_id, Arc::new(Range::default()))
-            .await?;
+        let _permit = self.semaphore.write(txn_id, Range::default()).await?;
 
         let collator = self.canon.collator().inner();
 
@@ -886,7 +890,7 @@ where
         let mut to_insert = backup.clone().keys(txn_id).await?;
         while let Some(key) = to_insert.try_next().await? {
             deletes.delete(&key).await?;
-            inserts.insert(key).await?;
+            inserts.insert(key.into_vec()).await?;
         }
 
         Ok(())
@@ -995,7 +999,7 @@ where
         let canon = Version::create(schema, collator, canon).map_err(de::Error::custom)?;
 
         let collator = canon.collator().clone();
-        let semaphore = Semaphore::with_reservation(txn_id, collator, Arc::new(Range::default()));
+        let semaphore = Semaphore::with_reservation(txn_id, collator, Range::default());
 
         trace!("decoded BTreeFile");
 

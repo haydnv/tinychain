@@ -1,4 +1,5 @@
 use safecast::TryCastFrom;
+use std::sync::Arc;
 
 use tc_error::*;
 use tc_value::uuid::Uuid;
@@ -88,7 +89,7 @@ impl<'a, State: StateInstance> Handler<'a, State> for UuidHandler<'a> {
                 };
 
                 let value = match self.dtype {
-                    "bytes" => Value::Bytes(uuid.into_bytes().into()),
+                    "bytes" => Value::Bytes(Arc::new(uuid.into_bytes())),
                     "id" => Value::Id(uuid.into()),
                     "string" => Value::String(uuid.to_string().into()),
                     other => {

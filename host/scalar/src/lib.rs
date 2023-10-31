@@ -15,6 +15,7 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use get_size::GetSize;
 use log::{debug, warn};
 use safecast::{as_type, Match, TryCastFrom, TryCastInto};
+use smallvec::SmallVec;
 
 use tc_error::*;
 use tc_transact::public::{Public, StateInstance, ToState};
@@ -932,6 +933,26 @@ impl TryCastFrom<Scalar> for Tuple<Scalar> {
         match scalar {
             Scalar::Tuple(tuple) => Some(tuple),
             Scalar::Value(Value::Tuple(tuple)) => Some(tuple.into_iter().collect()),
+            _ => None,
+        }
+    }
+}
+
+impl<const N: usize, T> TryCastFrom<Scalar> for SmallVec<[T; N]>
+where
+    T: TryCastFrom<Scalar>,
+    [T; N]: smallvec::Array<Item = T>,
+{
+    fn can_cast_from(scalar: &Scalar) -> bool {
+        match scalar {
+            Scalar::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(scalar: Scalar) -> Option<Self> {
+        match scalar {
+            Scalar::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,
         }
     }

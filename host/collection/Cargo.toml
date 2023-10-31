@@ -1,6 +1,6 @@
 [package]
 name = "tc-collection"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "TinyChain's collection types"
@@ -15,25 +15,26 @@ categories = ["database", "database-implementations", "data-structures"]
 opencl = ["ha-ndarray/opencl"]
 
 [dependencies]
-async-hash = "0.5"
+async-hash = { path = "../../../async-hash"}
 async-trait = "0.1"
-b-table = { version = "~0.1.1", features = ["all"] }
-b-tree = { version = "~0.2.1", features = ["all"] }
-collate = { version = "0.3", features = ["stream"] }
+b-table = { path = "../../../b-table", features = ["all"] }
+b-tree = { path = "../../../b-tree", features = ["all"] }
+collate = { path = "../../../collate", features = ["stream"] }
 destream = "0.7"
-ds-ext = "0.1"
+ds-ext = { path = "../../../ds-ext" }
 futures = "0.3"
-freqfs = { version = "0.8", features = ["logging"] }
-ha-ndarray = { version = "~0.1.1", features = ["freqfs", "stream"] }
+freqfs = { path = "../../../freqfs", features = ["logging"] }
+ha-ndarray = { path = "../../../ha-ndarray", features = ["freqfs", "stream"] }
 itertools = "0.11"
 log = { version = "0.4", features = ["release_max_level_info"] }
 num_cpus = "1.15"
+smallvec = "1.11"
 pin-project = "1.1"
 rayon = "1.7"
 safecast = "0.2"
-tc-error = "0.8"
-tc-scalar = "0.1"
-tc-transact = "0.17"
-tc-value = "0.9"
-tcgeneric = "0.7"
-tokio = { version = "1.32", features = ["sync"] }
+tc-error = { path = "../error" }
+tc-scalar = { path = "../scalar" }
+tc-transact = { path = "../transact" }
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }
+tokio = { version = "1.33", features = ["sync"] }

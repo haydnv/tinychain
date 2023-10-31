@@ -12,7 +12,7 @@ keywords = ["scalar", "value", "op", "ref", "resolve"]
 categories = ["concurrency", "data-structures"]
 
 [dependencies]
-async-hash = "0.5"
+async-hash = { path = "../../../async-hash" }
 async-trait = "0.1"
 bytes = "1.3"
 destream = "0.7"
@@ -23,7 +23,8 @@ log = { version = "0.4" }
 num_cpus = "1.13"
 safecast = "0.2"
 serde = { version = "1.0", features = [] }
-tc-error = "0.8"
-tc-transact = "0.17"
-tc-value = "0.9"
-tcgeneric = "0.7"
+smallvec = "1.11"
+tc-error = { path = "../error" }
+tc-transact = { path = "../transact" }
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }

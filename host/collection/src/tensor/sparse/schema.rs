@@ -5,17 +5,17 @@ use std::{fmt, io};
 use tc_error::*;
 use tc_value::Number;
 
-use crate::tensor::{Axes, Shape};
+use crate::tensor::Shape;
 
 use super::BLOCK_SIZE;
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct IndexSchema {
-    columns: Axes,
+    columns: Vec<usize>,
 }
 
 impl IndexSchema {
-    pub fn new(columns: Axes) -> Self {
+    pub fn new(columns: Vec<usize>) -> Self {
         Self { columns }
     }
 }
@@ -36,7 +36,7 @@ impl b_table::BTreeSchema for IndexSchema {
         12
     }
 
-    fn validate(&self, key: Vec<Self::Value>) -> Result<Vec<Self::Value>, Self::Error> {
+    fn validate_key(&self, key: Vec<Self::Value>) -> Result<Vec<Self::Value>, Self::Error> {
         if key.len() == self.len() {
             Ok(key)
         } else {
@@ -50,11 +50,6 @@ impl b_table::IndexSchema for IndexSchema {
 
     fn columns(&self) -> &[Self::Id] {
         &self.columns
-    }
-
-    fn extract_key(&self, key: &[Self::Value], other: &Self) -> Vec<Self::Value> {
-        debug_assert_eq!(key.len(), self.columns.len());
-        other.columns.iter().copied().map(|x| key[x]).collect()
     }
 }
 

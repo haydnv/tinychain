@@ -12,6 +12,7 @@ use futures::TryFutureExt;
 use ha_ndarray::{NDArray, Queue};
 use log::debug;
 use safecast::{AsType, CastFrom, CastInto, TryCastFrom, TryCastInto};
+use smallvec::SmallVec;
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
@@ -43,13 +44,13 @@ const PREFIX: PathLabel = path_label(&["state", "collection", "tensor"]);
 const IDEAL_BLOCK_SIZE: usize = 65_536;
 
 /// The axes of a [`Tensor`]
-pub type Axes = Vec<usize>;
+pub type Axes = SmallVec<[usize; 8]>;
 
 /// A [`Tensor`] coordinate
-pub type Coord = Vec<u64>;
+pub type Coord = SmallVec<[u64; 8]>;
 
 /// The strides of a [`Tensor`]
-pub type Strides = Vec<u64>;
+pub type Strides = SmallVec<[u64; 8]>;
 
 type Semaphore = tc_transact::lock::Semaphore<Collator<u64>, Range>;
 
@@ -69,7 +70,7 @@ impl From<(NumberType, Shape)> for Schema {
 impl TryCastFrom<Value> for Schema {
     fn can_cast_from(value: &Value) -> bool {
         match value {
-            Value::Tuple(tuple) => TryCastInto::<(TCPathBuf, Vec<u64>)>::can_cast_into(tuple),
+            Value::Tuple(tuple) => TryCastInto::<(TCPathBuf, Shape)>::can_cast_into(tuple),
             _ => false,
         }
     }
@@ -77,8 +78,7 @@ impl TryCastFrom<Value> for Schema {
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
             Value::Tuple(tuple) => {
-                let (dtype, shape): (TCPathBuf, Vec<u64>) = tuple.opt_cast_into()?;
-                let shape = Shape::from(shape);
+                let (dtype, shape): (TCPathBuf, Shape) = tuple.opt_cast_into()?;
                 let dtype = ValueType::from_path(&dtype)?;
                 match dtype {
                     ValueType::Number(dtype) => Some(Schema { shape, dtype }),
@@ -150,7 +150,11 @@ impl<'en> en::ToStream<'en> for Schema {
 /// Method to lock a tensor for reading.
 pub trait TensorPermitRead: Send + Sync {
     /// Acquire a read lock on the given `range` of this tensor.
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>>;
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>>;
 }
 
 #[async_trait]
@@ -489,7 +493,7 @@ pub trait TensorTransform {
 
     /// Transpose this [`Tensor`] by reordering its axes according to the given `permutation`.
     /// If no permutation is given, the axes will be reversed.
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose>;
+    fn transpose(self, permutation: Option<Axes>) -> TCResult<Self::Transpose>;
 }
 
 /// Trigonometric [`Tensor`] operations
@@ -1603,7 +1607,7 @@ where
         }
     }
 
-    fn transpose(self, permutation: Option<Vec<usize>>) -> TCResult<Self::Transpose> {
+    fn transpose(self, permutation: Option<Axes>) -> TCResult<Self::Transpose> {
         match self {
             Self::Dense(this) => this.into_view().transpose(permutation).map(Self::from),
             Self::Sparse(this) => this.into_view().transpose(permutation).map(Self::from),
@@ -2079,7 +2083,7 @@ where
     L: TensorInstance + TensorTransform + fmt::Debug,
     R: TensorInstance + TensorTransform + fmt::Debug,
 {
-    let broadcast_shape = broadcast_shape(left.shape(), right.shape())?;
+    let broadcast_shape = broadcast_shape(left.shape().as_slice(), right.shape().as_slice())?;
 
     Ok((
         left.broadcast(broadcast_shape.clone())?,
@@ -2094,34 +2098,26 @@ where
 pub fn broadcast_shape(left: &[u64], right: &[u64]) -> TCResult<Shape> {
     let ndim = Ord::max(left.len(), right.len());
 
-    let left: Vec<u64> = iter::repeat(1)
+    let left = iter::repeat(1)
         .take(ndim - left.len())
-        .chain(left.iter().copied())
-        .collect();
+        .chain(left.iter().copied());
 
-    let right: Vec<u64> = iter::repeat(1)
+    let right = iter::repeat(1)
         .take(ndim - right.len())
-        .chain(right.iter().copied())
-        .collect();
+        .chain(right.iter().copied());
 
-    let mut shape = Vec::with_capacity(ndim);
-    for (l, r) in left.iter().zip(&right) {
-        if l == r || *l == 1 {
-            shape.push(*r);
-        } else if *r == 1 {
-            shape.push(*l)
-        } else {
-            return Err(bad_request!(
-                "cannot broadcast dimension {} into {} (tensor shapes are {:?} and {:?}",
-                l,
-                r,
-                left,
-                right
-            ));
-        }
-    }
-
-    Ok(shape.into())
+    left.into_iter()
+        .zip(right)
+        .map(|(l, r)| {
+            if l == r || l == 1 {
+                Ok(r)
+            } else if r == 1 {
+                Ok(l)
+            } else {
+                Err(bad_request!("cannot broadcast dimension {l} into {r}"))
+            }
+        })
+        .collect()
 }
 
 #[inline]
@@ -2135,7 +2131,7 @@ fn coord_of<T: Copy + Div<Output = T> + Rem<Output = T> + PartialEq>(
     strides: &[T],
     shape: &[T],
     zero: T,
-) -> Vec<T> {
+) -> SmallVec<[T; 8]> {
     strides
         .iter()
         .copied()

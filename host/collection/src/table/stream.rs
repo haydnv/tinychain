@@ -2,10 +2,10 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use async_trait::async_trait;
-use b_table::{IndexSchema, Schema};
 use destream::en;
 use futures::{Stream, StreamExt, TryStreamExt};
 use safecast::AsType;
+use smallvec::SmallVec;
 
 use tc_error::*;
 use tc_transact::{IntoView, Transaction};
@@ -34,10 +34,23 @@ impl<'a> Rows<'a> {
     }
 
     pub(super) fn select(self, schema: TableSchema, selection_schema: TableSchema) -> Self {
-        let rows = self.rows.map_ok(move |row| {
-            schema
-                .primary()
-                .extract_key(&row, selection_schema.primary())
+        let mut indices = SmallVec::<[Option<usize>; 32]>::with_capacity(selection_schema.len());
+
+        for col_name in selection_schema.columns() {
+            if let Some(mut index) = schema.columns().position(|c| col_name == c) {
+                index -= indices.iter().filter(|i| (**i) < Some(index)).count();
+                indices.push(Some(index));
+            } else {
+                indices.push(None);
+            }
+        }
+
+        let rows = self.rows.map_ok(move |mut row| {
+            indices
+                .iter()
+                .copied()
+                .map(|i| i.map(|i| row.remove(i)).unwrap_or_default())
+                .collect()
         });
 
         Self {

@@ -1,12 +1,14 @@
-use std::fmt;
+use std::{fmt, mem};
 
 use async_trait::async_trait;
 use collate::OverlapsRange;
 use futures::{future, TryFutureExt, TryStreamExt};
 use safecast::AsType;
+use smallvec::smallvec;
 
 use tc_error::*;
 use tc_transact::{Transaction, TxnId};
+use tc_value::Value;
 use tcgeneric::{Id, Instance, ThreadSafe};
 
 use crate::btree::{BTreeSchema, Node};
@@ -14,7 +16,7 @@ use crate::btree::{BTreeSchema, Node};
 use super::file::TableFile;
 use super::schema::TableSchema;
 use super::stream::Rows;
-use super::{Key, Range, Row, Table, TableInstance, TableOrder, TableRead, TableStream, TableType};
+use super::{Range, Row, Table, TableInstance, TableOrder, TableRead, TableStream, TableType};
 
 /// A result set from a database table with a limited number of rows
 #[derive(Clone)]
@@ -183,13 +185,19 @@ impl<T: TableOrder> TableOrder for Selection<T> {
 
 #[async_trait]
 impl<T: TableRead> TableRead for Selection<T> {
-    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Row>> {
-        let schema = b_table::Schema::primary(self.schema());
-        let source_schema = b_table::Schema::primary(self.source.schema());
+    async fn read(&self, txn_id: TxnId, key: &[Value]) -> TCResult<Option<Row>> {
+        if let Some(mut row) = self.source.read(txn_id, key).await? {
+            debug_assert_eq!(row.len(), self.source.schema().len());
 
-        if let Some(row) = self.source.read(txn_id, key).await? {
-            let row = b_table::IndexSchema::extract_key(schema, &row, source_schema);
-            Ok(Some(row))
+            let mut selection = smallvec![Value::default(); 32];
+
+            for (i, col_name) in self.schema.columns().enumerate() {
+                if let Some(source_i) = self.source.schema().columns().position(|c| c == col_name) {
+                    mem::swap(&mut selection[i], &mut row[source_i]);
+                }
+            }
+
+            Ok(Some(selection))
         } else {
             Ok(None)
         }
@@ -395,8 +403,8 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Row>> {
-        let range = self.schema().range_from_key(key.clone())?;
+    async fn read(&self, txn_id: TxnId, key: &[Value]) -> TCResult<Option<Row>> {
+        let range = self.schema().range_from_key(&key)?;
 
         if self.range.contains(&range, self.table.collator().inner()) {
             self.table.read(txn_id, key).await

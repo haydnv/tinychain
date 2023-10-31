@@ -26,7 +26,7 @@ use super::stream::Rows;
 use super::view::{Limited, Selection, TableSlice as Slice};
 use super::{
     Key, Range, Row, TableInstance, TableOrder, TableRead, TableSchema, TableSlice, TableStream,
-    TableType, TableWrite, Values,
+    TableType, TableWrite,
 };
 
 const CANON: Label = label("canon");
@@ -153,10 +153,10 @@ where
         range: b_table::Range<Id, Value>,
         order: &[Id],
         reverse: bool,
-    ) -> TCResult<TCBoxTryStream<'a, Key>> {
+    ) -> TCResult<TCBoxTryStream<'a, Row>> {
         let inserted = {
             let inserts = self.inserts.read().await;
-            let inserted = inserts.rows(range.clone(), order, reverse, None)?;
+            let inserted = inserts.rows(range.clone(), order, reverse, None).await?;
             inserted.map_err(TCError::from)
         };
 
@@ -164,7 +164,7 @@ where
 
         let deleted = {
             let deletes = self.deletes.read().await;
-            let deleted = deletes.rows(range, order, reverse, None)?;
+            let deleted = deletes.rows(range, order, reverse, None).await?;
             deleted.map_err(TCError::from)
         };
 
@@ -251,7 +251,7 @@ where
     FE: AsType<Node> + ThreadSafe,
 {
     fn new(dir: DirLock<FE>, canon: Version<FE>, committed: DirLock<FE>) -> TCResult<Self> {
-        let semaphore = Semaphore::new(Arc::new(canon.collator().inner().clone()));
+        let semaphore = Semaphore::new(canon.collator().inner().clone());
 
         let deltas = {
             let mut deltas = OrdHashMap::new();
@@ -318,13 +318,13 @@ where
             range, order, reverse, txn_id
         );
 
-        let collator = (&**self.canon.collator()).clone();
+        let collator = self.canon.collator().clone();
 
         // read-lock the canonical version BEFORE locking self.state,
         // to avoid a deadlock or conflict with Self::finalize
         let mut rows: TCBoxTryStream<'static, Key> = {
             let table = self.canon.read().await;
-            let rows = table.rows(range.clone(), &order, reverse, None)?;
+            let rows = table.rows(range.clone(), &order, reverse, None).await?;
             Box::pin(rows.map_err(TCError::from))
         };
 
@@ -440,9 +440,8 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    async fn read(&self, txn_id: TxnId, key: Key) -> TCResult<Option<Row>> {
-        let key = b_table::Schema::validate_key(self.schema(), key)?;
-        let range = self.schema().range_from_key(key.clone())?;
+    async fn read(&self, txn_id: TxnId, key: &[Value]) -> TCResult<Option<Row>> {
+        let range = self.schema().range_from_key(key)?;
         let _permit = self.semaphore.read(txn_id, range).await?;
 
         let (deltas, pending) = {
@@ -462,9 +461,9 @@ where
         if let Some(pending) = pending {
             let (inserted, deleted) = pending.read().await;
 
-            if let Some(row) = inserted.get_row(key.to_vec()).await? {
+            if let Some(row) = inserted.get_row(key).await? {
                 return Ok(Some(row));
-            } else if deleted.contains(&key).await? {
+            } else if deleted.contains(key).await? {
                 return Ok(None);
             }
         }
@@ -472,9 +471,9 @@ where
         for delta in deltas.into_iter().rev() {
             let (inserted, deleted) = delta.read().await;
 
-            if let Some(row) = inserted.get_row(key.to_vec()).await? {
+            if let Some(row) = inserted.get_row(key).await? {
                 return Ok(Some(row));
-            } else if deleted.contains(&key).await? {
+            } else if deleted.contains(key).await? {
                 return Ok(None);
             }
         }
@@ -552,7 +551,7 @@ where
 
         let mut truncated = tmp.write().await;
         while let Some(row) = rows.try_next().await? {
-            truncated.insert(row).await?;
+            truncated.insert(row.into_vec()).await?;
         }
 
         let pending = {
@@ -564,14 +563,16 @@ where
         let (mut inserts, mut deletes) = pending.write().await;
 
         let truncated = truncated.downgrade();
-        let mut rows = truncated.keys(b_tree::Range::default(), false);
+        let mut rows = truncated
+            .keys(b_tree::Range::<Value>::default(), false)
+            .await?;
 
         while let Some(mut row) = rows.try_next().await? {
             let values = row.drain(key_len..).collect();
             let key = row;
 
-            deletes.upsert(key.to_vec(), values).await?;
-            inserts.delete_row(key).await?;
+            inserts.delete_row(&key).await?;
+            deletes.upsert(key.into_vec(), values).await?;
         }
 
         Ok(())
@@ -596,7 +597,7 @@ where
         let _permit = self.semaphore.write(txn_id, range.clone()).await?;
 
         let key_len = self.schema().key().len();
-        let update_row = |mut row: Vec<Value>| {
+        let update_row = |mut row: Row| {
             for (i, name) in value_columns.iter().enumerate() {
                 if let Some(value) = values.get(name) {
                     row[key_len + i] = value.clone();
@@ -609,8 +610,9 @@ where
         let mut rows = self.clone().into_rows(txn_id, range, vec![], false).await?;
 
         let mut updated = tmp.write().await;
+
         while let Some(row) = rows.try_next().await? {
-            updated.insert(update_row(row)).await?;
+            updated.insert(update_row(row).into_vec()).await?;
         }
 
         let pending = {
@@ -622,14 +624,16 @@ where
         let (mut inserts, mut deletes) = pending.write().await;
 
         let updated = updated.downgrade();
-        let mut rows = updated.keys(b_tree::Range::default(), false);
+        let mut rows = updated
+            .keys(b_tree::Range::<Value>::default(), false)
+            .await?;
 
         while let Some(mut row) = rows.try_next().await? {
             let values = row.drain(key_len..).collect();
             let key = row;
 
-            deletes.delete_row(key.to_vec()).await?;
-            inserts.upsert(key, values).await?;
+            deletes.delete_row(&key).await?;
+            inserts.upsert(key.into_vec(), values).await?;
         }
 
         Ok(())
@@ -642,11 +646,11 @@ where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
 {
-    async fn delete(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+    async fn delete(&self, txn_id: TxnId, key: Vec<Value>) -> TCResult<()> {
         debug!("TableFile::delete {:?}", key);
 
         let key = b_table::Schema::validate_key(self.schema(), key)?;
-        let range = self.schema().range_from_key(key.clone())?;
+        let range = self.schema().range_from_key(&key)?;
         let _permit = self.semaphore.write(txn_id, range).await?;
 
         trace!("got write permit to delete {:?}", key);
@@ -683,7 +687,7 @@ where
             return Ok(());
         }
 
-        let mut row = inserts.get_row(key.to_vec()).await?;
+        let mut row = inserts.get_row(&key).await?;
 
         if row.is_none() {
             for delta in deltas {
@@ -691,7 +695,7 @@ where
 
                 if deleted.contains(&key).await? {
                     return Ok(());
-                } else if let Some(insert) = inserted.get_row(key.to_vec()).await? {
+                } else if let Some(insert) = inserted.get_row(&key).await? {
                     row = Some(insert);
                     break;
                 }
@@ -699,7 +703,7 @@ where
         }
 
         if row.is_none() {
-            row = canon.get_row(key.to_vec()).await?;
+            row = canon.get_row(&key).await?;
         }
 
         if let Some(mut row) = row {
@@ -708,18 +712,18 @@ where
             let values = row.drain(key.len()..).collect();
             debug_assert_eq!(key, row[..key.len()]);
 
-            inserts.delete_row(key.to_vec()).await?;
+            inserts.delete_row(&key).await?;
             deletes.upsert(key, values).await?;
         }
 
         Ok(())
     }
 
-    async fn upsert(&self, txn_id: TxnId, key: Key, values: Values) -> TCResult<()> {
+    async fn upsert(&self, txn_id: TxnId, key: Vec<Value>, values: Vec<Value>) -> TCResult<()> {
         let key = b_table::Schema::validate_key(self.schema(), key)?;
         let values = b_table::Schema::validate_values(self.schema(), values)?;
 
-        let range = self.schema().range_from_key(key.clone())?;
+        let range = self.schema().range_from_key(&key)?;
         let _permit = self.semaphore.write(txn_id, range).await?;
 
         let pending = {
@@ -730,7 +734,7 @@ where
 
         let (mut inserts, mut deletes) = pending.write().await;
 
-        deletes.delete_row(key.to_vec()).await?;
+        deletes.delete_row(&key).await?;
         inserts.upsert(key, values).await?;
 
         Ok(())
@@ -962,7 +966,7 @@ where
             let mut inserts = inserts.write().await;
             while let Some(mut key) = rows.try_next().await? {
                 let values = key.drain(key_len..).collect();
-                inserts.upsert(key, values).await?;
+                inserts.upsert(key.into_vec(), values).await?;
             }
         }
 
@@ -1054,8 +1058,8 @@ where
             let values = row.drain(key_len..).collect();
             let key = row;
 
-            deletes.delete_row(key.to_vec()).await?;
-            inserts.upsert(key, values).await?;
+            deletes.delete_row(&key).await?;
+            inserts.upsert(key.into_vec(), values).await?;
         }
 
         Ok(())
@@ -1159,7 +1163,7 @@ where
 
         trace!("created canonical version");
 
-        let collator = Arc::new(canon.collator().inner().clone());
+        let collator = canon.collator().inner().clone();
         let semaphore = Semaphore::with_reservation(txn_id, collator, Range::default());
 
         Ok(TableFile {

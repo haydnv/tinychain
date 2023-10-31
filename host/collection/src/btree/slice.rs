@@ -1,5 +1,4 @@
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use collate::OverlapsRange;
@@ -17,7 +16,7 @@ use super::{BTreeInstance, BTreeType, Node, Range};
 
 pub struct BTreeSlice<Txn, FE> {
     file: BTreeFile<Txn, FE>,
-    range: Arc<Range>,
+    range: Range,
     reverse: bool,
     phantom: PhantomData<Txn>,
 }
@@ -34,14 +33,10 @@ impl<Txn, FE> Clone for BTreeSlice<Txn, FE> {
 }
 
 impl<Txn, FE> BTreeSlice<Txn, FE> {
-    pub(super) fn new<R: Into<Arc<Range>>>(
-        file: BTreeFile<Txn, FE>,
-        range: R,
-        reverse: bool,
-    ) -> Self {
+    pub(super) fn new(file: BTreeFile<Txn, FE>, range: Range, reverse: bool) -> Self {
         Self {
             file,
-            range: range.into(),
+            range,
             reverse,
             phantom: PhantomData,
         }

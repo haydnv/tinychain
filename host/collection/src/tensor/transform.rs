@@ -1,7 +1,8 @@
-use itertools::Itertools;
 use std::iter;
 
+use itertools::Itertools;
 use log::{trace, warn};
+use smallvec::{smallvec, SmallVec};
 
 use tc_error::*;
 
@@ -12,7 +13,7 @@ use super::{coord_of, strides_for, Axes, Coord, Strides};
 pub struct Broadcast {
     source_shape: Shape,
     shape: Shape,
-    broadcast: Vec<bool>,
+    broadcast: SmallVec<[bool; 8]>,
     offset: usize,
 }
 
@@ -42,7 +43,7 @@ impl Broadcast {
                     .zip(shape.iter().skip(offset))
                     .map(|(dim, bdim)| dim == &1 && dim != bdim),
             )
-            .collect::<Vec<bool>>();
+            .collect::<SmallVec<[bool; 8]>>();
 
         debug_assert_eq!(broadcast.len(), ndim);
 
@@ -70,7 +71,7 @@ impl Broadcast {
 
     pub fn invert_range(&self, range: Range) -> Range {
         let source_ndim = self.source_shape.len();
-        let mut source_range = Vec::with_capacity(source_ndim);
+        let mut source_range = SmallVec::<[AxisRange; 8]>::with_capacity(source_ndim);
 
         for axis in 0..source_ndim {
             if axis + self.offset < range.len() {
@@ -132,7 +133,7 @@ impl Expand {
 
         expand.sort();
 
-        let mut shape = Vec::with_capacity(source_shape.len() + expand.len());
+        let mut shape = SmallVec::<[u64; 8]>::with_capacity(source_shape.len() + expand.len());
         shape.extend_from_slice(&source_shape);
         for x in expand.iter().rev().copied() {
             shape.insert(x, 1);
@@ -153,8 +154,8 @@ impl Expand {
         &self.shape
     }
 
-    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
-        let mut axis_map = Vec::with_capacity(self.shape.len());
+    pub fn invert_axes(&self, axes: Axes) -> Axes {
+        let mut axis_map = Axes::with_capacity(self.shape.len());
         axis_map.extend(0..(self.shape.len() - self.expand.len()));
 
         for x in self.expand.iter().copied().rev() {
@@ -230,7 +231,7 @@ impl Expand {
 #[derive(Clone)]
 pub struct Reduce {
     source_shape: Shape,
-    axes: Vec<usize>,
+    axes: Axes,
     shape: Shape,
 }
 
@@ -306,7 +307,7 @@ impl Reduce {
     }
 
     pub fn invert_coord(&self, coord: &[u64]) -> Range {
-        let mut range = Vec::with_capacity(self.source_shape.len());
+        let mut range = SmallVec::<[AxisRange; 8]>::with_capacity(self.source_shape.len());
         range.extend(coord.iter().copied().map(|i| AxisRange::At(i)));
 
         if self.shape.len() == self.source_shape.len() {
@@ -403,7 +404,7 @@ impl Slice {
             ));
         }
 
-        let mut shape = Vec::with_capacity(source_shape.len());
+        let mut shape = SmallVec::<[u64; 8]>::with_capacity(source_shape.len());
 
         for bound in range.iter() {
             match bound {
@@ -453,14 +454,14 @@ impl Slice {
 
             return self.range.clone();
         } else {
-            range.normalize(&self.shape)
+            range.normalize(self.shape.as_slice())
         };
 
         trace!("range normalized to {range:?}");
 
         debug_assert_eq!(range.len(), self.shape().len());
 
-        let mut source_range = Vec::with_capacity(self.shape.len());
+        let mut source_range = SmallVec::<[AxisRange; 8]>::with_capacity(self.shape.len());
         let mut axis = 0;
 
         for source_axis_range in self.range.iter() {
@@ -495,7 +496,7 @@ impl Slice {
                                 .iter()
                                 .copied()
                                 .map(|i| source_range.start + i)
-                                .collect::<Vec<u64>>();
+                                .collect::<SmallVec<[u64; 32]>>();
 
                             debug_assert!(indices.iter().copied().all(|i| i < source_range.end));
 
@@ -621,7 +622,7 @@ pub struct Transpose {
 }
 
 impl Transpose {
-    pub fn new(source_shape: Shape, permutation: Option<Vec<usize>>) -> TCResult<Transpose> {
+    pub fn new(source_shape: Shape, permutation: Option<Axes>) -> TCResult<Transpose> {
         let ndim = source_shape.len();
 
         let permutation = if let Some(axes) = permutation {
@@ -650,7 +651,7 @@ impl Transpose {
         &self.shape
     }
 
-    pub fn invert_axes(&self, axes: Vec<usize>) -> Vec<usize> {
+    pub fn invert_axes(&self, axes: Axes) -> Axes {
         axes.into_iter().map(|x| self.permutation[x]).collect()
     }
 
@@ -665,7 +666,7 @@ impl Transpose {
     pub fn invert_coord(&self, coord: Coord) -> Coord {
         assert_eq!(coord.len(), self.permutation.len());
 
-        let mut source_coord = vec![0; coord.len()];
+        let mut source_coord = smallvec![0; coord.len()];
         for (x, i) in coord.into_iter().enumerate() {
             source_coord[self.permutation[x]] = i;
         }
