@@ -96,7 +96,7 @@ struct Config {
     #[arg(
         long = "stack_size",
         value_parser = data_size,
-        default_value = "4M",
+        default_value = "48M",
         help = "the size of the stack of each worker thread (in bytes)",
     )]
     pub stack_size: usize,

@@ -1,6 +1,6 @@
 [package]
 name = "tinychain"
-version = "0.13.1"
+version = "0.14.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "Next-gen cloud service runtime"
@@ -19,14 +19,14 @@ path = "src/main.rs"
 opencl = ["tc-collection/opencl"]
 
 [dependencies]
-async-hash = "0.5"
+async-hash = { path = "../../async-hash" }
 async-trait = "0.1"
-bytes = "1.3"
-clap = { version = "4.0", features = ["derive"] }
+bytes = "1.5"
+clap = { version = "4.4", features = ["derive"] }
 destream = "0.7"
 destream_json = { version = "0.11", features = ["tokio-io"] }
 env_logger = "0.10"
-freqfs = { version = "~0.8.2", features = ["logging", "stream"] }
+freqfs = { path = "../../freqfs", features = ["logging", "stream"] }
 futures = "0.3"
 get-size = "0.1"
 get-size-derive = "0.1"
@@ -34,21 +34,21 @@ hex = "0.4"
 http = "0.2"
 hyper = { version = "0.14", features = ["full"] }
 log = { version = "0.4", features = ["release_max_level_info"] }
-num_cpus = "1.13"
-pin-project = "1.0"
+num_cpus = "1.16"
+pin-project = "1.1"
 rjwt = "0.4"
 safecast = "0.2"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
 tbon = "0.5"
-tc-chain = "0.1"
-tc-collection = "0.1"
-tc-error = "0.8"
-tc-fs = "~0.1.1"
-tc-scalar = "0.1"
-tc-state = "~0.1.1"
-tc-transact = "0.17"
-tc-value = "0.9"
-tcgeneric = "0.7"
-tokio = { version = "1.32", features = ["rt-multi-thread", "signal"] }
+tc-chain = { path = "chain" }
+tc-collection = { path = "collection" }
+tc-error = { path = "error" }
+tc-fs = { path = "fs" }
+tc-scalar = { path = "scalar" }
+tc-state = { path = "state" }
+tc-transact = { path = "transact" }
+tc-value = { path = "value" }
+tcgeneric = { path = "generic" }
+tokio = { version = "1.33", features = ["rt-multi-thread", "signal"] }
 url = { version = "2.4" }
