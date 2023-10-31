@@ -127,14 +127,14 @@ impl FromStr for IdRef {
 impl TryCastFrom<Value> for IdRef {
     fn can_cast_from(value: &Value) -> bool {
         match value {
-            Value::String(s) => Self::from_str(s).is_ok(),
+            Value::String(s) => Self::from_str(s.as_str()).is_ok(),
             _ => false,
         }
     }
 
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
-            Value::String(s) => Self::from_str(&s).ok(),
+            Value::String(s) => Self::from_str(s.as_str()).ok(),
             _ => None,
         }
     }

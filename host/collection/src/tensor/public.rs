@@ -9,6 +9,7 @@ use futures::future::{self, Future, TryFutureExt};
 use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use log::{debug, trace};
 use safecast::*;
+use smallvec::{smallvec, SmallVec};
 
 use tc_error::*;
 use tc_scalar::Scalar;
@@ -20,12 +21,12 @@ use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType, Value
 use tcgeneric::{label, Id, Label, PathSegment, TCBoxTryFuture, ThreadSafe, Tuple};
 
 use super::{
-    broadcast, broadcast_shape, Axes, AxisRange, Dense, DenseBase, DenseCacheFile, DenseView, Node,
-    Range, Schema, Shape, Sparse, SparseBase, SparseView, Tensor, TensorBase, TensorBoolean,
-    TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert,
-    TensorDiagonal, TensorInstance, TensorMatMul, TensorMath, TensorMathConst, TensorRead,
-    TensorReduce, TensorTransform, TensorTrig, TensorType, TensorUnary, TensorUnaryBoolean,
-    TensorWrite, TensorWriteDual,
+    broadcast, broadcast_shape, Axes, AxisRange, Coord, Dense, DenseBase, DenseCacheFile,
+    DenseView, Node, Range, Schema, Shape, Sparse, SparseBase, SparseView, Tensor, TensorBase,
+    TensorBoolean, TensorBooleanConst, TensorCast, TensorCompare, TensorCompareConst, TensorCond,
+    TensorConvert, TensorDiagonal, TensorInstance, TensorMatMul, TensorMath, TensorMathConst,
+    TensorRead, TensorReduce, TensorTransform, TensorTrig, TensorType, TensorUnary,
+    TensorUnaryBoolean, TensorWrite, TensorWriteDual,
 };
 
 const AXES: Label = label("axes");
@@ -127,7 +128,7 @@ impl ConcatenateHandler {
 
         let ndim = tensors[0].ndim();
         let mut offsets = Vec::with_capacity(tensors.len());
-        let mut shape_out = tensors[0].shape().to_vec();
+        let mut shape_out = tensors[0].shape().clone();
         shape_out[axis] = 0;
 
         for tensor in &tensors {
@@ -251,10 +252,9 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let (shape, value): (Vec<u64>, Number) =
+                let (shape, value): (Shape, Number) =
                     key.try_cast_into(|v| TCError::unexpected(v, "a Tensor schema"))?;
 
-                let shape = Shape::from(shape);
                 constant::<State>(&txn, shape, value)
                     .map_ok(Tensor::from)
                     .map_ok(State::from)
@@ -434,8 +434,8 @@ where
 
                 let txn_id = *txn.id();
 
-                if elements.matches::<Vec<(Vec<u64>, Number)>>() {
-                    let elements: Vec<(Vec<u64>, Number)> = elements
+                if elements.matches::<Vec<(Coord, Number)>>() {
+                    let elements: Vec<(Coord, Number)> = elements
                         .opt_cast_into()
                         .expect("tensor coordinate elements");
 
@@ -533,11 +533,11 @@ where
                     TCError::unexpected(v, "the size of an identity tensor")
                 })?;
 
-                let schema = Schema::from((NumberType::Bool, vec![size, size].into()));
+                let schema = Schema::from((NumberType::Bool, smallvec![size, size].into()));
                 let tensor = create_sparse::<State>(txn, schema).await?;
 
                 stream::iter(0..size)
-                    .map(|i| (vec![i, i], true.into()))
+                    .map(|i| (smallvec![i, i], true.into()))
                     .map(|(coord, value)| tensor.write_value_at(*txn.id(), coord, value))
                     .buffer_unordered(num_cpus::get())
                     .try_fold((), |(), ()| future::ready(Ok(())))
@@ -597,7 +597,7 @@ where
                 self.tensor.shape().validate()?;
 
                 let axes = if key.is_none() {
-                    vec![self.tensor.ndim()]
+                    smallvec![self.tensor.ndim()]
                 } else {
                     cast_axes(key, self.tensor.ndim())?
                 };
@@ -716,7 +716,7 @@ where
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.matches::<(Vec<u64>, Number, Number)>() {
-                    let (shape, start, stop): (Vec<u64>, Number, Number) =
+                    let (shape, start, stop): (SmallVec<[u64; 8]>, Number, Number) =
                         key.opt_cast_into().expect("range parameters");
 
                     let shape = Shape::from(shape);
@@ -1084,14 +1084,14 @@ where
                         &right.shape()[..right.ndim() - 2],
                     )?;
 
-                    let mut left_shape = Vec::with_capacity(ndim);
+                    let mut left_shape = SmallVec::<[u64; 8]>::with_capacity(ndim);
                     left_shape.extend_from_slice(&batch_shape);
-                    left_shape.extend(self.tensor.shape().iter().rev().take(2).rev());
+                    left_shape.extend(self.tensor.shape().iter().rev().take(2).rev().copied());
                     let left = self.tensor.broadcast(left_shape.into())?;
 
-                    let mut right_shape = Vec::with_capacity(ndim);
-                    right_shape.extend(batch_shape.into_vec());
-                    right_shape.extend(right.shape().iter().rev().take(2).rev());
+                    let mut right_shape = SmallVec::<[u64; 8]>::with_capacity(ndim);
+                    right_shape.extend(batch_shape);
+                    right_shape.extend(right.shape().iter().rev().take(2).rev().copied());
                     let right = right.broadcast(right_shape.into())?;
 
                     Ok((left, right))
@@ -1129,7 +1129,7 @@ where
 
             return tensor
                 .pow_const(2i32.into())
-                .and_then(|pow| pow.sum(vec![axis], keepdims))
+                .and_then(|pow| pow.sum(smallvec![axis], keepdims))
                 .and_then(|sum| sum.pow_const(0.5f32.into()))
                 .map(State::from);
         } else if tensor.ndim() <= 2 {
@@ -1146,7 +1146,7 @@ where
             tensor
                 .pow_const(2i32.into())
                 .and_then(|pow| {
-                    let axes = vec![pow.ndim() - 1, pow.ndim() - 2];
+                    let axes = smallvec![pow.ndim() - 1, pow.ndim() - 2];
                     pow.sum(axes, keepdims)
                 })
                 .and_then(|sum| sum.pow_const(0.5f32.into()))
@@ -1932,7 +1932,7 @@ fn cast_axes(axes: Value, ndim: usize) -> TCResult<Axes> {
     debug!("cast axes {axes} with ndim {ndim}");
 
     match axes {
-        Value::Number(x) => cast_axis(Value::Number(x), ndim).map(|x| vec![x]),
+        Value::Number(x) => cast_axis(Value::Number(x), ndim).map(|x| smallvec![x]),
         Value::Tuple(tuple) if !tuple.is_empty() => {
             let mut axes = Axes::with_capacity(tuple.len());
             for value in tuple {
@@ -2014,11 +2014,12 @@ pub fn cast_range(shape: &Shape, scalar: Scalar) -> TCResult<Range> {
     match scalar {
         Scalar::Value(Value::Number(i)) => {
             let bound = cast_bound(shape[0], i.into())?;
-            Ok(Range::from(vec![bound]))
+            Ok([AxisRange::At(bound)].into_iter().collect())
         }
         range if range.matches::<(Bound<Value>, Bound<Value>)>() => {
             let range: (Bound<Value>, Bound<Value>) = range.opt_cast_into().expect("range");
-            Ok(Range::from(vec![cast_axis_range(shape[0], range)?]))
+            let range = cast_axis_range(shape[0], range)?;
+            Ok([range].into_iter().collect())
         }
         scalar if scalar.is_tuple() => {
             let bounds = Tuple::<Scalar>::try_cast_from(scalar, |s| {
@@ -2033,7 +2034,7 @@ pub fn cast_range(shape: &Shape, scalar: Scalar) -> TCResult<Range> {
                 ));
             }
 
-            let mut axis_bounds = Vec::with_capacity(shape.len());
+            let mut axis_bounds = SmallVec::<[AxisRange; 8]>::with_capacity(shape.len());
 
             for (axis, bound) in bounds.into_iter().enumerate() {
                 debug!(
@@ -2043,7 +2044,7 @@ pub fn cast_range(shape: &Shape, scalar: Scalar) -> TCResult<Range> {
 
                 let axis_range = if bound.is_none() {
                     AxisRange::all(shape[axis])
-                } else if bound.matches::<Vec<u64>>() {
+                } else if bound.matches::<SmallVec<[u64; 32]>>() {
                     bound
                         .opt_cast_into()
                         .map(AxisRange::Of)
@@ -2070,12 +2071,12 @@ pub fn cast_range(shape: &Shape, scalar: Scalar) -> TCResult<Range> {
     }
 }
 
-fn cast_shape(source_shape: &Shape, value: Tuple<Value>) -> TCResult<Vec<u64>> {
+fn cast_shape(source_shape: &Shape, value: Tuple<Value>) -> TCResult<SmallVec<[u64; 8]>> {
     if value.is_empty() {
         return Err(TCError::unexpected(value, "a Tensor shape"));
     }
 
-    let mut shape = vec![1; value.len()];
+    let mut shape = smallvec![1; value.len()];
     if value.iter().filter(|dim| *dim == &Value::None).count() > 1 {
         return Err(bad_request!(
             "Tensor reshape accepts a maximum of one unknown dimension"

@@ -13,6 +13,7 @@ use futures::try_join;
 use ha_ndarray::*;
 use log::{debug, trace};
 use safecast::{AsType, CastFrom, CastInto};
+use smallvec::{smallvec, SmallVec};
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
@@ -139,7 +140,11 @@ access_cast_from!(u64, U64);
 
 #[async_trait]
 impl<Txn: ThreadSafe, FE: ThreadSafe> TensorPermitRead for DenseAccessCast<Txn, FE> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         cast_dispatch!(self, this, this.read_permit(txn_id, range).await)
     }
 }
@@ -339,7 +344,11 @@ where
     FE: ThreadSafe,
     T: CDatatype + DType,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         match self {
             Self::Base(base) => base.read_permit(txn_id, range).await,
             Self::Broadcast(broadcast) => broadcast.read_permit(txn_id, range).await,
@@ -539,7 +548,11 @@ where
 
 #[async_trait]
 impl<S: TensorPermitRead> TensorPermitRead for DenseBroadcast<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, range).await
@@ -716,7 +729,11 @@ where
     FE: Send + Sync,
     S: TensorPermitRead,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.source.read_permit(txn_id, range).await
     }
 }
@@ -865,7 +882,7 @@ impl<S: TensorInstance + fmt::Debug> DenseDiagonal<S> {
         if source.shape().len() >= 2
             && source.shape().iter().nth_back(0) == source.shape().iter().nth_back(1)
         {
-            let mut shape = source.shape().to_vec();
+            let mut shape = source.shape().clone();
             shape.pop();
 
             Ok(Self {
@@ -930,7 +947,7 @@ impl<S: TensorInstance + TensorPermitRead + fmt::Debug> TensorPermitRead for Den
         &self,
         txn_id: TxnId,
         mut range: Range,
-    ) -> TCResult<Vec<PermitRead<Range>>> {
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         let range = match range.len().cmp(&self.ndim()) {
             Ordering::Less => Ok(range),
             Ordering::Equal => {
@@ -1017,7 +1034,7 @@ impl<S: DenseInstance + Clone> DenseInstance for DenseExpand<S> {
             .copied()
             .filter(|x| x >= &offset)
             .map(|x| x - offset)
-            .collect::<Axes>();
+            .collect::<Vec<usize>>();
 
         if axes.is_empty() {
             trace!("no need to expand {block:?}");
@@ -1050,7 +1067,7 @@ impl<S: DenseInstance + Clone> DenseInstance for DenseExpand<S> {
                 .copied()
                 .filter(|x| *x >= offset)
                 .map(|x| x - offset)
-                .collect::<Axes>();
+                .collect::<Vec<usize>>();
 
             if axes.is_empty() {
                 trace!("no need to expand {block:?}");
@@ -1073,7 +1090,11 @@ impl<S: DenseInstance + Clone> DenseInstance for DenseExpand<S> {
 
 #[async_trait]
 impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for DenseExpand<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, range).await
@@ -1213,7 +1234,7 @@ where
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         let (left, right) = try_join!(
-            self.left.read_value(txn_id, coord.to_vec()),
+            self.left.read_value(txn_id, coord.clone()),
             self.right.read_value(txn_id, coord)
         )?;
 
@@ -1228,7 +1249,11 @@ where
     R: TensorPermitRead,
     T: CDatatype,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         // always acquire these locks in the same order, to avoid the risk of a deadlock
         let mut left = self.left.read_permit(txn_id, range.clone()).await?;
         let right = self.right.read_permit(txn_id, range).await?;
@@ -1316,7 +1341,11 @@ where
 
 #[async_trait]
 impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseCombineConst<S, T> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.left.read_permit(txn_id, range).await
     }
 }
@@ -1447,7 +1476,7 @@ where
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         let (left, right) = try_join!(
-            self.left.read_value(txn_id, coord.to_vec()),
+            self.left.read_value(txn_id, coord.clone()),
             self.right.read_value(txn_id, coord)
         )?;
 
@@ -1457,7 +1486,11 @@ where
 
 #[async_trait]
 impl<Txn: ThreadSafe, FE: ThreadSafe, T: CDatatype> TensorPermitRead for DenseCompare<Txn, FE, T> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         // always acquire these permits in-order to avoid the risk of a deadlock
         let mut left = self.left.read_permit(txn_id, range.clone()).await?;
         let right = self.right.read_permit(txn_id, range).await?;
@@ -1582,7 +1615,11 @@ where
     FE: ThreadSafe,
     T: CDatatype,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.left.read_permit(txn_id, range).await
     }
 }
@@ -1711,8 +1748,8 @@ where
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         let (cond, then, or_else) = try_join!(
-            self.cond.read_value(txn_id, coord.to_vec()),
-            self.then.read_value(txn_id, coord.to_vec()),
+            self.cond.read_value(txn_id, coord.clone()),
+            self.then.read_value(txn_id, coord.clone()),
             self.or_else.read_value(txn_id, coord)
         )?;
 
@@ -1731,7 +1768,11 @@ where
     Then: TensorPermitRead,
     OrElse: TensorPermitRead,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         // always aquire these permits in-order to minimize the risk of a deadlock
         let mut permit = self.cond.read_permit(txn_id, range.clone()).await?;
 
@@ -1861,7 +1902,11 @@ where
 
 #[async_trait]
 impl<L: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseConst<L, T> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.left.read_permit(txn_id, range).await
     }
 }
@@ -1923,7 +1968,7 @@ where
                 "cannot matrix multiply {left:?} with {right:?} due to non-matching dimensions"
             ))
         } else {
-            let mut shape = Vec::with_capacity(left.ndim());
+            let mut shape = SmallVec::<[u64; 8]>::with_capacity(left.ndim());
             shape.extend_from_slice(&left.shape()[..left.ndim() - 1]);
             shape.push(right.shape()[right.ndim() - 1]);
 
@@ -1995,7 +2040,7 @@ where
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType> {
         self.shape.validate_coord(&coord)?;
 
-        let mut right_range = Vec::with_capacity(coord.len());
+        let mut right_range = SmallVec::<[AxisRange; 8]>::with_capacity(coord.len());
         right_range.extend(
             coord
                 .iter()
@@ -2018,8 +2063,8 @@ where
         let mut sum = T::zero();
         for (left_coord, right_coord) in coords {
             let (left, right) = try_join!(
-                self.left.read_value(txn_id, left_coord),
-                self.right.read_value(txn_id, right_coord)
+                self.left.read_value(txn_id, left_coord.into()),
+                self.right.read_value(txn_id, right_coord.into())
             )?;
 
             sum = sum + (left * right);
@@ -2035,7 +2080,11 @@ where
     L: TensorInstance + TensorPermitRead,
     R: TensorInstance + TensorPermitRead,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.shape.validate_range(&range)?;
 
         let left_range = range.iter().take(self.left.ndim() - 1).cloned().collect();
@@ -2394,7 +2443,11 @@ where
 
 #[async_trait]
 impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseReduce<S, T> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, range).await
@@ -2514,7 +2567,11 @@ where
 
 #[async_trait]
 impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for DenseReshape<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         if self.transform.shape().is_covered_by(&range) {
             self.read_permit(txn_id, Range::default()).await
         } else {
@@ -2659,7 +2716,11 @@ impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
 
 #[async_trait]
 impl<S: TensorPermitRead> TensorPermitRead for DenseResizeBlocks<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.source.read_permit(txn_id, range).await
     }
 }
@@ -2978,7 +3039,11 @@ where
 
 #[async_trait]
 impl<S: TensorPermitRead> TensorPermitRead for DenseSlice<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(range);
         self.source.read_permit(txn_id, range).await
@@ -3241,7 +3306,11 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
 
 #[async_trait]
 impl<S: TensorPermitRead> TensorPermitRead for DenseSparse<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.source.read_permit(txn_id, range).await
     }
 }
@@ -3402,7 +3471,11 @@ where
 
 #[async_trait]
 impl<S: TensorPermitRead> TensorPermitRead for DenseTranspose<S> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.transform.shape().validate_range(&range)?;
         let range = self.transform.invert_range(&range);
         self.source.read_permit(txn_id, range).await
@@ -3535,7 +3608,11 @@ where
 
 #[async_trait]
 impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseUnary<S, T> {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.source.read_permit(txn_id, range).await
     }
 }
@@ -3944,7 +4021,11 @@ where
     FE: ThreadSafe,
     T: CDatatype,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         let source = &self.source;
         cast_dispatch!(source, this, this.read_permit(txn_id, range).await)
     }
@@ -4053,10 +4134,14 @@ where
     FE: Send + Sync,
     T: CDatatype + DType,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.semaphore
             .read(txn_id, range)
-            .map_ok(|permit| vec![permit])
+            .map_ok(|permit| smallvec![permit])
             .map_err(TCError::from)
             .await
     }

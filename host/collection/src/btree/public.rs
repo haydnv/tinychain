@@ -20,7 +20,7 @@ use tcgeneric::{label, Map, PathSegment, TCPath, Tuple};
 use crate::Collection;
 
 use super::schema::{BTreeSchema, Column};
-use super::{BTree, BTreeFile, BTreeInstance, BTreeType, BTreeWrite, Node, Range};
+use super::{BTree, BTreeFile, BTreeInstance, BTreeType, BTreeWrite, Key, Node, Range};
 
 impl<State> Route<State> for BTreeType
 where
@@ -407,7 +407,7 @@ fn cast_into_range(scalar: Scalar) -> TCResult<Range> {
                     bad_request!("invalid value for BTree range: {:?}", v)
                 })
             })
-            .collect::<TCResult<_>>()?;
+            .collect::<TCResult<Key>>()?;
 
         Ok(Range::with_bounds(prefix, bounds))
     } else {
@@ -420,7 +420,7 @@ fn cast_into_range(scalar: Scalar) -> TCResult<Range> {
                     bad_request!("invalid value for BTree range: {:?}", v)
                 })
             })
-            .collect::<TCResult<_>>()?;
+            .collect::<TCResult<Key>>()?;
 
         Ok(Range::from_prefix(prefix))
     }

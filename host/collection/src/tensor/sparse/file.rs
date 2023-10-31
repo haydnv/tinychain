@@ -1,9 +1,9 @@
 use std::fmt;
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use b_table::{Collator, TableLock, TableWriteGuard};
+use b_tree::Key;
 use destream::de;
 use freqfs::DirLock;
 use futures::future::TryFutureExt;
@@ -11,11 +11,12 @@ use futures::stream::TryStreamExt;
 use ha_ndarray::{ArrayBase, CDatatype};
 use log::{debug, trace};
 use safecast::{AsType, CastInto};
+use smallvec::SmallVec;
 
 use tc_error::*;
 use tc_transact::{fs, TxnId};
 use tc_value::{DType, Number, NumberCollator, NumberType};
-use tcgeneric::{ThreadSafe, Tuple};
+use tcgeneric::ThreadSafe;
 
 use crate::tensor::{Axes, Coord, Range, Shape, TensorInstance};
 
@@ -41,7 +42,7 @@ impl<FE, T> Clone for SparseFile<FE, T> {
 }
 
 impl<FE, T> SparseFile<FE, T> {
-    pub fn collator(&self) -> &Arc<Collator<NumberCollator>> {
+    pub fn collator(&self) -> &Collator<NumberCollator> {
         self.table.collator()
     }
 
@@ -171,7 +172,8 @@ where
 
         trace!("acquired table read lock, reading rows in range {range:?}");
 
-        let rows = table.rows(range, &order, false, None)?;
+        let rows = table.rows(range, &order, false, None).await?;
+
         let elements = rows
             .inspect_ok(|row| trace!("row: {row:?}"))
             .map_ok(unwrap_row)
@@ -185,9 +187,9 @@ where
     async fn read_value(&self, _txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
         self.shape().validate_coord(&coord)?;
 
-        let key = coord.into_iter().map(Number::from).collect();
+        let key = coord.into_iter().map(Number::from).collect::<Key<_>>();
         let table = self.table.read().await;
-        if let Some(mut row) = table.get_row(key).await? {
+        if let Some(mut row) = table.get_row(&key).await? {
             let value = row.pop().expect("value");
             Ok(value.cast_into())
         } else {
@@ -306,11 +308,15 @@ where
     async fn write_value(&mut self, _txn_id: TxnId, coord: Coord, value: T) -> Result<(), TCError> {
         self.shape.validate_coord(&coord)?;
 
-        let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
-
         if value == T::zero() {
-            self.table.delete_row(coord).await?;
+            let coord = coord
+                .into_iter()
+                .map(|i| Number::UInt(i.into()))
+                .collect::<SmallVec<[Number; 8]>>();
+
+            self.table.delete_row(&coord).await?;
         } else {
+            let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
             self.table.upsert(coord, vec![value.into()]).await?;
         }
 
@@ -347,7 +353,7 @@ where
         while let Some((coord, value)) = seq.next_element::<(Coord, T)>(()).await? {
             if let Err(cause) = self.file.shape().validate_coord(&coord) {
                 return Err(de::Error::invalid_value(
-                    Tuple::from(coord),
+                    format!("{coord:?}"),
                     format!("a sparse tensor coordinate (note: {cause})"),
                 ));
             }

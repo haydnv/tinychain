@@ -25,8 +25,8 @@ use crate::table::TableUpdate;
 use crate::Collection;
 
 use super::{
-    ColumnRange, Key, Range, Table, TableFile, TableInstance, TableOrder, TableRead, TableSchema,
-    TableSlice, TableStream, TableType, TableWrite, Values,
+    ColumnRange, Range, Table, TableFile, TableInstance, TableOrder, TableRead, TableSchema,
+    TableSlice, TableStream, TableType, TableWrite,
 };
 
 impl<State> Route<State> for TableType
@@ -127,7 +127,7 @@ where
                         !empty
                     }
                     KeyOrRange::Key(key) => {
-                        let row = self.table.read(*txn.id(), key).await?;
+                        let row = self.table.read(*txn.id(), &key).await?;
                         row.is_some()
                     }
                     KeyOrRange::Range(bounds) => {
@@ -167,7 +167,7 @@ where
             Box::pin(async move {
                 let count = match KeyOrRange::try_from_value(&self.table, key)? {
                     KeyOrRange::All => self.table.count(*txn.id()).await?,
-                    KeyOrRange::Key(key) => match self.table.read(*txn.id(), key).await? {
+                    KeyOrRange::Key(key) => match self.table.read(*txn.id(), &key).await? {
                         Some(_row) => 1,
                         None => 0,
                     },
@@ -329,7 +329,8 @@ where
                     }
                     KeyOrRange::Key(key) => {
                         self.table
-                            .read(*txn.id(), key)
+                            .read(*txn.id(), &key)
+                            .map_ok(|maybe_row| maybe_row.map(|row| row.into_vec()))
                             .map_ok(Value::from)
                             .map_ok(State::from)
                             .await
@@ -368,7 +369,7 @@ where
                             .map(|state| {
                                 state.try_cast_into(|s| TCError::unexpected(s, "a column value"))
                             })
-                            .collect::<TCResult<Values>>()?;
+                            .collect::<TCResult<_>>()?;
 
                         self.table.upsert(*txn.id(), key, values).await
                     }
@@ -569,7 +570,7 @@ where
 
 enum KeyOrRange {
     All,
-    Key(Key),
+    Key(Vec<Value>),
     Range(Range),
 }
 

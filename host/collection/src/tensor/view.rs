@@ -9,6 +9,7 @@ use ha_ndarray::{Buffer, CDatatype, NDArrayRead};
 use log::trace;
 use rayon::prelude::*;
 use safecast::{AsType, CastInto};
+use smallvec::SmallVec;
 
 use tc_error::*;
 use tc_transact::lock::PermitRead;
@@ -204,7 +205,7 @@ impl<'en> en::IntoStream<'en> for DenseViewBlocks {
 }
 
 pub struct DenseView {
-    _permit: Vec<PermitRead<Range>>,
+    _permit: SmallVec<[PermitRead<Range>; 16]>,
     schema: (TCPathBuf, Vec<u64>),
     elements: DenseViewBlocks,
 }
@@ -247,7 +248,7 @@ impl<'en> en::IntoStream<'en> for DenseView {
 }
 
 pub struct SparseView {
-    _permit: Vec<PermitRead<Range>>,
+    _permit: SmallVec<[PermitRead<Range>; 16]>,
     schema: (TCPathBuf, Vec<u64>),
     elements: Pin<Box<dyn Stream<Item = TCResult<(Coord, Number)>> + Send>>,
 }

@@ -6,11 +6,12 @@ use std::{fmt, mem};
 use futures::stream::{Fuse, Stream, StreamExt, TryStream};
 use ha_ndarray::{ArrayBase, CDatatype};
 use pin_project::pin_project;
+use smallvec::SmallVec;
 
 use tc_error::*;
 use tc_transact::lock::PermitRead;
 
-use crate::tensor::{Coord, Range, IDEAL_BLOCK_SIZE};
+use crate::tensor::{Axes, Coord, Range, IDEAL_BLOCK_SIZE};
 
 #[pin_project]
 pub struct BlockCoords<S, T> {
@@ -273,7 +274,7 @@ where
 
 #[pin_project]
 pub struct Elements<S> {
-    permit: Vec<PermitRead<Range>>,
+    permit: SmallVec<[PermitRead<Range>; 16]>,
 
     #[pin]
     elements: Fuse<S>,
@@ -283,7 +284,7 @@ impl<S> Elements<S>
 where
     S: Stream,
 {
-    pub fn new(permit: Vec<PermitRead<Range>>, elements: S) -> Self {
+    pub fn new(permit: SmallVec<[PermitRead<Range>; 16]>, elements: S) -> Self {
         Self {
             permit,
             elements: elements.fuse(),
@@ -532,13 +533,13 @@ pub struct FilledAt<S> {
     #[pin]
     source: S,
 
-    pending: Option<Vec<u64>>,
-    axes: Vec<usize>,
+    pending: Option<SmallVec<[u64; 8]>>,
+    axes: Axes,
     ndim: usize,
 }
 
 impl<S> FilledAt<S> {
-    pub fn new(source: S, axes: Vec<usize>, ndim: usize) -> Self {
+    pub fn new(source: S, axes: Axes, ndim: usize) -> Self {
         debug_assert!(!axes.is_empty());
         debug_assert!(!axes.iter().copied().any(|x| x >= ndim));
 
@@ -552,7 +553,7 @@ impl<S> FilledAt<S> {
 }
 
 impl<T, S: Stream<Item = TCResult<(Coord, T)>>> Stream for FilledAt<S> {
-    type Item = TCResult<Vec<u64>>;
+    type Item = TCResult<Coord>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
         let mut this = self.project();

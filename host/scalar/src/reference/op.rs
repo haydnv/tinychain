@@ -97,9 +97,10 @@ impl Subject {
 
     fn reference_self(self, path: &TCPathBuf) -> Self {
         match self {
-            Self::Link(link) if link.path().starts_with(path) => {
-                Self::Ref(IdRef::from(SELF), link.path()[path.len()..].to_vec().into())
-            }
+            Self::Link(link) if link.path().starts_with(path) => Self::Ref(
+                IdRef::from(SELF),
+                link.into_path().into_iter().skip(path.len()).collect(),
+            ),
             other => other,
         }
     }
@@ -193,7 +194,7 @@ impl TryCastFrom<Value> for Subject {
     fn can_cast_from(value: &Value) -> bool {
         match value {
             Value::Link(_) => true,
-            Value::String(s) => Self::from_str(s).is_ok(),
+            Value::String(s) => Self::from_str(s.as_str()).is_ok(),
             Value::Tuple(tuple) => tuple.matches::<(IdRef, TCPathBuf)>(),
             _ => false,
         }

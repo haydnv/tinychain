@@ -7,6 +7,7 @@ use destream::{de, en};
 use futures::TryFutureExt;
 use itertools::{Itertools, MultiProduct};
 use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
+use smallvec::{smallvec, SmallVec};
 
 use tc_error::*;
 use tc_value::Value;
@@ -18,7 +19,7 @@ use super::Coord;
 pub enum AxisRangeIter {
     At(iter::Once<u64>),
     In(iter::StepBy<ops::Range<u64>>),
-    Of(std::vec::IntoIter<u64>),
+    Of(smallvec::IntoIter<[u64; 32]>),
 }
 
 impl Iterator for AxisRangeIter {
@@ -38,7 +39,7 @@ impl Iterator for AxisRangeIter {
 pub enum AxisRange {
     At(u64),
     In(ops::Range<u64>, u64),
-    Of(Vec<u64>),
+    Of(SmallVec<[u64; 32]>),
 }
 
 impl AxisRange {
@@ -121,8 +122,8 @@ impl From<u64> for AxisRange {
     }
 }
 
-impl From<Vec<u64>> for AxisRange {
-    fn from(of: Vec<u64>) -> AxisRange {
+impl From<SmallVec<[u64; 32]>> for AxisRange {
+    fn from(of: SmallVec<[u64; 32]>) -> AxisRange {
         AxisRange::Of(of)
     }
 }
@@ -168,7 +169,7 @@ impl TryFrom<AxisRange> for ha_ndarray::AxisBound {
                         i.try_into()
                             .map_err(|cause| bad_request!("bad index: {cause}"))
                     })
-                    .collect::<Result<Vec<usize>, TCError>>()?;
+                    .collect::<Result<_, TCError>>()?;
 
                 Ok(ha_ndarray::AxisBound::Of(indices))
             }
@@ -200,7 +201,7 @@ impl fmt::Debug for AxisRange {
 /// `Tensor` range
 #[derive(Clone)]
 pub struct Range {
-    axes: Vec<AxisRange>,
+    axes: SmallVec<[AxisRange; 8]>,
 }
 
 impl Range {
@@ -211,7 +212,7 @@ impl Range {
             .iter()
             .copied()
             .map(|dim| AxisRange::In(0..dim, 1))
-            .collect::<Vec<AxisRange>>()
+            .collect::<SmallVec<[AxisRange; 8]>>()
             .into()
     }
 
@@ -249,7 +250,7 @@ impl Range {
             return None;
         }
 
-        let mut coord = Vec::with_capacity(self.axes.len());
+        let mut coord = Coord::with_capacity(self.axes.len());
         for x in &self.axes {
             match x {
                 AxisRange::At(i) => coord.push(*i),
@@ -280,9 +281,12 @@ impl Range {
     ///
     /// Example:
     /// ```
+    /// # use smallvec::smallvec;
     /// # use tc_collection::tensor::{Range, Shape};
     /// let mut range = Range::from(&[0u64][..]);
-    /// assert_eq!(range.to_shape(&Shape::from(vec![2, 3, 4])).unwrap(), Shape::from(vec![3, 4]));
+    /// assert_eq!(
+    ///     range.to_shape(&Shape::from(smallvec![2, 3, 4])).unwrap(),
+    ///     Shape::from(smallvec![3, 4]));
     /// ```
     pub fn normalize(mut self, shape: &[u64]) -> Self {
         assert!(shape.len() >= self.len());
@@ -358,7 +362,7 @@ impl OverlapsValue<Coord, Collator<u64>> for Range {
 
 impl IntoIterator for Range {
     type Item = AxisRange;
-    type IntoIter = <Vec<AxisRange> as IntoIterator>::IntoIter;
+    type IntoIter = <SmallVec<[AxisRange; 8]> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.axes.into_iter()
@@ -376,12 +380,12 @@ impl<'a> IntoIterator for &'a Range {
 
 impl Default for Range {
     fn default() -> Self {
-        Self { axes: vec![] }
+        Self { axes: smallvec![] }
     }
 }
 
 impl ops::Deref for Range {
-    type Target = Vec<AxisRange>;
+    type Target = SmallVec<[AxisRange; 8]>;
 
     fn deref(&'_ self) -> &'_ Self::Target {
         &self.axes
@@ -408,23 +412,25 @@ impl FromIterator<AxisRange> for Range {
     }
 }
 
-impl From<Vec<AxisRange>> for Range {
-    fn from(axes: Vec<AxisRange>) -> Range {
-        Range { axes }
+impl From<SmallVec<[AxisRange; 8]>> for Range {
+    fn from(axes: SmallVec<[AxisRange; 8]>) -> Self {
+        Self { axes }
     }
 }
 
 impl From<&[u64]> for Range {
     fn from(coord: &[u64]) -> Range {
-        let axes = coord.iter().map(|i| AxisRange::At(*i)).collect();
-        Range { axes }
+        Range {
+            axes: coord.iter().map(|i| AxisRange::At(*i)).collect(),
+        }
     }
 }
 
-impl From<Vec<u64>> for Range {
-    fn from(coord: Vec<u64>) -> Range {
-        let axes = coord.iter().map(|i| AxisRange::At(*i)).collect();
-        Range { axes }
+impl From<Coord> for Range {
+    fn from(coord: Coord) -> Range {
+        Range {
+            axes: coord.into_iter().map(AxisRange::At).collect(),
+        }
     }
 }
 
@@ -447,7 +453,7 @@ impl fmt::Debug for Range {
 
 /// The shape of a `Tensor`
 #[derive(Clone, Default, Eq, PartialEq)]
-pub struct Shape(Vec<u64>);
+pub struct Shape(SmallVec<[u64; 8]>);
 
 impl Shape {
     /// Return true if the given [`Range`] fit within this [`Shape`].
@@ -495,8 +501,8 @@ impl Shape {
         }
     }
 
-    /// Consume this `Shape` and return the underlying `Vec<u64>`.
-    pub fn into_vec(self) -> Vec<u64> {
+    /// Consume this `Shape` and return the underlying `SmallVec<[u64; 8]>`.
+    pub fn into_inner(self) -> SmallVec<[u64; 8]> {
         self.0
     }
 
@@ -592,15 +598,15 @@ impl Shape {
 }
 
 impl ops::Deref for Shape {
-    type Target = Vec<u64>;
+    type Target = SmallVec<[u64; 8]>;
 
-    fn deref(&'_ self) -> &'_ Vec<u64> {
+    fn deref(&'_ self) -> &'_ Self::Target {
         &self.0
     }
 }
 
 impl ops::DerefMut for Shape {
-    fn deref_mut(&'_ mut self) -> &'_ mut Vec<u64> {
+    fn deref_mut(&'_ mut self) -> &'_ mut Self::Target {
         &mut self.0
     }
 }
@@ -624,7 +630,7 @@ impl<'a, D: Digest> Hash<D> for &'a Shape {
 
 impl IntoIterator for Shape {
     type Item = u64;
-    type IntoIter = <Vec<u64> as IntoIterator>::IntoIter;
+    type IntoIter = <SmallVec<[u64; 8]> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
@@ -640,33 +646,25 @@ impl<'a> IntoIterator for &'a Shape {
     }
 }
 
-impl From<Vec<u64>> for Shape {
-    fn from(shape: Vec<u64>) -> Shape {
-        Shape(shape)
+impl FromIterator<u64> for Shape {
+    fn from_iter<I: IntoIterator<Item = u64>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
     }
 }
 
-impl FromIterator<u64> for Shape {
-    fn from_iter<I: IntoIterator<Item = u64>>(iter: I) -> Self {
-        let dims = Vec::<u64>::from_iter(iter);
-        Self(dims)
+impl From<SmallVec<[u64; 8]>> for Shape {
+    fn from(shape: SmallVec<[u64; 8]>) -> Self {
+        Self(shape)
     }
 }
 
 impl TryCastFrom<Value> for Shape {
     fn can_cast_from(value: &Value) -> bool {
-        value.matches::<Vec<u64>>()
+        value.matches::<SmallVec<[u64; 8]>>()
     }
 
     fn opt_cast_from(value: Value) -> Option<Shape> {
-        let shape: Option<Vec<u64>> = value.opt_cast_into();
-        shape.map(Shape::from)
-    }
-}
-
-impl From<Shape> for Vec<u64> {
-    fn from(shape: Shape) -> Self {
-        shape.0
+        value.opt_cast_into().map(Self)
     }
 }
 

@@ -11,7 +11,7 @@ use tc_error::{bad_request, TCError, TCResult};
 use tc_value::{NumberType, Value, ValueType};
 use tcgeneric::{Id, NativeClass};
 
-use super::{Key, Range};
+use super::Range;
 
 const MEGA: usize = 1_000_000;
 const MIN_ORDER: usize = 4;
@@ -142,7 +142,7 @@ impl b_tree::Schema for BTreeSchema {
         self.order
     }
 
-    fn validate(&self, key: Key) -> TCResult<Key> {
+    fn validate_key(&self, key: Vec<Value>) -> TCResult<Vec<Value>> {
         if key.len() != self.len() {
             return Err(bad_request!(
                 "BTree expected a key of length {}, not {}",
@@ -166,22 +166,6 @@ impl b_table::IndexSchema for BTreeSchema {
 
     fn columns(&self) -> &[Self::Id] {
         &self.names
-    }
-
-    fn extract_key(&self, key: &[Self::Value], other: &Self) -> b_tree::Key<Self::Value> {
-        let mut extracted = Vec::with_capacity(b_tree::Schema::len(other));
-
-        // TODO: should this construct a HashMap instead of using a nested iteration?
-        for i in 0..b_tree::Schema::len(other) {
-            for (val, name) in key.iter().zip(&self.names) {
-                if name == &other.columns()[i] {
-                    extracted.push(val.clone());
-                    break;
-                }
-            }
-        }
-
-        extracted
     }
 }
 
@@ -370,7 +354,7 @@ impl TryCastFrom<Value> for Column {
 impl CastFrom<Column> for Value {
     fn cast_from(column: Column) -> Self {
         let mut tuple = Vec::with_capacity(3);
-        tuple.push(String::from(column.name).into());
+        tuple.push(column.name.to_string().into());
         tuple.push(column.dtype.path().into());
 
         if let Some(max_len) = column.max_len {

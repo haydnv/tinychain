@@ -104,7 +104,7 @@ pub struct ValueStream<S, T> {
 impl<'a, S: StreamExt + 'a, T: Copy + 'a> ValueStream<S, T> {
     pub fn new(filled: S, range: Range, zero: T) -> Self {
         let mut affected = range.affected();
-        let next_coord = affected.next();
+        let next_coord = affected.next().map(Coord::from);
 
         Self {
             filled: filled.fuse(),
@@ -136,34 +136,34 @@ impl<S: Stream<Item = TCResult<(Coord, T)>>, T: Copy> Stream for ValueStream<S, 
             mem::swap(this.next_filled, &mut next);
             if let Some((filled_coord, value)) = next {
                 break if next_coord == &filled_coord {
-                    *(this.next_coord) = this.affected.next();
+                    *(this.next_coord) = this.affected.next().map(Coord::from);
                     Some(Ok(value))
                 } else {
-                    *(this.next_coord) = this.affected.next();
+                    *(this.next_coord) = this.affected.next().map(Coord::from);
                     *(this.next_filled) = Some((filled_coord, value));
                     Some(Ok(*this.zero))
                 };
             } else if this.filled.is_terminated() {
-                *(this.next_coord) = this.affected.next();
+                *(this.next_coord) = this.affected.next().map(Coord::from);
                 break Some(Ok(*this.zero));
             } else {
                 match ready!(this.filled.as_mut().poll_next(cxt)) {
                     Some(Ok((filled_coord, value))) => {
                         break if next_coord == &filled_coord {
-                            *(this.next_coord) = this.affected.next();
+                            *(this.next_coord) = this.affected.next().map(Coord::from);
                             Some(Ok(value))
                         } else {
-                            *(this.next_coord) = this.affected.next();
+                            *(this.next_coord) = this.affected.next().map(Coord::from);
                             *(this.next_filled) = Some((filled_coord, value));
                             Some(Ok(*this.zero))
                         };
                     }
                     None => {
-                        *(this.next_coord) = this.affected.next();
+                        *(this.next_coord) = this.affected.next().map(Coord::from);
                         break Some(Ok(*this.zero));
                     }
                     Some(Err(cause)) => {
-                        *(this.next_coord) = this.affected.next();
+                        *(this.next_coord) = this.affected.next().map(Coord::from);
                         break Some(Err(cause));
                     }
                 }

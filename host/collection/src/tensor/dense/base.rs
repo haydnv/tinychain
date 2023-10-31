@@ -12,6 +12,7 @@ use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype};
 use log::{debug, trace, warn};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
+use smallvec::SmallVec;
 
 use tc_error::*;
 use tc_transact::lock::{PermitRead, PermitWrite};
@@ -213,7 +214,7 @@ where
     T: CDatatype,
 {
     fn new(dir: DirLock<FE>, canon: DenseFile<FE, T>, committed: DirLock<FE>) -> TCResult<Self> {
-        let semaphore = Semaphore::new(Arc::new(Collator::default()));
+        let semaphore = Semaphore::new(Collator::default());
 
         let deltas = {
             let mut deltas = OrdHashMap::new();
@@ -286,7 +287,11 @@ where
     FE: Send + Sync,
     T: CDatatype + DType,
 {
-    async fn read_permit(&self, txn_id: TxnId, range: Range) -> TCResult<Vec<PermitRead<Range>>> {
+    async fn read_permit(
+        &self,
+        txn_id: TxnId,
+        range: Range,
+    ) -> TCResult<SmallVec<[PermitRead<Range>; 16]>> {
         self.canon.read_permit(txn_id, range).await
     }
 }

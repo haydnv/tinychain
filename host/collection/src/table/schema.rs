@@ -11,7 +11,7 @@ use tc_value::Value;
 use tcgeneric::Id;
 
 use crate::btree::{BTreeSchema as IndexSchema, Column};
-use crate::table::{Key, Range};
+use crate::table::Range;
 
 #[derive(Clone, Eq, PartialEq)]
 /// The schema of a table
@@ -32,7 +32,7 @@ impl TableSchema {
         }
     }
 
-    pub(super) fn range_from_key(&self, key: Key) -> TCResult<Range> {
+    pub(super) fn range_from_key(&self, key: &[Value]) -> TCResult<Range> {
         if key.len() != self.key.len() {
             return Err(bad_request!(
                 "invalid key for table with schema {:?}: {:?}",
@@ -42,8 +42,9 @@ impl TableSchema {
         }
 
         let mut range = HashMap::with_capacity(key.len());
-        for (val, col) in key.into_iter().zip(&self.primary) {
+        for (col, val) in self.primary.iter().zip(key) {
             let val = val
+                .clone()
                 .into_type(col.dtype)
                 .ok_or_else(|| bad_request!("key has an invalid value for column {}", col.name))?;
 
@@ -99,6 +100,16 @@ impl TableSchema {
             primary,
             indices,
         })
+    }
+
+    /// Construct an iterator over the [`Id`]s of the columns in this [`TableSchema`].
+    pub fn columns(&self) -> impl Iterator<Item = &Id> {
+        self.key.iter().chain(self.values.iter())
+    }
+
+    /// Return the number of columns in this [`TableSchema`].
+    pub fn len(&self) -> usize {
+        self.key.len() + self.values.len()
     }
 
     #[inline]

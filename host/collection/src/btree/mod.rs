@@ -35,7 +35,7 @@ const PREFIX: PathLabel = path_label(&["state", "collection", "btree"]);
 pub type Key = b_tree::Key<Value>;
 
 /// A node in a [`BTree`]
-pub type Node = b_tree::Node<Vec<Key>>;
+pub type Node = b_tree::Node<Vec<Vec<Value>>>;
 
 /// A range used to slice a [`BTree`]
 pub type Range = b_tree::Range<Value>;
@@ -119,7 +119,7 @@ pub trait BTreeWrite: BTreeInstance {
     /// Insert the given [`Key`] into this `BTree`.
     ///
     /// If the [`Key`] is already present, this is a no-op.
-    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()>;
+    async fn insert(&self, txn_id: TxnId, key: Vec<Value>) -> TCResult<()>;
 
     /// Insert all the keys from the given [`Stream`] into this `BTree`.
     /// The stream of `keys` does not need to be collated.
@@ -228,7 +228,7 @@ where
         }
     }
 
-    async fn insert(&self, txn_id: TxnId, key: Key) -> TCResult<()> {
+    async fn insert(&self, txn_id: TxnId, key: Vec<Value>) -> TCResult<()> {
         match self {
             Self::File(file) => file.insert(txn_id, key).await,
             slice => Err(bad_request!(

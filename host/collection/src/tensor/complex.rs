@@ -18,7 +18,7 @@ pub(crate) trait ComplexRead: TensorInstance + TensorRead {
     async fn read_value(this: (Self, Self), txn_id: TxnId, coord: Coord) -> TCResult<Number> {
         let (re, im) = this;
         let (re, im) = try_join!(
-            re.read_value(txn_id, coord.to_vec()),
+            re.read_value(txn_id, coord.clone()),
             im.read_value(txn_id, coord)
         )?;
 
