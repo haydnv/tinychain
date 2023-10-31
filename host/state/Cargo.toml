@@ -12,9 +12,9 @@ keywords = ["chain", "collection", "object", "scalar", "generic"]
 categories = ["data-structures"]
 
 [dependencies]
-async-hash = "0.5"
+async-hash = { path = "../../../async-hash" }
 async-trait = "0.1"
-bytes = "1.4"
+bytes = "1.5"
 destream = "0.7"
 futures = "0.3"
 get-size = "0.1"
@@ -22,11 +22,11 @@ get-size-derive = "0.1"
 log = "0.4"
 num_cpus = "1.13"
 safecast = "0.2"
-tc-chain = "0.1"
-tc-collection = "0.1"
-tc-error = "0.8"
-tc-fs = "~0.1.1"
-tc-scalar = "0.1"
-tc-transact = "0.17"
-tc-value = "0.9"
-tcgeneric = "0.7"
+tc-chain = { path = "../chain" }
+tc-collection = { path = "../collection" }
+tc-error = { path = "../error" }
+tc-fs = { path = "../fs" }
+tc-scalar = { path = "../scalar" }
+tc-transact = { path = "../transact" }
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }

@@ -174,10 +174,7 @@ where
 
         let rows = table.rows(range, &order, false, None).await?;
 
-        let elements = rows
-            .inspect_ok(|row| trace!("row: {row:?}"))
-            .map_ok(unwrap_row)
-            .map_err(TCError::from);
+        let elements = rows.map_ok(unwrap_row).map_err(TCError::from);
 
         trace!("constructed table row stream");
 

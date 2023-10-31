@@ -88,7 +88,7 @@ impl Dispatch for System {
                 )),
             }
         } else if StateType::from_path(path).is_some() {
-            let extends = Link::from(TCPathBuf::from(path.to_vec()));
+            let extends = Link::from(TCPathBuf::from_slice(path));
 
             let proto =
                 data.try_into_map(|state| TCError::unexpected(state, "a class prototype"))?;

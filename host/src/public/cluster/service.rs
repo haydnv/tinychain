@@ -100,7 +100,7 @@ impl<'a> ServiceHandler<'a> {
                 }
 
                 if !classes.is_empty() && txn.is_leader(link.path()) {
-                    let mut class_path = TCPathBuf::from(CLASS);
+                    let mut class_path = TCPathBuf::with_capacity(link.path().len()).append(CLASS);
                     class_path.extend(link.path()[1..].iter().cloned());
 
                     debug!(
@@ -247,7 +247,7 @@ impl<'a> Handler<'a, State> for DirHandler<'a, Service> {
                     ));
                 }
 
-                let mut class_path = TCPathBuf::from(CLASS);
+                let mut class_path = TCPathBuf::with_capacity(link.path().len()).append(CLASS);
                 class_path.extend(link.path()[1..].iter().cloned());
 
                 let class_link: Link = if let Some(host) = link.host() {
@@ -256,7 +256,7 @@ impl<'a> Handler<'a, State> for DirHandler<'a, Service> {
                     class_path.clone().into()
                 };
 
-                let class_dir_path = TCPathBuf::from(class_path[..class_path.len() - 1].to_vec());
+                let class_dir_path = TCPathBuf::from_slice(&class_path[..class_path.len() - 1]);
 
                 let parent_dir_path = &link.path()[..link.path().len() - 1];
 
