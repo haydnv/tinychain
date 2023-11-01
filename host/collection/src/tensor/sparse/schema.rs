@@ -1,5 +1,6 @@
 //! Tensor schema types
 
+use itertools::Itertools;
 use std::{fmt, io};
 
 use tc_error::*;
@@ -68,21 +69,26 @@ pub struct Schema {
 
 impl Schema {
     pub fn new(shape: Shape) -> Self {
-        let primary = IndexSchema::new((0..shape.len() + 1).into_iter().collect());
-        let mut auxiliary = Vec::with_capacity(shape.len());
-        for x in 0..shape.len() {
-            let mut columns = Vec::with_capacity(shape.len());
-            columns.push(x);
+        let primary = IndexSchema::new((0..=shape.len()).into_iter().collect());
 
-            for xo in 0..shape.len() {
-                if xo != x {
-                    columns.push(xo);
-                }
-            }
+        let auxiliary = if shape.len() <= 4 {
+            let mut permutations = (0..shape.len()).permutations(shape.len());
 
-            let index_schema = IndexSchema::new(columns);
-            auxiliary.push((x.to_string(), index_schema));
-        }
+            assert_eq!(
+                permutations.next().as_ref().map(|cols| cols.as_slice()),
+                Some(&primary.columns[..shape.len()])
+            );
+
+            permutations
+                .map(|axes| {
+                    let name = axes.iter().join("-");
+                    let index_schema = IndexSchema::new(axes);
+                    (name, index_schema)
+                })
+                .collect()
+        } else {
+            Vec::default()
+        };
 
         Self {
             primary,

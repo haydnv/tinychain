@@ -263,7 +263,7 @@ pub(crate) trait ComplexMath: ComplexUnary + Clone {
 
     fn add_real(this: (Self, Self), that: Self) -> TCResult<(Self, Self)> {
         let (real, imag) = this;
-        let real = real.clone().add(that)?;
+        let real = real.add(that)?;
         Ok((real, imag))
     }
 
