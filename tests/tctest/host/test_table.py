@@ -90,6 +90,7 @@ class TableTests(HostTest):
         actual = self.host.post(ENDPOINT, cxt)
 
         self.assertEqual(actual, expected)
+
     @unittest.skip
     def testAggregate(self):
         count = 10

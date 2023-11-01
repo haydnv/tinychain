@@ -507,21 +507,6 @@ class SparseTests(HostTest):
         expected = expect_sparse(tc.I16, shape, expected)
         self.assertEqual(actual, expected)
 
-    def testSum_axis1(self):
-        shape = [2, 4, 3, 5]
-        axis = 1
-
-        cxt = tc.Context()
-        cxt.big = tc.tensor.Sparse.zeros(shape, tc.I32)
-        cxt.result = tc.after(cxt.big[0, 1, 2, 3].write(2), cxt.big.sum(axis))
-
-        actual = self.host.post(ENDPOINT, cxt)
-        expected = np.zeros(shape, dtype=np.int32)
-        expected[0, 1, 2, 3] = 2
-        expected = expected.sum(axis)
-        expected = expect_sparse(tc.I32, [2, 3, 5], expected)
-        self.assertEqual(actual, expected)
-
     def testSum_axis0(self):
         shape = (3, 2)
         data = [
@@ -545,6 +530,21 @@ class SparseTests(HostTest):
         expected = np.sum(expected, 0)
         expected = expect_sparse(tc.I32, (2,), expected)
 
+        self.assertEqual(actual, expected)
+
+    def testSum_axis1(self):
+        shape = [2, 4, 3, 5]
+        axis = 1
+
+        cxt = tc.Context()
+        cxt.big = tc.tensor.Sparse.zeros(shape, tc.I32)
+        cxt.result = tc.after(cxt.big[0, 1, 2, 3].write(2), cxt.big.sum(axis))
+
+        actual = self.host.post(ENDPOINT, cxt)
+        expected = np.zeros(shape, dtype=np.int32)
+        expected[0, 1, 2, 3] = 2
+        expected = expected.sum(axis)
+        expected = expect_sparse(tc.I32, [2, 3, 5], expected)
         self.assertEqual(actual, expected)
 
     def testProduct(self):
@@ -608,7 +608,6 @@ class SparseTests(HostTest):
 
         self.assertEqual(actual, expected)
 
-    @unittest.skip("TODO: re-enable after fixing range selection in b_table")
     def testExpandAndTransposeAndSum(self):
         shape = [2, 3]
         elements = [((0, 1), 1), ((1, 1), 2)]
@@ -618,7 +617,6 @@ class SparseTests(HostTest):
         cxt.result = cxt.tensor.expand_dims(1).transpose().sum(1)
 
         actual = self.host.post(ENDPOINT, cxt)
-        print("actual", actual)
 
         expected = np.zeros(shape)
         for coord, value in elements:
@@ -626,7 +624,6 @@ class SparseTests(HostTest):
 
         expected = np.sum(np.transpose(np.expand_dims(expected, 1)), 1)
         expected = expect_sparse(tc.I32, expected.shape, expected)
-        print("expected", expected)
 
         self.assertEqual(actual, expected)
 
