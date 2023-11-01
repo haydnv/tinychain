@@ -1028,6 +1028,8 @@ where
         range: Range,
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
+        debug!("SparseCombine::blocks");
+
         let ndim = self.ndim();
 
         let block_op = self.block_op;
@@ -1056,12 +1058,15 @@ where
         range: Range,
         order: Axes,
     ) -> Result<Elements<Self::DType>, TCError> {
+        debug!("SparseCombine::elements");
         let ndim = self.ndim();
         let blocks = self.blocks(txn_id, range, order).await?;
         block_elements(blocks, ndim)
     }
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> Result<Self::DType, TCError> {
+        debug!("SparseCombine::read_value");
+
         let (left, right) = try_join!(
             self.left.read_value(txn_id, coord.clone()),
             self.right.read_value(txn_id, coord)
@@ -2162,8 +2167,8 @@ where
 
         #[cfg(not(debug_assertions))]
         let (source_blocks, filled_blocks, zero_blocks) = try_join!(
-            self.source.blocks(txn_id, range.clone(), order.to_vec()),
-            self.filled.blocks(txn_id, range.clone(), order.to_vec()),
+            self.source.blocks(txn_id, range.clone(), order.clone()),
+            self.filled.blocks(txn_id, range.clone(), order.clone()),
             self.zeros.blocks(txn_id, range, order)
         )?;
 
