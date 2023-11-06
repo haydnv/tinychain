@@ -1,6 +1,6 @@
 [package]
 name = "tc-error"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "TinyChain's generic error struct"
