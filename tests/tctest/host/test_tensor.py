@@ -1,11 +1,13 @@
 import itertools
 import math
+import os
 
 import numpy as np
 import tinychain as tc
 import unittest
 
 from .base import HostTest
+from ..process import TC_PATH
 
 
 ENDPOINT = "/transact/hypothetical"
@@ -408,6 +410,10 @@ class DenseTests(HostTest):
 
 
 class SparseTests(HostTest):
+    @classmethod
+    def setUpClass(cls):
+        HostTest.setUpClass(10)
+
     def testCreate(self):
         shape = [2, 5]
         coord = [0, 0]
@@ -532,6 +538,7 @@ class SparseTests(HostTest):
 
         self.assertEqual(actual, expected)
 
+    @unittest.skipIf("debug" in TC_PATH, "too slow for debug mode")
     def testSum_axis1(self):
         shape = [2, 4, 3, 5]
         axis = 1
@@ -547,6 +554,7 @@ class SparseTests(HostTest):
         expected = expect_sparse(tc.I32, [2, 3, 5], expected)
         self.assertEqual(actual, expected)
 
+    @unittest.skipIf("debug" in TC_PATH, "too slow for debug mode")
     def testProduct(self):
         shape = [2, 4, 3, 5]
         axis = 2
