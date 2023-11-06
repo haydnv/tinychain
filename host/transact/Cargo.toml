@@ -12,11 +12,11 @@ keywords = ["tinychain", "transaction", "executor"]
 categories = ["concurrency", "data-structures"]
 
 [dependencies]
-async-hash = { path = "../../../async-hash" }
+async-hash = "0.5"
 async-trait = "0.1"
 destream = "0.7"
 futures = "0.3"
-freqfs = { path = "../../../freqfs", features = ["all"] }
+freqfs = { version = "0.9", features = ["all"] }
 get-size = "0.1"
 get-size-derive = "0.1"
 log = { version = "0.4", features = ["release_max_level_info"] }
@@ -28,5 +28,5 @@ tcgeneric = { path = "../generic" }
 tc-error = { path = "../error" }
 tc-value = { path = "../value" }
 tokio = { version = "1.33", features = ["sync"] }
-txfs = { path = "../../../txfs", features = ["logging"] }
-txn_lock = { path = "../../../txn_lock", features = ["logging"] }
+txfs = { version = "0.2", features = ["logging"] }
+txn_lock = { version = "0.8", features = ["logging"] }

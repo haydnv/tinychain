@@ -12,11 +12,11 @@ keywords = ["tinychain", "scalar", "value", "collate"]
 categories = ["data-structures"]
 
 [dependencies]
-async-hash = { path = "../../../async-hash", features = ["smallvec"] }
+async-hash = { version = "0.5", features = ["smallvec"] }
 async-trait = "0.1"
 base64 = "0.21"
 bytes = "1.0"
-collate = { path = "../../../collate" }
+collate = "0.4"
 destream = { version = "~0.7.2", features = ["smallvec"] }
 email-address-parser = "2.0"
 futures = "0.3"
@@ -25,8 +25,8 @@ get-size-derive = "0.1"
 handlebars = "4.3"
 hex = "0.4"
 log = { version = "0.4", features = [] }
-number-general = { path = "../../../number-general", features = ["all"] }
-pathlink = { path = "../../../pathlink", features = ["all"] }
+number-general = { version = "0.11", features = ["all"] }
+pathlink = { version = "0.2", features = ["all"] }
 safecast = "0.2"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0", features = [] }
