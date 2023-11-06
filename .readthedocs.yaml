@@ -9,8 +9,13 @@ version: 2
 sphinx:
    configuration: client/docs/conf.py
 
+# Python build environment configuration
+build:
+   os: "ubuntu-22.04"
+   tools:
+      python: "3.12"
+
 # Optionally set the version of Python and requirements required to build your docs
 python:
-   version: 3.7
    install:
    - requirements: client/docs/requirements.txt
