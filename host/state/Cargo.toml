@@ -1,6 +1,6 @@
 [package]
 name = "tc-state"
-version = "0.1.1"
+version = "0.2.1"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "TinyChain's general state enum"
@@ -22,11 +22,11 @@ get-size-derive = "0.1"
 log = "0.4"
 num_cpus = "1.13"
 safecast = "0.2"
-tc-chain = { path = "../chain" }
-tc-collection = { path = "../collection" }
-tc-error = { path = "../error" }
-tc-fs = { path = "../fs" }
-tc-scalar = { path = "../scalar" }
-tc-transact = { path = "../transact" }
-tc-value = { path = "../value" }
-tcgeneric = { path = "../generic" }
+tc-chain = "0.2"
+tc-collection = "0.2"
+tc-error = "0.9"
+tc-fs = "0.2"
+tc-scalar = "0.2"
+tc-transact = "0.18"
+tc-value = "0.10"
+tcgeneric = "0.8"
