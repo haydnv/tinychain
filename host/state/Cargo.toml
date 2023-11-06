@@ -12,7 +12,7 @@ keywords = ["chain", "collection", "object", "scalar", "generic"]
 categories = ["data-structures"]
 
 [dependencies]
-async-hash = { path = "../../../async-hash" }
+async-hash = "0.5"
 async-trait = "0.1"
 bytes = "1.5"
 destream = "0.7"
