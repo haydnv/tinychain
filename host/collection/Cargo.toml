@@ -32,9 +32,9 @@ smallvec = "1.11"
 pin-project = "1.1"
 rayon = "1.7"
 safecast = "0.2"
-tc-error = { path = "../error" }
-tc-scalar = { path = "../scalar" }
-tc-transact = { path = "../transact" }
-tc-value = { path = "../value" }
-tcgeneric = { path = "../generic" }
+tc-error = "0.9"
+tc-scalar = "0.2"
+tc-transact = "0.18"
+tc-value = "0.10"
+tcgeneric = "0.8"
 tokio = { version = "1.33", features = ["sync"] }
