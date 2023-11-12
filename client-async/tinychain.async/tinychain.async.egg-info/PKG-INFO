@@ -1,0 +1,24 @@
+Metadata-Version: 2.1
+Name: tinychain.async
+Version: 1.0.0
+Summary: Provides an asynchronous implementation of a TinyChain host.
+Home-page: https://github.com/haydnv/tinychain
+Author: The TinyChain Contributors
+Author-email: code@tinychain.net
+Keywords: 'distributed cross-service transaction ml platform'
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Financial and Insurance Industry
+Classifier: Intended Audience :: Information Technology
+Classifier: Intended Audience :: Science/Research
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Software Development
+Classifier: Topic :: Software Development :: Code Generators
+Description-Content-Type: text/markdown
+
+This package allows for the installation of the TinyChain package without the installation of async modules. By installing the tinychain.async package, the module tinychian.host.async can be used.
+
+There are tutorials available in the TinyChain documentation at 
+https://docs.tinychain.net/.
