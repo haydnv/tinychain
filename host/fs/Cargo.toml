@@ -25,8 +25,8 @@ num_cpus = "1.15"
 rjwt = "0.4"
 safecast = "0.2"
 tbon = "0.5"
-tc-chain = "0.2"
-tc-collection = "0.2"
+tc-chain = { path = "../chain" }
+tc-collection = { path = "../collection" }
 tc-error = "0.9"
 tc-scalar = "0.2"
 tc-transact = "0.18"
