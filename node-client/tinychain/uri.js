@@ -76,13 +76,13 @@ export default class URI {
     this._subject = subject;
     this._path = path;
 
-    if (String(this).startsWith('//')) {
+    if (this.__str__().startsWith('//')) {
       throw new Error(`invalid URI prefix: ${this}`);
     }
   }
 
   __add__(other) {
-    other = String(other);
+    other = other.__str__();
 
     if (other.startsWith('$')) {
       throw new Error(`AssertionError: other does not start with '$'`);
@@ -103,7 +103,7 @@ export default class URI {
   }
 
   __radd__(other) {
-    return new URI(other).__add__(String(this));
+    return new URI(other).__add__(this.__str__());
   }
 
   __bool__() {
@@ -111,7 +111,7 @@ export default class URI {
   }
 
   __eq__(other) {
-    return String(this) === String(other);
+    return this.__str__() === other.__str__();
   }
 
   __getitem__(item) {
@@ -147,7 +147,7 @@ export default class URI {
   }
 
   __gt__(other) {
-    return this.startsWith(other) && this.length > other.length;
+    return this.startsWith(other) && this.__len__() > other.__len__();
   }
 
   __ge__(other) {
@@ -159,7 +159,7 @@ export default class URI {
   }
 
   __lt__(other) {
-    return other.startsWith(this) && this.length < other.length;
+    return other.startsWith(this) && this.__len__() < other.__len__();
   }
 
   __le__(other) {
@@ -169,7 +169,7 @@ export default class URI {
   __hash__() {
     const hash = crypto.createHash('sha256');
 
-    hash.update(String(this), 'utf-8');
+    hash.update(this.__str__(), 'utf-8');
 
     const hexHash = hash.digest('hex');
 
@@ -179,7 +179,7 @@ export default class URI {
   }
 
   __json__() {
-    return { [String(this)]: [] };
+    return { [this.__str__()]: [] };
   }
 
   __ns__(cxt, nameHint) {
@@ -202,7 +202,9 @@ export default class URI {
         ? String(this._subject.__uri__)
         : String(this._subject);
 
-    if (!(root.startsWith('/') || root.startsWith('$') || '://' in root)) {
+    if (
+      !(root.startsWith('/') || root.startsWith('$') || root.includes('://'))
+    ) {
       root = `$${root}`;
     }
 
@@ -221,7 +223,7 @@ export default class URI {
    * @example
    * value = OpRef.Get(new URI("http://example.com/myapp").append("value/name"))
    */
-  append(suffix) {
+  append(suffix = '') {
     suffix = String(suffix);
 
     if (suffix === '' || suffix === '/') {
@@ -265,8 +267,6 @@ export default class URI {
           validated.push(segment);
         }
       }
-
-      return validate(segment);
     });
 
     return new URI(this._subject, ...this._path, ...validated);
@@ -277,7 +277,7 @@ export default class URI {
    * Return the ID segment of this `URI`, if present.
    */
   id() {
-    const thisStr = String(this);
+    const thisStr = this.__str__();
 
     if (thisStr.startsWith('$')) {
       const end = thisStr.includes('/') ? thisStr.indexOf('/') : undefined;
@@ -290,7 +290,7 @@ export default class URI {
    * Return `True` if this URI is a simple ID, like `$foo`.
    */
   isId() {
-    return !String(this).includes('/');
+    return !this.__str__().includes('/');
   }
 
   /**
@@ -298,7 +298,7 @@ export default class URI {
    * Return the host segment of this `URI`, if present.
    */
   host() {
-    const uri = String(this);
+    const uri = this.__str__();
 
     if (!uri.includes('://')) {
       return null;
@@ -307,7 +307,11 @@ export default class URI {
     const start = uri.indexOf('://') + 3;
 
     if (!uri.slice(start).includes('/')) {
-      return uri.slice(start);
+      if (uri.includes(':', start)) {
+        return uri.slice(start, uri.indexOf(':', start));
+      } else {
+        return uri.slice(start);
+      }
     }
 
     const end = uri.includes(':', start)
@@ -322,7 +326,7 @@ export default class URI {
    * Return the path segment of this `URI`, if present.
    */
   path() {
-    const uri = String(this);
+    const uri = this.__str__();
 
     if (!uri.includes('://')) {
       return new URI(uri.slice(uri.indexOf('/')));
@@ -352,14 +356,19 @@ export default class URI {
 
     prefix += host ? host : '';
 
-    const uri = String(this);
+    const uri = this.__str__();
 
     if (uri === prefix) {
       return null;
     }
 
     if (prefix && uri[prefix.length] == ':') {
-      const end = uri.indexOf('/', prefix.length);
+      let end = uri.indexOf('/', prefix.length);
+
+      if (end === -1) {
+        end = uri.length;
+      }
+
       return parseInt(uri.slice(prefix.length + 1, end));
     }
   }
@@ -369,7 +378,7 @@ export default class URI {
    * Return the protocol of this `URI` (e.g. "http"), if present.
    */
   protocol() {
-    const uri = String(this);
+    const uri = this.__str__();
 
     if (uri.includes('://')) {
       const i = uri.indexOf('://');
@@ -388,12 +397,12 @@ export default class URI {
    */
   split() {
     if (this.startsWith('/')) {
-      const segments = String(this).slice(1).split('/');
+      const segments = this.__str__().slice(1).split('/');
       segments[0] = `/${segments[0]}`;
 
       return segments;
     } else if (this.startsWith('$')) {
-      return String(this).split('/');
+      return this.__str__().split('/');
     } else {
       const host = this.host();
       const port = this.port();
@@ -402,7 +411,7 @@ export default class URI {
 
       return [
         `${this.protocol()}://${calculatedHost}`,
-        ...String(this.path()).split('/').slice(1),
+        ...this.path().__str__().split('/').slice(1),
       ];
     }
   }
@@ -412,6 +421,6 @@ export default class URI {
    * Return `True` if this :class:`URI` starts with the given `prefix`.
    */
   startsWith(prefix) {
-    return String(this).startsWith(String(prefix));
+    return this.__str__().startsWith(String(prefix));
   }
 }
