@@ -129,5 +129,8 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
+# Node.js package lock
+package-lock
+
 # Public folder
 public
