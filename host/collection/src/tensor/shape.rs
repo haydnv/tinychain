@@ -134,14 +134,14 @@ impl From<ops::Range<u64>> for AxisRange {
     }
 }
 
-impl TryFrom<AxisRange> for ha_ndarray::AxisBound {
+impl TryFrom<AxisRange> for ha_ndarray::AxisRange {
     type Error = TCError;
 
     fn try_from(range: AxisRange) -> Result<Self, Self::Error> {
         match range {
             AxisRange::At(i) => i
                 .try_into()
-                .map(ha_ndarray::AxisBound::At)
+                .map(ha_ndarray::AxisRange::At)
                 .map_err(|cause| bad_request!("bad range: {cause}")),
 
             AxisRange::In(range, step) => {
@@ -159,7 +159,7 @@ impl TryFrom<AxisRange> for ha_ndarray::AxisBound {
                     .try_into()
                     .map_err(|cause| bad_request!("bad range start: {cause}"))?;
 
-                Ok(ha_ndarray::AxisBound::In(start, stop, step))
+                Ok(ha_ndarray::AxisRange::In(start, stop, step))
             }
 
             AxisRange::Of(indices) => {
@@ -171,7 +171,7 @@ impl TryFrom<AxisRange> for ha_ndarray::AxisBound {
                     })
                     .collect::<Result<_, TCError>>()?;
 
-                Ok(ha_ndarray::AxisBound::Of(indices))
+                Ok(ha_ndarray::AxisRange::Of(indices))
             }
         }
     }
