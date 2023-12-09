@@ -785,7 +785,7 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
             .unwrap_or_else(|| AxisRange::all(self.shape()[self.axis]));
 
         let (source_range, dim) = if range.len() > self.axis {
-            let bdim = range[self.axis].dim();
+            let bdim = range[self.axis].dim().unwrap_or(1);
             let mut source_range = range;
             source_range[self.axis] = AxisRange::At(0);
             (source_range, bdim)
