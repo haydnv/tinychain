@@ -79,7 +79,7 @@ impl<FE> DenseCacheFile for FE where
 #[async_trait]
 pub trait DenseInstance: TensorInstance + fmt::Debug {
     type Block: NDArrayRead<DType = Self::DType> + NDArrayTransform + Into<Array<Self::DType>>;
-    type DType: CDatatype + DType;
+    type DType: CType + DType;
 
     fn block_size(&self) -> usize;
 
@@ -159,7 +159,7 @@ impl<Txn, FE, A> DenseTensor<Txn, FE, A> {
     }
 }
 
-impl<Txn, FE, T: CDatatype> DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>> {
+impl<Txn, FE, T: CType> DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>> {
     pub fn from_access<A: Into<DenseAccess<Txn, FE, T>>>(accessor: A) -> Self {
         Self {
             accessor: accessor.into(),
@@ -205,7 +205,7 @@ where
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
     L: DenseInstance<DType = T> + Into<DenseAccess<Txn, FE, T>> + fmt::Debug,
     R: DenseInstance<DType = T> + Into<DenseAccess<Txn, FE, T>> + fmt::Debug,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     DenseAccessCast<Txn, FE>: From<DenseAccess<Txn, FE, T>>,
     DenseTensor<Txn, FE, R>: fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
@@ -289,7 +289,7 @@ where
     FE: ThreadSafe,
     L: DenseInstance<DType = T> + Into<DenseAccessCast<Txn, FE>>,
     R: DenseInstance<DType = T> + Into<DenseAccessCast<Txn, FE>>,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     type Compare = DenseTensor<Txn, FE, DenseCompare<Txn, FE, u8>>;
 
@@ -408,7 +408,7 @@ where
     Cond: DenseInstance<DType = u8> + fmt::Debug,
     Then: DenseInstance<DType = T> + fmt::Debug,
     OrElse: DenseInstance<DType = T> + fmt::Debug,
-    T: CDatatype,
+    T: CType,
 {
     type Cond = DenseTensor<Txn, FE, DenseCond<Cond, Then, OrElse>>;
 
@@ -461,13 +461,13 @@ where
     FE: ThreadSafe,
     L: DenseInstance<DType = T>,
     R: DenseInstance<DType = T>,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     type Combine = DenseTensor<Txn, FE, DenseCombine<L, R, T>>;
     type LeftCombine = DenseTensor<Txn, FE, DenseCombine<L, R, T>>;
 
     fn add(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::Combine> {
-        fn add<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn add<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             left.add(right).map(Array::from).map_err(TCError::from)
         }
 
@@ -475,7 +475,7 @@ where
     }
 
     fn div(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
-        fn div<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn div<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             left.div(right).map(Array::from).map_err(TCError::from)
         }
 
@@ -483,7 +483,7 @@ where
     }
 
     fn log(self, base: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
-        fn log<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn log<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             let right = right.cast()?;
             left.log(right).map(Array::from).map_err(TCError::from)
         }
@@ -495,7 +495,7 @@ where
     }
 
     fn mul(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
-        fn mul<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn mul<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             left.mul(right).map(Array::from).map_err(TCError::from)
         }
 
@@ -503,7 +503,7 @@ where
     }
 
     fn pow(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
-        fn pow<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn pow<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             let right = right.cast()?;
             left.pow(right).map(Array::from).map_err(TCError::from)
         }
@@ -515,7 +515,7 @@ where
     }
 
     fn sub(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::Combine> {
-        fn sub<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn sub<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             left.sub(right).map(Array::from).map_err(TCError::from)
         }
 
@@ -629,7 +629,7 @@ where
     FE: ThreadSafe,
     L: DenseInstance<DType = T>,
     R: DenseInstance<DType = T>,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     type MatMul = DenseTensor<Txn, FE, DenseMatMul<L, R>>;
 
@@ -2058,7 +2058,7 @@ pub fn dense_from<Txn, FE, A, T>(
 ) -> DenseTensor<Txn, FE, DenseAccess<Txn, FE, T>>
 where
     A: Into<DenseAccess<Txn, FE, T>>,
-    T: CDatatype,
+    T: CType,
 {
     DenseTensor::from_access(tensor.into_inner())
 }

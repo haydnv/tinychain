@@ -6,9 +6,7 @@ use async_trait::async_trait;
 use destream::de;
 use freqfs::*;
 use futures::stream::{StreamExt, TryStreamExt};
-use ha_ndarray::{
-    ArrayBase, ArrayOp, Buffer, BufferWrite, CDatatype, NDArrayMathScalar, NDArrayRead,
-};
+use ha_ndarray::{ArrayBase, ArrayOp, Buffer, BufferWrite, CType, NDArrayMathScalar, NDArrayRead};
 use itertools::Itertools;
 use safecast::{AsType, CastFrom};
 
@@ -49,7 +47,7 @@ impl<FE, T> Clone for DenseFile<FE, T> {
 impl<FE, T> DenseFile<FE, T>
 where
     FE: DenseCacheFile + AsType<Buffer<T>>,
-    T: CDatatype + DType,
+    T: CType + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     pub async fn constant(dir: DirLock<FE>, shape: Shape, value: T) -> TCResult<Self> {
@@ -415,7 +413,7 @@ where
 impl<FE, T> DenseInstance for DenseFile<FE, T>
 where
     FE: AsType<Buffer<T>> + ThreadSafe,
-    T: CDatatype + DType + 'static,
+    T: CType + DType + 'static,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     type Block = ArrayBase<FileReadGuardOwned<FE, Buffer<T>>>;
@@ -482,7 +480,7 @@ where
 impl<'a, FE, T> DenseWrite for DenseFile<FE, T>
 where
     FE: AsType<Buffer<T>> + ThreadSafe,
-    T: CDatatype + DType + 'static,
+    T: CType + DType + 'static,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     type BlockWrite = ArrayBase<FileWriteGuardOwned<FE, Buffer<T>>>;
@@ -528,7 +526,7 @@ where
 impl<'a, FE, T> DenseWriteLock<'a> for DenseFile<FE, T>
 where
     FE: AsType<Buffer<T>> + ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     type WriteGuard = DenseFileWriteGuard<'a, FE>;
@@ -574,7 +572,7 @@ impl_from_stream!(u16, decode_array_u16);
 impl_from_stream!(u32, decode_array_u32);
 impl_from_stream!(u64, decode_array_u64);
 
-impl<Txn, FE, T: CDatatype> From<DenseFile<FE, T>> for DenseAccess<Txn, FE, T> {
+impl<Txn, FE, T: CType> From<DenseFile<FE, T>> for DenseAccess<Txn, FE, T> {
     fn from(file: DenseFile<FE, T>) -> Self {
         Self::File(file)
     }
@@ -596,7 +594,7 @@ impl<'a, FE> DenseFileWriteGuard<'a, FE> {
     pub async fn merge<T>(&self, other: DirLock<FE>) -> TCResult<()>
     where
         FE: AsType<Buffer<T>> + ThreadSafe,
-        T: CDatatype + DType + 'static,
+        T: CType + DType + 'static,
         Buffer<T>: de::FromStream<Context = ()>,
     {
         let num_blocks = div_ceil(self.shape.size(), self.block_size as u64);
@@ -625,7 +623,7 @@ impl<'a, FE> DenseFileWriteGuard<'a, FE> {
 impl<'a, FE, T> DenseWriteGuard<T> for DenseFileWriteGuard<'a, FE>
 where
     FE: AsType<Buffer<T>> + ThreadSafe,
-    T: CDatatype + DType + 'static,
+    T: CType + DType + 'static,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     async fn overwrite<O: DenseInstance<DType = T>>(

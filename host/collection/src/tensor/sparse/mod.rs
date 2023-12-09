@@ -222,7 +222,7 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
     type CoordBlock: NDArrayRead<DType = u64> + NDArrayMath + NDArrayTransform + Into<Array<u64>>;
     type ValueBlock: NDArrayRead<DType = Self::DType> + Into<Array<Self::DType>>;
     type Blocks: Stream<Item = Result<(Self::CoordBlock, Self::ValueBlock), TCError>> + Send;
-    type DType: CDatatype + DType;
+    type DType: CType + DType;
 
     async fn blocks(
         self,
@@ -319,7 +319,7 @@ impl<Txn, FE, A> SparseTensor<Txn, FE, A> {
     }
 }
 
-impl<Txn, FE, T: CDatatype> SparseTensor<Txn, FE, SparseAccess<Txn, FE, T>> {
+impl<Txn, FE, T: CType> SparseTensor<Txn, FE, SparseAccess<Txn, FE, T>> {
     pub fn from_access<A: Into<SparseAccess<Txn, FE, T>>>(accessor: A) -> Self {
         Self {
             accessor: accessor.into(),
@@ -635,7 +635,7 @@ where
     FE: AsType<Node> + ThreadSafe,
     L: SparseInstance<DType = T>,
     R: SparseInstance<DType = T>,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     type Combine = SparseTensor<Txn, FE, SparseCombine<L, R, T>>;
     type LeftCombine = SparseTensor<Txn, FE, SparseCombineLeft<L, R, T>>;
@@ -661,7 +661,7 @@ where
     }
 
     fn log(self, base: SparseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
-        fn log<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn log<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             let right = right.cast()?;
             left.log(right).map(Array::from).map_err(TCError::from)
         }
@@ -683,7 +683,7 @@ where
     }
 
     fn pow(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
-        fn pow<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn pow<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
             let right = right.cast()?;
             left.pow(right).map(Array::from).map_err(TCError::from)
         }
@@ -711,7 +711,7 @@ where
     FE: ThreadSafe,
     A: SparseInstance,
     A::DType: CastFrom<Number>,
-    <A::DType as CDatatype>::Float: CastFrom<Number>,
+    <A::DType as CType>::Float: CastFrom<Number>,
     Number: From<A::DType>,
 {
     type Combine = SparseTensor<Txn, FE, SparseCombineConst<A, A::DType>>;
@@ -1881,7 +1881,7 @@ pub fn sparse_from<Txn, FE, A, T>(
 ) -> SparseTensor<Txn, FE, SparseAccess<Txn, FE, T>>
 where
     A: Into<SparseAccess<Txn, FE, T>>,
-    T: CDatatype,
+    T: CType,
 {
     SparseTensor::from_access(tensor.into_inner())
 }

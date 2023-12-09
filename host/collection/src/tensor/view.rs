@@ -5,7 +5,7 @@ use destream::{de, en};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::try_join;
-use ha_ndarray::{Buffer, CDatatype, NDArrayRead};
+use ha_ndarray::{Buffer, CType, NDArrayRead};
 use log::trace;
 use rayon::prelude::*;
 use safecast::{AsType, CastInto};
@@ -88,7 +88,7 @@ async fn read_from_complex<Txn, FE, T>(
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + Clone,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -142,7 +142,7 @@ async fn read_from_real<Txn, FE, T>(
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + Clone,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {

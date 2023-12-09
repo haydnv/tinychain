@@ -52,7 +52,7 @@ macro_rules! block_cmp {
 }
 
 impl Block {
-    pub fn cast<T: CDatatype>(self) -> TCResult<Array<T>> {
+    pub fn cast<T: CType>(self) -> TCResult<Array<T>> {
         block_dispatch!(
             self,
             this,

@@ -4,7 +4,7 @@ use std::task::{ready, Context, Poll};
 use std::{fmt, mem};
 
 use futures::stream::{Fuse, Stream, StreamExt, TryStream};
-use ha_ndarray::{ArrayBase, CDatatype};
+use ha_ndarray::{ArrayBase, CType};
 use pin_project::pin_project;
 use smallvec::SmallVec;
 
@@ -38,7 +38,7 @@ where
 
 impl<S, T> BlockCoords<S, T>
 where
-    T: CDatatype,
+    T: CType,
 {
     fn block_cutoff(
         pending_coords: &mut Vec<u64>,
@@ -64,7 +64,7 @@ where
 impl<S, T> Stream for BlockCoords<S, T>
 where
     S: Stream<Item = TCResult<(Coord, T)>> + Unpin,
-    T: CDatatype,
+    T: CType,
 {
     type Item = TCResult<(ArrayBase<Vec<u64>>, ArrayBase<Vec<T>>)>;
 
@@ -129,7 +129,7 @@ where
 
 impl<S, T> BlockOffsetsDual<S, T>
 where
-    T: CDatatype,
+    T: CType,
 {
     fn block_cutoff(
         pending_offsets: &mut Vec<u64>,
@@ -152,7 +152,7 @@ where
 impl<S, T> Stream for BlockOffsetsDual<S, T>
 where
     S: Stream<Item = TCResult<(u64, (T, T))>> + Unpin,
-    T: CDatatype,
+    T: CType,
 {
     type Item = TCResult<(ArrayBase<Vec<u64>>, (ArrayBase<Vec<T>>, ArrayBase<Vec<T>>))>;
 
@@ -214,7 +214,7 @@ where
 
 impl<S, T> BlockOffsets<S, T>
 where
-    T: CDatatype,
+    T: CType,
 {
     fn block_cutoff(
         pending_offsets: &mut Vec<u64>,
@@ -239,7 +239,7 @@ where
 impl<S, T> Stream for BlockOffsets<S, T>
 where
     S: Stream<Item = TCResult<(u64, T)>> + Unpin,
-    T: CDatatype,
+    T: CType,
 {
     type Item = TCResult<(ArrayBase<Vec<u64>>, ArrayBase<Vec<T>>)>;
 
@@ -347,7 +347,7 @@ where
     Cond: Stream<Item = TCResult<(u64, u8)>>,
     Then: Stream<Item = TCResult<(u64, T)>>,
     OrElse: Stream<Item = TCResult<(u64, T)>>,
-    T: CDatatype + fmt::Debug,
+    T: CType + fmt::Debug,
 {
     type Item = TCResult<(u64, T)>;
 
@@ -461,7 +461,7 @@ impl<L, R, T> Stream for TryDiff<L, R, T>
 where
     L: Stream<Item = TCResult<(u64, T)>>,
     R: Stream<Item = TCResult<(u64, T)>>,
-    T: CDatatype + fmt::Debug,
+    T: CType + fmt::Debug,
 {
     type Item = TCResult<(u64, T)>;
 
@@ -716,7 +716,7 @@ impl<L, R, T> Stream for TryMerge<L, R, T>
 where
     Fuse<L>: TryStream<Ok = (u64, T), Error = TCError> + Unpin,
     Fuse<R>: TryStream<Ok = (u64, T), Error = TCError> + Unpin,
-    T: CDatatype + fmt::Debug,
+    T: CType + fmt::Debug,
 {
     type Item = TCResult<(u64, T)>;
 

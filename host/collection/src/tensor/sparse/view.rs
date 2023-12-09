@@ -4,7 +4,7 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use destream::de;
 use futures::{Stream, TryStreamExt};
-use ha_ndarray::{Array, Buffer, CDatatype, NDArrayBoolean, NDArrayRead};
+use ha_ndarray::{Array, Buffer, CType, NDArrayBoolean, NDArrayRead};
 use log::trace;
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
@@ -133,7 +133,7 @@ async fn into_complex_elements<Txn, FE, T>(
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + Clone,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Complex: From<(T, T)>,
     Number: From<T> + CastInto<T>,

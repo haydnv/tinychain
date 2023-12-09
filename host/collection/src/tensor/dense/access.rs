@@ -159,7 +159,7 @@ where
     }
 }
 
-pub enum DenseAccess<Txn, FE, T: CDatatype> {
+pub enum DenseAccess<Txn, FE, T: CType> {
     Base(DenseBase<Txn, FE, T>),
     File(DenseFile<FE, T>),
     Broadcast(Box<DenseBroadcast<Self>>),
@@ -184,7 +184,7 @@ pub enum DenseAccess<Txn, FE, T: CDatatype> {
     Version(DenseVersion<FE, T>),
 }
 
-impl<Txn, FE, T: CDatatype> Clone for DenseAccess<Txn, FE, T> {
+impl<Txn, FE, T: CType> Clone for DenseAccess<Txn, FE, T> {
     fn clone(&self) -> Self {
         match self {
             Self::Base(base) => Self::Base(base.clone()),
@@ -246,7 +246,7 @@ impl<Txn, FE, T> TensorInstance for DenseAccess<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn dtype(&self) -> NumberType {
         T::dtype()
@@ -262,7 +262,7 @@ impl<Txn, FE, T> DenseInstance for DenseAccess<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -342,7 +342,7 @@ impl<Txn, FE, T> TensorPermitRead for DenseAccess<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     async fn read_permit(
         &self,
@@ -385,7 +385,7 @@ impl<Txn, FE, T> TensorPermitWrite for DenseAccess<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
         match self {
@@ -400,11 +400,11 @@ where
     }
 }
 
-impl<Txn, FE, T: CDatatype + DType> fmt::Debug for DenseAccess<Txn, FE, T>
+impl<Txn, FE, T: CType + DType> fmt::Debug for DenseAccess<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         access_dispatch!(self, this, this.fmt(f))
@@ -561,7 +561,7 @@ impl<S: TensorPermitRead> TensorPermitRead for DenseBroadcast<S> {
 
 impl<Txn, FE, T, S> From<DenseBroadcast<S>> for DenseAccess<Txn, FE, T>
 where
-    T: CDatatype,
+    T: CType,
     S: Into<DenseAccess<Txn, FE, T>>,
 {
     fn from(broadcast: DenseBroadcast<S>) -> Self {
@@ -795,7 +795,7 @@ where
 
 impl<'a, Txn, FE, S, T> From<DenseCow<FE, S>> for DenseAccess<Txn, FE, T>
 where
-    T: CDatatype,
+    T: CType,
     DenseAccess<Txn, FE, T>: From<S>,
 {
     fn from(cow: DenseCow<FE, S>) -> Self {
@@ -965,7 +965,7 @@ impl<S: TensorInstance + TensorPermitRead + fmt::Debug> TensorPermitRead for Den
 impl<Txn, FE, S, T> From<DenseDiagonal<S>> for DenseAccess<Txn, FE, T>
 where
     S: Into<DenseAccess<Txn, FE, T>>,
-    T: CDatatype,
+    T: CType,
 {
     fn from(diag: DenseDiagonal<S>) -> Self {
         Self::Diagonal(Box::new(DenseDiagonal {
@@ -1104,7 +1104,7 @@ impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for DenseExpand<S> {
 impl<Txn, FE, S, T> From<DenseExpand<S>> for DenseAccess<Txn, FE, T>
 where
     S: Into<DenseAccess<Txn, FE, T>>,
-    T: CDatatype,
+    T: CType,
 {
     fn from(expand: DenseExpand<S>) -> Self {
         Self::Expand(Box::new(DenseExpand {
@@ -1128,7 +1128,7 @@ impl<S: fmt::Debug> fmt::Debug for DenseExpand<S> {
 type Combine<T> = fn(Array<T>, Array<T>) -> TCResult<Array<T>>;
 
 #[derive(Clone)]
-pub struct DenseCombine<L, R, T: CDatatype> {
+pub struct DenseCombine<L, R, T: CType> {
     left: L,
     right: R,
     block_op: Combine<T>,
@@ -1139,7 +1139,7 @@ impl<L, R, T> DenseCombine<L, R, T>
 where
     L: DenseInstance + fmt::Debug,
     R: DenseInstance + fmt::Debug,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     pub fn new(left: L, right: R, block_op: Combine<T>, value_op: fn(T, T) -> T) -> TCResult<Self> {
         if left.shape() == right.shape() && left.block_size() == right.block_size() {
@@ -1165,7 +1165,7 @@ impl<L, R, T> TensorInstance for DenseCombine<L, R, T>
 where
     L: TensorInstance,
     R: TensorInstance,
-    T: DType + CDatatype,
+    T: DType + CType,
 {
     fn dtype(&self) -> NumberType {
         T::dtype()
@@ -1182,7 +1182,7 @@ impl<L, R, T> DenseInstance for DenseCombine<L, R, T>
 where
     L: DenseInstance<DType = T>,
     R: DenseInstance<DType = T>,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     type Block = Array<T>;
     type DType = T;
@@ -1247,7 +1247,7 @@ impl<L, R, T> TensorPermitRead for DenseCombine<L, R, T>
 where
     L: TensorPermitRead,
     R: TensorPermitRead,
-    T: CDatatype,
+    T: CType,
 {
     async fn read_permit(
         &self,
@@ -1266,7 +1266,7 @@ impl<Txn, FE, L, R, T> From<DenseCombine<L, R, T>> for DenseAccess<Txn, FE, T>
 where
     L: Into<DenseAccess<Txn, FE, T>>,
     R: Into<DenseAccess<Txn, FE, T>>,
-    T: CDatatype,
+    T: CType,
 {
     fn from(combine: DenseCombine<L, R, T>) -> Self {
         Self::Combine(Box::new(DenseCombine {
@@ -1282,7 +1282,7 @@ impl<L, R, T> fmt::Debug for DenseCombine<L, R, T>
 where
     L: fmt::Debug,
     R: fmt::Debug,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} with {:?}", self.left, self.right)
@@ -1290,14 +1290,14 @@ where
 }
 
 #[derive(Clone)]
-pub struct DenseCombineConst<S, T: CDatatype> {
+pub struct DenseCombineConst<S, T: CType> {
     left: S,
     right: T,
     block_op: fn(Array<T>, T) -> TCResult<Array<T>>,
     value_op: fn(T, T) -> T,
 }
 
-impl<S: TensorInstance, T: CDatatype + DType> TensorInstance for DenseCombineConst<S, T> {
+impl<S: TensorInstance, T: CType + DType> TensorInstance for DenseCombineConst<S, T> {
     fn dtype(&self) -> NumberType {
         T::dtype()
     }
@@ -1311,7 +1311,7 @@ impl<S: TensorInstance, T: CDatatype + DType> TensorInstance for DenseCombineCon
 impl<S, T> DenseInstance for DenseCombineConst<S, T>
 where
     S: DenseInstance<DType = T>,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     type Block = Array<T>;
     type DType = T;
@@ -1340,7 +1340,7 @@ where
 }
 
 #[async_trait]
-impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseCombineConst<S, T> {
+impl<S: TensorPermitRead, T: CType> TensorPermitRead for DenseCombineConst<S, T> {
     async fn read_permit(
         &self,
         txn_id: TxnId,
@@ -1353,7 +1353,7 @@ impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseCombineConst<S
 impl<Txn, FE, S, T> From<DenseCombineConst<S, T>> for DenseAccess<Txn, FE, T>
 where
     S: Into<DenseAccess<Txn, FE, T>>,
-    T: CDatatype,
+    T: CType,
 {
     fn from(combine: DenseCombineConst<S, T>) -> Self {
         Self::CombineConst(Box::new(DenseCombineConst {
@@ -1365,7 +1365,7 @@ where
     }
 }
 
-impl<S: fmt::Debug, T: CDatatype + DType> fmt::Debug for DenseCombineConst<S, T> {
+impl<S: fmt::Debug, T: CType + DType> fmt::Debug for DenseCombineConst<S, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "combine {:?} with a constant value", self.left)
     }
@@ -1373,14 +1373,14 @@ impl<S: fmt::Debug, T: CDatatype + DType> fmt::Debug for DenseCombineConst<S, T>
 
 type ArrayCmp<T> = fn(Block, Block) -> TCResult<Array<T>>;
 
-pub struct DenseCompare<Txn, FE, T: CDatatype> {
+pub struct DenseCompare<Txn, FE, T: CType> {
     left: DenseAccessCast<Txn, FE>,
     right: DenseAccessCast<Txn, FE>,
     block_op: ArrayCmp<T>,
     value_op: fn(Number, Number) -> T,
 }
 
-impl<Txn, FE, T: CDatatype> Clone for DenseCompare<Txn, FE, T> {
+impl<Txn, FE, T: CType> Clone for DenseCompare<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
             left: self.left.clone(),
@@ -1391,7 +1391,7 @@ impl<Txn, FE, T: CDatatype> Clone for DenseCompare<Txn, FE, T> {
     }
 }
 
-impl<Txn, FE, T: CDatatype> DenseCompare<Txn, FE, T> {
+impl<Txn, FE, T: CType> DenseCompare<Txn, FE, T> {
     pub fn new<L, R>(
         left: L,
         right: R,
@@ -1423,7 +1423,7 @@ impl<Txn, FE, T> TensorInstance for DenseCompare<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn dtype(&self) -> NumberType {
         T::dtype()
@@ -1440,7 +1440,7 @@ impl<Txn, FE, T> DenseInstance for DenseCompare<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
     type Block = Array<T>;
@@ -1485,7 +1485,7 @@ where
 }
 
 #[async_trait]
-impl<Txn: ThreadSafe, FE: ThreadSafe, T: CDatatype> TensorPermitRead for DenseCompare<Txn, FE, T> {
+impl<Txn: ThreadSafe, FE: ThreadSafe, T: CType> TensorPermitRead for DenseCompare<Txn, FE, T> {
     async fn read_permit(
         &self,
         txn_id: TxnId,
@@ -1499,17 +1499,17 @@ impl<Txn: ThreadSafe, FE: ThreadSafe, T: CDatatype> TensorPermitRead for DenseCo
     }
 }
 
-impl<Txn, FE, T: CDatatype> From<DenseCompare<Txn, FE, T>> for DenseAccess<Txn, FE, T> {
+impl<Txn, FE, T: CType> From<DenseCompare<Txn, FE, T>> for DenseAccess<Txn, FE, T> {
     fn from(compare: DenseCompare<Txn, FE, T>) -> Self {
         Self::Compare(Box::new(compare))
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for DenseCompare<Txn, FE, T>
+impl<Txn, FE, T: CType> fmt::Debug for DenseCompare<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "compare {:?} with {:?}", self.left, self.right)
@@ -1518,14 +1518,14 @@ where
 
 type ArrayCmpScalar<T> = fn(Block, Number) -> TCResult<Array<T>>;
 
-pub struct DenseCompareConst<Txn, FE, T: CDatatype> {
+pub struct DenseCompareConst<Txn, FE, T: CType> {
     left: DenseAccessCast<Txn, FE>,
     right: Number,
     block_op: ArrayCmpScalar<T>,
     value_op: fn(Number, Number) -> T,
 }
 
-impl<Txn, FE, T: CDatatype> Clone for DenseCompareConst<Txn, FE, T> {
+impl<Txn, FE, T: CType> Clone for DenseCompareConst<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
             left: self.left.clone(),
@@ -1536,7 +1536,7 @@ impl<Txn, FE, T: CDatatype> Clone for DenseCompareConst<Txn, FE, T> {
     }
 }
 
-impl<Txn, FE, T: CDatatype> DenseCompareConst<Txn, FE, T> {
+impl<Txn, FE, T: CType> DenseCompareConst<Txn, FE, T> {
     pub fn new<L, R>(
         left: L,
         right: R,
@@ -1560,7 +1560,7 @@ impl<Txn, FE, T> TensorInstance for DenseCompareConst<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn dtype(&self) -> NumberType {
         T::dtype()
@@ -1577,7 +1577,7 @@ impl<Txn, FE, T> DenseInstance for DenseCompareConst<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
 {
     type Block = Array<T>;
     type DType = T;
@@ -1613,7 +1613,7 @@ impl<Txn, FE, T> TensorPermitRead for DenseCompareConst<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype,
+    T: CType,
 {
     async fn read_permit(
         &self,
@@ -1624,17 +1624,17 @@ where
     }
 }
 
-impl<Txn, FE, T: CDatatype> From<DenseCompareConst<Txn, FE, T>> for DenseAccess<Txn, FE, T> {
+impl<Txn, FE, T: CType> From<DenseCompareConst<Txn, FE, T>> for DenseAccess<Txn, FE, T> {
     fn from(compare: DenseCompareConst<Txn, FE, T>) -> Self {
         Self::CompareConst(Box::new(compare))
     }
 }
 
-impl<Txn, FE, T: CDatatype> fmt::Debug for DenseCompareConst<Txn, FE, T>
+impl<Txn, FE, T: CType> fmt::Debug for DenseCompareConst<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "compare {:?} with {:?}", self.left, self.right)
@@ -1653,7 +1653,7 @@ where
     Cond: DenseInstance<DType = u8> + fmt::Debug,
     Then: DenseInstance<DType = T> + fmt::Debug,
     OrElse: DenseInstance<DType = T> + fmt::Debug,
-    T: CDatatype,
+    T: CType,
 {
     pub fn new(cond: Cond, then: Then, or_else: OrElse) -> TCResult<DenseCond<Cond, Then, OrElse>> {
         if cond.shape() == then.shape()
@@ -1708,7 +1708,7 @@ where
     Cond: DenseInstance<DType = u8> + Clone,
     Then: DenseInstance<DType = T> + Clone,
     OrElse: DenseInstance<DType = T> + Clone,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     type Block = ArrayOp<ha_ndarray::ops::GatherCond<Cond::Block, T, Then::Block, OrElse::Block>>;
     type DType = T;
@@ -1791,7 +1791,7 @@ where
     Cond: Into<DenseAccess<Txn, FE, u8>>,
     Then: Into<DenseAccess<Txn, FE, T>>,
     OrElse: Into<DenseAccess<Txn, FE, T>>,
-    T: CDatatype,
+    T: CType,
 {
     fn from(cond: DenseCond<Cond, Then, OrElse>) -> Self {
         Self::Cond(Box::new(DenseCond {
@@ -1818,14 +1818,14 @@ where
 }
 
 #[derive(Clone)]
-pub struct DenseConst<L, T: CDatatype> {
+pub struct DenseConst<L, T: CType> {
     left: L,
     right: T,
     block_op: fn(Array<T>, T) -> TCResult<Array<T>>,
     value_op: fn(T, T) -> T,
 }
 
-impl<L, T: CDatatype> DenseConst<L, T> {
+impl<L, T: CType> DenseConst<L, T> {
     pub fn new(
         left: L,
         right: T,
@@ -1844,7 +1844,7 @@ impl<L, T: CDatatype> DenseConst<L, T> {
 impl<L, T> TensorInstance for DenseConst<L, T>
 where
     L: TensorInstance,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn dtype(&self) -> NumberType {
         T::dtype()
@@ -1859,7 +1859,7 @@ where
 impl<L, T> DenseInstance for DenseConst<L, T>
 where
     L: DenseInstance<DType = T> + fmt::Debug,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     type Block = Array<T>;
     type DType = T;
@@ -1901,7 +1901,7 @@ where
 }
 
 #[async_trait]
-impl<L: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseConst<L, T> {
+impl<L: TensorPermitRead, T: CType> TensorPermitRead for DenseConst<L, T> {
     async fn read_permit(
         &self,
         txn_id: TxnId,
@@ -1914,7 +1914,7 @@ impl<L: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseConst<L, T> {
 impl<Txn, FE, L, T> From<DenseConst<L, T>> for DenseAccess<Txn, FE, T>
 where
     L: Into<DenseAccess<Txn, FE, T>>,
-    T: CDatatype,
+    T: CType,
 {
     fn from(combine: DenseConst<L, T>) -> Self {
         Self::Const(Box::new(DenseConst {
@@ -1926,7 +1926,7 @@ where
     }
 }
 
-impl<L: fmt::Debug, T: CDatatype + DType> fmt::Debug for DenseConst<L, T> {
+impl<L: fmt::Debug, T: CType + DType> fmt::Debug for DenseConst<L, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "dual constant operation on {:?}", self.left)
     }
@@ -1982,7 +1982,7 @@ where
     }
 
     #[inline]
-    fn block_op<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+    fn block_op<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
         left.matmul(right).map(Array::from).map_err(TCError::from)
     }
 }
@@ -2006,7 +2006,7 @@ impl<L, R, T> DenseInstance for DenseMatMul<L, R>
 where
     L: DenseInstance<DType = T> + Clone,
     R: DenseInstance<DType = T> + Clone,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     type Block = Array<T>;
     type DType = T;
@@ -2105,7 +2105,7 @@ where
 
 impl<Txn, FE, L, R, T> From<DenseMatMul<L, R>> for DenseAccess<Txn, FE, T>
 where
-    T: CDatatype,
+    T: CType,
     L: Into<DenseAccess<Txn, FE, T>>,
     R: Into<DenseAccess<Txn, FE, T>>,
 {
@@ -2126,7 +2126,7 @@ impl<L: fmt::Debug, R: fmt::Debug> fmt::Debug for DenseMatMul<L, R> {
 }
 
 #[derive(Clone)]
-pub struct DenseReduce<S, T: CDatatype> {
+pub struct DenseReduce<S, T: CType> {
     source: S,
     transform: Reduce,
     block_map: ArrayBase<Vec<u64>>,
@@ -2308,7 +2308,7 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
     }
 }
 
-impl<S: TensorInstance, T: CDatatype> TensorInstance for DenseReduce<S, T> {
+impl<S: TensorInstance, T: CType> TensorInstance for DenseReduce<S, T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -2322,7 +2322,7 @@ impl<S: TensorInstance, T: CDatatype> TensorInstance for DenseReduce<S, T> {
 impl<S, T> DenseInstance for DenseReduce<S, T>
 where
     S: DenseInstance<Block = Array<T>, DType = T> + Clone,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     type Block = Array<T>;
     type DType = T;
@@ -2442,7 +2442,7 @@ where
 }
 
 #[async_trait]
-impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseReduce<S, T> {
+impl<S: TensorPermitRead, T: CType> TensorPermitRead for DenseReduce<S, T> {
     async fn read_permit(
         &self,
         txn_id: TxnId,
@@ -2457,7 +2457,7 @@ impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseReduce<S, T> {
 impl<Txn, FE, S, T> From<DenseReduce<S, T>> for DenseAccess<Txn, FE, T>
 where
     S: Into<DenseAccess<Txn, FE, T>>,
-    T: CDatatype,
+    T: CType,
 {
     fn from(reduce: DenseReduce<S, T>) -> Self {
         Self::Reduce(Box::new(DenseReduce {
@@ -2474,7 +2474,7 @@ where
     }
 }
 
-impl<S: fmt::Debug, T: CDatatype + DType> fmt::Debug for DenseReduce<S, T> {
+impl<S: fmt::Debug, T: CType + DType> fmt::Debug for DenseReduce<S, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -2586,7 +2586,7 @@ impl<S: TensorPermitRead + fmt::Debug> TensorPermitRead for DenseReshape<S> {
 
 impl<Txn, FE, T, S> From<DenseReshape<S>> for DenseAccess<Txn, FE, T>
 where
-    T: CDatatype,
+    T: CType,
     S: Into<DenseAccess<Txn, FE, T>>,
 {
     fn from(reshape: DenseReshape<S>) -> Self {
@@ -2727,7 +2727,7 @@ impl<S: TensorPermitRead> TensorPermitRead for DenseResizeBlocks<S> {
 
 impl<Txn, FE, T, S> From<DenseResizeBlocks<S>> for DenseAccess<Txn, FE, T>
 where
-    T: CDatatype,
+    T: CType,
     S: Into<DenseAccess<Txn, FE, T>>,
 {
     fn from(resize: DenseResizeBlocks<S>) -> Self {
@@ -3107,7 +3107,7 @@ where
 
 impl<Txn, FE, S, T> From<DenseSlice<S>> for DenseAccess<Txn, FE, T>
 where
-    T: CDatatype,
+    T: CType,
     S: Into<DenseAccess<Txn, FE, T>>,
 {
     fn from(slice: DenseSlice<S>) -> Self {
@@ -3318,7 +3318,7 @@ impl<S: TensorPermitRead> TensorPermitRead for DenseSparse<S> {
 impl<Txn, FE, S, T> From<DenseSparse<S>> for DenseAccess<Txn, FE, T>
 where
     S: Into<SparseAccess<Txn, FE, T>>,
-    T: CDatatype,
+    T: CType,
 {
     fn from(sparse: DenseSparse<S>) -> Self {
         Self::Sparse(Box::new(DenseSparse {
@@ -3484,7 +3484,7 @@ impl<S: TensorPermitRead> TensorPermitRead for DenseTranspose<S> {
 
 impl<Txn, FE, S, T> From<DenseTranspose<S>> for DenseAccess<Txn, FE, T>
 where
-    T: CDatatype,
+    T: CType,
     S: Into<DenseAccess<Txn, FE, T>>,
 {
     fn from(transpose: DenseTranspose<S>) -> Self {
@@ -3509,7 +3509,7 @@ impl<S: fmt::Debug> fmt::Debug for DenseTranspose<S> {
 }
 
 #[derive(Clone)]
-pub struct DenseUnary<S, T: CDatatype> {
+pub struct DenseUnary<S, T: CType> {
     source: S,
     block_op: fn(Array<T>) -> TCResult<Array<T>>,
     value_op: fn(T) -> T,
@@ -3561,7 +3561,7 @@ impl<S: DenseInstance> DenseUnary<S, S::DType> {
     }
 }
 
-impl<S: TensorInstance, T: CDatatype> TensorInstance for DenseUnary<S, T> {
+impl<S: TensorInstance, T: CType> TensorInstance for DenseUnary<S, T> {
     fn dtype(&self) -> NumberType {
         self.source.dtype()
     }
@@ -3607,7 +3607,7 @@ where
 }
 
 #[async_trait]
-impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseUnary<S, T> {
+impl<S: TensorPermitRead, T: CType> TensorPermitRead for DenseUnary<S, T> {
     async fn read_permit(
         &self,
         txn_id: TxnId,
@@ -3620,7 +3620,7 @@ impl<S: TensorPermitRead, T: CDatatype> TensorPermitRead for DenseUnary<S, T> {
 impl<Txn, FE, S, T> From<DenseUnary<S, T>> for DenseAccess<Txn, FE, T>
 where
     S: Into<DenseAccess<Txn, FE, T>>,
-    T: CDatatype,
+    T: CType,
 {
     fn from(unary: DenseUnary<S, T>) -> Self {
         Self::Unary(Box::new(DenseUnary {
@@ -3631,19 +3631,19 @@ where
     }
 }
 
-impl<S: fmt::Debug, T: CDatatype + DType> fmt::Debug for DenseUnary<S, T> {
+impl<S: fmt::Debug, T: CType + DType> fmt::Debug for DenseUnary<S, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "unary transform of {:?}", self.source)
     }
 }
 
-pub struct DenseUnaryCast<Txn, FE, T: CDatatype> {
+pub struct DenseUnaryCast<Txn, FE, T: CType> {
     source: DenseAccessCast<Txn, FE>,
     block_op: fn(Block) -> TCResult<Array<T>>,
     value_op: fn(Number) -> T,
 }
 
-impl<Txn, FE, T: CDatatype> Clone for DenseUnaryCast<Txn, FE, T> {
+impl<Txn, FE, T: CType> Clone for DenseUnaryCast<Txn, FE, T> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
@@ -3653,7 +3653,7 @@ impl<Txn, FE, T: CDatatype> Clone for DenseUnaryCast<Txn, FE, T> {
     }
 }
 
-impl<Txn, FE, T: CDatatype> DenseUnaryCast<Txn, FE, T> {
+impl<Txn, FE, T: CType> DenseUnaryCast<Txn, FE, T> {
     pub fn new<S>(
         source: S,
         block_op: fn(Block) -> TCResult<Array<T>>,
@@ -3965,7 +3965,7 @@ impl<Txn, FE, T> TensorInstance for DenseUnaryCast<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn dtype(&self) -> NumberType {
         T::dtype()
@@ -3982,7 +3982,7 @@ impl<Txn, FE, T> DenseInstance for DenseUnaryCast<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
     type Block = Array<T>;
@@ -4019,7 +4019,7 @@ impl<Txn, FE, T> TensorPermitRead for DenseUnaryCast<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype,
+    T: CType,
 {
     async fn read_permit(
         &self,
@@ -4031,7 +4031,7 @@ where
     }
 }
 
-impl<Txn, FE, T: CDatatype> From<DenseUnaryCast<Txn, FE, T>> for DenseAccess<Txn, FE, T> {
+impl<Txn, FE, T: CType> From<DenseUnaryCast<Txn, FE, T>> for DenseAccess<Txn, FE, T> {
     fn from(unary: DenseUnaryCast<Txn, FE, T>) -> Self {
         Self::UnaryCast(Box::new(unary))
     }
@@ -4041,7 +4041,7 @@ impl<Txn, FE, T> fmt::Debug for DenseUnaryCast<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "unary transform/cast of {:?}", self.source)
@@ -4070,7 +4070,7 @@ impl<FE, T> DenseVersion<FE, T> {
 impl<FE, T> DenseVersion<FE, T>
 where
     FE: DenseCacheFile + AsType<Buffer<T>> + for<'en> fs::FileSave<'en>,
-    T: CDatatype + DType,
+    T: CType + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     pub fn commit(&self, txn_id: &TxnId) {
@@ -4105,7 +4105,7 @@ where
 impl<FE, T> DenseInstance for DenseVersion<FE, T>
 where
     FE: AsType<Buffer<T>> + ThreadSafe,
-    T: CDatatype + DType + 'static,
+    T: CType + DType + 'static,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     type Block = <DenseFile<FE, T> as DenseInstance>::Block;
@@ -4132,7 +4132,7 @@ where
 impl<FE, T> TensorPermitRead for DenseVersion<FE, T>
 where
     FE: Send + Sync,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     async fn read_permit(
         &self,
@@ -4151,7 +4151,7 @@ where
 impl<FE, T> TensorPermitWrite for DenseVersion<FE, T>
 where
     FE: Send + Sync,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
         self.semaphore
@@ -4165,7 +4165,7 @@ where
 impl<'a, FE, T> DenseWriteLock<'a> for DenseVersion<FE, T>
 where
     FE: AsType<Buffer<T>> + ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     type WriteGuard = <DenseFile<FE, T> as DenseWriteLock<'a>>::WriteGuard;
@@ -4175,7 +4175,7 @@ where
     }
 }
 
-impl<Txn, FE, T: CDatatype> From<DenseVersion<FE, T>> for DenseAccess<Txn, FE, T> {
+impl<Txn, FE, T: CType> From<DenseVersion<FE, T>> for DenseAccess<Txn, FE, T> {
     fn from(version: DenseVersion<FE, T>) -> Self {
         Self::Version(version)
     }
@@ -4184,7 +4184,7 @@ impl<Txn, FE, T: CDatatype> From<DenseVersion<FE, T>> for DenseAccess<Txn, FE, T
 impl<FE, T> fmt::Debug for DenseVersion<FE, T>
 where
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "transactional version of {:?}", self.file)

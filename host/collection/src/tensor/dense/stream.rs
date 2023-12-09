@@ -4,7 +4,7 @@ use std::task::{self, ready};
 
 use futures::stream::{Fuse, FusedStream, Stream};
 use futures::StreamExt;
-use ha_ndarray::{ArrayBase, CDatatype, NDArrayRead, Shape};
+use ha_ndarray::{ArrayBase, CType, NDArrayRead, Shape};
 use itertools::MultiProduct;
 use pin_project::pin_project;
 
@@ -40,7 +40,7 @@ impl<S, A, T> Stream for BlockResize<S, T>
 where
     S: Stream<Item = Result<A, TCError>>,
     A: NDArrayRead<DType = T>,
-    T: CDatatype,
+    T: CType,
 {
     type Item = Result<ArrayBase<Vec<T>>, TCError>;
 

@@ -8,7 +8,7 @@ use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, FileWriteGuardOwned};
 use futures::{join, try_join};
-use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype};
+use ha_ndarray::{Array, ArrayBase, Buffer, CType};
 use log::{debug, trace, warn};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
@@ -48,7 +48,7 @@ struct State<Txn, FE, T> {
 impl<Txn, FE, T> State<Txn, FE, T>
 where
     FE: DenseCacheFile + AsType<Buffer<T>> + 'static,
-    T: CDatatype + DType,
+    T: CType + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     #[inline]
@@ -139,7 +139,7 @@ impl<Txn, FE, T> DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + Clone,
-    T: CDatatype + DType,
+    T: CType + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     pub async fn constant(store: fs::Dir<FE>, shape: Shape, value: T) -> TCResult<Self> {
@@ -198,7 +198,7 @@ impl<Txn, FE, T> DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>>,
-    T: CDatatype + DType,
+    T: CType + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     fn access(&self, txn_id: TxnId) -> TCResult<DenseAccess<Txn, FE, T>> {
@@ -211,7 +211,7 @@ impl<Txn, FE, T> DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Buffer<T>> + ThreadSafe,
-    T: CDatatype,
+    T: CType,
 {
     fn new(dir: DirLock<FE>, canon: DenseFile<FE, T>, committed: DirLock<FE>) -> TCResult<Self> {
         let semaphore = Semaphore::new(Collator::default());
@@ -269,7 +269,7 @@ impl<Txn, FE, T> TensorInstance for DenseBase<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn dtype(&self) -> NumberType {
         T::dtype()
@@ -285,7 +285,7 @@ impl<Txn, FE, T> TensorPermitRead for DenseBase<Txn, FE, T>
 where
     Txn: Send + Sync,
     FE: Send + Sync,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     async fn read_permit(
         &self,
@@ -301,7 +301,7 @@ impl<Txn, FE, T> TensorPermitWrite for DenseBase<Txn, FE, T>
 where
     Txn: Send + Sync,
     FE: Send + Sync,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
         self.canon.write_permit(txn_id, range).await
@@ -313,7 +313,7 @@ impl<Txn, FE, T> DenseInstance for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -345,7 +345,7 @@ impl<Txn, FE, T> DenseWrite for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -377,7 +377,7 @@ impl<'a, Txn, FE, T> DenseWriteLock<'a> for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -397,7 +397,7 @@ impl<'a, Txn, FE, T> DenseWriteGuard<T> for DenseBaseWriteGuard<'a, Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -445,7 +445,7 @@ impl<Txn, FE, T> Transact for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + for<'en> fs::FileSave<'en> + Clone,
-    T: CDatatype + DType,
+    T: CType + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     type Commit = ();
@@ -572,7 +572,7 @@ impl<Txn, FE, T> fs::Persist<FE> for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + Clone,
-    T: CDatatype + DType + de::FromStream<Context = ()>,
+    T: CType + DType + de::FromStream<Context = ()>,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     type Txn = Txn;
@@ -620,7 +620,7 @@ impl<Txn, FE, T, O> fs::CopyFrom<FE, O> for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + Clone,
-    T: CDatatype + DType + de::FromStream<Context = ()>,
+    T: CType + DType + de::FromStream<Context = ()>,
     O: DenseInstance<DType = T>,
     Buffer<T>: de::FromStream<Context = ()>,
 {
@@ -636,7 +636,7 @@ impl<Txn, FE, T> fs::Restore<FE> for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + Clone,
-    T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
+    T: CType + DType + de::FromStream<Context = ()> + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -661,7 +661,7 @@ impl<Txn, FE, T> de::FromStream for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Buffer<T>> + ThreadSafe + Clone,
-    T: CDatatype + DType,
+    T: CType + DType,
     DenseFile<FE, T>: de::FromStream<Context = (DirLock<FE>, Shape)>,
 {
     type Context = (Txn, Shape);
@@ -694,7 +694,7 @@ where
     }
 }
 
-impl<Txn, FE, T: CDatatype> From<DenseBase<Txn, FE, T>> for DenseAccess<Txn, FE, T> {
+impl<Txn, FE, T: CType> From<DenseBase<Txn, FE, T>> for DenseAccess<Txn, FE, T> {
     fn from(base: DenseBase<Txn, FE, T>) -> Self {
         Self::Base(base)
     }
@@ -704,7 +704,7 @@ impl<Txn, FE, T> fmt::Debug for DenseBase<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
@@ -727,7 +727,7 @@ impl<Txn, FE, T> DenseComplexBaseVisitor<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + Clone,
-    T: CDatatype + DType + de::FromStream<Context = ()>,
+    T: CType + DType + de::FromStream<Context = ()>,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     pub async fn end(self) -> TCResult<(DenseBase<Txn, FE, T>, DenseBase<Txn, FE, T>)> {
