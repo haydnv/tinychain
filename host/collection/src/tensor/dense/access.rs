@@ -415,7 +415,7 @@ where
 pub struct DenseBroadcast<S> {
     source: S,
     transform: Broadcast,
-    block_map: ArrayBase<Vec<u64>>,
+    block_map: ArrayBuf<StackVec<u64>>,
     block_size: usize,
 }
 
@@ -462,10 +462,10 @@ impl<S: DenseInstance> DenseBroadcast<S> {
         } else if source_block_map.size() == map_shape.iter().product::<usize>() {
             // TODO: this should not be necessary
             let block_map = source_block_map.reshape(map_shape)?;
-            ArrayBase::<Vec<u64>>::copy(&block_map)?
+            ArrayBuf::copy(&block_map)?
         } else {
             let block_map = source_block_map.broadcast(map_shape)?;
-            ArrayBase::<Vec<u64>>::copy(&block_map)?
+            ArrayBuf::copy(&block_map)?
         };
 
         Ok(Self {
@@ -680,7 +680,7 @@ where
 
             let block_axis = block_axis_for(self.shape(), self.block_size());
             let block_shape = block_shape_for(block_axis, self.shape(), buffer.len());
-            let block = ArrayBase::<Buffer<S::DType>>::new(block_shape, buffer)?;
+            let block = ArrayBuf::<Buffer<S::DType>>::new(block_shape, buffer)?;
 
             Ok(block.into())
         } else {
@@ -757,14 +757,13 @@ where
     Array<S::DType>: From<S::Block>,
     Buffer<S::DType>: de::FromStream<Context = ()>,
 {
-    type BlockWrite = ArrayBase<FileWriteGuardOwned<FE, Buffer<S::DType>>>;
+    type BlockWrite = ArrayBuf<FileWriteGuardOwned<FE, Buffer<S::DType>>>;
 
     async fn write_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
         let buffer = self.write_buffer(txn_id, block_id).await?;
         let block_axis = block_axis_for(self.shape(), self.block_size());
         let block_shape = block_shape_for(block_axis, self.shape(), buffer.len());
-        ArrayBase::<FileWriteGuardOwned<FE, Buffer<S::DType>>>::new(block_shape, buffer)
-            .map_err(TCError::from)
+        ArrayBuf::new(buffer, block_shape).map_err(TCError::from)
     }
 
     async fn write_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>> {
@@ -2129,7 +2128,7 @@ impl<L: fmt::Debug, R: fmt::Debug> fmt::Debug for DenseMatMul<L, R> {
 pub struct DenseReduce<S, T: CType> {
     source: S,
     transform: Reduce,
-    block_map: ArrayBase<Vec<u64>>,
+    block_map: ArrayBuf<StackVec<u64>>,
     map_axes: Axes,
     block_axes: Axes,
     id: T,
@@ -2176,7 +2175,7 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
         block_map_shape.push(source.shape()[block_axis] as usize / block_shape[0]);
 
         let block_map = (0..num_blocks).into_iter().collect();
-        let block_map = ArrayBase::<Vec<u64>>::new(block_map_shape, block_map)?;
+        let block_map = ArrayBuf::new(block_map_shape, block_map)?;
 
         Ok(Self {
             source,
@@ -2210,11 +2209,7 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
                 Ok(max)
             },
             |l, r| {
-                let l = ArrayBase::<Arc<Buffer<S::DType>>>::copy(&l)?;
-                let r = ArrayBase::<Arc<Buffer<S::DType>>>::copy(&r)?;
-
-                l.clone()
-                    .ge(r.clone())?
+                l.ge(r)?
                     .cond(l, r)
                     .map(Array::from)
                     .map_err(TCError::from)
@@ -2247,11 +2242,7 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
                 Ok(min)
             },
             |l, r| {
-                let l = ArrayBase::<Arc<Buffer<S::DType>>>::copy(&l)?;
-                let r = ArrayBase::<Arc<Buffer<S::DType>>>::copy(&r)?;
-
-                l.clone()
-                    .le(r.clone())?
+                l.le(r)?
                     .cond(l, r)
                     .map(Array::from)
                     .map_err(TCError::from)
@@ -2632,7 +2623,7 @@ impl<S: TensorInstance> TensorInstance for DenseResizeBlocks<S> {
 
 #[async_trait]
 impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
-    type Block = ArrayBase<Vec<S::DType>>;
+    type Block = ArrayBuf<Buffer<S::DType>>;
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
@@ -2698,7 +2689,7 @@ impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
             block_shape[0] = buffer.len() / trailing_size;
         }
 
-        ArrayBase::<Vec<Self::DType>>::new(block_shape, buffer).map_err(TCError::from)
+        ArrayBuf::new(block_shape, buffer).map_err(TCError::from)
     }
 
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
@@ -2748,7 +2739,7 @@ impl<S: fmt::Debug> fmt::Debug for DenseResizeBlocks<S> {
 pub struct DenseSlice<S> {
     source: S,
     transform: Slice,
-    block_map: ArrayBase<Vec<u64>>,
+    block_map: ArrayBuf<StackVec<u64>>,
     block_size: usize,
 }
 
@@ -2784,7 +2775,7 @@ impl<S: DenseInstance> DenseSlice<S> {
         num_blocks: u64,
         transform: &Slice,
         block_shape: BlockShape,
-    ) -> TCResult<ArrayBase<Vec<u64>>> {
+    ) -> TCResult<ArrayBuf<StackVec<u64>>> {
         debug!(
             "construct block map for slice {:?} of {:?} with block shape {block_shape:?}",
             transform.range(),
@@ -2835,7 +2826,7 @@ impl<S: DenseInstance> DenseSlice<S> {
             block_map
         } else {
             let block_map = block_map.slice(block_map_bounds)?;
-            ArrayBase::<Vec<u64>>::copy(&block_map)?
+            ArrayBuf::<StackVec<u64>>::copy(&block_map)?
         };
 
         Ok(block_map)
@@ -3208,7 +3199,7 @@ impl<S: TensorInstance> TensorInstance for DenseSparse<S> {
 
 #[async_trait]
 impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
-    type Block = ArrayBase<Vec<S::DType>>;
+    type Block = ArrayBuf<Buffer<S::DType>>;
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
@@ -3269,7 +3260,7 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
         let values = ValueStream::new(elements, range, S::DType::zero());
         let block = values.try_collect().await?;
 
-        ArrayBase::<Vec<S::DType>>::new(block_shape, block).map_err(TCError::from)
+        ArrayBuf::new(block_shape, block).map_err(TCError::from)
     }
 
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
@@ -3292,7 +3283,7 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
 
                     let mut block_shape = block_shape.to_vec();
                     block_shape[0] = block.len() / block_shape.iter().skip(1).product::<usize>();
-                    ArrayBase::<Vec<_>>::new(block_shape, block).map_err(TCError::from)
+                    ArrayBuf::new(block_shape, block).map_err(TCError::from)
                 })
             });
 
@@ -3338,7 +3329,7 @@ impl<S: fmt::Debug> fmt::Debug for DenseSparse<S> {
 pub struct DenseTranspose<S> {
     source: S,
     transform: Transpose,
-    block_map: ArrayBase<Vec<u64>>,
+    block_map: ArrayBuf<StackVec<u64>>,
     block_axes: Axes,
 }
 
@@ -3391,11 +3382,11 @@ impl<S: DenseInstance> DenseTranspose<S> {
             ))
         }?;
 
-        let block_map = ArrayBase::<Vec<_>>::new(map_shape, (0..num_blocks).into_iter().collect())?;
+        let block_map = ArrayBuf::new(map_shape, (0..num_blocks).into_iter().collect())?;
 
         let block_map = if num_blocks > 1 {
             let block_map = block_map.transpose(Some(map_axes.to_vec()))?;
-            ArrayBase::<Vec<_>>::copy(&block_map).map_err(TCError::from)
+            ArrayBuf::copy(&block_map).map_err(TCError::from)
         } else {
             Ok(block_map)
         }?;
@@ -4192,7 +4183,7 @@ where
 }
 
 #[inline]
-fn source_block_id_for(block_map: &ArrayBase<Vec<u64>>, block_id: u64) -> TCResult<u64> {
+fn source_block_id_for(block_map: &ArrayBuf<StackVec<u64>>, block_id: u64) -> TCResult<u64> {
     block_map
         .as_slice()
         .get(block_id as usize)

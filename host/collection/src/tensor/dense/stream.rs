@@ -4,7 +4,7 @@ use std::task::{self, ready};
 
 use futures::stream::{Fuse, FusedStream, Stream};
 use futures::StreamExt;
-use ha_ndarray::{ArrayBase, CType, NDArrayRead, Shape};
+use ha_ndarray::{ArrayBuf, CType, NDArrayRead, Shape};
 use itertools::MultiProduct;
 use pin_project::pin_project;
 
@@ -42,13 +42,13 @@ where
     A: NDArrayRead<DType = T>,
     T: CType,
 {
-    type Item = Result<ArrayBase<Vec<T>>, TCError>;
+    type Item = Result<ArrayBuf<Vec<T>>, TCError>;
 
     fn poll_next(
         self: Pin<&mut Self>,
         cxt: &mut task::Context<'_>,
     ) -> task::Poll<Option<Self::Item>> {
-        let shape = self.shape.to_vec();
+        let shape = StackVec::from_slice(self.shape);
         let size = shape.iter().product::<usize>();
         let mut this = self.project();
 
@@ -56,7 +56,7 @@ where
             if this.pending.len() > size {
                 debug_assert_eq!(shape.iter().product::<usize>(), size);
                 let data = this.pending.drain(..size).collect();
-                let data = ArrayBase::<Vec<T>>::new(shape, data).map_err(TCError::from);
+                let data = ArrayBuf::new(data, shape).map_err(TCError::from);
                 break Some(data);
             } else {
                 match ready!(this.source.as_mut().poll_next(cxt)) {
@@ -81,7 +81,7 @@ where
                         let mut data = vec![];
                         mem::swap(this.pending, &mut data);
 
-                        let data = ArrayBase::<Vec<T>>::new(shape, data).map_err(TCError::from);
+                        let data = ArrayBuf::new(data, shape).map_err(TCError::from);
                         break Some(data);
                     }
                 }

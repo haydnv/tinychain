@@ -4,7 +4,7 @@ use std::task::{ready, Context, Poll};
 use std::{fmt, mem};
 
 use futures::stream::{Fuse, Stream, StreamExt, TryStream};
-use ha_ndarray::{ArrayBase, CType};
+use ha_ndarray::{ArrayBuf, CType};
 use pin_project::pin_project;
 use smallvec::SmallVec;
 
@@ -44,17 +44,17 @@ where
         pending_coords: &mut Vec<u64>,
         pending_values: &mut Vec<T>,
         ndim: usize,
-    ) -> TCResult<(ArrayBase<Vec<u64>>, ArrayBase<Vec<T>>)> {
+    ) -> TCResult<(ArrayBuf<Buffer<u64>>, ArrayBuf<Buffer<T>>)> {
         let num_coords = pending_values.len();
 
         debug_assert_eq!(pending_coords.len() % ndim, 0);
 
         let values =
-            ArrayBase::<Vec<_>>::new(vec![num_coords], pending_values.drain(..).collect())?;
+            ArrayBuf::new(pending_values.drain(..).collect(), shape![num_coords])?;
 
-        let coords = ArrayBase::<Vec<_>>::new(
-            vec![pending_coords.len() / ndim, ndim],
+        let coords = ArrayBuf::new(
             pending_coords.drain(..).collect(),
+            shape![pending_coords.len() / ndim, ndim],
         )?;
 
         Ok((coords, values))
@@ -66,7 +66,7 @@ where
     S: Stream<Item = TCResult<(Coord, T)>> + Unpin,
     T: CType,
 {
-    type Item = TCResult<(ArrayBase<Vec<u64>>, ArrayBase<Vec<T>>)>;
+    type Item = TCResult<(ArrayBuf<Buffer<u64>>, ArrayBuf<Buffer<T>>)>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
         let ndim = self.ndim;
@@ -135,15 +135,14 @@ where
         pending_offsets: &mut Vec<u64>,
         pending_left: &mut Vec<T>,
         pending_right: &mut Vec<T>,
-    ) -> TCResult<(ArrayBase<Vec<u64>>, (ArrayBase<Vec<T>>, ArrayBase<Vec<T>>))> {
+    ) -> TCResult<(ArrayBuf<Buffer<u64>>, (ArrayBuf<Buffer<T>>, ArrayBuf<Buffer<T>>))> {
         debug_assert_eq!(pending_offsets.len(), pending_left.len());
         debug_assert_eq!(pending_left.len(), pending_right.len());
 
         let num_offsets = pending_left.len();
-        let left = ArrayBase::<Vec<_>>::new(vec![num_offsets], pending_left.drain(..).collect())?;
-        let right = ArrayBase::<Vec<_>>::new(vec![num_offsets], pending_right.drain(..).collect())?;
-        let coords =
-            ArrayBase::<Vec<_>>::new(vec![num_offsets], pending_offsets.drain(..).collect())?;
+        let left = ArrayBuf::new(pending_left.drain(..).collect(), shape![num_offsets])?;
+        let right = ArrayBuf::new(pending_right.drain(..).collect(), shape![num_offsets])?;
+        let coords = ArrayBuf::new(pending_offsets.drain(..).collect(), shape![num_offsets])?;
 
         Ok((coords, (left, right)))
     }
@@ -154,7 +153,7 @@ where
     S: Stream<Item = TCResult<(u64, (T, T))>> + Unpin,
     T: CType,
 {
-    type Item = TCResult<(ArrayBase<Vec<u64>>, (ArrayBase<Vec<T>>, ArrayBase<Vec<T>>))>;
+    type Item = TCResult<(ArrayBuf<Buffer<u64>>, (ArrayBuf<Buffer<T>>, ArrayBuf<Buffer<T>>))>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
@@ -219,17 +218,17 @@ where
     fn block_cutoff(
         pending_offsets: &mut Vec<u64>,
         pending_values: &mut Vec<T>,
-    ) -> TCResult<(ArrayBase<Vec<u64>>, ArrayBase<Vec<T>>)> {
+    ) -> TCResult<(ArrayBuf<Buffer<u64>>, ArrayBuf<Buffer<T>>)> {
         debug_assert_eq!(pending_offsets.len(), pending_values.len());
 
-        let values = ArrayBase::<Vec<_>>::new(
-            vec![pending_values.len()],
+        let values = ArrayBuf::new(
             pending_values.drain(..).collect(),
+            shape![pending_values.len()],
         )?;
 
-        let offsets = ArrayBase::<Vec<_>>::new(
-            vec![pending_offsets.len()],
+        let offsets = ArrayBuf::new(
             pending_offsets.drain(..).collect(),
+            shape![pending_offsets.len()],
         )?;
 
         Ok((offsets, values))
@@ -241,7 +240,7 @@ where
     S: Stream<Item = TCResult<(u64, T)>> + Unpin,
     T: CType,
 {
-    type Item = TCResult<(ArrayBase<Vec<u64>>, ArrayBase<Vec<T>>)>;
+    type Item = TCResult<(ArrayBuf<Buffer<u64>>, ArrayBuf<Buffer<T>>)>;
 
     fn poll_next(self: Pin<&mut Self>, cxt: &mut Context) -> Poll<Option<Self::Item>> {
         let mut this = self.project();

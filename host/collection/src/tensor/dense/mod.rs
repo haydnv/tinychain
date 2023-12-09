@@ -1990,7 +1990,7 @@ fn block_map_for(
     num_blocks: u64,
     shape: &[u64],
     block_shape: &[usize],
-) -> TCResult<ArrayBase<Vec<u64>>> {
+) -> TCResult<ArrayBuf<StackVec<u64>>> {
     debug!("construct a block map for {shape:?} with block shape {block_shape:?}");
 
     debug_assert!(shape.len() >= block_shape.len());
@@ -2007,11 +2007,7 @@ fn block_map_for(
 
     block_map_shape.push(div_ceil(shape[block_axis], block_shape[0] as u64) as usize);
 
-    ArrayBase::<Vec<_>>::new(
-        block_map_shape,
-        (0..num_blocks as u64).into_iter().collect(),
-    )
-    .map_err(TCError::from)
+    ArrayBuf::new((0..num_blocks as u64).into_iter().collect(), block_map_shape).map_err(TCError::from)
 }
 
 #[inline]

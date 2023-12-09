@@ -577,8 +577,8 @@ where
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<Self::DType>>;
+    type CoordBlock = ArrayBuf<Buffer<u64>>;
+    type ValueBlock = ArrayBuf<Buffer<Self::DType>>;
     type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
     type DType = T;
 
@@ -744,8 +744,8 @@ impl<S: TensorInstance> TensorInstance for SparseBroadcastAxis<S> {
 
 #[async_trait]
 impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
-    type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<Self::DType>>;
+    type CoordBlock = ArrayBuf<Buffer<u64>>;
+    type ValueBlock = ArrayBuf<Buffer<Self::DType>>;
     type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
     type DType = S::DType;
 
@@ -1936,7 +1936,7 @@ where
     T: CType + DType + fmt::Debug,
 {
     type CoordBlock = Array<u64>;
-    type ValueBlock = ArrayBase<Vec<T>>;
+    type ValueBlock = ArrayBuf<Buffer<T>>;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
@@ -1946,12 +1946,11 @@ where
         range: Range,
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
-        let shape = self.shape().to_vec();
+        let shape = StackVec::copy_from(self.shape());
         let ndim = shape.len();
 
         let strides = strides_for(&shape, ndim);
-        let strides =
-            ArrayBase::<Arc<Vec<_>>>::new(vec![strides.len()], Arc::new(strides.into_vec()))?;
+        let strides = ArrayBuf::new(strides, shape![strides.len()])?;
 
         let (cond, then, or_else) = try_join!(
             self.cond.blocks(txn_id, range.clone(), order.clone()),
@@ -1966,7 +1965,7 @@ where
         let elements = stream::Select::new(cond, then, or_else);
         let offsets = stream::BlockOffsets::new(elements);
 
-        let dims = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], Arc::new(shape))?;
+        let dims = ArrayBuf::new(shape, shape![ndim])?;
         let blocks = offsets.map(move |result| {
             let (offsets, values) = result?;
             let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
@@ -2118,7 +2117,7 @@ where
     Number: CastInto<T>,
 {
     type CoordBlock = Array<u64>;
-    type ValueBlock = ArrayBase<Vec<T>>;
+    type ValueBlock = ArrayBuf<Buffer<T>>;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
@@ -2136,12 +2135,10 @@ where
         self.shape().validate_range(&range)?;
         self.shape().validate_axes(&order, true)?;
 
-        let shape = self.source.shape().to_vec();
+        let shape = StackVec::from_slice(self.source.shape());
         let ndim = shape.len();
 
-        let strides = strides_for(&shape, ndim);
-        let strides =
-            ArrayBase::<Arc<Vec<_>>>::new(vec![strides.len()], Arc::new(strides.into_vec()))?;
+        let strides = ArrayBuf::new(strides_for(&shape, ndim), shape![strides.len()])?;
 
         #[cfg(debug_assertions)]
         let (source_blocks, filled_blocks, zero_blocks) = {
@@ -2180,7 +2177,7 @@ where
         let elements = stream::TryMerge::new(elements, filled_elements);
         let offsets = stream::BlockOffsets::new(elements);
 
-        let dims = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], Arc::new(shape))?;
+        let dims = ArrayBuf::new(shape, shape![ndim])?;
         let blocks = offsets.map(move |result| {
             let (offsets, values) = result?;
             log::trace!("block has {} values", values.size());
@@ -2433,8 +2430,8 @@ where
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<T>>;
+    type CoordBlock = ArrayBuf<Buffer<u64>>;
+    type ValueBlock = ArrayBuf<Buffer<T>>;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
@@ -2497,8 +2494,8 @@ where
             } else {
                 let num_values = values.len();
                 let coords = coords.into_iter().flatten().collect();
-                let coords = ArrayBase::<Vec<u64>>::new(vec![num_values, ndim], coords)?;
-                let values = ArrayBase::<Vec<Self::DType>>::new(vec![num_values], values)?;
+                let coords = ArrayBuf::new(coords, shape![num_values, ndim])?;
+                let values = ArrayBuf::new(values, shape![num_values])?;
                 Ok(Some((coords, values)))
             }
         });
@@ -2580,8 +2577,8 @@ impl<S: TensorInstance> TensorInstance for SparseExpand<S> {
 
 #[async_trait]
 impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
-    type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<Self::DType>>;
+    type CoordBlock = ArrayBuf<Buffer<u64>>;
+    type ValueBlock = ArrayBuf<Buffer<Self::DType>>;
     type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
     type DType = S::DType;
 
@@ -2761,8 +2758,8 @@ where
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<T>>;
+    type CoordBlock = ArrayBuf<Buffer<u64>>;
+    type ValueBlock = ArrayBuf<Buffer<T>>;
     type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
     type DType = T;
 
@@ -2935,14 +2932,14 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
             .blocks(txn_id, source_range, source_order)
             .await?;
 
-        let source_strides = Arc::new(self.transform.source_strides().to_vec());
-        let source_strides = ArrayBase::<Arc<Vec<_>>>::new(vec![source_ndim], source_strides)?;
+        let source_strides = Strides::from_slice(self.transform.source_strides());
+        let source_strides = ArrayBuf::new(source_strides, shape![source_ndim])?;
 
         let ndim = self.transform.shape().len();
-        let strides = Arc::new(self.transform.strides().to_vec());
-        let strides = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], strides)?;
-        let dims = Arc::new(self.transform.shape().to_vec());
-        let dims = ArrayBase::<Arc<Vec<_>>>::new(vec![ndim], dims)?;
+        let strides = Strides::from_slice(self.transform.strides());
+        let strides = ArrayBuf::new(strides, shape![ndim])?;
+        let dims = Shape::from_slice(self.transform.shape());
+        let dims = ArrayBuf::new(dims, shape![ndim])?;
 
         let blocks = source_blocks.map(move |result| {
             let (source_coords, values) = result?;
@@ -3075,7 +3072,7 @@ impl<S> SparseInstance for SparseSlice<S>
 where
     S: SparseInstance,
 {
-    type CoordBlock = ArrayBase<Vec<u64>>;
+    type CoordBlock = ArrayBuf<Buffer<u64>>;
     type ValueBlock = S::ValueBlock;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
@@ -3116,7 +3113,7 @@ where
                 .flatten()
                 .collect();
 
-            let coords = ArrayBase::<Vec<u64>>::new(vec![values.size(), ndim], coords)?;
+            let coords = ArrayBuf::new(coords, shape![values.size(), ndim])?;
 
             Ok((coords, values))
         });
@@ -3308,7 +3305,7 @@ where
     S: SparseInstance,
     <S::CoordBlock as NDArrayTransform>::Transpose: NDArrayRead<DType = u64> + Into<Array<u64>>,
 {
-    type CoordBlock = ArrayBase<Vec<u64>>;
+    type CoordBlock = ArrayBuf<Buffer<u64>>;
     type ValueBlock = S::ValueBlock;
     type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
@@ -3358,7 +3355,7 @@ where
                 .flatten()
                 .collect();
 
-            let coords = ArrayBase::<Vec<u64>>::new(vec![values.size(), ndim], coords)?;
+            let coords = ArrayBuf::new(coords, shape![values.size(), ndim])?;
 
             Ok((coords, values))
         });
@@ -4114,7 +4111,7 @@ fn block_elements<T: CType, C: NDArrayRead<DType = u64>, V: NDArrayRead<DType = 
 
 #[inline]
 fn offsets<C, V, T>(
-    strides: ArrayBase<Arc<Vec<u64>>>,
+    strides: ArrayBuf<Buffer<u64>>,
     blocks: impl Stream<Item = Result<(C, V), TCError>> + Send + 'static,
 ) -> impl Stream<Item = Result<(u64, T), TCError>> + Send
 where
@@ -4156,7 +4153,7 @@ fn filter_zeros<T: CType>(
 ) -> TCResult<Option<(Array<u64>, Array<T>)>> {
     let zero = T::zero();
 
-    let values = ArrayBase::<Vec<T>>::copy(&values)?;
+    let values = ArrayBuf::copy(&values)?;
 
     if values.all()? {
         Ok(Some((coords, values.into())))
@@ -4189,8 +4186,8 @@ fn filter_zeros<T: CType>(
             Ok(None)
         } else {
             let num_values = filtered_values.len();
-            let coords = ArrayBase::<Vec<u64>>::new(vec![ndim, num_values], filtered_coords)?;
-            let values = ArrayBase::<Vec<T>>::new(vec![num_values], filtered_values)?;
+            let coords = ArrayBuf::new(filtered_coords, shape![ndim, num_values])?;
+            let values = ArrayBuf::new(filtered_values, shape![num_values])?;
 
             Ok(Some((coords.into(), values.into())))
         }
@@ -4205,7 +4202,7 @@ async fn merge_blocks_inner<L, R, T>(
     range: Range,
     order: Axes,
 ) -> TCResult<
-    impl Stream<Item = TCResult<(Array<u64>, (ArrayBase<Vec<T>>, ArrayBase<Vec<T>>))>> + Send,
+    impl Stream<Item = TCResult<(Array<u64>, (ArrayBuf<Buffer<T>>, ArrayBuf<Buffer<T>>))>> + Send,
 >
 where
     L: SparseInstance<DType = T>,
@@ -4216,8 +4213,8 @@ where
     debug_assert_eq!(&shape, right.shape());
 
     let strides = strides_for(&shape, shape.len());
-    let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![strides.len()], Arc::new(strides.to_vec()))?;
-    let dims = ArrayBase::<Arc<Vec<u64>>>::new(vec![shape.len()], Arc::new(shape.to_vec()))?;
+    let strides = ArrayBuf::new(strides, shape![strides.len()])?;
+    let dims = ArrayBuf::new(shape, shape![shape.len()])?;
 
     let (left_blocks, right_blocks) = try_join!(
         left.blocks(txn_id, range.clone(), order.clone()),
@@ -4246,7 +4243,7 @@ pub(super) async fn merge_blocks_outer<L, R, T>(
     range: Range,
     order: Axes,
 ) -> TCResult<
-    impl Stream<Item = TCResult<(Array<u64>, (ArrayBase<Vec<T>>, ArrayBase<Vec<T>>))>> + Send,
+    impl Stream<Item = TCResult<(Array<u64>, (ArrayBuf<Buffer<T>>, ArrayBuf<Buffer<T>>))>> + Send,
 >
 where
     L: SparseInstance<DType = T>,
@@ -4258,8 +4255,8 @@ where
 
     let ndim = shape.len();
     let strides = strides_for(&shape, ndim).to_vec();
-    let strides = ArrayBase::<Arc<Vec<u64>>>::new(vec![ndim], Arc::new(strides))?;
-    let dims = ArrayBase::<Arc<Vec<u64>>>::new(vec![ndim], Arc::new(shape.to_vec()))?;
+    let strides = ArrayBuf::new(strides, shape![ndim])?;
+    let dims = ArrayBuf::new(shape, shape![ndim])?;
 
     let (left_blocks, right_blocks) = try_join!(
         left.blocks(txn_id, range.clone(), order.clone()),
@@ -4283,8 +4280,8 @@ where
 #[inline]
 fn offsets_to_coords(
     offsets: Array<u64>,
-    strides: ArrayBase<Arc<Vec<u64>>>,
-    dims: ArrayBase<Arc<Vec<u64>>>,
+    strides: ArrayBuf<Buffer<u64>>,
+    dims: ArrayBuf<Buffer<u64>>,
 ) -> TCResult<Array<u64>> {
     let ndim = dims.size();
     let num_offsets = offsets.size();

@@ -8,7 +8,7 @@ use destream::de;
 use freqfs::DirLock;
 use futures::future::TryFutureExt;
 use futures::stream::TryStreamExt;
-use ha_ndarray::{ArrayBase, CType};
+use ha_ndarray::{ArrayBuf, CType};
 use log::{debug, trace};
 use safecast::{AsType, CastInto};
 use smallvec::SmallVec;
@@ -137,8 +137,8 @@ where
     T: CType + DType,
     Number: CastInto<T>,
 {
-    type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<Self::DType>>;
+    type CoordBlock = ArrayBuf<Buffer<u64>>;
+    type ValueBlock = ArrayBuf<Buffer<Self::DType>>;
     type Blocks = BlockCoords<Elements<T>, T>;
     type DType = T;
 

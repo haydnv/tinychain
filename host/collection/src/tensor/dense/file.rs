@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use destream::de;
 use freqfs::*;
 use futures::stream::{StreamExt, TryStreamExt};
-use ha_ndarray::{ArrayBase, ArrayOp, Buffer, BufferWrite, CType, NDArrayMathScalar, NDArrayRead};
+use ha_ndarray::{ArrayBuf, ArrayOp, Buffer, BufferWrite, CType, NDArrayMathScalar, NDArrayRead};
 use itertools::Itertools;
 use safecast::{AsType, CastFrom};
 
@@ -26,7 +26,7 @@ use super::{
 
 pub struct DenseFile<FE, T> {
     dir: DirLock<FE>,
-    block_map: ArrayBase<Vec<u64>>,
+    block_map: ArrayBuf<StackVec<u64>>,
     block_size: usize,
     shape: Shape,
     dtype: PhantomData<T>,
@@ -98,7 +98,7 @@ where
             .collect();
 
         let block_map = (0u64..num_blocks as u64).into_iter().collect();
-        let block_map = ArrayBase::<Vec<_>>::new(map_shape, block_map)?;
+        let block_map = ArrayBuf::new(map_shape, block_map)?;
 
         Ok(Self {
             dir,
@@ -416,7 +416,7 @@ where
     T: CType + DType + 'static,
     Buffer<T>: de::FromStream<Context = ()>,
 {
-    type Block = ArrayBase<FileReadGuardOwned<FE, Buffer<T>>>;
+    type Block = ArrayBuf<FileReadGuardOwned<FE, Buffer<T>>>;
     type DType = T;
 
     fn block_size(&self) -> usize {
@@ -432,8 +432,7 @@ where
         let buffer = file.read_owned().await?;
         let block_axis = block_axis_for(self.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, &self.shape, buffer.len());
-        ArrayBase::<FileReadGuardOwned<FE, Buffer<T>>>::new(block_shape, buffer)
-            .map_err(TCError::from)
+        ArrayBuf::new(block_shape, buffer).map_err(TCError::from)
     }
 
     async fn read_blocks(self, _txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
@@ -455,7 +454,7 @@ where
             .map(move |result| {
                 let buffer = result?;
                 let block_shape = block_shape_for(block_axis, &shape, buffer.len());
-                ArrayBase::<FileReadGuardOwned<FE, Buffer<T>>>::new(block_shape, buffer)
+                ArrayBuf::<FileReadGuardOwned<FE, Buffer<T>>>::new(block_shape, buffer)
                     .map_err(TCError::from)
             });
 
@@ -483,7 +482,7 @@ where
     T: CType + DType + 'static,
     Buffer<T>: de::FromStream<Context = ()>,
 {
-    type BlockWrite = ArrayBase<FileWriteGuardOwned<FE, Buffer<T>>>;
+    type BlockWrite = ArrayBuf<FileWriteGuardOwned<FE, Buffer<T>>>;
 
     async fn write_block(&self, _txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
         let dir = self.dir.read().await;
@@ -494,8 +493,7 @@ where
         let buffer = file.write_owned().await?;
         let block_axis = block_axis_for(self.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, &self.shape, buffer.len());
-        ArrayBase::<FileWriteGuardOwned<FE, Buffer<T>>>::new(block_shape, buffer)
-            .map_err(TCError::from)
+        ArrayBuf::new(buffer, block_shape).map_err(TCError::from)
     }
 
     async fn write_blocks(self, _txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>> {
@@ -514,8 +512,7 @@ where
             .map(move |result| {
                 let buffer = result?;
                 let block_shape = block_shape_for(block_axis, &shape, buffer.len());
-                ArrayBase::<FileWriteGuardOwned<FE, Buffer<T>>>::new(block_shape, buffer)
-                    .map_err(TCError::from)
+                ArrayBuf::new(buffer, block_shape).map_err(TCError::from)
             });
 
         Ok(Box::pin(blocks))

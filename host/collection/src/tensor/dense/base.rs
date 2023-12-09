@@ -8,7 +8,7 @@ use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, FileWriteGuardOwned};
 use futures::{join, try_join};
-use ha_ndarray::{Array, ArrayBase, Buffer, CType};
+use ha_ndarray::{Array, ArrayBuf, Buffer, CType};
 use log::{debug, trace, warn};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
@@ -349,7 +349,7 @@ where
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type BlockWrite = ArrayBase<FileWriteGuardOwned<FE, Buffer<T>>>;
+    type BlockWrite = ArrayBuf<FileWriteGuardOwned<FE, Buffer<T>>>;
 
     async fn write_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
         let version = {
