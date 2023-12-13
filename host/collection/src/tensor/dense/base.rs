@@ -8,7 +8,7 @@ use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, FileWriteGuardOwned};
 use futures::{join, try_join};
-use ha_ndarray::{Array, ArrayBuf, Buffer, CType};
+use ha_ndarray::{AccessBuf, Accessor, Array, Buffer, CType};
 use log::{debug, trace, warn};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
@@ -317,19 +317,19 @@ where
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type Block = Array<T>;
+    type Block = Accessor<T>;
     type DType = T;
 
     fn block_size(&self) -> usize {
         self.canon.block_size()
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Array<T, Self::Block>> {
         let version = self.access(txn_id)?;
         version.read_block(txn_id, block_id).await
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let version = self.access(txn_id)?;
         version.read_blocks(txn_id).await
     }
@@ -349,9 +349,13 @@ where
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type BlockWrite = ArrayBuf<FileWriteGuardOwned<FE, Buffer<T>>>;
+    type BlockWrite = AccessBuf<FileWriteGuardOwned<FE, Buffer<T>>>;
 
-    async fn write_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
+    async fn write_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<T, Self::BlockWrite>> {
         let version = {
             let dir = self.dir.read().await;
             let mut state = self.state.write().expect("dense state");
@@ -361,7 +365,10 @@ where
         version.write_block(txn_id, block_id).await
     }
 
-    async fn write_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>> {
+    async fn write_blocks(
+        self,
+        txn_id: TxnId,
+    ) -> TCResult<BlockStream<Self::DType, Self::BlockWrite>> {
         let version = {
             let dir = self.dir.read().await;
             let mut state = self.state.write().expect("dense state");
@@ -580,7 +587,7 @@ where
 
     async fn create(_txn_id: TxnId, shape: Shape, store: fs::Dir<FE>) -> TCResult<Self> {
         let (dir, canon, versions) = fs_init(store).await?;
-        let canon = DenseFile::constant(canon, shape, T::zero()).await?;
+        let canon = DenseFile::constant(canon, shape, T::ZERO).await?;
         Self::new(dir, canon, versions)
     }
 
@@ -602,7 +609,7 @@ where
 
         // handle the case that no canonical version was ever finalized
         let canon = if canon.try_read()?.is_empty() {
-            DenseFile::constant(canon, shape, T::zero()).await?
+            DenseFile::constant(canon, shape, T::ZERO).await?
         } else {
             DenseFile::load(canon, shape).await?
         };
@@ -637,6 +644,7 @@ where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + Clone,
     T: CType + DType + de::FromStream<Context = ()> + fmt::Debug,
+    Accessor<T>: From<AccessBuf<Buffer<T>>>,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {

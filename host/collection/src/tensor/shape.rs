@@ -301,10 +301,7 @@ impl Range {
 
     /// Return the [`Shape`] of the `Tensor` slice with this `Range`.
     pub fn shape(&self) -> Shape {
-        self.axes
-            .iter()
-            .filter_map(AxisRange::dim)
-            .collect()
+        self.axes.iter().filter_map(AxisRange::dim).collect()
     }
 
     /// Return the size of the slice with this `Range`,

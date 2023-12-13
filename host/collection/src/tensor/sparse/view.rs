@@ -21,10 +21,10 @@ use tcgeneric::ThreadSafe;
 use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTrig, ComplexUnary};
 use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
-    autoqueue, broadcast_shape, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst,
-    TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal,
-    TensorInstance, TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead,
-    TensorReduce, TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
+    broadcast_shape, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast,
+    TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal, TensorInstance,
+    TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce,
+    TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
@@ -156,20 +156,18 @@ where
 
     let elements = blocks
         .map_ok(move |(coords, (re, im))| async move {
-            let queue = autoqueue(&coords)?;
-
             let coords = coords
-                .read(&queue)
+                .read()
                 .and_then(|buffer| buffer.to_slice())
                 .map(|slice| slice.into_vec())?;
 
             let re = re
-                .read(&queue)
+                .read()
                 .and_then(|buffer| buffer.to_slice())
                 .map(|slice| slice.into_vec())?;
 
             let im = im
-                .read(&queue)
+                .read()
                 .and_then(|buffer| buffer.to_slice())
                 .map(|slice| slice.into_vec())?;
 

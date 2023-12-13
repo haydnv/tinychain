@@ -4,20 +4,20 @@ use std::task::{self, ready};
 
 use futures::stream::{Fuse, FusedStream, Stream};
 use futures::StreamExt;
-use ha_ndarray::{ArrayBuf, CType, NDArrayRead, Shape};
+use ha_ndarray::{ArrayBuf, CType, NDArrayRead, Shape as BlockShape};
 use itertools::MultiProduct;
 use pin_project::pin_project;
 
 use tc_error::*;
 
 use crate::tensor::shape::AxisRangeIter;
-use crate::tensor::{autoqueue, Coord, Range};
+use crate::tensor::{Coord, Range};
 
 #[pin_project]
 pub struct BlockResize<S, T> {
     #[pin]
     source: Fuse<S>,
-    shape: Shape,
+    shape: BlockShape,
     pending: Vec<T>,
 }
 
@@ -25,7 +25,7 @@ impl<S, T> BlockResize<S, T>
 where
     S: Stream,
 {
-    pub fn new(source: S, block_shape: Shape) -> TCResult<Self> {
+    pub fn new(source: S, block_shape: BlockShape) -> TCResult<Self> {
         let size = block_shape.iter().product::<usize>();
 
         Ok(Self {
@@ -42,30 +42,26 @@ where
     A: NDArrayRead<DType = T>,
     T: CType,
 {
-    type Item = Result<ArrayBuf<Vec<T>>, TCError>;
+    type Item = Result<ArrayBuf<T, Vec<T>>, TCError>;
 
     fn poll_next(
         self: Pin<&mut Self>,
         cxt: &mut task::Context<'_>,
     ) -> task::Poll<Option<Self::Item>> {
-        let shape = StackVec::from_slice(self.shape);
-        let size = shape.iter().product::<usize>();
         let mut this = self.project();
 
         task::Poll::Ready(loop {
-            if this.pending.len() > size {
-                debug_assert_eq!(shape.iter().product::<usize>(), size);
+            if this.pending.len() > this.shape.iter().product() {
+                let shape = this.shape.clone();
+                let size = shape.iter().product::<usize>();
                 let data = this.pending.drain(..size).collect();
                 let data = ArrayBuf::new(data, shape).map_err(TCError::from);
                 break Some(data);
             } else {
                 match ready!(this.source.as_mut().poll_next(cxt)) {
-                    Some(Ok(block)) => match autoqueue(&block) {
-                        Ok(queue) => match block.read(&queue) {
-                            Ok(buffer) => match buffer.to_slice() {
-                                Ok(slice) => this.pending.extend(slice.as_ref()),
-                                Err(cause) => break Some(Err(TCError::from(cause))),
-                            },
+                    Some(Ok(block)) => match block.read() {
+                        Ok(buffer) => match buffer.to_slice() {
+                            Ok(slice) => this.pending.extend(slice.as_ref()),
                             Err(cause) => break Some(Err(TCError::from(cause))),
                         },
                         Err(cause) => break Some(Err(TCError::from(cause))),
@@ -73,14 +69,12 @@ where
                     Some(Err(cause)) => break Some(Err(cause)),
                     None if this.pending.is_empty() => break None,
                     None => {
-                        let mut shape = shape;
+                        let mut shape = this.shape.clone();
                         let trailing_size = shape.iter().skip(1).product::<usize>();
                         shape[0] = this.pending.len() / trailing_size;
                         debug_assert_eq!(this.pending.len() % trailing_size, 0);
 
-                        let mut data = vec![];
-                        mem::swap(this.pending, &mut data);
-
+                        let data = this.pending.drain(..).collect();
                         let data = ArrayBuf::new(data, shape).map_err(TCError::from);
                         break Some(data);
                     }

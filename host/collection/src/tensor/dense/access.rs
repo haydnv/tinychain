@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use collate::Collate;
@@ -34,8 +33,8 @@ use crate::tensor::block::Block;
 use crate::tensor::sparse::{Node, SparseAccess, SparseInstance};
 use crate::tensor::transform::{Broadcast, Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
-    autoqueue, coord_of, offset_of, Axes, AxisRange, Coord, Range, Semaphore, Shape,
-    TensorInstance, TensorPermitRead, TensorPermitWrite,
+    coord_of, offset_of, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
+    TensorPermitRead, TensorPermitWrite,
 };
 
 use super::stream::{BlockResize, ValueStream};
@@ -266,14 +265,18 @@ where
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type Block = Array<T>;
+    type Block = Accessor<T>;
     type DType = T;
 
     fn block_size(&self) -> usize {
         access_dispatch!(self, this, this.block_size())
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         access_dispatch!(
             self,
             this,
@@ -281,7 +284,7 @@ where
         )
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         match self {
             Self::Base(base) => base.read_blocks(txn_id).await,
             Self::File(file) => Ok(Box::pin(
@@ -415,7 +418,7 @@ where
 pub struct DenseBroadcast<S> {
     source: S,
     transform: Broadcast,
-    block_map: ArrayBuf<StackVec<u64>>,
+    block_map: ArrayBuf<u64, StackVec<u64>>,
     block_size: usize,
 }
 
@@ -447,7 +450,7 @@ impl<S: DenseInstance> DenseBroadcast<S> {
             .take(axis_offset + block_axis)
             .copied()
             .map(|dim| dim as usize)
-            .collect::<Vec<usize>>();
+            .collect::<ha_ndarray::Shape>();
 
         let block_shape = transform
             .shape()
@@ -455,18 +458,17 @@ impl<S: DenseInstance> DenseBroadcast<S> {
             .skip(axis_offset + block_axis)
             .copied()
             .map(|dim| dim as usize)
-            .collect::<Vec<usize>>();
+            .collect::<ha_ndarray::Shape>();
 
         let block_map = if map_shape.is_empty() {
-            source_block_map
+            Ok(source_block_map)
         } else if source_block_map.size() == map_shape.iter().product::<usize>() {
             // TODO: this should not be necessary
-            let block_map = source_block_map.reshape(map_shape)?;
-            ArrayBuf::copy(&block_map)?
+            source_block_map.reshape(map_shape)
         } else {
-            let block_map = source_block_map.broadcast(map_shape)?;
-            ArrayBuf::copy(&block_map)?
-        };
+            let block_map = source_block_map.broadcast(map_shape.clone())?;
+            ArrayBuf::new(block_map.read()?.to_slice()?.into_stackvec(), map_shape)
+        }?;
 
         Ok(Self {
             source,
@@ -488,20 +490,19 @@ impl<S: TensorInstance> TensorInstance for DenseBroadcast<S> {
 }
 
 #[async_trait]
-impl<S: DenseInstance + Clone> DenseInstance for DenseBroadcast<S>
-where
-    S::Block: NDArrayTransform,
-    <S::Block as NDArrayTransform>::Broadcast:
-        NDArrayRead<DType = S::DType> + NDArrayTransform + Into<Array<S::DType>>,
-{
-    type Block = <S::Block as NDArrayTransform>::Broadcast;
+impl<S: DenseInstance + Clone> DenseInstance for DenseBroadcast<S> {
+    type Block = AccessOp<ha_ndarray::ops::View<S::Block, S::DType>>;
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
         self.block_size
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         let source_block_id = source_block_id_for(&self.block_map, block_id)?;
         let block_axis = block_axis_for(self.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
@@ -513,14 +514,14 @@ where
         source_block.broadcast(block_shape).map_err(TCError::from)
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let block_axis = block_axis_for(self.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
 
         let this = &self;
         debug!("DenseBroadcast::read_blocks from {this:?} by broadcasting source blocks into {block_shape:?}");
 
-        let blocks = futures::stream::iter(self.block_map.into_inner())
+        let blocks = futures::stream::iter(self.block_map.into_access().into_inner())
             .map(move |block_id| {
                 let source = self.source.clone();
                 async move { source.read_block(txn_id, block_id).await }
@@ -532,7 +533,7 @@ where
                 trace!("broadcast {source_block:?} into {block_shape:?}");
 
                 source_block
-                    .broadcast(block_shape.to_vec())
+                    .broadcast(block_shape.clone())
                     .map_err(TCError::from)
             });
 
@@ -609,7 +610,6 @@ impl<FE, S> DenseCow<FE, S>
 where
     FE: DenseCacheFile + AsType<Buffer<S::DType>> + 'static,
     S: DenseInstance + Clone,
-    Array<S::DType>: From<S::Block>,
     Buffer<S::DType>: de::FromStream<Context = ()>,
 {
     async fn write_buffer(
@@ -623,11 +623,10 @@ where
             buffer.write_owned().map_err(TCError::from).await
         } else {
             let block = self.source.read_block(txn_id, block_id).await?;
-            let queue = autoqueue(&block)?;
-            let buffer = block.read(&queue)?.into_buffer()?;
+            let buffer = block.read()?.into_buffer()?;
 
             let type_size = S::DType::dtype().size();
-            let buffer_data_size = type_size * buffer.len();
+            let buffer_data_size = type_size * buffer.size();
             let buffer = dir.create_file(block_id.to_string(), buffer, buffer_data_size)?;
 
             buffer.into_write().map_err(TCError::from).await
@@ -654,17 +653,21 @@ impl<FE, S> DenseInstance for DenseCow<FE, S>
 where
     FE: DenseCacheFile + AsType<Buffer<S::DType>> + 'static,
     S: DenseInstance + Clone,
-    Array<S::DType>: From<S::Block>,
+    Accessor<S::DType>: From<S::Block> + From<AccessBuf<Buffer<S::DType>>>,
     Buffer<S::DType>: de::FromStream<Context = ()>,
 {
-    type Block = Array<S::DType>;
+    type Block = Accessor<S::DType>;
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
         self.source.block_size()
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         debug!("DenseCow::read_block {block_id} at {txn_id}");
 
         let dir = self.dir.read().await;
@@ -679,10 +682,10 @@ where
                 .await?;
 
             let block_axis = block_axis_for(self.shape(), self.block_size());
-            let block_shape = block_shape_for(block_axis, self.shape(), buffer.len());
-            let block = ArrayBuf::<Buffer<S::DType>>::new(block_shape, buffer)?;
+            let block_shape = block_shape_for(block_axis, self.shape(), buffer.size());
+            let block = ArrayBuf::new(buffer, block_shape)?;
 
-            Ok(block.into())
+            Ok(ArrayAccess::from(block))
         } else {
             debug!(
                 "DenseCow::read_block {block_id} at {txn_id} reading from {source:?}",
@@ -691,12 +694,12 @@ where
 
             self.source
                 .read_block(txn_id, block_id)
-                .map_ok(Array::from)
+                .map_ok(ArrayAccess::from)
                 .await
         }
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let num_blocks = div_ceil(self.size(), self.block_size() as u64);
 
         let blocks = futures::stream::iter(0..num_blocks)
@@ -717,8 +720,7 @@ where
         let block_offset = (offset % self.block_size() as u64) as usize;
 
         let block = self.read_block(txn_id, block_id).await?;
-        let queue = autoqueue(&block)?;
-        let buffer = block.read(&queue)?;
+        let buffer = block.read()?;
         Ok(buffer.to_slice()?.as_ref()[block_offset])
     }
 }
@@ -754,19 +756,26 @@ impl<FE, S> DenseWrite for DenseCow<FE, S>
 where
     FE: DenseCacheFile + AsType<Buffer<S::DType>> + 'static,
     S: DenseInstance + Clone,
-    Array<S::DType>: From<S::Block>,
+    Accessor<S::DType>: From<S::Block> + From<AccessBuf<Buffer<S::DType>>>,
     Buffer<S::DType>: de::FromStream<Context = ()>,
 {
-    type BlockWrite = ArrayBuf<FileWriteGuardOwned<FE, Buffer<S::DType>>>;
+    type BlockWrite = AccessBuf<FileWriteGuardOwned<FE, Buffer<S::DType>>>;
 
-    async fn write_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
+    async fn write_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::BlockWrite>> {
         let buffer = self.write_buffer(txn_id, block_id).await?;
         let block_axis = block_axis_for(self.shape(), self.block_size());
-        let block_shape = block_shape_for(block_axis, self.shape(), buffer.len());
-        ArrayBuf::new(buffer, block_shape).map_err(TCError::from)
+        let block_shape = block_shape_for(block_axis, self.shape(), buffer.size());
+        Array::new(buffer, block_shape).map_err(TCError::from)
     }
 
-    async fn write_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>> {
+    async fn write_blocks(
+        self,
+        txn_id: TxnId,
+    ) -> TCResult<BlockStream<Self::DType, Self::BlockWrite>> {
         let num_blocks = div_ceil(self.size(), self.block_size() as u64);
         let blocks = futures::stream::iter(0..num_blocks).then(move |block_id| {
             let this = self.clone();
@@ -782,7 +791,7 @@ impl<'a, FE, S> DenseWriteLock<'a> for DenseCow<FE, S>
 where
     FE: DenseCacheFile + AsType<Buffer<S::DType>> + 'static,
     S: DenseInstance + Clone,
-    Array<S::DType>: From<S::Block>,
+    Accessor<S::DType>: From<S::Block> + From<AccessBuf<Buffer<S::DType>>>,
     Buffer<S::DType>: de::FromStream<Context = ()>,
 {
     type WriteGuard = DenseCowWriteGuard<'a, FE, S>;
@@ -823,7 +832,7 @@ impl<'a, FE, S> DenseWriteGuard<S::DType> for DenseCowWriteGuard<'a, FE, S>
 where
     FE: DenseCacheFile + AsType<Buffer<S::DType>> + 'static,
     S: DenseInstance + Clone,
-    Array<S::DType>: From<S::Block>,
+    Accessor<S::DType>: From<S::Block>,
     Buffer<S::DType>: de::FromStream<Context = ()>,
 {
     async fn overwrite<O: DenseInstance<DType = S::DType>>(
@@ -909,7 +918,7 @@ impl<S: TensorInstance> TensorInstance for DenseDiagonal<S> {
 
 #[async_trait]
 impl<S: DenseInstance> DenseInstance for DenseDiagonal<S> {
-    type Block = ArrayOp<ha_ndarray::ops::MatDiag<S::Block>>;
+    type Block = AccessOp<ha_ndarray::ops::MatDiag<S::Block, S::DType>>;
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
@@ -917,17 +926,21 @@ impl<S: DenseInstance> DenseInstance for DenseDiagonal<S> {
         self.source.block_size() / matrix_dim
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         self.source
             .read_block(txn_id, block_id)
-            .map(|result| result.and_then(|block| block.diagonal().map_err(TCError::from)))
+            .map(|result| result.and_then(|block| block.diag().map_err(TCError::from)))
             .await
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let source_blocks = self.source.read_blocks(txn_id).await?;
         let blocks = source_blocks
-            .map(|result| result.and_then(|block| block.diagonal().map_err(TCError::from)));
+            .map(|result| result.and_then(|block| block.diag().map_err(TCError::from)));
 
         Ok(Box::pin(blocks))
     }
@@ -1003,15 +1016,22 @@ impl<S: TensorInstance> TensorInstance for DenseExpand<S> {
 }
 
 #[async_trait]
-impl<S: DenseInstance + Clone> DenseInstance for DenseExpand<S> {
-    type Block = Array<S::DType>;
+impl<S: DenseInstance + Clone> DenseInstance for DenseExpand<S>
+where
+    Accessor<S::DType>: From<S::Block>,
+{
+    type Block = Accessor<S::DType>;
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
         self.source.block_size()
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         debug!(
             "DenseExpand::read_block {block_id} from {:?} and expand axes {:?}",
             self.source,
@@ -1033,18 +1053,20 @@ impl<S: DenseInstance + Clone> DenseInstance for DenseExpand<S> {
             .copied()
             .filter(|x| x >= &offset)
             .map(|x| x - offset)
-            .collect::<Vec<usize>>();
+            .collect::<ha_ndarray::Axes>();
 
         if axes.is_empty() {
             trace!("no need to expand {block:?}");
-            Ok(block.into())
+            Ok(ArrayAccess::from(block))
         } else {
             trace!("expand axes {axes:?} of {block:?}");
-            block.into().expand_dims(axes).map_err(TCError::from)
+            ArrayAccess::from(block)
+                .unsqueeze(axes)
+                .map_err(TCError::from)
         }
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         debug!(
             "DenseExpand::read_blocks from {:?} and expand axes {:?}",
             self.source,
@@ -1066,14 +1088,16 @@ impl<S: DenseInstance + Clone> DenseInstance for DenseExpand<S> {
                 .copied()
                 .filter(|x| *x >= offset)
                 .map(|x| x - offset)
-                .collect::<Vec<usize>>();
+                .collect::<ha_ndarray::Axes>();
 
             if axes.is_empty() {
                 trace!("no need to expand {block:?}");
-                Ok(block.into())
+                Ok(ArrayAccess::from(block))
             } else {
                 trace!("expand axes {axes:?} of {block:?}");
-                block.into().expand_dims(axes).map_err(TCError::from)
+                ArrayAccess::from(block)
+                    .unsqueeze(axes)
+                    .map_err(TCError::from)
             }
         });
 
@@ -1124,7 +1148,7 @@ impl<S: fmt::Debug> fmt::Debug for DenseExpand<S> {
     }
 }
 
-type Combine<T> = fn(Array<T>, Array<T>) -> TCResult<Array<T>>;
+type Combine<T> = fn(ArrayAccess<T>, ArrayAccess<T>) -> TCResult<ArrayAccess<T>>;
 
 #[derive(Clone)]
 pub struct DenseCombine<L, R, T: CType> {
@@ -1182,15 +1206,20 @@ where
     L: DenseInstance<DType = T>,
     R: DenseInstance<DType = T>,
     T: CType + DType,
+    Accessor<T>: From<L::Block> + From<R::Block>,
 {
-    type Block = Array<T>;
+    type Block = Accessor<T>;
     type DType = T;
 
     fn block_size(&self) -> usize {
         self.left.block_size()
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         debug!(
             "DenseCombine::read_block {block_id} from {:?} and {:?}",
             self.left, self.right
@@ -1201,10 +1230,10 @@ where
             self.right.read_block(txn_id, block_id)
         )?;
 
-        (self.block_op)(left.into(), right.into())
+        (self.block_op)(ArrayAccess::from(left), ArrayAccess::from(right))
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         debug!(
             "DenseCombine::read_blocks from {:?} and {:?}",
             self.left, self.right
@@ -1222,10 +1251,16 @@ where
         let blocks = left.zip(right).map(move |(l, r)| {
             let (l, r) = (l?, r?);
 
-            debug_assert!(l.shape() == block_shape, "left block has the wrong shape");
-            debug_assert!(r.shape() == block_shape, "right block has the wrong shape");
+            debug_assert!(
+                l.shape() == block_shape.as_slice(),
+                "left block has the wrong shape"
+            );
+            debug_assert!(
+                r.shape() == block_shape.as_slice(),
+                "right block has the wrong shape"
+            );
 
-            (op)(l.into(), r.into())
+            (op)(ArrayAccess::from(l), ArrayAccess::from(r))
         });
 
         Ok(Box::pin(blocks))
@@ -1292,7 +1327,7 @@ where
 pub struct DenseCombineConst<S, T: CType> {
     left: S,
     right: T,
-    block_op: fn(Array<T>, T) -> TCResult<Array<T>>,
+    block_op: fn(ArrayAccess<T>, T) -> TCResult<ArrayAccess<T>>,
     value_op: fn(T, T) -> T,
 }
 
@@ -1311,23 +1346,29 @@ impl<S, T> DenseInstance for DenseCombineConst<S, T>
 where
     S: DenseInstance<DType = T>,
     T: CType + DType,
+    Accessor<T>: From<S::Block>,
 {
-    type Block = Array<T>;
+    type Block = Accessor<T>;
     type DType = T;
 
     fn block_size(&self) -> usize {
         self.left.block_size()
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         let source_block = self.left.read_block(txn_id, block_id).await?;
-        (self.block_op)(source_block.into(), self.right)
+        (self.block_op)(ArrayAccess::from(source_block), self.right)
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let source_blocks = self.left.read_blocks(txn_id).await?;
-        let blocks = source_blocks
-            .map(move |result| result.and_then(|block| (self.block_op)(block.into(), self.right)));
+        let blocks = source_blocks.map(move |result| {
+            result.and_then(|block| (self.block_op)(ArrayAccess::from(block), self.right))
+        });
 
         Ok(Box::pin(blocks))
     }
@@ -1370,7 +1411,7 @@ impl<S: fmt::Debug, T: CType + DType> fmt::Debug for DenseCombineConst<S, T> {
     }
 }
 
-type ArrayCmp<T> = fn(Block, Block) -> TCResult<Array<T>>;
+type ArrayCmp<T> = fn(Block, Block) -> TCResult<ArrayAccess<T>>;
 
 pub struct DenseCompare<Txn, FE, T: CType> {
     left: DenseAccessCast<Txn, FE>,
@@ -1442,7 +1483,7 @@ where
     T: CType + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
-    type Block = Array<T>;
+    type Block = Accessor<T>;
     type DType = T;
 
     fn block_size(&self) -> usize {
@@ -1450,7 +1491,11 @@ where
         cast_dispatch!(left, this, this.block_size())
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         let (left, right) = try_join!(
             self.left.read_block(txn_id, block_id),
             self.right.read_block(txn_id, block_id)
@@ -1459,7 +1504,7 @@ where
         (self.block_op)(left, right)
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let (left, right) = try_join!(
             self.left.read_blocks(txn_id),
             self.right.read_blocks(txn_id)
@@ -1515,7 +1560,7 @@ where
     }
 }
 
-type ArrayCmpScalar<T> = fn(Block, Number) -> TCResult<Array<T>>;
+type ArrayCmpScalar<T> = fn(Block, Number) -> TCResult<ArrayAccess<T>>;
 
 pub struct DenseCompareConst<Txn, FE, T: CType> {
     left: DenseAccessCast<Txn, FE>,
@@ -1578,7 +1623,7 @@ where
     FE: DenseCacheFile + AsType<Node>,
     T: CType + DType + fmt::Debug,
 {
-    type Block = Array<T>;
+    type Block = Accessor<T>;
     type DType = T;
 
     fn block_size(&self) -> usize {
@@ -1586,14 +1631,18 @@ where
         cast_dispatch!(left, this, this.block_size())
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         self.left
             .read_block(txn_id, block_id)
             .map(|result| result.and_then(move |block| (self.block_op)(block, self.right)))
             .await
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let left = self.left.read_blocks(txn_id).await?;
         let blocks =
             left.map(move |result| result.and_then(|block| (self.block_op)(block, self.right)));
@@ -1709,14 +1758,18 @@ where
     OrElse: DenseInstance<DType = T> + Clone,
     T: CType + DType,
 {
-    type Block = ArrayOp<ha_ndarray::ops::GatherCond<Cond::Block, T, Then::Block, OrElse::Block>>;
+    type Block = AccessOp<ha_ndarray::ops::Cond<Cond::Block, Then::Block, OrElse::Block, T>>;
     type DType = T;
 
     fn block_size(&self) -> usize {
         self.cond.block_size()
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         trace!(
             "read block {block_id} conditionally from {:?} and {:?} based on {:?}",
             self.then,
@@ -1733,7 +1786,7 @@ where
         cond.cond(then, or_else).map_err(TCError::from)
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let num_blocks = div_ceil(self.size(), self.block_size() as u64);
         let blocks = futures::stream::iter(0..num_blocks)
             .map(move |block_id| {
@@ -1820,7 +1873,7 @@ where
 pub struct DenseConst<L, T: CType> {
     left: L,
     right: T,
-    block_op: fn(Array<T>, T) -> TCResult<Array<T>>,
+    block_op: fn(ArrayAccess<T>, T) -> TCResult<ArrayAccess<T>>,
     value_op: fn(T, T) -> T,
 }
 
@@ -1828,7 +1881,7 @@ impl<L, T: CType> DenseConst<L, T> {
     pub fn new(
         left: L,
         right: T,
-        block_op: fn(Array<T>, T) -> TCResult<Array<T>>,
+        block_op: fn(ArrayAccess<T>, T) -> TCResult<ArrayAccess<T>>,
         value_op: fn(T, T) -> T,
     ) -> Self {
         Self {
@@ -1859,15 +1912,20 @@ impl<L, T> DenseInstance for DenseConst<L, T>
 where
     L: DenseInstance<DType = T> + fmt::Debug,
     T: CType + DType,
+    Accessor<T>: From<L::Block>,
 {
-    type Block = Array<T>;
+    type Block = Accessor<T>;
     type DType = T;
 
     fn block_size(&self) -> usize {
         self.left.block_size()
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         debug!(
             "DenseConst::read_block {block_id} from source {:?}",
             self.left
@@ -1875,18 +1933,20 @@ where
 
         self.left
             .read_block(txn_id, block_id)
-            .map(move |result| result.and_then(|block| (self.block_op)(block.into(), self.right)))
+            .map(move |result| {
+                result.and_then(|block| (self.block_op)(ArrayAccess::from(block), self.right))
+            })
             .await
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         debug!("DenseConst::read_blocks with source {:?}", self.left);
 
         let left = self.left.read_blocks(txn_id).await?;
         let blocks = left.map(move |result| {
             result.and_then(|block| {
                 trace!("apply const op to {block:?}");
-                (self.block_op)(block.into(), self.right)
+                (self.block_op)(ArrayAccess::from(block), self.right)
             })
         });
 
@@ -1981,7 +2041,7 @@ where
     }
 
     #[inline]
-    fn block_op<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+    fn block_op<T: CType>(left: ArrayAccess<T>, right: ArrayAccess<T>) -> TCResult<ArrayAccess<T>> {
         left.matmul(right).map(Array::from).map_err(TCError::from)
     }
 }
@@ -2006,24 +2066,29 @@ where
     L: DenseInstance<DType = T> + Clone,
     R: DenseInstance<DType = T> + Clone,
     T: CType + DType,
+    Accessor<T>: From<L::Block> + From<R::Block>,
 {
-    type Block = Array<T>;
+    type Block = Accessor<T>;
     type DType = T;
 
     fn block_size(&self) -> usize {
         self.per_block * self.shape.iter().rev().take(2).product::<u64>() as usize
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         let (left, right) = try_join!(
             self.left.read_block(txn_id, block_id),
             self.right.read_block(txn_id, block_id),
         )?;
 
-        Self::block_op(left.into(), right.into())
+        Self::block_op(ArrayAccess::from(left), ArrayAccess::from(right))
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let num_blocks = self.size() / self.block_size() as u64;
 
         let blocks = futures::stream::iter(0..num_blocks)
@@ -2059,14 +2124,15 @@ where
 
         let coords = left_range.affected().zip(right_range.affected());
 
-        let mut sum = T::zero();
+        // TODO: parallelize
+        let mut sum = T::ZERO;
         for (left_coord, right_coord) in coords {
             let (left, right) = try_join!(
                 self.left.read_value(txn_id, left_coord.into()),
                 self.right.read_value(txn_id, right_coord.into())
             )?;
 
-            sum = sum + (left * right);
+            sum = T::add(sum, T::mul(left, right));
         }
 
         Ok(sum)
@@ -2128,13 +2194,13 @@ impl<L: fmt::Debug, R: fmt::Debug> fmt::Debug for DenseMatMul<L, R> {
 pub struct DenseReduce<S, T: CType> {
     source: S,
     transform: Reduce,
-    block_map: ArrayBuf<StackVec<u64>>,
+    block_map: ArrayBuf<u64, StackVec<u64>>,
     map_axes: Axes,
     block_axes: Axes,
     id: T,
-    reduce_all: fn(Array<T>, T) -> TCResult<T>,
+    reduce_all: fn(ArrayAccess<T>, T) -> TCResult<T>,
     reduce_blocks: Combine<T>,
-    reduce_op: fn(Array<T>, &[usize], bool) -> TCResult<Array<T>>,
+    reduce_op: fn(ArrayAccess<T>, usize, bool) -> TCResult<ArrayAccess<T>>,
 }
 
 impl<S: DenseInstance> DenseReduce<S, S::DType> {
@@ -2143,9 +2209,9 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
         mut axes: Axes,
         keepdims: bool,
         id: S::DType,
-        reduce_all: fn(Array<S::DType>, S::DType) -> TCResult<S::DType>,
+        reduce_all: fn(ArrayAccess<S::DType>, S::DType) -> TCResult<S::DType>,
         reduce_blocks: Combine<S::DType>,
-        reduce_op: fn(Array<S::DType>, &[usize], bool) -> TCResult<Array<S::DType>>,
+        reduce_op: fn(ArrayAccess<S::DType>, usize, bool) -> TCResult<ArrayAccess<S::DType>>,
     ) -> TCResult<Self> {
         axes.sort();
         axes.dedup();
@@ -2165,17 +2231,19 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
 
         let transform = Reduce::new(source.shape().clone(), axes, keepdims)?;
 
-        let mut block_map_shape = Vec::with_capacity(source.ndim());
+        let mut block_map_shape = BlockShape::with_capacity(source.ndim());
         block_map_shape.extend(
-            source.shape()[..block_axis]
+            source
+                .shape()
                 .iter()
+                .take(block_axis)
                 .copied()
                 .map(|dim| dim as usize),
         );
         block_map_shape.push(source.shape()[block_axis] as usize / block_shape[0]);
 
         let block_map = (0..num_blocks).into_iter().collect();
-        let block_map = ArrayBuf::new(block_map_shape, block_map)?;
+        let block_map = ArrayBuf::new(block_map, block_map_shape)?;
 
         Ok(Self {
             source,
@@ -2198,7 +2266,7 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             source,
             axes,
             keepdims,
-            S::DType::min(),
+            S::DType::MIN,
             |block, max| {
                 let block_max = block.max_all()?;
                 let max = match NumberCollator::default().cmp(&max.into(), &block_max.into()) {
@@ -2209,14 +2277,15 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
                 Ok(max)
             },
             |l, r| {
-                l.ge(r)?
+                l.clone()
+                    .ge(r.clone())?
                     .cond(l, r)
                     .map(Array::from)
                     .map_err(TCError::from)
             },
-            |block, axes, keepdims| {
+            |block, axis, keepdims| {
                 block
-                    .max(axes.to_vec(), keepdims)
+                    .max(axis, keepdims)
                     .map(Array::from)
                     .map_err(TCError::from)
             },
@@ -2231,7 +2300,7 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             source,
             axes,
             keepdims,
-            S::DType::max(),
+            S::DType::MAX,
             |block, min| {
                 let block_min = block.min_all()?;
                 let min = match NumberCollator::default().cmp(&min.into(), &block_min.into()) {
@@ -2242,14 +2311,15 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
                 Ok(min)
             },
             |l, r| {
-                l.le(r)?
+                l.clone()
+                    .le(r.clone())?
                     .cond(l, r)
-                    .map(Array::from)
+                    .map(ArrayAccess::from)
                     .map_err(TCError::from)
             },
-            |block, axes, keepdims| {
+            |block, axis, keepdims| {
                 block
-                    .min(axes.to_vec(), keepdims)
+                    .min(axis, keepdims)
                     .map(Array::from)
                     .map_err(TCError::from)
             },
@@ -2261,17 +2331,15 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             source,
             axes,
             keepdims,
-            S::DType::zero(),
+            S::DType::ZERO,
             |block, sum| {
-                block
-                    .sum_all()
-                    .map(|block_sum| block_sum + sum)
-                    .map_err(TCError::from)
+                let block_sum = block.sum_all()?;
+                Ok(S::DType::add(block_sum, sum))
             },
             |l, r| l.add(r).map(Array::from).map_err(TCError::from),
-            |block, axes, keepdims| {
+            |block, axis, keepdims| {
                 block
-                    .sum(axes.to_vec(), keepdims)
+                    .sum(axis, keepdims)
                     .map(Array::from)
                     .map_err(TCError::from)
             },
@@ -2283,15 +2351,15 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
             source,
             axes,
             keepdims,
-            S::DType::one(),
+            S::DType::ONE,
             |block, product| {
                 let block_product = block.product_all()?;
-                Ok(block_product * product)
+                Ok(S::DType::mul(block_product, product))
             },
             |l, r| l.mul(r).map(Array::from).map_err(TCError::from),
-            |block, axes, keepdims| {
+            |block, axis, keepdims| {
                 block
-                    .product(axes.to_vec(), keepdims)
+                    .product(axis, keepdims)
                     .map(Array::from)
                     .map_err(TCError::from)
             },
@@ -2312,10 +2380,10 @@ impl<S: TensorInstance, T: CType> TensorInstance for DenseReduce<S, T> {
 #[async_trait]
 impl<S, T> DenseInstance for DenseReduce<S, T>
 where
-    S: DenseInstance<Block = Array<T>, DType = T> + Clone,
+    S: DenseInstance<Block = Accessor<T>, DType = T> + Clone,
     T: CType + DType,
 {
-    type Block = Array<T>;
+    type Block = Accessor<T>;
     type DType = T;
 
     fn block_size(&self) -> usize {
@@ -2336,7 +2404,11 @@ where
             .product()
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         let source_blocks_per_block = self
             .map_axes
             .iter()
@@ -2345,7 +2417,10 @@ where
             .product::<usize>();
 
         let source_block_id = block_id * source_blocks_per_block as u64;
-        let map_strides = ha_ndarray::strides_for(self.block_map.shape(), self.block_map.ndim());
+
+        let map_strides = ha_ndarray::strides_for(self.block_map.shape(), self.block_map.ndim())
+            .collect::<ha_ndarray::Strides>();
+
         let map_coord = coord_of(
             source_block_id as usize,
             &map_strides,
@@ -2357,18 +2432,17 @@ where
             let mut map_slice = map_coord
                 .into_iter()
                 .map(|i| ha_ndarray::AxisRange::At(i))
-                .collect::<Vec<_>>();
+                .collect::<ha_ndarray::Range>();
 
             for x in self.map_axes.iter().copied() {
                 map_slice[x] = ha_ndarray::AxisRange::In(0, self.block_map.shape()[x], 1);
             }
 
-            let queue = autoqueue(&self.block_map)?;
             let block_map_slice = self.block_map.clone().slice(map_slice)?;
-            block_map_slice.read(&queue)?.to_slice()?.into_vec()
+            block_map_slice.read()?.to_slice()?.into_stackvec()
         } else {
             let block_id = self.block_map.read_value(&map_coord)?;
-            vec![block_id]
+            stackvec![block_id]
         };
 
         debug_assert_eq!(source_blocks[0], source_block_id);
@@ -2379,7 +2453,13 @@ where
             .map(|result| {
                 result.and_then(|block| {
                     debug_assert!(self.block_axes.iter().copied().all(|x| x < block.ndim()));
-                    (self.reduce_op)(block, &self.block_axes, self.transform.keepdims())
+
+                    let mut reduced = block;
+                    for axis in self.block_axes.iter().rev().copied() {
+                        reduced = (self.reduce_op)(reduced, axis, self.transform.keepdims())?
+                    }
+
+                    Ok(reduced)
                 })
             })
             .await?;
@@ -2395,7 +2475,14 @@ where
                                 .iter()
                                 .copied()
                                 .all(|x| x < block.ndim()));
-                            (self.reduce_op)(block, &self.block_axes, self.transform.keepdims())
+
+                            let keepdims = self.transform.keepdims();
+                            let mut reduced = block;
+                            for axis in self.block_axes.iter().rev().copied() {
+                                reduced = (self.reduce_op)(reduced, axis, keepdims)?
+                            }
+
+                            Ok(reduced)
                         })
                     })
             })
@@ -2407,7 +2494,7 @@ where
     }
 
     // TODO: optimize
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let num_blocks = div_ceil(self.size(), self.block_size() as u64);
         let blocks = futures::stream::iter(0..num_blocks)
             .map(move |block_id| {
@@ -2424,9 +2511,10 @@ where
         let range = self.transform.invert_coord(&coord);
         let slice = DenseSlice::new(self.source.clone(), range)?;
         let source_blocks = slice.read_blocks(txn_id).await?;
+
         source_blocks
             .try_fold(self.id, |reduced, block| async move {
-                (self.reduce_all)(block, reduced)
+                (self.reduce_all)(ArrayAccess::from(block), reduced)
             })
             .await
     }
@@ -2499,20 +2587,19 @@ impl<S: TensorInstance> TensorInstance for DenseReshape<S> {
 }
 
 #[async_trait]
-impl<S: DenseInstance> DenseInstance for DenseReshape<S>
-where
-    S::Block: NDArrayTransform,
-    <S::Block as NDArrayTransform>::Reshape:
-        NDArrayRead<DType = S::DType> + NDArrayTransform + Into<Array<S::DType>>,
-{
-    type Block = <S::Block as NDArrayTransform>::Reshape;
+impl<S: DenseInstance> DenseInstance for DenseReshape<S> {
+    type Block = S::Block;
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
         self.source.block_size()
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         let block_axis = block_axis_for(self.shape(), self.block_size());
         let mut block_shape = block_shape_for(block_axis, self.shape(), self.block_size());
 
@@ -2527,7 +2614,7 @@ where
         block.reshape(block_shape).map_err(TCError::from)
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let block_size = self.block_size();
         let block_axis = block_axis_for(self.shape(), block_size);
         let block_shape = block_shape_for(block_axis, self.shape(), block_size);
@@ -2535,7 +2622,7 @@ where
         let source_blocks = self.source.read_blocks(txn_id).await?;
         let blocks = source_blocks.map(move |result| {
             let block = result?;
-            let mut block_shape = block_shape.to_vec();
+            let mut block_shape = block_shape.clone();
 
             if block.size() < block_size {
                 // this must be the trailing block
@@ -2623,14 +2710,18 @@ impl<S: TensorInstance> TensorInstance for DenseResizeBlocks<S> {
 
 #[async_trait]
 impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
-    type Block = ArrayBuf<Buffer<S::DType>>;
+    type Block = AccessBuf<Vec<S::DType>>;
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
         self.block_size
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         let block_axis = block_axis_for(self.shape(), self.block_size);
         let mut block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
 
@@ -2649,8 +2740,7 @@ impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
             .map(|block_id| self.source.read_block(txn_id, block_id))
             .buffered(num_cpus::get())
             .map_ok(|block| async move {
-                let queue = autoqueue(&block)?;
-                let buffer = block.read(&queue)?;
+                let buffer = block.read()?;
 
                 buffer
                     .to_slice()
@@ -2666,7 +2756,7 @@ impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
             let source_buffer = source_buffer.expect("source buffer");
 
             let start = (start % source_block_size) as usize;
-            let stop = Ord::min(start + self.block_size, source_buffer.len());
+            let stop = Ord::min(start + self.block_size, source_buffer.size());
             buffer.extend_from_slice(&source_buffer[start..stop]);
         }
 
@@ -2685,14 +2775,14 @@ impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
 
         if stop > self.size() {
             let trailing_size = block_shape.iter().skip(1).product::<usize>();
-            debug_assert_eq!(buffer.len() % trailing_size, 0);
-            block_shape[0] = buffer.len() / trailing_size;
+            debug_assert_eq!(buffer.size() % trailing_size, 0);
+            block_shape[0] = buffer.size() / trailing_size;
         }
 
-        ArrayBuf::new(block_shape, buffer).map_err(TCError::from)
+        ArrayBuf::new(buffer, block_shape).map_err(TCError::from)
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let block_axis = block_axis_for(self.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);
         let source_blocks = self.source.read_blocks(txn_id).await?;
@@ -2739,7 +2829,7 @@ impl<S: fmt::Debug> fmt::Debug for DenseResizeBlocks<S> {
 pub struct DenseSlice<S> {
     source: S,
     transform: Slice,
-    block_map: ArrayBuf<StackVec<u64>>,
+    block_map: ArrayBuf<u64, StackVec<u64>>,
     block_size: usize,
 }
 
@@ -2775,7 +2865,7 @@ impl<S: DenseInstance> DenseSlice<S> {
         num_blocks: u64,
         transform: &Slice,
         block_shape: BlockShape,
-    ) -> TCResult<ArrayBuf<StackVec<u64>>> {
+    ) -> TCResult<ArrayBuf<u64, StackVec<u64>>> {
         debug!(
             "construct block map for slice {:?} of {:?} with block shape {block_shape:?}",
             transform.range(),
@@ -2784,7 +2874,7 @@ impl<S: DenseInstance> DenseSlice<S> {
 
         let block_map = block_map_for(num_blocks, transform.source_shape(), &block_shape)?;
 
-        let mut block_map_bounds = Vec::with_capacity(block_axis + 1);
+        let mut block_map_bounds = ha_ndarray::Range::with_capacity(block_axis + 1);
         for axis_range in transform.range().iter().take(block_axis).cloned() {
             let bound = ha_ndarray::AxisRange::try_from(axis_range)?;
             block_map_bounds.push(bound);
@@ -2811,7 +2901,7 @@ impl<S: DenseInstance> DenseSlice<S> {
                         .iter()
                         .copied()
                         .map(|i| (i / stride as u64) as usize)
-                        .collect::<Vec<usize>>();
+                        .collect();
 
                     ha_ndarray::AxisRange::Of(indices)
                 }
@@ -2826,7 +2916,10 @@ impl<S: DenseInstance> DenseSlice<S> {
             block_map
         } else {
             let block_map = block_map.slice(block_map_bounds)?;
-            ArrayBuf::<StackVec<u64>>::copy(&block_map)?
+            ArrayBuf::new(
+                block_map.read()?.to_slice()?.into_stackvec(),
+                BlockShape::from_slice(block_map.shape()),
+            )?
         };
 
         Ok(block_map)
@@ -2839,8 +2932,9 @@ impl<S: DenseInstance> DenseSlice<S> {
         block_shape: &BlockShape,
         num_blocks: u64,
         source_block_id: u64,
-    ) -> TCResult<Vec<ha_ndarray::AxisRange>> {
-        let mut block_bounds = Vec::with_capacity(transform.source_shape().len());
+    ) -> TCResult<ha_ndarray::Range> {
+        let mut block_bounds = ha_ndarray::Range::with_capacity(transform.source_shape().len());
+
         for bound in transform.range().iter().skip(block_axis).cloned() {
             block_bounds.push(bound.try_into()?);
         }
@@ -2884,14 +2978,14 @@ impl<S: DenseInstance> DenseSlice<S> {
 
         debug_assert_eq!(
             block_shape.len(),
-            block_bounds.iter().filter(|bound| bound.size() > 0).count()
+            block_bounds.iter().filter_map(|ar| ar.size()).count()
         );
 
         Ok(block_bounds)
     }
 
     #[inline]
-    fn block_bounds(&self, block_id: u64) -> TCResult<(u64, Vec<ha_ndarray::AxisRange>)> {
+    fn block_bounds(&self, block_id: u64) -> TCResult<(u64, ha_ndarray::Range)> {
         let source_block_id = source_block_id_for(&self.block_map, block_id)?;
         let num_blocks = self.block_map.size() as u64;
         let block_axis = block_axis_for(self.shape(), self.block_size);
@@ -2925,7 +3019,7 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
         let source = self.source;
         let transform = self.transform;
 
-        let blocks = futures::stream::iter(self.block_map.into_inner())
+        let blocks = futures::stream::iter(self.block_map.into_access().into_inner())
             .map(move |source_block_id| {
                 get_block(source.clone(), source_block_id)
                     .map_ok(move |block| (source_block_id, block))
@@ -2945,8 +3039,7 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
                 debug_assert_eq!(
                     block_bounds
                         .iter()
-                        .map(|bound| bound.size())
-                        .filter(|dim| dim > &0)
+                        .filter_map(|bound| bound.size())
                         .collect::<BlockShape>(),
                     block_shape
                 );
@@ -2970,20 +3063,19 @@ impl<S: TensorInstance> TensorInstance for DenseSlice<S> {
 }
 
 #[async_trait]
-impl<S: DenseInstance + Clone> DenseInstance for DenseSlice<S>
-where
-    S::Block: NDArrayTransform,
-    <S::Block as NDArrayTransform>::Slice:
-        NDArrayRead<DType = S::DType> + NDArrayTransform + Into<Array<S::DType>>,
-{
-    type Block = <S::Block as NDArrayTransform>::Slice;
+impl<S: DenseInstance + Clone> DenseInstance for DenseSlice<S> {
+    type Block = AccessOp<ha_ndarray::ops::Slice<S::Block, S::DType>>;
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
         self.block_size
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         debug!(
             "DenseSlice::read_block {block_id} from source {:?}",
             self.source
@@ -2999,8 +3091,7 @@ where
         debug_assert_eq!(
             block_bounds
                 .iter()
-                .map(|bound| bound.size())
-                .filter(|dim| dim > &0)
+                .filter_map(|ar| ar.size())
                 .collect::<BlockShape>(),
             block_shape
         );
@@ -3009,7 +3100,7 @@ where
         source_block.slice(block_bounds).map_err(TCError::from)
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         debug!("DenseSlice::read_blocks from source {:?}", self.source);
 
         let blocks = self
@@ -3051,24 +3142,23 @@ impl<S: TensorPermitWrite> TensorPermitWrite for DenseSlice<S> {
 }
 
 #[async_trait]
-impl<'a, S: DenseWrite + Clone> DenseWrite for DenseSlice<S>
-where
-    S::Block: NDArrayTransform,
-    <S::Block as NDArrayTransform>::Slice:
-        NDArrayRead<DType = S::DType> + NDArrayTransform + Into<Array<S::DType>>,
-    S::BlockWrite: NDArrayTransform,
-    <S::BlockWrite as NDArrayTransform>::Slice:
-        NDArrayRead<DType = S::DType> + NDArrayTransform + NDArrayWrite + Into<Array<S::DType>>,
-{
-    type BlockWrite = <S::BlockWrite as NDArrayTransform>::Slice;
+impl<'a, S: DenseWrite + Clone> DenseWrite for DenseSlice<S> {
+    type BlockWrite = AccessOp<ha_ndarray::ops::Slice<S::BlockWrite, S::DType>>;
 
-    async fn write_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
+    async fn write_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<S::DType, Self::BlockWrite>> {
         let (source_block_id, block_bounds) = self.block_bounds(block_id)?;
         let source_block = self.source.write_block(txn_id, source_block_id).await?;
         source_block.slice(block_bounds).map_err(TCError::from)
     }
 
-    async fn write_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>> {
+    async fn write_blocks(
+        self,
+        txn_id: TxnId,
+    ) -> TCResult<BlockStream<Self::DType, Self::BlockWrite>> {
         let blocks = self
             .block_stream(move |source, block_id| async move {
                 source.write_block(txn_id, block_id).await
@@ -3080,15 +3170,7 @@ where
 }
 
 #[async_trait]
-impl<'a, S: DenseWrite + DenseWriteLock<'a> + Clone> DenseWriteLock<'a> for DenseSlice<S>
-where
-    S::Block: NDArrayTransform,
-    <S::Block as NDArrayTransform>::Slice:
-        NDArrayRead<DType = S::DType> + NDArrayTransform + Into<Array<S::DType>>,
-    S::BlockWrite: NDArrayTransform,
-    <S::BlockWrite as NDArrayTransform>::Slice:
-        NDArrayRead<DType = S::DType> + NDArrayTransform + NDArrayWrite + Into<Array<S::DType>>,
-{
+impl<'a, S: DenseWrite + DenseWriteLock<'a> + Clone> DenseWriteLock<'a> for DenseSlice<S> {
     type WriteGuard = DenseSliceWriteGuard<'a, S>;
 
     async fn write(&'a self) -> Self::WriteGuard {
@@ -3130,12 +3212,6 @@ pub struct DenseSliceWriteGuard<'a, S> {
 impl<'a, S> DenseWriteGuard<S::DType> for DenseSliceWriteGuard<'a, S>
 where
     S: DenseWrite + DenseWriteLock<'a> + Clone,
-    S::Block: NDArrayTransform,
-    <S::Block as NDArrayTransform>::Slice:
-        NDArrayRead<DType = S::DType> + NDArrayTransform + Into<Array<S::DType>>,
-    S::BlockWrite: NDArrayTransform,
-    <S::BlockWrite as NDArrayTransform>::Slice:
-        NDArrayRead<DType = S::DType> + NDArrayTransform + NDArrayWrite + Into<Array<S::DType>>,
 {
     async fn overwrite<O: DenseInstance<DType = S::DType>>(
         &self,
@@ -3161,6 +3237,7 @@ where
 
     async fn overwrite_value(&self, txn_id: TxnId, value: S::DType) -> TCResult<()> {
         let dest = self.dest.clone().write_blocks(txn_id).await?;
+
         dest.map_ok(|mut block| block.write_value(value))
             .try_fold((), |(), _| futures::future::ready(Ok(())))
             .await
@@ -3199,14 +3276,18 @@ impl<S: TensorInstance> TensorInstance for DenseSparse<S> {
 
 #[async_trait]
 impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
-    type Block = ArrayBuf<Buffer<S::DType>>;
+    type Block = AccessBuf<Vec<S::DType>>;
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
         self.block_size
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         trace!("read block {block_id} of {self:?}");
 
         let block_size = self.block_size as u64;
@@ -3257,20 +3338,20 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
             .elements(txn_id, range.clone(), Axes::default())
             .await?;
 
-        let values = ValueStream::new(elements, range, S::DType::zero());
+        let values = ValueStream::new(elements, range, S::DType::ZERO);
         let block = values.try_collect().await?;
 
-        ArrayBuf::new(block_shape, block).map_err(TCError::from)
+        ArrayBuf::new(block, block_shape).map_err(TCError::from)
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let block_axis = block_axis_for(self.shape(), self.block_size());
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size());
 
         let range = Range::all(self.shape());
         let order = Axes::default();
         let elements = self.source.elements(txn_id, range.clone(), order).await?;
-        let values = ValueStream::new(elements, range, S::DType::zero());
+        let values = ValueStream::new(elements, range, S::DType::ZERO);
         let blocks = values
             .try_chunks(self.block_size)
             .map_err(|cause| bad_request!("dense conversion error: {}", cause))
@@ -3281,9 +3362,9 @@ impl<S: SparseInstance + Clone> DenseInstance for DenseSparse<S> {
                         0
                     );
 
-                    let mut block_shape = block_shape.to_vec();
+                    let mut block_shape = block_shape.clone();
                     block_shape[0] = block.len() / block_shape.iter().skip(1).product::<usize>();
-                    ArrayBuf::new(block_shape, block).map_err(TCError::from)
+                    ArrayBuf::new(block, block_shape).map_err(TCError::from)
                 })
             });
 
@@ -3329,7 +3410,7 @@ impl<S: fmt::Debug> fmt::Debug for DenseSparse<S> {
 pub struct DenseTranspose<S> {
     source: S,
     transform: Transpose,
-    block_map: ArrayBuf<StackVec<u64>>,
+    block_map: ArrayBuf<u64, StackVec<u64>>,
     block_axes: Axes,
 }
 
@@ -3374,7 +3455,7 @@ impl<S: DenseInstance> DenseTranspose<S> {
                 .map(|x| x - block_axis)
                 .collect::<Axes>();
 
-            Ok((map_axes.to_vec(), block_axes))
+            Ok((map_axes, block_axes))
         } else {
             Err(bad_request!(
                 "cannot transpose axes {axes:?} of {source:?} without copying",
@@ -3382,11 +3463,14 @@ impl<S: DenseInstance> DenseTranspose<S> {
             ))
         }?;
 
-        let block_map = ArrayBuf::new(map_shape, (0..num_blocks).into_iter().collect())?;
+        let block_map: StackVec<u64> = (0..num_blocks).into_iter().collect();
+        let block_map = ArrayBuf::new(block_map, map_shape)?;
 
         let block_map = if num_blocks > 1 {
-            let block_map = block_map.transpose(Some(map_axes.to_vec()))?;
-            ArrayBuf::copy(&block_map).map_err(TCError::from)
+            let block_map = block_map.transpose(Some(ha_ndarray::Axes::from_slice(map_axes)))?;
+            let map_shape = BlockShape::from_slice(block_map.shape());
+            let block_map = block_map.read()?.to_slice()?.into_stackvec();
+            ArrayBuf::new(block_map, map_shape)
         } else {
             Ok(block_map)
         }?;
@@ -3411,32 +3495,31 @@ impl<S: TensorInstance> TensorInstance for DenseTranspose<S> {
 }
 
 #[async_trait]
-impl<S: DenseInstance + Clone> DenseInstance for DenseTranspose<S>
-where
-    S::Block: NDArrayTransform,
-    <S::Block as NDArrayTransform>::Transpose:
-        NDArrayRead<DType = S::DType> + NDArrayTransform + Into<Array<S::DType>>,
-{
-    type Block = <S::Block as NDArrayTransform>::Transpose;
+impl<S: DenseInstance + Clone> DenseInstance for DenseTranspose<S> {
+    type Block = AccessOp<ha_ndarray::ops::View<S::Block, S::DType>>;
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
         self.source.block_size()
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         let source_block_id = source_block_id_for(&self.block_map, block_id)?;
         let block = self.source.read_block(txn_id, source_block_id).await?;
 
         block
-            .transpose(Some(self.transform.axes().to_vec()))
+            .transpose(Some(ha_ndarray::Axes::from_slice(self.transform.axes())))
             .map_err(TCError::from)
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let block_axes = self.block_axes;
 
-        let blocks = futures::stream::iter(self.block_map.into_inner())
+        let blocks = futures::stream::iter(self.block_map.into_access().into_inner())
             .map(move |block_id| {
                 let source = self.source.clone();
                 async move { source.read_block(txn_id, block_id).await }
@@ -3446,7 +3529,7 @@ where
                 let block = result?;
 
                 block
-                    .transpose(Some(block_axes.to_vec()))
+                    .transpose(Some(block_axes.clone()))
                     .map_err(TCError::from)
             });
 
@@ -3502,14 +3585,14 @@ impl<S: fmt::Debug> fmt::Debug for DenseTranspose<S> {
 #[derive(Clone)]
 pub struct DenseUnary<S, T: CType> {
     source: S,
-    block_op: fn(Array<T>) -> TCResult<Array<T>>,
+    block_op: fn(ArrayAccess<T>) -> TCResult<ArrayAccess<T>>,
     value_op: fn(T) -> T,
 }
 
 impl<S: DenseInstance> DenseUnary<S, S::DType> {
     fn new(
         source: S,
-        block_op: fn(Array<S::DType>) -> TCResult<Array<S::DType>>,
+        block_op: fn(ArrayAccess<S::DType>) -> TCResult<ArrayAccess<S::DType>>,
         value_op: fn(S::DType) -> S::DType,
     ) -> Self {
         Self {
@@ -3565,27 +3648,31 @@ impl<S: TensorInstance, T: CType> TensorInstance for DenseUnary<S, T> {
 #[async_trait]
 impl<S: DenseInstance> DenseInstance for DenseUnary<S, S::DType>
 where
-    Array<S::DType>: From<S::Block>,
+    Accessor<S::DType>: From<S::Block>,
 {
-    type Block = Array<S::DType>;
+    type Block = Accessor<S::DType>;
     type DType = S::DType;
 
     fn block_size(&self) -> usize {
         self.source.block_size()
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         self.source
             .read_block(txn_id, block_id)
-            .map_ok(Array::from)
+            .map_ok(ArrayAccess::from)
             .map(move |result| result.and_then(|block| (self.block_op)(block)))
             .await
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let source_blocks = self.source.read_blocks(txn_id).await?;
         let blocks = source_blocks
-            .map_ok(Array::from)
+            .map_ok(ArrayAccess::from)
             .map(move |result| result.and_then(|block| (self.block_op)(block)));
 
         Ok(Box::pin(blocks))
@@ -3630,7 +3717,7 @@ impl<S: fmt::Debug, T: CType + DType> fmt::Debug for DenseUnary<S, T> {
 
 pub struct DenseUnaryCast<Txn, FE, T: CType> {
     source: DenseAccessCast<Txn, FE>,
-    block_op: fn(Block) -> TCResult<Array<T>>,
+    block_op: fn(Block) -> TCResult<ArrayAccess<T>>,
     value_op: fn(Number) -> T,
 }
 
@@ -3647,7 +3734,7 @@ impl<Txn, FE, T: CType> Clone for DenseUnaryCast<Txn, FE, T> {
 impl<Txn, FE, T: CType> DenseUnaryCast<Txn, FE, T> {
     pub fn new<S>(
         source: S,
-        block_op: fn(Block) -> TCResult<Array<T>>,
+        block_op: fn(Block) -> TCResult<ArrayAccess<T>>,
         value_op: fn(Number) -> T,
     ) -> Self
     where
@@ -3976,7 +4063,7 @@ where
     T: CType + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
-    type Block = Array<T>;
+    type Block = Accessor<T>;
     type DType = T;
 
     fn block_size(&self) -> usize {
@@ -3984,14 +4071,18 @@ where
         cast_dispatch!(source, this, this.block_size())
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         self.source
             .read_block(txn_id, block_id)
             .map(|result| result.and_then(|block| (self.block_op)(block)))
             .await
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let source_blocks = self.source.read_blocks(txn_id).await?;
         let blocks =
             source_blocks.map(move |result| result.and_then(|block| (self.block_op)(block)));
@@ -4106,11 +4197,15 @@ where
         self.file.block_size()
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         self.file.read_block(txn_id, block_id).await
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         self.file.read_blocks(txn_id).await
     }
 
@@ -4183,9 +4278,10 @@ where
 }
 
 #[inline]
-fn source_block_id_for(block_map: &ArrayBuf<StackVec<u64>>, block_id: u64) -> TCResult<u64> {
+fn source_block_id_for(block_map: &ArrayBuf<u64, StackVec<u64>>, block_id: u64) -> TCResult<u64> {
     block_map
-        .as_slice()
+        .access()
+        .inner()
         .get(block_id as usize)
         .copied()
         .ok_or_else(|| bad_request!("block id {} is out of range", block_id))

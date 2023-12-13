@@ -6,7 +6,10 @@ use async_trait::async_trait;
 use destream::de;
 use freqfs::*;
 use futures::stream::{StreamExt, TryStreamExt};
-use ha_ndarray::{ArrayBuf, ArrayOp, Buffer, BufferWrite, CType, NDArrayMathScalar, NDArrayRead};
+use ha_ndarray::{
+    AccessBuf, Array, ArrayBuf, ArrayOp, Buffer, BufferInstance, BufferMut, CType,
+    NDArrayMathScalar, NDArrayRead, StackVec,
+};
 use itertools::Itertools;
 use safecast::{AsType, CastFrom};
 
@@ -15,7 +18,7 @@ use tc_transact::{fs, TxnId};
 use tc_value::{DType, Number, NumberClass, NumberType};
 use tcgeneric::ThreadSafe;
 
-use crate::tensor::{autoqueue, offset_of, Coord, Shape, TensorInstance};
+use crate::tensor::{offset_of, Coord, Shape, TensorInstance};
 
 use super::access::DenseAccess;
 use super::stream::BlockResize;
@@ -26,7 +29,7 @@ use super::{
 
 pub struct DenseFile<FE, T> {
     dir: DirLock<FE>,
-    block_map: ArrayBuf<StackVec<u64>>,
+    block_map: ArrayBuf<u64, StackVec<u64>>,
     block_size: usize,
     shape: Shape,
     dtype: PhantomData<T>,
@@ -98,7 +101,7 @@ where
             .collect();
 
         let block_map = (0u64..num_blocks as u64).into_iter().collect();
-        let block_map = ArrayBuf::new(map_shape, block_map)?;
+        let block_map = ArrayBuf::new(block_map, map_shape)?;
 
         Ok(Self {
             dir,
@@ -126,16 +129,16 @@ where
 
         let mut block_id = 0;
         while let Some(block) = source_blocks.try_next().await? {
-            let buffer = block.into_inner();
+            let buffer = block.into_access().into_inner();
 
             if block_id == num_blocks - 1 {
-                assert_ne!(buffer.len(), 0);
-                assert_eq!(block_size % buffer.len(), 0);
+                assert_ne!(buffer.size(), 0);
+                assert_eq!(block_size % buffer.size(), 0);
             } else {
-                assert_eq!(block_size, buffer.len());
+                assert_eq!(block_size, buffer.size());
             }
 
-            let size_in_bytes = buffer.len() * T::dtype().size();
+            let size_in_bytes = buffer.size() * T::dtype().size();
             let buffer = Buffer::from(buffer);
             dir_guard.create_file(block_id.to_string(), buffer, size_in_bytes)?;
             block_id += 1;
@@ -183,7 +186,7 @@ where
 
         for (block_id, block) in blocks.into_iter().enumerate() {
             let buffer = Buffer::from(block.collect::<Vec<T>>());
-            let size_in_bytes = buffer.len() * T::dtype().size();
+            let size_in_bytes = buffer.size() * T::dtype().size();
             dir_guard.create_file(block_id.to_string(), buffer, size_in_bytes)?;
         }
 
@@ -223,8 +226,8 @@ where
                 .ok_or_else(|| internal!("tensor missing block 0"))?;
 
             let block: FileReadGuard<Buffer<T>> = block.read().await?;
-            size += block.len() as u64;
-            block.len()
+            size += block.size() as u64;
+            block.size()
         };
 
         let block_axis = block_axis_for(&shape, block_size);
@@ -236,13 +239,13 @@ where
                 .ok_or_else(|| internal!("tensor missing block {block_id}"))?;
 
             let block: FileReadGuard<Buffer<T>> = block.read().await?;
-            if block.len() == block_size {
-                size += block.len() as u64;
+            if block.size() == block_size {
+                size += block.size() as u64;
             } else {
                 return Err(bad_request!(
                     "block {} has incorrect size {} (expected {})",
                     block_id,
-                    block.len(),
+                    block.size(),
                     block_size
                 ));
             }
@@ -255,7 +258,7 @@ where
                 .ok_or_else(|| internal!("tensor missing block {block_id}"))?;
 
             let block: FileReadGuard<Buffer<T>> = block.read().await?;
-            size += block.len() as u64;
+            size += block.size() as u64;
         }
 
         std::mem::drop(contents);
@@ -284,12 +287,10 @@ where
     where
         T: fmt::Display,
     {
-        Self::construct_with_op(dir, shape, |context, queue, block_size| {
-            let op = ha_ndarray::construct::Range::with_context(context, start, stop, block_size)?;
-
-            ha_ndarray::ops::Op::enqueue(&op, &queue)
-                .map(|buffer| buffer)
-                .map_err(TCError::from)
+        Self::construct_with_op(dir, shape, |block_shape| {
+            let arr = ArrayOp::range(start, stop, block_shape)?;
+            let buf = arr.read()?.into_buffer()?;
+            Ok(buf)
         })
         .await
     }
@@ -300,7 +301,7 @@ where
         block_ctr: Ctr,
     ) -> TCResult<Self>
     where
-        Ctr: Fn(ha_ndarray::Context, ha_ndarray::Queue, BlockShape) -> TCResult<Buffer<T>> + Copy,
+        Ctr: Fn(BlockShape) -> TCResult<Buffer<T>> + Copy,
     {
         shape.validate()?;
 
@@ -309,14 +310,9 @@ where
         let block_axis = block_axis_for(&shape, block_size);
         let block_shape = block_shape_for(block_axis, &shape, block_size);
 
-        let context = ha_ndarray::Context::default()?;
-        let queue = ha_ndarray::Queue::new(context.clone(), block_size)?;
-
         let mut blocks = futures::stream::iter(0..num_blocks as u64)
             .map(|block_id| {
                 let mut block_shape = block_shape.clone();
-                let context = context.clone();
-                let queue = queue.clone();
 
                 async move {
                     if (block_id + 1) * (block_size as u64) > size {
@@ -324,7 +320,7 @@ where
                         block_shape[0] = block_size / block_shape.iter().skip(1).product::<usize>();
                     }
 
-                    block_ctr(context, queue, block_shape).map(|buffer| (block_id, buffer))
+                    block_ctr(block_shape).map(|buffer| (block_id, buffer))
                 }
             })
             .buffered(num_cpus::get());
@@ -333,7 +329,7 @@ where
 
         let dtype_size = T::dtype().size();
         while let Some((block_id, buffer)) = blocks.try_next().await? {
-            let size_in_bytes = dtype_size * buffer.len();
+            let size_in_bytes = dtype_size * buffer.size();
             dir_guard.create_file(block_id.to_string(), buffer, size_in_bytes)?;
         }
 
@@ -368,28 +364,21 @@ where
         mean: f32,
         std: f32,
     ) -> TCResult<Self> {
-        Self::construct_with_op(dir, shape, |context, queue, block_shape| {
-            let block_size = block_shape.iter().product();
-            let op = ha_ndarray::construct::RandomNormal::with_context(context, block_size)?;
-            let random = ArrayOp::new(block_shape, op)
+        Self::construct_with_op(dir, shape, |block_shape| {
+            let arr = ArrayOp::random_normal(block_shape.iter().product())?
                 .mul_scalar(std)?
                 .add_scalar(mean)?;
-
-            random
-                .read(&queue)
-                .and_then(|buffer| buffer.into_buffer())
-                .map_err(TCError::from)
+            let buf = arr.read()?.into_buffer()?;
+            Ok(buf)
         })
         .await
     }
 
     pub async fn random_uniform(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
-        Self::construct_with_op(dir, shape, |context, queue, block_shape| {
-            let op = ha_ndarray::construct::RandomUniform::with_context(context, block_shape)?;
-
-            ha_ndarray::ops::Op::enqueue(&op, &queue)
-                .map(|buffer| buffer)
-                .map_err(TCError::from)
+        Self::construct_with_op(dir, shape, |block_shape| {
+            let arr = ArrayOp::random_uniform(block_shape.iter().product())?;
+            let buf = arr.read()?.into_buffer()?;
+            Ok(buf)
         })
         .await
     }
@@ -416,14 +405,18 @@ where
     T: CType + DType + 'static,
     Buffer<T>: de::FromStream<Context = ()>,
 {
-    type Block = ArrayBuf<FileReadGuardOwned<FE, Buffer<T>>>;
+    type Block = AccessBuf<FileReadGuardOwned<FE, Buffer<T>>>;
     type DType = T;
 
     fn block_size(&self) -> usize {
         self.block_size
     }
 
-    async fn read_block(&self, _txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        _txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         let dir = self.dir.read().await;
         let file = dir
             .get_file(&block_id)
@@ -431,14 +424,14 @@ where
 
         let buffer = file.read_owned().await?;
         let block_axis = block_axis_for(self.shape(), self.block_size);
-        let block_shape = block_shape_for(block_axis, &self.shape, buffer.len());
-        ArrayBuf::new(block_shape, buffer).map_err(TCError::from)
+        let block_shape = block_shape_for(block_axis, &self.shape, buffer.size());
+        ArrayBuf::new(buffer, block_shape).map_err(TCError::from)
     }
 
-    async fn read_blocks(self, _txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, _txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let shape = self.shape;
         let block_axis = block_axis_for(&shape, self.block_size);
-        let block_map = self.block_map.into_inner();
+        let block_map = self.block_map.into_access().into_inner();
         let dir = self.dir.into_read().await;
 
         log::debug!("read blocks {block_map:?} from dense file");
@@ -453,9 +446,8 @@ where
             .try_buffered(num_cpus::get())
             .map(move |result| {
                 let buffer = result?;
-                let block_shape = block_shape_for(block_axis, &shape, buffer.len());
-                ArrayBuf::<FileReadGuardOwned<FE, Buffer<T>>>::new(block_shape, buffer)
-                    .map_err(TCError::from)
+                let block_shape = block_shape_for(block_axis, &shape, buffer.size());
+                ArrayBuf::new(buffer, block_shape).map_err(TCError::from)
             });
 
         Ok(Box::pin(blocks))
@@ -469,8 +461,7 @@ where
         let block_offset = (offset % self.block_size() as u64) as usize;
 
         let block = self.read_block(txn_id, block_id).await?;
-        let queue = autoqueue(&block)?;
-        let buffer = block.read(&queue)?;
+        let buffer = block.read()?;
         Ok(buffer.to_slice()?.as_ref()[block_offset])
     }
 }
@@ -482,9 +473,13 @@ where
     T: CType + DType + 'static,
     Buffer<T>: de::FromStream<Context = ()>,
 {
-    type BlockWrite = ArrayBuf<FileWriteGuardOwned<FE, Buffer<T>>>;
+    type BlockWrite = AccessBuf<FileWriteGuardOwned<FE, Buffer<T>>>;
 
-    async fn write_block(&self, _txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
+    async fn write_block(
+        &self,
+        _txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::BlockWrite>> {
         let dir = self.dir.read().await;
         let file = dir
             .get_file(&block_id)
@@ -492,16 +487,19 @@ where
 
         let buffer = file.write_owned().await?;
         let block_axis = block_axis_for(self.shape(), self.block_size);
-        let block_shape = block_shape_for(block_axis, &self.shape, buffer.len());
+        let block_shape = block_shape_for(block_axis, &self.shape, buffer.size());
         ArrayBuf::new(buffer, block_shape).map_err(TCError::from)
     }
 
-    async fn write_blocks(self, _txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>> {
+    async fn write_blocks(
+        self,
+        _txn_id: TxnId,
+    ) -> TCResult<BlockStream<Self::DType, Self::BlockWrite>> {
         let shape = self.shape;
         let block_axis = block_axis_for(&shape, self.block_size);
         let dir = self.dir.into_read().await;
 
-        let blocks = futures::stream::iter(self.block_map.into_inner())
+        let blocks = futures::stream::iter(self.block_map.into_access().into_inner())
             .map(move |block_id| {
                 dir.get_file(&block_id).cloned().ok_or_else(|| {
                     io::Error::new(io::ErrorKind::NotFound, format!("tensor block {block_id}"))
@@ -511,7 +509,7 @@ where
             .try_buffered(num_cpus::get())
             .map(move |result| {
                 let buffer = result?;
-                let block_shape = block_shape_for(block_axis, &shape, buffer.len());
+                let block_shape = block_shape_for(block_axis, &shape, buffer.size());
                 ArrayBuf::new(buffer, block_shape).map_err(TCError::from)
             });
 
@@ -603,8 +601,9 @@ impl<'a, FE> DenseFileWriteGuard<'a, FE> {
                     let that = that.read().await;
                     if that.contains(&block_id) {
                         let mut this = self.dir.write_file(&block_id).await?;
+
                         let that = that.read_file(&block_id).await?;
-                        this.write(&*that).map_err(TCError::from)
+                        this.write(that.read()).map_err(TCError::from)
                     } else {
                         Ok(())
                     }
@@ -643,9 +642,8 @@ where
                     let mut block = dir.write_file(&block_id).await?;
 
                     let data = result?;
-                    let queue = autoqueue(&data)?;
-                    let data = data.read(&queue)?;
-                    debug_assert_eq!(block.len(), data.len());
+                    let data = data.read()?;
+                    debug_assert_eq!(block.size(), data.size());
                     block.write(data)?;
 
                     Result::<(), TCError>::Ok(())
@@ -720,7 +718,7 @@ macro_rules! impl_visitor {
 
                 let (block_size, num_blocks) = ideal_block_size_for(&self.shape);
 
-                let zero = <$t>::zero();
+                let zero = <$t>::ZERO;
                 let type_size = <$t>::dtype().size();
                 let mut buffer = vec![zero; block_size];
                 for block_id in 0..num_blocks {
@@ -740,7 +738,7 @@ macro_rules! impl_visitor {
                                 ),
                             ))
                         }
-                    } else if buffer.len() == block_size {
+                    } else if buffer.size() == block_size {
                         Ok(buffer.drain(..).collect::<Vec<$t>>())
                     } else {
                         Err(de::Error::invalid_length(

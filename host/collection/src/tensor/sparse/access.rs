@@ -27,8 +27,8 @@ use crate::tensor::dense::{
 };
 use crate::tensor::transform::{Broadcast, Expand, Reduce, Reshape, Slice, Transpose};
 use crate::tensor::{
-    autoqueue, strides_for, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance,
-    TensorPermitRead, TensorPermitWrite,
+    strides_for, Axes, AxisRange, Coord, Range, Semaphore, Shape, TensorInstance, TensorPermitRead,
+    TensorPermitWrite,
 };
 
 use super::base::SparseBase;
@@ -168,7 +168,8 @@ where
         txn_id: TxnId,
         range: Range,
         order: Axes,
-    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<(Array<u64>, (Block, Block))>> + Send>>> {
+    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<(ArrayAccess<u64>, (Block, Block))>> + Send>>>
+    {
         let shape = if self.shape() == other.shape() {
             Ok(self.shape().clone())
         } else {
@@ -197,7 +198,8 @@ where
         txn_id: TxnId,
         range: Range,
         order: Axes,
-    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<(Array<u64>, (Block, Block))>> + Send>>> {
+    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<(ArrayAccess<u64>, (Block, Block))>> + Send>>>
+    {
         let shape = if self.shape() == other.shape() {
             Ok(self.shape().clone())
         } else {
@@ -225,10 +227,10 @@ where
         txn_id: TxnId,
         range: Range,
         order: Axes,
-    ) -> TCResult<Blocks<Array<u64>, Block>> {
+    ) -> TCResult<Pin<Box<dyn Stream<Item = TCResult<(ArrayAccess<u64>, Block)>> + Send>>> {
         access_cast_dispatch!(self, this, {
             let blocks = this.blocks(txn_id, range, order).await?;
-            let blocks = blocks.map_ok(|(coords, values)| (coords.into(), values.into()));
+            let blocks = blocks.map_ok(|(coords, values)| (coords, Block::from(values)));
             Ok(Box::pin(blocks))
         })
     }
@@ -402,9 +404,9 @@ where
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type CoordBlock = Array<u64>;
-    type ValueBlock = Array<T>;
-    type Blocks = Blocks<Array<u64>, Array<T>>;
+    type CoordBlock = Accessor<u64>;
+    type ValueBlock = Accessor<T>;
+    type Blocks = Blocks<T, Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(
@@ -577,8 +579,8 @@ where
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type CoordBlock = ArrayBuf<Buffer<u64>>;
-    type ValueBlock = ArrayBuf<Buffer<Self::DType>>;
+    type CoordBlock = AccessBuf<Buffer<u64>>;
+    type ValueBlock = AccessBuf<Buffer<Self::DType>>;
     type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
     type DType = T;
 
@@ -744,8 +746,8 @@ impl<S: TensorInstance> TensorInstance for SparseBroadcastAxis<S> {
 
 #[async_trait]
 impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
-    type CoordBlock = ArrayBuf<Buffer<u64>>;
-    type ValueBlock = ArrayBuf<Buffer<Self::DType>>;
+    type CoordBlock = AccessBuf<Buffer<u64>>;
+    type ValueBlock = AccessBuf<Buffer<Self::DType>>;
     type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
     type DType = S::DType;
 
@@ -959,7 +961,7 @@ impl<S: fmt::Debug> fmt::Debug for SparseBroadcastAxis<S> {
 pub struct SparseCombine<L, R, T: CType> {
     left: L,
     right: R,
-    block_op: fn(Array<T>, Array<T>) -> TCResult<Array<T>>,
+    block_op: fn(ArrayAccess<T>, ArrayAccess<T>) -> TCResult<ArrayAccess<T>>,
     value_op: fn(T, T) -> T,
 }
 
@@ -972,7 +974,7 @@ where
     pub fn new(
         left: L,
         right: R,
-        block_op: fn(Array<T>, Array<T>) -> TCResult<Array<T>>,
+        block_op: fn(ArrayAccess<T>, ArrayAccess<T>) -> TCResult<ArrayAccess<T>>,
         value_op: fn(T, T) -> T,
     ) -> TCResult<Self> {
         log::debug!("SparseCombine::new({left:?}, {right:?})");
@@ -1016,10 +1018,11 @@ where
     L: SparseInstance<DType = T>,
     R: SparseInstance<DType = T>,
     T: CType + DType + PartialEq + fmt::Debug,
+    Accessor<T>: From<L::ValueBlock> + From<R::ValueBlock>,
 {
-    type CoordBlock = Array<u64>;
-    type ValueBlock = Array<T>;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type CoordBlock = Accessor<u64>;
+    type ValueBlock = Accessor<T>;
+    type Blocks = Blocks<T, Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(
@@ -1042,7 +1045,8 @@ where
                 result.and_then(|(coords, (left, right))| {
                     debug_assert_eq!(coords.ndim(), 2);
                     debug_assert_eq!(coords.shape()[1], ndim);
-                    (block_op)(left.into(), right.into()).map(|values| (coords, values))
+                    (block_op)(ArrayAccess::from(left), ArrayAccess::from(right))
+                        .map(|values| (coords, values))
                 })
             })
             .try_filter_map(
@@ -1122,7 +1126,7 @@ impl<L: fmt::Debug, R: fmt::Debug, T: CType + DType> fmt::Debug for SparseCombin
 pub struct SparseCombineLeft<L, R, T: CType> {
     left: L,
     right: R,
-    block_op: fn(Array<T>, Array<T>) -> TCResult<Array<T>>,
+    block_op: fn(ArrayAccess<T>, ArrayAccess<T>) -> TCResult<ArrayAccess<T>>,
     value_op: fn(T, T) -> T,
 }
 
@@ -1135,7 +1139,7 @@ where
     pub fn new(
         left: L,
         right: R,
-        block_op: fn(Array<T>, Array<T>) -> TCResult<Array<T>>,
+        block_op: fn(ArrayAccess<T>, ArrayAccess<T>) -> TCResult<ArrayAccess<T>>,
         value_op: fn(T, T) -> T,
     ) -> TCResult<Self> {
         if left.shape() == right.shape() {
@@ -1177,10 +1181,11 @@ where
     L: SparseInstance<DType = T>,
     R: SparseInstance<DType = T>,
     T: CType + DType + PartialEq + fmt::Debug,
+    Accessor<T>: From<L::ValueBlock> + From<R::ValueBlock>,
 {
-    type CoordBlock = Array<u64>;
-    type ValueBlock = Array<T>;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type CoordBlock = Accessor<u64>;
+    type ValueBlock = Accessor<T>;
+    type Blocks = Blocks<T, Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(
@@ -1202,7 +1207,8 @@ where
                     debug_assert_eq!(coords.ndim(), 2);
                     debug_assert_eq!(coords.shape()[1], ndim);
                     trace!("combine values {left:?} and {right:?} at {coords:?}");
-                    (block_op)(left.into(), right.into()).map(|values| (coords, values))
+                    (block_op)(ArrayAccess::from(left), ArrayAccess::from(right))
+                        .map(|values| (coords, values))
                 })
             })
             .try_filter_map(
@@ -1284,7 +1290,7 @@ impl<L: fmt::Debug, R: fmt::Debug, T: CType + DType> fmt::Debug for SparseCombin
 pub struct SparseCombineConst<S, T: CType> {
     left: S,
     right: Number,
-    block_op: fn(Array<T>, Number) -> TCResult<Array<T>>,
+    block_op: fn(ArrayAccess<T>, Number) -> TCResult<ArrayAccess<T>>,
     value_op: fn(T, Number) -> T,
 }
 
@@ -1292,7 +1298,7 @@ impl<S, T: CType> SparseCombineConst<S, T> {
     pub fn new(
         left: S,
         right: Number,
-        block_op: fn(Array<T>, Number) -> TCResult<Array<T>>,
+        block_op: fn(ArrayAccess<T>, Number) -> TCResult<ArrayAccess<T>>,
         value_op: fn(T, Number) -> T,
     ) -> Self {
         Self {
@@ -1323,10 +1329,12 @@ impl<S, T> SparseInstance for SparseCombineConst<S, T>
 where
     S: SparseInstance<DType = T>,
     T: CType + DType,
+    Accessor<T>: From<S::ValueBlock>,
+    Accessor<u64>: From<S::CoordBlock>,
 {
-    type CoordBlock = Array<u64>;
-    type ValueBlock = Array<T>;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type CoordBlock = Accessor<u64>;
+    type ValueBlock = Accessor<T>;
+    type Blocks = Blocks<T, Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(
@@ -1342,11 +1350,11 @@ where
         let blocks = left_blocks
             .map(move |result| {
                 let (coords, values) = result?;
-                let values = (self.block_op)(values.into(), self.right)?;
+                let values = (self.block_op)(ArrayAccess::from(values), self.right)?;
                 Ok((coords, values))
             })
             .try_filter_map(move |(coords, values)| async move {
-                filter_zeros(coords.into(), values, ndim)
+                filter_zeros(ArrayAccess::from(coords), values, ndim)
             });
 
         Ok(Box::pin(blocks))
@@ -1414,7 +1422,7 @@ where
 pub struct SparseCompare<Txn, FE, T: CType> {
     left: SparseAccessCast<Txn, FE>,
     right: SparseAccessCast<Txn, FE>,
-    block_op: fn(Block, Block) -> TCResult<Array<T>>,
+    block_op: fn(Block, Block) -> TCResult<ArrayAccess<T>>,
     value_op: fn(Number, Number) -> T,
 }
 
@@ -1433,7 +1441,7 @@ impl<Txn: ThreadSafe, FE: ThreadSafe, T: CType> SparseCompare<Txn, FE, T> {
     pub fn new<L, R>(
         left: L,
         right: R,
-        block_op: fn(Block, Block) -> TCResult<Array<T>>,
+        block_op: fn(Block, Block) -> TCResult<ArrayAccess<T>>,
         value_op: fn(Number, Number) -> T,
     ) -> TCResult<Self>
     where
@@ -1483,9 +1491,9 @@ where
     FE: DenseCacheFile + AsType<Node>,
     T: CType + DType,
 {
-    type CoordBlock = Array<u64>;
-    type ValueBlock = Array<T>;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type CoordBlock = Accessor<u64>;
+    type ValueBlock = Accessor<T>;
+    type Blocks = Blocks<T, Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(
@@ -1575,7 +1583,7 @@ where
 pub struct SparseCompareLeft<Txn, FE, T: CType> {
     left: SparseAccessCast<Txn, FE>,
     right: SparseAccessCast<Txn, FE>,
-    block_op: fn(Block, Block) -> TCResult<Array<T>>,
+    block_op: fn(Block, Block) -> TCResult<ArrayAccess<T>>,
     value_op: fn(Number, Number) -> T,
 }
 
@@ -1594,7 +1602,7 @@ impl<Txn: ThreadSafe, FE: ThreadSafe, T: CType> SparseCompareLeft<Txn, FE, T> {
     pub fn new<L, R>(
         left: L,
         right: R,
-        block_op: fn(Block, Block) -> TCResult<Array<T>>,
+        block_op: fn(Block, Block) -> TCResult<ArrayAccess<T>>,
         value_op: fn(Number, Number) -> T,
     ) -> TCResult<Self>
     where
@@ -1644,9 +1652,9 @@ where
     FE: DenseCacheFile + AsType<Node>,
     T: CType + DType,
 {
-    type CoordBlock = Array<u64>;
-    type ValueBlock = Array<T>;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type CoordBlock = Accessor<u64>;
+    type ValueBlock = Accessor<T>;
+    type Blocks = Blocks<T, Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(
@@ -1736,7 +1744,7 @@ where
 pub struct SparseCompareConst<Txn, FE, T: CType> {
     left: SparseAccessCast<Txn, FE>,
     right: Number,
-    block_op: fn(Block, Number) -> TCResult<Array<T>>,
+    block_op: fn(Block, Number) -> TCResult<ArrayAccess<T>>,
     value_op: fn(Number, Number) -> T,
 }
 
@@ -1755,7 +1763,7 @@ impl<Txn, FE, T: CType> SparseCompareConst<Txn, FE, T> {
     pub fn new<L>(
         left: L,
         right: Number,
-        block_op: fn(Block, Number) -> TCResult<Array<T>>,
+        block_op: fn(Block, Number) -> TCResult<ArrayAccess<T>>,
         value_op: fn(Number, Number) -> T,
     ) -> Self
     where
@@ -1793,9 +1801,9 @@ where
     T: CType + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
-    type CoordBlock = Array<u64>;
-    type ValueBlock = Array<T>;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type CoordBlock = Accessor<u64>;
+    type ValueBlock = Accessor<T>;
+    type Blocks = Blocks<T, Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(
@@ -1935,9 +1943,9 @@ where
     OrElse: SparseInstance<DType = T>,
     T: CType + DType + fmt::Debug,
 {
-    type CoordBlock = Array<u64>;
-    type ValueBlock = ArrayBuf<Buffer<T>>;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type CoordBlock = Accessor<u64>;
+    type ValueBlock = AccessBuf<Buffer<T>>;
+    type Blocks = Blocks<T, Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(
@@ -1946,11 +1954,11 @@ where
         range: Range,
         order: Axes,
     ) -> Result<Self::Blocks, TCError> {
-        let shape = StackVec::copy_from(self.shape());
+        let shape = StackVec::from_slice(self.shape());
         let ndim = shape.len();
 
-        let strides = strides_for(&shape, ndim);
-        let strides = ArrayBuf::new(strides, shape![strides.len()])?;
+        let strides = strides_for(&shape, ndim).collect::<StackVec<u64>>();
+        let strides = ArrayBuf::new(strides, shape![ndim])?;
 
         let (cond, then, or_else) = try_join!(
             self.cond.blocks(txn_id, range.clone(), order.clone()),
@@ -1968,7 +1976,10 @@ where
         let dims = ArrayBuf::new(shape, shape![ndim])?;
         let blocks = offsets.map(move |result| {
             let (offsets, values) = result?;
-            let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
+
+            let coords =
+                offsets_to_coords(ArrayAccess::from(offsets), strides.clone(), dims.clone())?;
+
             Ok((coords, values))
         });
 
@@ -2116,9 +2127,9 @@ where
     S: SparseInstance<DType = T>,
     Number: CastInto<T>,
 {
-    type CoordBlock = Array<u64>;
-    type ValueBlock = ArrayBuf<Buffer<T>>;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type CoordBlock = Accessor<u64>;
+    type ValueBlock = AccessBuf<Buffer<T>>;
+    type Blocks = Blocks<T, Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(
@@ -2138,7 +2149,8 @@ where
         let shape = StackVec::from_slice(self.source.shape());
         let ndim = shape.len();
 
-        let strides = ArrayBuf::new(strides_for(&shape, ndim), shape![strides.len()])?;
+        let strides = strides_for(&shape, ndim).collect::<StackVec<u64>>();
+        let strides = ArrayBuf::new(strides, shape![ndim])?;
 
         #[cfg(debug_assertions)]
         let (source_blocks, filled_blocks, zero_blocks) = {
@@ -2182,7 +2194,8 @@ where
             let (offsets, values) = result?;
             log::trace!("block has {} values", values.size());
 
-            let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
+            let coords =
+                offsets_to_coords(ArrayAccess::from(offsets), strides.clone(), dims.clone())?;
 
             Ok((coords, values))
         });
@@ -2211,7 +2224,7 @@ where
         {
             let zeros = self.zeros.table().read().await;
             if zeros.contains(&key).await? {
-                return Ok(Self::DType::zero());
+                return Ok(Self::DType::ZERO);
             }
         }
 
@@ -2368,11 +2381,7 @@ where
     }
 
     async fn write_value(&mut self, txn_id: TxnId, coord: Coord, value: T) -> Result<(), TCError> {
-        let inverse = if value == T::zero() {
-            T::one()
-        } else {
-            T::zero()
-        };
+        let inverse = if value == T::ZERO { T::ONE } else { T::ZERO };
 
         try_join!(
             self.filled.write_value(txn_id, coord.clone(), value),
@@ -2430,9 +2439,9 @@ where
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type CoordBlock = ArrayBuf<Buffer<u64>>;
-    type ValueBlock = ArrayBuf<Buffer<T>>;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type CoordBlock = AccessBuf<Vec<u64>>;
+    type ValueBlock = AccessBuf<Vec<T>>;
+    type Blocks = Blocks<T, Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(
@@ -2459,46 +2468,42 @@ where
         let coords = range.affected().map(|coord| coord.into_iter()).flatten();
         let coords = futures::stream::iter(coords).chunks(coord_block_size);
 
-        let source_blocks: Blocks<_, Array<Self::DType>> = if is_slice {
-            let source_blocks = DenseSlice::new(source, range)?.read_blocks(txn_id).await?;
-
-            let blocks = coords
-                .zip(source_blocks)
-                .map(|(coords, values)| values.map(|values| (coords, values.into())));
-
-            Box::pin(blocks)
-        } else {
-            let source_blocks = source.read_blocks(txn_id).await?;
-            let blocks = coords
-                .zip(source_blocks)
-                .map(|(coords, values)| values.map(|values| (coords, values.into())));
-
-            Box::pin(blocks)
-        };
-
-        let zero = Self::DType::zero();
-        let blocks = source_blocks.try_filter_map(move |(coords, values)| async move {
-            let queue = autoqueue(&values)?;
-            let values = values.read(&queue)?.to_slice()?;
-
-            let (coords, values) = coords
-                .into_par_iter()
-                .chunks(ndim)
-                .zip(values.as_ref().into_par_iter().copied())
-                .filter(|(_coord, value)| value != &zero)
-                .map(|(coord, value)| (coord, value))
-                .unzip::<_, _, Vec<Vec<u64>>, Vec<Self::DType>>();
-
-            if values.is_empty() {
-                Ok(None)
+        let source_blocks: Pin<Box<dyn Stream<Item = TCResult<ArrayAccess<T>>> + Send>> =
+            if is_slice {
+                let source_blocks = DenseSlice::new(source, range)?.read_blocks(txn_id).await?;
+                let blocks = source_blocks.map_ok(ArrayAccess::from);
+                Box::pin(blocks)
             } else {
-                let num_values = values.len();
-                let coords = coords.into_iter().flatten().collect();
-                let coords = ArrayBuf::new(coords, shape![num_values, ndim])?;
-                let values = ArrayBuf::new(values, shape![num_values])?;
-                Ok(Some((coords, values)))
-            }
-        });
+                let source_blocks = source.read_blocks(txn_id).await?;
+                let blocks = source_blocks.map_ok(ArrayAccess::from);
+                Box::pin(blocks)
+            };
+
+        let zero = Self::DType::ZERO;
+        let blocks = coords
+            .zip(source_blocks)
+            .map(|(coords, values)| values.map(|values| (coords, values)))
+            .try_filter_map(move |(coords, values)| async move {
+                let values = values.read()?.to_slice()?;
+
+                let (coords, values) = coords
+                    .into_par_iter()
+                    .chunks(ndim)
+                    .zip(values.as_ref().into_par_iter().copied())
+                    .filter(|(_coord, value)| value != &zero)
+                    .map(|(coord, value)| (coord, value))
+                    .unzip::<_, _, Vec<Vec<u64>>, Vec<Self::DType>>();
+
+                if values.is_empty() {
+                    Ok(None)
+                } else {
+                    let num_values = values.len();
+                    let coords = coords.into_iter().flatten().collect();
+                    let coords = ArrayBuf::new(coords, shape![num_values, ndim])?;
+                    let values = ArrayBuf::new(values, shape![num_values])?;
+                    Ok(Some((coords, values)))
+                }
+            });
 
         Ok(Box::pin(blocks))
     }
@@ -2577,8 +2582,8 @@ impl<S: TensorInstance> TensorInstance for SparseExpand<S> {
 
 #[async_trait]
 impl<S: SparseInstance> SparseInstance for SparseExpand<S> {
-    type CoordBlock = ArrayBuf<Buffer<u64>>;
-    type ValueBlock = ArrayBuf<Buffer<Self::DType>>;
+    type CoordBlock = AccessBuf<Buffer<u64>>;
+    type ValueBlock = AccessBuf<Buffer<Self::DType>>;
     type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
     type DType = S::DType;
 
@@ -2758,8 +2763,8 @@ where
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type CoordBlock = ArrayBuf<Buffer<u64>>;
-    type ValueBlock = ArrayBuf<Buffer<T>>;
+    type CoordBlock = AccessBuf<Buffer<u64>>;
+    type ValueBlock = AccessBuf<Buffer<T>>;
     type Blocks = stream::BlockCoords<Elements<Self::DType>, Self::DType>;
     type DType = T;
 
@@ -2804,7 +2809,7 @@ where
             .filled_at(txn_id, source_range, source_order, source_axes)
             .await?;
 
-        let zero = T::zero();
+        let zero = T::ZERO;
         let elements = filled_at
             .map(move |result| {
                 let coord = result?;
@@ -2891,9 +2896,9 @@ impl<S: TensorInstance> TensorInstance for SparseReshape<S> {
 
 #[async_trait]
 impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
-    type CoordBlock = Array<u64>;
+    type CoordBlock = Accessor<u64>;
     type ValueBlock = S::ValueBlock;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type Blocks = Blocks<S::DType, Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
 
     async fn blocks(
@@ -2932,13 +2937,13 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
             .blocks(txn_id, source_range, source_order)
             .await?;
 
-        let source_strides = Strides::from_slice(self.transform.source_strides());
+        let source_strides = StackVec::from_slice(self.transform.source_strides());
         let source_strides = ArrayBuf::new(source_strides, shape![source_ndim])?;
 
         let ndim = self.transform.shape().len();
-        let strides = Strides::from_slice(self.transform.strides());
+        let strides = StackVec::from_slice(self.transform.strides());
         let strides = ArrayBuf::new(strides, shape![ndim])?;
-        let dims = Shape::from_slice(self.transform.shape());
+        let dims = StackVec::from_slice(self.transform.shape());
         let dims = ArrayBuf::new(dims, shape![ndim])?;
 
         let blocks = source_blocks.map(move |result| {
@@ -2949,12 +2954,13 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
 
             let source_strides = source_strides
                 .clone()
-                .broadcast(vec![values.size(), source_ndim])?;
+                .broadcast(shape![values.size(), source_ndim])?;
 
             let offsets = source_coords.mul(source_strides)?;
-            let offsets = offsets.sum(vec![1], false)?;
+            let offsets = NDArrayReduce::sum(offsets, 1, false)?;
 
-            let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
+            let coords =
+                offsets_to_coords(ArrayAccess::from(offsets), strides.clone(), dims.clone())?;
 
             Result::<_, TCError>::Ok((coords, values))
         });
@@ -3072,9 +3078,9 @@ impl<S> SparseInstance for SparseSlice<S>
 where
     S: SparseInstance,
 {
-    type CoordBlock = ArrayBuf<Buffer<u64>>;
+    type CoordBlock = AccessBuf<Vec<u64>>;
     type ValueBlock = S::ValueBlock;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type Blocks = Blocks<S::DType, Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
 
     async fn blocks(
@@ -3096,13 +3102,13 @@ where
         let ndim = transform.shape().len();
         let source_ndim = transform.source_shape().len();
 
+        // TODO: it should be possible to parallelize this without reading into a Vec
         let blocks = source_blocks.map(move |result| {
             let (source_coords, values) = result?;
 
             debug_assert_eq!(source_coords.shape(), [values.size(), source_ndim]);
 
-            let queue = autoqueue(&source_coords)?;
-            let source_coords = source_coords.read(&queue)?;
+            let source_coords = source_coords.read()?;
 
             let coords = source_coords
                 .to_slice()?
@@ -3303,11 +3309,10 @@ where
 impl<S> SparseInstance for SparseTranspose<S>
 where
     S: SparseInstance,
-    <S::CoordBlock as NDArrayTransform>::Transpose: NDArrayRead<DType = u64> + Into<Array<u64>>,
 {
-    type CoordBlock = ArrayBuf<Buffer<u64>>;
+    type CoordBlock = AccessBuf<Vec<u64>>;
     type ValueBlock = S::ValueBlock;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type Blocks = Blocks<S::DType, Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
 
     async fn blocks(
@@ -3340,11 +3345,11 @@ where
             .blocks(txn_id, source_range, source_order)
             .await?;
 
+        // TODO: it should be possible to parallelize this without reading into a Vec
         let blocks = source_blocks.map(move |result| {
             let (source_coords, values) = result?;
 
-            let queue = autoqueue(&source_coords)?;
-            let source_coords = source_coords.read(&queue)?.to_slice()?;
+            let source_coords = source_coords.read()?.to_slice()?;
 
             let ndim = self.transform.shape().len();
             let coords = source_coords
@@ -3421,14 +3426,14 @@ impl<S: fmt::Debug> fmt::Debug for SparseTranspose<S> {
 #[derive(Clone)]
 pub struct SparseUnary<S, T: CType> {
     source: S,
-    block_op: fn(Array<T>) -> TCResult<Array<T>>,
+    block_op: fn(ArrayAccess<T>) -> TCResult<ArrayAccess<T>>,
     value_op: fn(T) -> T,
 }
 
 impl<S, T: CType> SparseUnary<S, T> {
     pub fn new(
         source: S,
-        block_op: fn(Array<T>) -> TCResult<Array<T>>,
+        block_op: fn(ArrayAccess<T>) -> TCResult<ArrayAccess<T>>,
         value_op: fn(T) -> T,
     ) -> Self {
         Self {
@@ -3450,10 +3455,13 @@ impl<S: TensorInstance, T: CType + DType> TensorInstance for SparseUnary<S, T> {
 }
 
 #[async_trait]
-impl<S: SparseInstance<DType = T>, T: CType + DType> SparseInstance for SparseUnary<S, T> {
+impl<S: SparseInstance<DType = T>, T: CType + DType> SparseInstance for SparseUnary<S, T>
+where
+    Accessor<T>: From<S::ValueBlock>,
+{
     type CoordBlock = S::CoordBlock;
-    type ValueBlock = Array<T>;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type ValueBlock = Accessor<T>;
+    type Blocks = Blocks<S::DType, Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(
@@ -3467,7 +3475,7 @@ impl<S: SparseInstance<DType = T>, T: CType + DType> SparseInstance for SparseUn
         let source_blocks = self.source.blocks(txn_id, range, order).await?;
         let blocks = source_blocks.map(move |result| {
             let (coords, values) = result?;
-            (self.block_op)(values.into()).map(|values| (coords, values))
+            (self.block_op)(ArrayAccess::from(values)).map(|values| (coords, values))
         });
 
         Ok(Box::pin(blocks))
@@ -3525,7 +3533,7 @@ impl<S: fmt::Debug, T: CType + DType> fmt::Debug for SparseUnary<S, T> {
 
 pub struct SparseUnaryCast<Txn, FE, T: CType> {
     source: SparseAccessCast<Txn, FE>,
-    block_op: fn(Block) -> TCResult<Array<T>>,
+    block_op: fn(Block) -> TCResult<ArrayAccess<T>>,
     value_op: fn(Number) -> T,
 }
 
@@ -3542,7 +3550,7 @@ impl<Txn, FE, T: CType> Clone for SparseUnaryCast<Txn, FE, T> {
 impl<Txn, FE, T: CType> SparseUnaryCast<Txn, FE, T> {
     pub fn new<S: Into<SparseAccessCast<Txn, FE>>>(
         source: S,
-        block_op: fn(Block) -> TCResult<Array<T>>,
+        block_op: fn(Block) -> TCResult<ArrayAccess<T>>,
         value_op: fn(Number) -> T,
     ) -> Self {
         Self {
@@ -3857,9 +3865,9 @@ where
     FE: DenseCacheFile + AsType<Node>,
     T: CType + DType,
 {
-    type CoordBlock = Array<u64>;
-    type ValueBlock = Array<T>;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type CoordBlock = Accessor<u64>;
+    type ValueBlock = Accessor<T>;
+    type Blocks = Blocks<T, Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(
@@ -4088,11 +4096,8 @@ fn block_elements<T: CType, C: NDArrayRead<DType = u64>, V: NDArrayRead<DType = 
         .map(move |result| {
             let (coords, values) = result?;
 
-            let queue = autoqueue(&coords)?;
-            let coords = coords.read(&queue)?.to_slice()?;
-
-            let queue = autoqueue(&values)?;
-            let values = values.read(&queue)?.to_slice()?;
+            let coords = coords.read()?.to_slice()?;
+            let values = values.read()?.to_slice()?;
 
             let tuples = coords
                 .as_ref()
@@ -4111,25 +4116,24 @@ fn block_elements<T: CType, C: NDArrayRead<DType = u64>, V: NDArrayRead<DType = 
 
 #[inline]
 fn offsets<C, V, T>(
-    strides: ArrayBuf<Buffer<u64>>,
-    blocks: impl Stream<Item = Result<(C, V), TCError>> + Send + 'static,
+    strides: ArrayBuf<u64, StackVec<u64>>,
+    blocks: impl Stream<Item = Result<(Array<u64, C>, Array<T, V>), TCError>> + Send + 'static,
 ) -> impl Stream<Item = Result<(u64, T), TCError>> + Send
 where
-    C: NDArrayRead<DType = u64> + NDArrayMath + 'static,
-    V: NDArrayRead<DType = T>,
+    C: Access<u64>,
+    V: Access<T>,
     T: CType,
 {
     let offsets = blocks
         .map(move |result| {
             let (coords, values) = result?;
 
-            let queue = autoqueue(&coords)?;
-            let strides = strides.clone().broadcast(coords.shape().to_vec())?;
-            let offsets = coords.mul(strides)?.sum(vec![1], false)?;
-            let offsets = offsets.read(&queue)?.to_slice()?.into_vec();
-
-            let queue = autoqueue(&values)?;
-            let values = values.read(&queue)?.to_slice()?.into_vec();
+            let shape = ha_ndarray::Shape::from_slice(coords.shape());
+            let strides = NDArrayTransform::broadcast(strides.as_ref::<[u64]>(), shape)?;
+            let offsets = NDArrayMath::mul(coords, strides)?;
+            let offsets = NDArrayReduce::sum(offsets, 1, false)?;
+            let offsets = offsets.read()?.to_slice()?.into_vec();
+            let values = values.read()?.to_slice()?.into_vec();
 
             debug_assert_eq!(offsets.len(), values.len());
 
@@ -4147,26 +4151,25 @@ where
 
 #[inline]
 fn filter_zeros<T: CType>(
-    coords: Array<u64>,
-    values: Array<T>,
+    coords: ArrayAccess<u64>,
+    values: ArrayAccess<T>,
     ndim: usize,
-) -> TCResult<Option<(Array<u64>, Array<T>)>> {
-    let zero = T::zero();
+) -> TCResult<Option<(ArrayAccess<u64>, ArrayAccess<T>)>> {
+    let zero = T::ZERO;
 
-    let values = ArrayBuf::copy(&values)?;
+    let values = ArrayBuf::<T, Buffer<T>>::copy(&values)?;
 
-    if values.all()? {
-        Ok(Some((coords, values.into())))
+    if NDArrayReduceBoolean::all(values.as_ref())? {
+        Ok(Some((coords, ArrayAccess::from(values))))
     } else {
-        let queue = autoqueue(&coords)?;
-        let coord_slice = coords.read(&queue)?.to_slice()?;
-        let value_slice = values.into_inner();
+        let coord_slice = coords.read()?.to_slice()?;
+        let value_slice = values.into_access().into_inner();
+        let value_slice = value_slice.read().to_slice()?;
         debug_assert_eq!(coord_slice.len() % ndim, 0);
 
         let (filtered_coords, filtered_values): (Vec<&[u64]>, Vec<T>) = coord_slice
-            .as_ref()
             .par_chunks(ndim)
-            .zip(value_slice.into_par_iter())
+            .zip(value_slice.into_par_iter().copied())
             .filter_map(|(coord, value)| {
                 if value == zero {
                     None
@@ -4180,7 +4183,7 @@ fn filter_zeros<T: CType>(
             .into_par_iter()
             .map(|coord| coord.into_par_iter().copied())
             .flatten()
-            .collect();
+            .collect::<Vec<u64>>();
 
         if filtered_values.is_empty() {
             Ok(None)
@@ -4189,7 +4192,7 @@ fn filter_zeros<T: CType>(
             let coords = ArrayBuf::new(filtered_coords, shape![ndim, num_values])?;
             let values = ArrayBuf::new(filtered_values, shape![num_values])?;
 
-            Ok(Some((coords.into(), values.into())))
+            Ok(Some((ArrayAccess::from(coords), ArrayAccess::from(values))))
         }
     }
 }
@@ -4202,7 +4205,12 @@ async fn merge_blocks_inner<L, R, T>(
     range: Range,
     order: Axes,
 ) -> TCResult<
-    impl Stream<Item = TCResult<(Array<u64>, (ArrayBuf<Buffer<T>>, ArrayBuf<Buffer<T>>))>> + Send,
+    impl Stream<
+            Item = TCResult<(
+                ArrayAccess<u64>,
+                (ArrayBuf<T, Buffer<T>>, ArrayBuf<T, Buffer<T>>),
+            )>,
+        > + Send,
 >
 where
     L: SparseInstance<DType = T>,
@@ -4212,9 +4220,9 @@ where
     debug_assert_eq!(&shape, left.shape());
     debug_assert_eq!(&shape, right.shape());
 
-    let strides = strides_for(&shape, shape.len());
-    let strides = ArrayBuf::new(strides, shape![strides.len()])?;
-    let dims = ArrayBuf::new(shape, shape![shape.len()])?;
+    let strides = strides_for(&shape, shape.len()).collect::<StackVec<u64>>();
+    let strides = ArrayBuf::new(strides, shape![shape.len()])?;
+    let dims = ArrayBuf::new(StackVec::from(shape.as_slice()), shape![shape.len()])?;
 
     let (left_blocks, right_blocks) = try_join!(
         left.blocks(txn_id, range.clone(), order.clone()),
@@ -4228,7 +4236,9 @@ where
     let blocks = stream::BlockOffsetsDual::new(elements);
     let coord_blocks = blocks.map(move |result| {
         let (offsets, values) = result?;
-        let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
+
+        let coords = offsets_to_coords(ArrayAccess::from(offsets), strides.clone(), dims.clone())?;
+
         Ok((coords, values))
     });
 
@@ -4243,7 +4253,12 @@ pub(super) async fn merge_blocks_outer<L, R, T>(
     range: Range,
     order: Axes,
 ) -> TCResult<
-    impl Stream<Item = TCResult<(Array<u64>, (ArrayBuf<Buffer<T>>, ArrayBuf<Buffer<T>>))>> + Send,
+    impl Stream<
+            Item = TCResult<(
+                ArrayAccess<u64>,
+                (ArrayBuf<T, Buffer<T>>, ArrayBuf<T, Buffer<T>>),
+            )>,
+        > + Send,
 >
 where
     L: SparseInstance<DType = T>,
@@ -4254,9 +4269,9 @@ where
     debug_assert_eq!(&shape, right.shape());
 
     let ndim = shape.len();
-    let strides = strides_for(&shape, ndim).to_vec();
+    let strides = strides_for(&shape, ndim).collect::<StackVec<u64>>();
     let strides = ArrayBuf::new(strides, shape![ndim])?;
-    let dims = ArrayBuf::new(shape, shape![ndim])?;
+    let dims = ArrayBuf::new(StackVec::from_slice(&shape), shape![ndim])?;
 
     let (left_blocks, right_blocks) = try_join!(
         left.blocks(txn_id, range.clone(), order.clone()),
@@ -4266,11 +4281,13 @@ where
     let left = offsets(strides.clone(), left_blocks);
     let right = offsets(strides.clone(), right_blocks);
 
-    let elements = stream::OuterJoin::new(left, right, T::zero());
+    let elements = stream::OuterJoin::new(left, right, T::ZERO);
     let blocks = stream::BlockOffsetsDual::new(elements);
     let coord_blocks = blocks.map(move |result| {
         let (offsets, values) = result?;
-        let coords = offsets_to_coords(offsets.into(), strides.clone(), dims.clone())?;
+
+        let coords = offsets_to_coords(ArrayAccess::from(offsets), strides.clone(), dims.clone())?;
+
         Ok((coords, values))
     });
 
@@ -4279,18 +4296,18 @@ where
 
 #[inline]
 fn offsets_to_coords(
-    offsets: Array<u64>,
-    strides: ArrayBuf<Buffer<u64>>,
-    dims: ArrayBuf<Buffer<u64>>,
-) -> TCResult<Array<u64>> {
+    offsets: ArrayAccess<u64>,
+    strides: ArrayBuf<u64, StackVec<u64>>,
+    dims: ArrayBuf<u64, StackVec<u64>>,
+) -> TCResult<ArrayAccess<u64>> {
     let ndim = dims.size();
     let num_offsets = offsets.size();
-    let block_shape = vec![num_offsets, ndim];
+    let block_shape = shape![num_offsets, ndim];
 
     offsets
-        .expand_dims(vec![1])?
-        .broadcast(block_shape.to_vec())?
-        .checked_div(strides.broadcast(block_shape.to_vec())?)?
+        .unsqueeze(axes![1])?
+        .broadcast(block_shape.clone())?
+        .div(strides.broadcast(block_shape.clone())?)?
         .rem(dims.broadcast(block_shape)?)
         .map(Array::from)
         .map_err(TCError::from)

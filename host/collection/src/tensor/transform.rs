@@ -350,8 +350,8 @@ impl Reshape {
             ));
         }
 
-        let source_strides = strides_for(&source_shape, source_shape.len());
-        let strides = strides_for(&shape, shape.len());
+        let source_strides = strides_for(&source_shape, source_shape.len()).collect();
+        let strides = strides_for(&shape, shape.len()).collect();
 
         Ok(Self {
             source_shape,

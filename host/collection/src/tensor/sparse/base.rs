@@ -8,7 +8,7 @@ use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::DirLock;
 use futures::{join, try_join, TryFutureExt};
-use ha_ndarray::{Array, Buffer, CType};
+use ha_ndarray::{Accessor, Buffer, CType};
 use log::{debug, trace};
 use safecast::{AsType, CastInto};
 use smallvec::SmallVec;
@@ -372,9 +372,9 @@ where
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type CoordBlock = Array<u64>;
-    type ValueBlock = Array<T>;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type CoordBlock = Accessor<u64>;
+    type ValueBlock = Accessor<T>;
+    type Blocks = Blocks<T, Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(

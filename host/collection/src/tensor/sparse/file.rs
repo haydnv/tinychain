@@ -8,7 +8,7 @@ use destream::de;
 use freqfs::DirLock;
 use futures::future::TryFutureExt;
 use futures::stream::TryStreamExt;
-use ha_ndarray::{ArrayBuf, CType};
+use ha_ndarray::{AccessBuf, Buffer, CType};
 use log::{debug, trace};
 use safecast::{AsType, CastInto};
 use smallvec::SmallVec;
@@ -137,8 +137,8 @@ where
     T: CType + DType,
     Number: CastInto<T>,
 {
-    type CoordBlock = ArrayBuf<Buffer<u64>>;
-    type ValueBlock = ArrayBuf<Buffer<Self::DType>>;
+    type CoordBlock = AccessBuf<Buffer<u64>>;
+    type ValueBlock = AccessBuf<Buffer<Self::DType>>;
     type Blocks = BlockCoords<Elements<T>, T>;
     type DType = T;
 
@@ -190,7 +190,7 @@ where
             let value = row.pop().expect("value");
             Ok(value.cast_into())
         } else {
-            Ok(T::zero())
+            Ok(T::ZERO)
         }
     }
 }
@@ -305,7 +305,7 @@ where
     async fn write_value(&mut self, _txn_id: TxnId, coord: Coord, value: T) -> Result<(), TCError> {
         self.shape.validate_coord(&coord)?;
 
-        if value == T::zero() {
+        if value == T::ZERO {
             let coord = coord
                 .into_iter()
                 .map(|i| Number::UInt(i.into()))
@@ -357,7 +357,7 @@ where
 
             let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
 
-            if value != T::zero() {
+            if value != T::ZERO {
                 guard
                     .upsert(coord, vec![value.into()])
                     .map_err(de::Error::custom)

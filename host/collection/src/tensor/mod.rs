@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use collate::Collator;
 use destream::{de, en};
 use futures::TryFutureExt;
-use ha_ndarray::{NDArray, Queue};
 use log::debug;
 use safecast::{AsType, CastFrom, CastInto, TryCastFrom, TryCastInto};
 use smallvec::SmallVec;
@@ -2121,11 +2120,6 @@ pub fn broadcast_shape(left: &[u64], right: &[u64]) -> TCResult<Shape> {
 }
 
 #[inline]
-fn autoqueue<A: NDArray>(array: &A) -> Result<Queue, ha_ndarray::Error> {
-    Queue::new(array.context().clone(), array.size())
-}
-
-#[inline]
 fn coord_of<T: Copy + Div<Output = T> + Rem<Output = T> + PartialEq>(
     offset: T,
     strides: &[T],
@@ -2161,7 +2155,7 @@ fn offset_of(coord: Coord, shape: &[u64]) -> u64 {
 }
 
 #[inline]
-fn strides_for(shape: &[u64], ndim: usize) -> Strides {
+fn strides_for(shape: &[u64], ndim: usize) -> impl Iterator<Item = u64> + '_ {
     debug_assert!(ndim >= shape.len());
 
     let zeros = std::iter::repeat(0).take(ndim - shape.len());
@@ -2174,5 +2168,5 @@ fn strides_for(shape: &[u64], ndim: usize) -> Strides {
         }
     });
 
-    zeros.chain(strides).collect()
+    zeros.chain(strides)
 }

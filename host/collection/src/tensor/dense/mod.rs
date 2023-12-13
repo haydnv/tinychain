@@ -18,7 +18,7 @@ use safecast::{AsType, CastFrom, CastInto};
 use tc_error::*;
 use tc_transact::{fs, Transact, Transaction, TxnId};
 use tc_value::{
-    Complex, ComplexType, DType, Float, FloatType, Int, IntType, Number, NumberCollator,
+    Complex, ComplexType, DType, Float as FP, FloatType, Int, IntType, Number, NumberCollator,
     NumberInstance, NumberType, UInt, UIntType, ValueType,
 };
 use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
@@ -44,7 +44,7 @@ mod stream;
 mod view;
 
 type BlockShape = ha_ndarray::Shape;
-type BlockStream<Block> = Pin<Box<dyn Stream<Item = TCResult<Block>> + Send>>;
+type BlockStream<T, Block> = Pin<Box<dyn Stream<Item = TCResult<Array<T, Block>>> + Send>>;
 
 pub type Buffer<T> = ha_ndarray::Buffer<T>;
 
@@ -78,14 +78,18 @@ impl<FE> DenseCacheFile for FE where
 
 #[async_trait]
 pub trait DenseInstance: TensorInstance + fmt::Debug {
-    type Block: NDArrayRead<DType = Self::DType> + NDArrayTransform + Into<Array<Self::DType>>;
+    type Block: Access<Self::DType>;
     type DType: CType + DType;
 
     fn block_size(&self) -> usize;
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block>;
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>>;
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>>;
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>>;
 
     async fn read_value(&self, txn_id: TxnId, coord: Coord) -> TCResult<Self::DType>;
 }
@@ -99,11 +103,15 @@ impl<T: DenseInstance> DenseInstance for Box<T> {
         (&**self).block_size()
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::Block>> {
         (**self).read_block(txn_id, block_id).await
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         (*self).read_blocks(txn_id).await
     }
 
@@ -114,11 +122,18 @@ impl<T: DenseInstance> DenseInstance for Box<T> {
 
 #[async_trait]
 pub trait DenseWrite: DenseInstance {
-    type BlockWrite: NDArrayWrite<DType = Self::DType>;
+    type BlockWrite: AccessMut<Self::DType>;
 
-    async fn write_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite>;
+    async fn write_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<Self::DType, Self::BlockWrite>>;
 
-    async fn write_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>>;
+    async fn write_blocks(
+        self,
+        txn_id: TxnId,
+    ) -> TCResult<BlockStream<Self::DType, Self::BlockWrite>>;
 }
 
 #[async_trait]
@@ -426,9 +441,6 @@ where
     Txn: ThreadSafe,
     FE: ThreadSafe,
     A: DenseInstance + Into<DenseAccess<Txn, FE, A::DType>> + Clone,
-    A::Block: NDArrayTransform,
-    <A::Block as NDArrayTransform>::Slice:
-        NDArrayRead<DType = A::DType> + NDArrayTransform + Into<Array<A::DType>>,
 {
     type Dense = Self;
     type Sparse = SparseTensor<Txn, FE, SparseDense<Txn, FE, A::DType>>;
@@ -467,23 +479,23 @@ where
     type LeftCombine = DenseTensor<Txn, FE, DenseCombine<L, R, T>>;
 
     fn add(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::Combine> {
-        fn add<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn add<T: CType>(left: ArrayAccess<T>, right: ArrayAccess<T>) -> TCResult<ArrayAccess<T>> {
             left.add(right).map(Array::from).map_err(TCError::from)
         }
 
-        DenseCombine::new(self.accessor, other.accessor, add, |l, r| l + r).map(DenseTensor::from)
+        DenseCombine::new(self.accessor, other.accessor, add, T::add).map(DenseTensor::from)
     }
 
     fn div(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
-        fn div<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn div<T: CType>(left: ArrayAccess<T>, right: ArrayAccess<T>) -> TCResult<ArrayAccess<T>> {
             left.div(right).map(Array::from).map_err(TCError::from)
         }
 
-        DenseCombine::new(self.accessor, other.accessor, div, |l, r| l / r).map(DenseTensor::from)
+        DenseCombine::new(self.accessor, other.accessor, div, T::div).map(DenseTensor::from)
     }
 
     fn log(self, base: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
-        fn log<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn log<T: CType>(left: ArrayAccess<T>, right: ArrayAccess<T>) -> TCResult<ArrayAccess<T>> {
             let right = right.cast()?;
             left.log(right).map(Array::from).map_err(TCError::from)
         }
@@ -495,15 +507,15 @@ where
     }
 
     fn mul(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
-        fn mul<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn mul<T: CType>(left: ArrayAccess<T>, right: ArrayAccess<T>) -> TCResult<ArrayAccess<T>> {
             left.mul(right).map(Array::from).map_err(TCError::from)
         }
 
-        DenseCombine::new(self.accessor, other.accessor, mul, |l, r| l * r).map(DenseTensor::from)
+        DenseCombine::new(self.accessor, other.accessor, mul, T::mul).map(DenseTensor::from)
     }
 
     fn pow(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
-        fn pow<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn pow<T: CType>(left: ArrayAccess<T>, right: ArrayAccess<T>) -> TCResult<ArrayAccess<T>> {
             let right = right.cast()?;
             left.pow(right).map(Array::from).map_err(TCError::from)
         }
@@ -515,11 +527,11 @@ where
     }
 
     fn sub(self, other: DenseTensor<Txn, FE, R>) -> TCResult<Self::Combine> {
-        fn sub<T: CType>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn sub<T: CType>(left: ArrayAccess<T>, right: ArrayAccess<T>) -> TCResult<ArrayAccess<T>> {
             left.sub(right).map(Array::from).map_err(TCError::from)
         }
 
-        DenseCombine::new(self.accessor, other.accessor, sub, |l, r| l - r).map(DenseTensor::from)
+        DenseCombine::new(self.accessor, other.accessor, sub, T::sub).map(DenseTensor::from)
     }
 }
 
@@ -539,7 +551,7 @@ where
             self.accessor,
             n,
             |block, n| block.add_scalar(n).map(Array::from).map_err(TCError::from),
-            |l, r| l + r,
+            A::DType::add,
         );
 
         Ok(accessor.into())
@@ -548,12 +560,12 @@ where
     fn div_const(self, other: Number) -> TCResult<Self::Combine> {
         let n = other.cast_into();
 
-        if n != A::DType::zero() {
+        if n != A::DType::ZERO {
             let accessor = DenseConst::new(
                 self.accessor,
                 n,
                 |block, n| block.div_scalar(n).map(Array::from).map_err(TCError::from),
-                |l, r| l / r,
+                A::DType::div,
             );
 
             Ok(accessor.into())
@@ -568,12 +580,7 @@ where
         let accessor = DenseConst::new(
             self.accessor,
             n,
-            |block, n| {
-                block
-                    .log_scalar(n.to_float())
-                    .map(Array::from)
-                    .map_err(TCError::from)
-            },
+            |block, n| block.log_scalar(n).map(Array::from).map_err(TCError::from),
             |l, r| A::DType::from_float(l.to_float().log(r.to_float())),
         );
 
@@ -585,7 +592,7 @@ where
             self.accessor,
             other.cast_into(),
             |block, n| block.mul_scalar(n).map(Array::from).map_err(TCError::from),
-            |l, r| l * r,
+            A::DType::mul,
         );
 
         Ok(accessor.into())
@@ -597,12 +604,7 @@ where
         let accessor = DenseConst::new(
             self.accessor,
             n,
-            |block, n| {
-                block
-                    .pow_scalar(n.to_float())
-                    .map(Array::from)
-                    .map_err(TCError::from)
-            },
+            |block, n| block.pow_scalar(n).map(Array::from).map_err(TCError::from),
             |l, r| A::DType::from_float(l.to_float().pow(r.to_float())),
         );
 
@@ -616,7 +618,7 @@ where
             self.accessor,
             n,
             |block, n| block.sub_scalar(n).map(Array::from).map_err(TCError::from),
-            |l, r| l - r,
+            A::DType::sub,
         );
 
         Ok(accessor.into())
@@ -709,7 +711,7 @@ where
         let max = blocks
             .map(|result| result.and_then(|block| block.max_all().map_err(TCError::from)))
             .map_ok(Number::from)
-            .try_fold(Number::from(A::DType::min()), |max, block_max| {
+            .try_fold(Number::from(A::DType::MIN), |max, block_max| {
                 let max = match collator.cmp(&max, &block_max) {
                     Ordering::Greater | Ordering::Equal => max,
                     Ordering::Less => block_max,
@@ -734,7 +736,7 @@ where
         let min = blocks
             .map(|result| result.and_then(|block| block.min_all().map_err(TCError::from)))
             .map_ok(Number::from)
-            .try_fold(Number::from(A::DType::max()), |min, block_min| {
+            .try_fold(Number::from(A::DType::MAX), |min, block_min| {
                 let max = match collator.cmp(&min, &block_min) {
                     Ordering::Less | Ordering::Equal => min,
                     Ordering::Greater => block_min,
@@ -759,14 +761,14 @@ where
 
             let product = blocks
                 .map(|result| result.and_then(|block| block.product_all().map_err(TCError::from)))
-                .try_fold(A::DType::one(), |product, block_product| {
-                    future::ready(Ok(product * block_product))
+                .try_fold(A::DType::ONE, |product, block_product| {
+                    future::ready(Ok(A::DType::mul(product, block_product)))
                 })
                 .await?;
 
             Ok(product.into())
         } else {
-            Ok(A::DType::zero().into())
+            Ok(A::DType::ZERO.into())
         }
     }
 
@@ -780,8 +782,8 @@ where
 
         let sum = blocks
             .map(|result| result.and_then(|block| block.sum_all().map_err(TCError::from)))
-            .try_fold(A::DType::zero(), |sum, block_sum| {
-                future::ready(Ok(sum + block_sum))
+            .try_fold(A::DType::ZERO, |sum, block_sum| {
+                future::ready(Ok(A::DType::add(sum, block_sum)))
             })
             .await?;
 
@@ -955,12 +957,12 @@ where
 
                 try_join!(re, im).map(Self::C64)
             }
-            Number::Float(Float::F32(n)) => {
+            Number::Float(FP::F32(n)) => {
                 base::DenseBase::constant(store, shape, n)
                     .map_ok(Self::F32)
                     .await
             }
-            Number::Float(Float::F64(n)) => {
+            Number::Float(FP::F64(n)) => {
                 base::DenseBase::constant(store, shape, n)
                     .map_ok(Self::F64)
                     .await
@@ -1990,7 +1992,7 @@ fn block_map_for(
     num_blocks: u64,
     shape: &[u64],
     block_shape: &[usize],
-) -> TCResult<ArrayBuf<StackVec<u64>>> {
+) -> TCResult<ArrayBuf<u64, StackVec<u64>>> {
     debug!("construct a block map for {shape:?} with block shape {block_shape:?}");
 
     debug_assert!(shape.len() >= block_shape.len());
@@ -2007,7 +2009,11 @@ fn block_map_for(
 
     block_map_shape.push(div_ceil(shape[block_axis], block_shape[0] as u64) as usize);
 
-    ArrayBuf::new((0..num_blocks as u64).into_iter().collect(), block_map_shape).map_err(TCError::from)
+    ArrayBuf::new(
+        (0..num_blocks as u64).into_iter().collect(),
+        block_map_shape,
+    )
+    .map_err(TCError::from)
 }
 
 #[inline]
@@ -2016,13 +2022,13 @@ fn block_shape_for(axis: usize, shape: &[u64], block_size: usize) -> BlockShape 
     assert_ne!(shape.iter().product::<u64>(), 0, "invalid shape: {shape:?}");
 
     if axis == shape.len() - 1 {
-        vec![block_size]
+        shape![block_size]
     } else {
         let mut block_shape = shape[axis..]
             .iter()
             .copied()
             .map(|dim| dim as usize)
-            .collect::<Vec<usize>>();
+            .collect::<BlockShape>();
 
         let trailing_size = block_shape.iter().skip(1).product::<usize>();
 

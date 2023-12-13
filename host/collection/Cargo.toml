@@ -27,14 +27,14 @@ freqfs = { version = "0.9", features = ["logging"] }
 ha-ndarray = { path = "../../../ha-ndarray", features = ["freqfs", "stream"] }
 itertools = "0.11"
 log = { version = "0.4", features = ["release_max_level_info"] }
-num_cpus = "1.15"
+num_cpus = "1.16"
 smallvec = "1.11"
 pin-project = "1.1"
-rayon = "1.7"
+rayon = "1.8"
 safecast = "0.2"
-tc-error = "0.9"
-tc-scalar = "0.2"
-tc-transact = "0.18"
-tc-value = "0.10"
-tcgeneric = "0.8"
+tc-error = { path = "../error" }
+tc-scalar = { path = "../scalar" }
+tc-transact = { path = "../transact" }
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }
 tokio = { version = "1.33", features = ["sync"] }
