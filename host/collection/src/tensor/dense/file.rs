@@ -132,13 +132,13 @@ where
             let buffer = block.into_access().into_inner();
 
             if block_id == num_blocks - 1 {
-                assert_ne!(buffer.size(), 0);
-                assert_eq!(block_size % buffer.size(), 0);
+                assert_ne!(buffer.len(), 0);
+                assert_eq!(block_size % buffer.len(), 0);
             } else {
-                assert_eq!(block_size, buffer.size());
+                assert_eq!(block_size, buffer.len());
             }
 
-            let size_in_bytes = buffer.size() * T::dtype().size();
+            let size_in_bytes = buffer.len() * T::dtype().size();
             let buffer = Buffer::from(buffer);
             dir_guard.create_file(block_id.to_string(), buffer, size_in_bytes)?;
             block_id += 1;
@@ -186,7 +186,7 @@ where
 
         for (block_id, block) in blocks.into_iter().enumerate() {
             let buffer = Buffer::from(block.collect::<Vec<T>>());
-            let size_in_bytes = buffer.size() * T::dtype().size();
+            let size_in_bytes = buffer.len() * T::dtype().size();
             dir_guard.create_file(block_id.to_string(), buffer, size_in_bytes)?;
         }
 
@@ -226,8 +226,8 @@ where
                 .ok_or_else(|| internal!("tensor missing block 0"))?;
 
             let block: FileReadGuard<Buffer<T>> = block.read().await?;
-            size += block.size() as u64;
-            block.size()
+            size += block.len() as u64;
+            block.len()
         };
 
         let block_axis = block_axis_for(&shape, block_size);
@@ -239,13 +239,13 @@ where
                 .ok_or_else(|| internal!("tensor missing block {block_id}"))?;
 
             let block: FileReadGuard<Buffer<T>> = block.read().await?;
-            if block.size() == block_size {
-                size += block.size() as u64;
+            if block.len() == block_size {
+                size += block.len() as u64;
             } else {
                 return Err(bad_request!(
                     "block {} has incorrect size {} (expected {})",
                     block_id,
-                    block.size(),
+                    block.len(),
                     block_size
                 ));
             }
@@ -258,7 +258,7 @@ where
                 .ok_or_else(|| internal!("tensor missing block {block_id}"))?;
 
             let block: FileReadGuard<Buffer<T>> = block.read().await?;
-            size += block.size() as u64;
+            size += block.len() as u64;
         }
 
         std::mem::drop(contents);
@@ -329,7 +329,7 @@ where
 
         let dtype_size = T::dtype().size();
         while let Some((block_id, buffer)) = blocks.try_next().await? {
-            let size_in_bytes = dtype_size * buffer.size();
+            let size_in_bytes = dtype_size * buffer.len();
             dir_guard.create_file(block_id.to_string(), buffer, size_in_bytes)?;
         }
 
@@ -424,7 +424,7 @@ where
 
         let buffer = file.read_owned().await?;
         let block_axis = block_axis_for(self.shape(), self.block_size);
-        let block_shape = block_shape_for(block_axis, &self.shape, buffer.size());
+        let block_shape = block_shape_for(block_axis, &self.shape, buffer.len());
         ArrayBuf::new(buffer, block_shape).map_err(TCError::from)
     }
 
@@ -446,7 +446,7 @@ where
             .try_buffered(num_cpus::get())
             .map(move |result| {
                 let buffer = result?;
-                let block_shape = block_shape_for(block_axis, &shape, buffer.size());
+                let block_shape = block_shape_for(block_axis, &shape, buffer.len());
                 ArrayBuf::new(buffer, block_shape).map_err(TCError::from)
             });
 
@@ -487,7 +487,7 @@ where
 
         let buffer = file.write_owned().await?;
         let block_axis = block_axis_for(self.shape(), self.block_size);
-        let block_shape = block_shape_for(block_axis, &self.shape, buffer.size());
+        let block_shape = block_shape_for(block_axis, &self.shape, buffer.len());
         ArrayBuf::new(buffer, block_shape).map_err(TCError::from)
     }
 
@@ -509,7 +509,7 @@ where
             .try_buffered(num_cpus::get())
             .map(move |result| {
                 let buffer = result?;
-                let block_shape = block_shape_for(block_axis, &shape, buffer.size());
+                let block_shape = block_shape_for(block_axis, &shape, buffer.len());
                 ArrayBuf::new(buffer, block_shape).map_err(TCError::from)
             });
 
@@ -643,7 +643,7 @@ where
 
                     let data = result?;
                     let data = data.read()?;
-                    debug_assert_eq!(block.size(), data.size());
+                    debug_assert_eq!(block.len(), data.size());
                     block.write(data)?;
 
                     Result::<(), TCError>::Ok(())
@@ -738,7 +738,7 @@ macro_rules! impl_visitor {
                                 ),
                             ))
                         }
-                    } else if buffer.size() == block_size {
+                    } else if buffer.len() == block_size {
                         Ok(buffer.drain(..).collect::<Vec<$t>>())
                     } else {
                         Err(de::Error::invalid_length(

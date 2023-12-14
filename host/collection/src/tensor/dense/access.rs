@@ -626,7 +626,7 @@ where
             let buffer = block.read()?.into_buffer()?;
 
             let type_size = S::DType::dtype().size();
-            let buffer_data_size = type_size * buffer.size();
+            let buffer_data_size = type_size * buffer.len();
             let buffer = dir.create_file(block_id.to_string(), buffer, buffer_data_size)?;
 
             buffer.into_write().map_err(TCError::from).await
@@ -682,7 +682,7 @@ where
                 .await?;
 
             let block_axis = block_axis_for(self.shape(), self.block_size());
-            let block_shape = block_shape_for(block_axis, self.shape(), buffer.size());
+            let block_shape = block_shape_for(block_axis, self.shape(), buffer.len());
             let block = ArrayBuf::new(buffer, block_shape)?;
 
             Ok(ArrayAccess::from(block))
@@ -768,7 +768,7 @@ where
     ) -> TCResult<Array<Self::DType, Self::BlockWrite>> {
         let buffer = self.write_buffer(txn_id, block_id).await?;
         let block_axis = block_axis_for(self.shape(), self.block_size());
-        let block_shape = block_shape_for(block_axis, self.shape(), buffer.size());
+        let block_shape = block_shape_for(block_axis, self.shape(), buffer.len());
         Array::new(buffer, block_shape).map_err(TCError::from)
     }
 
@@ -2756,7 +2756,7 @@ impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
             let source_buffer = source_buffer.expect("source buffer");
 
             let start = (start % source_block_size) as usize;
-            let stop = Ord::min(start + self.block_size, source_buffer.size());
+            let stop = Ord::min(start + self.block_size, source_buffer.len());
             buffer.extend_from_slice(&source_buffer[start..stop]);
         }
 
@@ -2775,8 +2775,8 @@ impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
 
         if stop > self.size() {
             let trailing_size = block_shape.iter().skip(1).product::<usize>();
-            debug_assert_eq!(buffer.size() % trailing_size, 0);
-            block_shape[0] = buffer.size() / trailing_size;
+            debug_assert_eq!(buffer.len() % trailing_size, 0);
+            block_shape[0] = buffer.len() / trailing_size;
         }
 
         ArrayBuf::new(buffer, block_shape).map_err(TCError::from)
