@@ -22,8 +22,8 @@ num_cpus = "1.13"
 safecast = "0.2"
 tbon = "0.5"
 tc-collection = { path = "../collection" }
-tc-error = "0.9"
-tc-scalar = "0.2"
-tc-transact = "0.18"
-tc-value = "0.10"
-tcgeneric = "0.8"
+tc-error = { path = "../error" }
+tc-scalar = { path = "../scalar" }
+tc-transact = { path = "../transact" }
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }
