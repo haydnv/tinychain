@@ -3415,31 +3415,19 @@ impl<S: DenseInstance> DenseTranspose<S> {
 
         let num_blocks = source.size().div_ceil(source.block_size() as u64);
         let block_axis = block_axis_for(source.shape(), source.block_size());
+        let block_shape = block_shape_for(block_axis, source.shape(), source.block_size());
+        let block_map = block_map_for(num_blocks, source.shape(), &block_shape)?;
 
-        let map_shape = source
-            .shape()
-            .iter()
-            .take(block_axis)
-            .copied()
-            .map(|dim| dim as usize)
-            .collect();
-
-        let valid = if num_blocks == 1 {
-            assert_eq!(block_axis, 0);
-            true
-        } else {
-            let valid_map = transform.axes()[..block_axis]
-                .iter()
-                .copied()
-                .all(|x| x < block_axis);
-
-            let valid_block = transform.axes()[block_axis..]
-                .iter()
-                .copied()
-                .all(|x| x > block_axis);
-
-            valid_map && valid_block
-        };
+        let valid = num_blocks == 1
+            || transform.axes().iter().copied().enumerate().all(|(i, x)| {
+                if i < block_axis {
+                    x < block_axis
+                } else if i == block_axis {
+                    x == block_axis
+                } else {
+                    x > block_axis
+                }
+            });
 
         let (map_axes, block_axes) = if valid {
             let (map_axes, block_axes) = transform.axes().split_at(block_axis);
@@ -3457,9 +3445,6 @@ impl<S: DenseInstance> DenseTranspose<S> {
                 axes = transform.axes()
             ))
         }?;
-
-        let block_map: StackVec<u64> = (0..num_blocks).into_iter().collect();
-        let block_map = ArrayBuf::new(block_map, map_shape)?;
 
         let block_map = if num_blocks > 1 {
             let block_map = block_map.transpose(Some(ha_ndarray::Axes::from_slice(map_axes)))?;

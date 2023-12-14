@@ -1,6 +1,5 @@
 import itertools
 import math
-import os
 
 import numpy as np
 import tinychain as tc
@@ -109,7 +108,7 @@ class DenseTests(HostTest):
         expected = expect_dense(tc.F64, shape, np.arange(1, 4))
         self.assertEqual(actual, expected)
 
-    def testMul(self):
+    def testMulReal(self):
         shape = [5, 2, 1]
 
         cxt = tc.Context()
@@ -125,18 +124,6 @@ class DenseTests(HostTest):
         expected = expect_dense(tc.I64, list(expected.shape), expected.flatten())
         self.assertEqual(actual, expected)
 
-    def testNorm_matrix(self):
-        shape = [2, 3, 4]
-        matrices = np.arange(24).reshape(shape)
-        expected = np.stack([np.linalg.norm(matrix) for matrix in matrices])
-
-        cxt = tc.Context()
-        cxt.matrices = load_dense(matrices, tc.F32)
-        cxt.actual = cxt.matrices.norm()
-
-        actual = self.host.post(ENDPOINT, cxt)
-        self.assertTrue(all_close(actual, expected))
-
     def testNorm_column(self):
         shape = [2, 3, 4]
         matrices = np.arange(24).reshape(shape)
@@ -147,6 +134,20 @@ class DenseTests(HostTest):
         cxt.actual = cxt.matrices.norm(-1)
 
         actual = self.host.post(ENDPOINT, cxt)
+        self.assertTrue(all_close(actual, expected))
+
+    def testNorm_matrix(self):
+        shape = [2, 3, 4]
+        matrices = np.arange(24).reshape(shape)
+        expected = np.stack([np.linalg.norm(matrix) for matrix in matrices])
+
+        cxt = tc.Context()
+        cxt.matrices = load_dense(matrices, tc.F32)
+        cxt.actual = cxt.matrices.norm()
+
+        actual = self.host.post(ENDPOINT, cxt)
+        print(actual, actual)
+        print("expected", expected)
         self.assertTrue(all_close(actual, expected))
 
     def testPow(self):
@@ -287,19 +288,22 @@ class DenseTests(HostTest):
             actual, expect_dense(tc.F64, expected.shape, expected.flatten())
         )
 
-    def testSum(self):
+    def testSum_axis(self):
         shape = [4, 2, 3, 5]
+        size = int(np.prod(shape))
         axis = 2
 
         cxt = tc.Context()
-        cxt.big = tc.tensor.Dense.arange(shape, 0.0, 120.0)
+        cxt.big = tc.tensor.Dense.arange(shape, 0.0, size)
         cxt.result = cxt.big.sum(axis)
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = np.sum(np.arange(0, 120).reshape(shape), axis)
-        self.assertEqual(actual, expect_dense(tc.F64, [4, 2, 5], expected.flatten()))
+        expected = np.arange(0, size).reshape(shape)
+        expected = np.sum(expected, axis)
+        expected = expect_dense(tc.F64, [4, 2, 5], expected.flatten())
+        self.assertEqual(actual, expected)
 
-    def testSumAll(self):
+    def testSum_all(self):
         shape = [5, 2]
 
         cxt = tc.Context()
