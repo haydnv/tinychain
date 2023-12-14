@@ -23,8 +23,8 @@ use crate::tensor::{offset_of, Coord, Shape, TensorInstance};
 use super::access::DenseAccess;
 use super::stream::BlockResize;
 use super::{
-    block_axis_for, block_map_for, block_shape_for, div_ceil, ideal_block_size_for, BlockShape,
-    BlockStream, DenseCacheFile, DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock,
+    block_axis_for, block_map_for, block_shape_for, ideal_block_size_for, BlockShape, BlockStream,
+    DenseCacheFile, DenseInstance, DenseWrite, DenseWriteGuard, DenseWriteLock,
 };
 
 pub struct DenseFile<FE, T> {
@@ -592,7 +592,7 @@ impl<'a, FE> DenseFileWriteGuard<'a, FE> {
         T: CType + DType + 'static,
         Buffer<T>: de::FromStream<Context = ()>,
     {
-        let num_blocks = div_ceil(self.shape.size(), self.block_size as u64);
+        let num_blocks = self.shape.size().div_ceil(self.block_size as u64);
         futures::stream::iter(0..num_blocks)
             .map(move |block_id| {
                 let that = other.clone();
@@ -601,7 +601,6 @@ impl<'a, FE> DenseFileWriteGuard<'a, FE> {
                     let that = that.read().await;
                     if that.contains(&block_id) {
                         let mut this = self.dir.write_file(&block_id).await?;
-
                         let that = that.read_file(&block_id).await?;
                         this.write(that.read()).map_err(TCError::from)
                     } else {
@@ -655,7 +654,7 @@ where
     }
 
     async fn overwrite_value(&self, _txn_id: TxnId, value: T) -> TCResult<()> {
-        let num_blocks = div_ceil(self.shape.size(), self.block_size as u64);
+        let num_blocks = self.shape.size().div_ceil(self.block_size as u64);
 
         futures::stream::iter(0..num_blocks)
             .map(|block_id| async move {

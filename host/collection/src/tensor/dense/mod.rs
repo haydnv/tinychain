@@ -2007,7 +2007,7 @@ fn block_map_for(
             .map(|dim| dim as usize),
     );
 
-    block_map_shape.push(div_ceil(shape[block_axis], block_shape[0] as u64) as usize);
+    block_map_shape.push(shape[block_axis].div_ceil(block_shape[0] as u64) as usize);
 
     ArrayBuf::new(
         (0..num_blocks as u64).into_iter().collect(),
@@ -2066,15 +2066,6 @@ where
 }
 
 #[inline]
-fn div_ceil(num: u64, denom: u64) -> u64 {
-    if num % denom == 0 {
-        num / denom
-    } else {
-        (num / denom) + 1
-    }
-}
-
-#[inline]
 fn ideal_block_size_for(shape: &[u64]) -> (usize, usize) {
     let ideal = IDEAL_BLOCK_SIZE as u64;
     let size = shape.iter().product::<u64>();
@@ -2088,12 +2079,12 @@ fn ideal_block_size_for(shape: &[u64]) -> (usize, usize) {
     } else if ndim == 1 && size % ideal == 0 {
         (IDEAL_BLOCK_SIZE, (size / ideal) as usize)
     } else if ndim == 1 || (shape.iter().rev().take(2).product::<u64>() > (2 * ideal)) {
-        let num_blocks = div_ceil(size, ideal) as usize;
+        let num_blocks = size.div_ceil(ideal) as usize;
         (IDEAL_BLOCK_SIZE, num_blocks as usize)
     } else {
         let matrix_size = shape.iter().rev().take(2).product::<u64>();
         let block_size = ideal + (matrix_size - (ideal % matrix_size));
-        let num_blocks = div_ceil(size, ideal);
+        let num_blocks = size.div_ceil(ideal);
         (block_size as usize, num_blocks as usize)
     }
 }

@@ -25,7 +25,7 @@ use tcgeneric::ThreadSafe;
 use super::base::DenseBase;
 use super::file::DenseFile;
 use super::{
-    block_axis_for, block_map_for, block_shape_for, div_ceil, ideal_block_size_for, DenseInstance,
+    block_axis_for, block_map_for, block_shape_for, ideal_block_size_for, DenseInstance,
     DenseWrite, DenseWriteGuard, DenseWriteLock,
 };
 
@@ -700,7 +700,7 @@ where
     }
 
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
-        let num_blocks = div_ceil(self.size(), self.block_size() as u64);
+        let num_blocks = self.size().div_ceil(self.block_size() as u64);
 
         let blocks = futures::stream::iter(0..num_blocks)
             .map(move |block_id| {
@@ -776,7 +776,7 @@ where
         self,
         txn_id: TxnId,
     ) -> TCResult<BlockStream<Self::DType, Self::BlockWrite>> {
-        let num_blocks = div_ceil(self.size(), self.block_size() as u64);
+        let num_blocks = self.size().div_ceil(self.block_size() as u64);
         let blocks = futures::stream::iter(0..num_blocks).then(move |block_id| {
             let this = self.clone();
             async move { this.write_block(txn_id, block_id).await }
@@ -1787,7 +1787,7 @@ where
     }
 
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
-        let num_blocks = div_ceil(self.size(), self.block_size() as u64);
+        let num_blocks = self.size().div_ceil(self.block_size() as u64);
         let blocks = futures::stream::iter(0..num_blocks)
             .map(move |block_id| {
                 let this = self.clone();
@@ -2216,7 +2216,7 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
         axes.sort();
         axes.dedup();
 
-        let num_blocks = div_ceil(source.size(), source.block_size() as u64);
+        let num_blocks = source.size().div_ceil(source.block_size() as u64);
         let block_axis = block_axis_for(source.shape(), source.block_size());
         let block_shape = block_shape_for(block_axis, source.shape(), source.block_size());
         debug_assert_eq!(source.shape()[block_axis] % block_shape[0] as u64, 0);
@@ -2495,7 +2495,7 @@ where
 
     // TODO: optimize
     async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
-        let num_blocks = div_ceil(self.size(), self.block_size() as u64);
+        let num_blocks = self.size().div_ceil(self.block_size() as u64);
         let blocks = futures::stream::iter(0..num_blocks)
             .map(move |block_id| {
                 let this = self.clone();
@@ -2732,7 +2732,7 @@ impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
         let stop = start + block_size;
 
         let source_block_id_start = start / source_block_size;
-        let source_block_id_stop = div_ceil(stop, source_block_size);
+        let source_block_id_stop = stop.div_ceil(source_block_size);
         let num_source_blocks = source_block_id_stop - source_block_id_start;
         assert_ne!(num_source_blocks, 0);
 
@@ -2841,10 +2841,9 @@ impl<S: DenseInstance> DenseSlice<S> {
 
         let block_axis = block_axis_for(source.shape(), source.block_size());
         let block_shape = block_shape_for(block_axis, source.shape(), source.block_size());
-        let num_blocks = div_ceil(
-            source.size() as u64,
-            block_shape.iter().product::<usize>() as u64,
-        );
+        let num_blocks = source
+            .size()
+            .div_ceil(block_shape.iter().product::<usize>() as u64);
 
         let size = transform.shape().iter().product::<u64>();
         let block_size = size / num_blocks;
@@ -2893,7 +2892,7 @@ impl<S: DenseInstance> DenseSlice<S> {
                 }
                 AxisRange::In(axis_range, _step) => {
                     let start = (axis_range.start / stride as u64) as usize;
-                    let stop = div_ceil(axis_range.end, stride as u64) as usize;
+                    let stop = axis_range.end.div_ceil(stride as u64) as usize;
                     ha_ndarray::AxisRange::In(start, stop, 1)
                 }
                 AxisRange::Of(indices) => {
@@ -3418,7 +3417,7 @@ impl<S: DenseInstance> DenseTranspose<S> {
     pub fn new(source: S, permutation: Option<Axes>) -> TCResult<Self> {
         let transform = Transpose::new(source.shape().clone(), permutation)?;
 
-        let num_blocks = div_ceil(source.size(), source.block_size() as u64);
+        let num_blocks = source.size().div_ceil(source.block_size() as u64);
         let block_axis = block_axis_for(source.shape(), source.block_size());
 
         let map_shape = source
