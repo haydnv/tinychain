@@ -56,8 +56,6 @@ where
     pub async fn constant(dir: DirLock<FE>, shape: Shape, value: T) -> TCResult<Self> {
         shape.validate()?;
 
-        let size = shape.iter().product::<u64>();
-
         let (block_size, num_blocks) = ideal_block_size_for(&shape);
 
         assert_ne!(block_size, 0);
@@ -77,31 +75,16 @@ where
             }
 
             let last_block_id = num_blocks - 1;
-            if size % block_size as u64 == 0 {
-                dir.create_file::<Buffer<T>>(
-                    last_block_id.to_string(),
-                    vec![value; block_size].into(),
-                    block_size * dtype_size,
-                )
-            } else {
-                dir.create_file::<Buffer<T>>(
-                    last_block_id.to_string(),
-                    vec![value; block_size].into(),
-                    block_size * dtype_size,
-                )
-            }?;
+            dir.create_file::<Buffer<T>>(
+                last_block_id.to_string(),
+                vec![value; block_size].into(),
+                block_size * dtype_size,
+            )?;
         };
 
         let block_axis = block_axis_for(&shape, block_size);
-        let map_shape = shape
-            .iter()
-            .take(block_axis)
-            .copied()
-            .map(|dim| dim as usize)
-            .collect();
-
-        let block_map = (0u64..num_blocks as u64).into_iter().collect();
-        let block_map = ArrayBuf::new(block_map, map_shape)?;
+        let block_shape = block_shape_for(block_axis, &shape, block_size);
+        let block_map = block_map_for(num_blocks as u64, &shape, &block_shape)?;
 
         Ok(Self {
             dir,

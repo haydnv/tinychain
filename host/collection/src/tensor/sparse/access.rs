@@ -2956,8 +2956,8 @@ impl<S: SparseInstance> SparseInstance for SparseReshape<S> {
                 .clone()
                 .broadcast(shape![values.size(), source_ndim])?;
 
-            let offsets = source_coords.mul(source_strides)?;
-            let offsets = NDArrayReduce::sum(offsets, 1, false)?;
+            let offsets = source_coords.mul(source_strides).map(ArrayAccess::from)?;
+            let offsets = NDArrayReduce::sum(offsets, axes![1], false)?;
 
             let coords =
                 offsets_to_coords(ArrayAccess::from(offsets), strides.clone(), dims.clone())?;
@@ -4120,8 +4120,8 @@ fn offsets<C, V, T>(
     blocks: impl Stream<Item = Result<(Array<u64, C>, Array<T, V>), TCError>> + Send + 'static,
 ) -> impl Stream<Item = Result<(u64, T), TCError>> + Send
 where
-    C: Access<u64>,
-    V: Access<T>,
+    C: Access<u64> + 'static,
+    V: Access<T> + 'static,
     T: CType,
 {
     let offsets = blocks
@@ -4129,9 +4129,9 @@ where
             let (coords, values) = result?;
 
             let shape = ha_ndarray::Shape::from_slice(coords.shape());
-            let strides = NDArrayTransform::broadcast(strides.as_ref::<[u64]>(), shape)?;
-            let offsets = NDArrayMath::mul(coords, strides)?;
-            let offsets = NDArrayReduce::sum(offsets, 1, false)?;
+            let strides = NDArrayTransform::broadcast(strides.clone(), shape)?;
+            let offsets = NDArrayMath::mul(coords, strides).map(ArrayAccess::from)?;
+            let offsets = NDArrayReduce::sum(offsets, axes![1], false)?;
             let offsets = offsets.read()?.to_slice()?.into_vec();
             let values = values.read()?.to_slice()?.into_vec();
 

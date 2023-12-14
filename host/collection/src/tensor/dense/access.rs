@@ -2200,7 +2200,7 @@ pub struct DenseReduce<S, T: CType> {
     id: T,
     reduce_all: fn(ArrayAccess<T>, T) -> TCResult<T>,
     reduce_blocks: Combine<T>,
-    reduce_op: fn(ArrayAccess<T>, usize, bool) -> TCResult<ArrayAccess<T>>,
+    reduce_op: fn(ArrayAccess<T>, Axes, bool) -> TCResult<ArrayAccess<T>>,
 }
 
 impl<S: DenseInstance> DenseReduce<S, S::DType> {
@@ -2211,7 +2211,11 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
         id: S::DType,
         reduce_all: fn(ArrayAccess<S::DType>, S::DType) -> TCResult<S::DType>,
         reduce_blocks: Combine<S::DType>,
-        reduce_op: fn(ArrayAccess<S::DType>, usize, bool) -> TCResult<ArrayAccess<S::DType>>,
+        reduce_op: fn(
+            ArrayAccess<S::DType>,
+            ha_ndarray::Axes,
+            bool,
+        ) -> TCResult<ArrayAccess<S::DType>>,
     ) -> TCResult<Self> {
         axes.sort();
         axes.dedup();
@@ -2283,9 +2287,9 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
                     .map(Array::from)
                     .map_err(TCError::from)
             },
-            |block, axis, keepdims| {
+            |block, axes, keepdims| {
                 block
-                    .max(axis, keepdims)
+                    .max(axes, keepdims)
                     .map(Array::from)
                     .map_err(TCError::from)
             },
@@ -2317,9 +2321,9 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
                     .map(ArrayAccess::from)
                     .map_err(TCError::from)
             },
-            |block, axis, keepdims| {
+            |block, axes, keepdims| {
                 block
-                    .min(axis, keepdims)
+                    .min(axes, keepdims)
                     .map(Array::from)
                     .map_err(TCError::from)
             },
@@ -2337,9 +2341,9 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
                 Ok(S::DType::add(block_sum, sum))
             },
             |l, r| l.add(r).map(Array::from).map_err(TCError::from),
-            |block, axis, keepdims| {
+            |block, axes, keepdims| {
                 block
-                    .sum(axis, keepdims)
+                    .sum(axes, keepdims)
                     .map(Array::from)
                     .map_err(TCError::from)
             },
@@ -2357,9 +2361,9 @@ impl<S: DenseInstance> DenseReduce<S, S::DType> {
                 Ok(S::DType::mul(block_product, product))
             },
             |l, r| l.mul(r).map(Array::from).map_err(TCError::from),
-            |block, axis, keepdims| {
+            |block, axes, keepdims| {
                 block
-                    .product(axis, keepdims)
+                    .product(axes, keepdims)
                     .map(Array::from)
                     .map_err(TCError::from)
             },
@@ -2453,13 +2457,7 @@ where
             .map(|result| {
                 result.and_then(|block| {
                     debug_assert!(self.block_axes.iter().copied().all(|x| x < block.ndim()));
-
-                    let mut reduced = block;
-                    for axis in self.block_axes.iter().rev().copied() {
-                        reduced = (self.reduce_op)(reduced, axis, self.transform.keepdims())?
-                    }
-
-                    Ok(reduced)
+                    (self.reduce_op)(block, self.block_axes.clone(), self.transform.keepdims())
                 })
             })
             .await?;
@@ -2476,13 +2474,11 @@ where
                                 .copied()
                                 .all(|x| x < block.ndim()));
 
-                            let keepdims = self.transform.keepdims();
-                            let mut reduced = block;
-                            for axis in self.block_axes.iter().rev().copied() {
-                                reduced = (self.reduce_op)(reduced, axis, keepdims)?
-                            }
-
-                            Ok(reduced)
+                            (self.reduce_op)(
+                                block,
+                                self.block_axes.clone(),
+                                self.transform.keepdims(),
+                            )
                         })
                     })
             })

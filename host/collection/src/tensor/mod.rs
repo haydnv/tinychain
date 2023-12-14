@@ -1554,7 +1554,6 @@ where
     fn sum(self, axes: Axes, keepdims: bool) -> TCResult<Self::Reduce> {
         match self {
             Self::Dense(this) => this.into_view().sum(axes, keepdims).map(Self::from),
-
             Self::Sparse(this) => this.into_view().sum(axes, keepdims).map(Self::from),
         }
     }
