@@ -8,7 +8,7 @@ use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, FileWriteGuardOwned};
 use futures::{join, try_join};
-use ha_ndarray::{AccessBuf, Accessor, Array, Buffer, CType};
+use ha_ndarray::{AccessBuf, Accessor, Array, Buffer, Convert, CType, PlatformInstance};
 use log::{debug, trace, warn};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
@@ -846,14 +846,17 @@ macro_rules! impl_from_stream_complex {
                         .copied()
                         .collect::<Vec<$t>>();
 
+                    let platform = ha_ndarray::Platform::select(size / 2);
                     let block_size = size * type_size;
 
+                    let re = platform.convert(re.into()).map_err(de::Error::custom)?;
                     contents_r
-                        .create_file(block_id.to_string(), Buffer::from(re), block_size)
+                        .create_file(block_id.to_string(), re, block_size)
                         .map_err(de::Error::custom)?;
 
+                    let im = platform.convert(im.into()).map_err(de::Error::custom)?;
                     contents_i
-                        .create_file(block_id.to_string(), Buffer::from(im), block_size)
+                        .create_file(block_id.to_string(), im, block_size)
                         .map_err(de::Error::custom)?;
                 }
 

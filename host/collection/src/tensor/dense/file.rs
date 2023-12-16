@@ -7,8 +7,8 @@ use destream::de;
 use freqfs::*;
 use futures::stream::{StreamExt, TryStreamExt};
 use ha_ndarray::{
-    AccessBuf, Array, ArrayBuf, ArrayOp, Buffer, BufferInstance, BufferMut, CType,
-    NDArrayMathScalar, NDArrayRead, StackVec,
+    AccessBuf, Array, ArrayBuf, ArrayOp, Buffer, BufferInstance, BufferMut, CType, Constant,
+    Convert, NDArrayMathScalar, NDArrayRead, PlatformInstance, StackVec,
 };
 use itertools::Itertools;
 use safecast::{AsType, CastFrom};
@@ -66,18 +66,27 @@ where
 
             let mut dir = dir.write().await;
 
-            for block_id in 0..num_blocks {
+            let platform = ha_ndarray::Platform::select(block_size);
+            let last_block_id = num_blocks - 1;
+            for block_id in 0..last_block_id {
                 dir.create_file::<Buffer<T>>(
                     block_id.to_string(),
-                    vec![value; block_size].into(),
+                    platform.constant(value, block_size)?,
                     block_size * dtype_size,
                 )?;
             }
 
-            let last_block_id = num_blocks - 1;
+            let last_block_size = (shape.iter().product::<u64>() % block_size as u64) as usize;
+            let last_block_size = if last_block_size == 0 {
+                block_size
+            } else {
+                last_block_size
+            };
+
+            let platform = ha_ndarray::Platform::select(last_block_size);
             dir.create_file::<Buffer<T>>(
                 last_block_id.to_string(),
-                vec![value; block_size].into(),
+                platform.constant(value, last_block_size)?,
                 block_size * dtype_size,
             )?;
         };
@@ -121,8 +130,9 @@ where
                 assert_eq!(block_size, buffer.len());
             }
 
+            let platform = ha_ndarray::Platform::select(buffer.len());
+            let buffer = platform.convert(buffer.into())?;
             let size_in_bytes = buffer.len() * T::dtype().size();
-            let buffer = Buffer::from(buffer);
             dir_guard.create_file(block_id.to_string(), buffer, size_in_bytes)?;
             block_id += 1;
         }
@@ -168,7 +178,9 @@ where
         let mut dir_guard = dir.write().await;
 
         for (block_id, block) in blocks.into_iter().enumerate() {
-            let buffer = Buffer::from(block.collect::<Vec<T>>());
+            let buffer = block.collect::<Vec<T>>();
+            let platform = ha_ndarray::Platform::select(buffer.len());
+            let buffer = platform.convert(buffer.into())?;
             let size_in_bytes = buffer.len() * T::dtype().size();
             dir_guard.create_file(block_id.to_string(), buffer, size_in_bytes)?;
         }
@@ -351,7 +363,9 @@ where
             let arr = ArrayOp::random_normal(block_shape.iter().product())?
                 .mul_scalar(std)?
                 .add_scalar(mean)?;
+
             let buf = arr.read()?.into_buffer()?;
+
             Ok(buf)
         })
         .await
@@ -625,7 +639,7 @@ where
 
                     let data = result?;
                     let data = data.read()?;
-                    debug_assert_eq!(block.len(), data.size());
+                    debug_assert_eq!(block.len(), data.len());
                     block.write(data)?;
 
                     Result::<(), TCError>::Ok(())
@@ -727,8 +741,10 @@ macro_rules! impl_visitor {
                             buffered,
                             format!("a Tensor block of {block_size} elements"),
                         ))
-                    }
-                    .map(Buffer::from)?;
+                    }?;
+
+                    let platform = ha_ndarray::Platform::select(buffer.len());
+                    let buffer = platform.convert(buffer.into()).map_err(de::Error::custom)?;
 
                     contents
                         .create_file(block_id.to_string(), buffer, buffered * type_size)

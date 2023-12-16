@@ -623,7 +623,9 @@ where
             buffer.write_owned().map_err(TCError::from).await
         } else {
             let block = self.source.read_block(txn_id, block_id).await?;
-            let buffer = block.read()?.into_buffer()?;
+            let platform = ha_ndarray::Platform::select(block.len());
+            let buffer = block.read()?;
+            let buffer = platform.convert(buffer)?;
 
             let type_size = S::DType::dtype().size();
             let buffer_data_size = type_size * buffer.len();
