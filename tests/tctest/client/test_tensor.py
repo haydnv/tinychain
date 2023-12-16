@@ -26,7 +26,7 @@ class TensorTests(ClientTest):
         split = [2, 2]
         axis = 1
 
-        x = np.random.random(np.product(input_shape)).reshape(input_shape)
+        x = np.random.random(np.prod(input_shape)).reshape(input_shape)
 
         cxt = tc.Context()
         cxt.input = tc.tensor.Dense.load(x.shape, x.flatten().tolist())

@@ -21,7 +21,7 @@ class DenseTests(HostTest):
         cxt.tensor = tc.tensor.Dense.constant(shape, c)
         cxt.result = tc.after(cxt.tensor[0, 0, 0].write(0), cxt.tensor)
 
-        expected = expect_dense(tc.F64, shape, [0] + [c] * (np.product(shape) - 1))
+        expected = expect_dense(tc.F64, shape, [0] + [c] * (np.prod(shape) - 1))
         actual = self.host.post(ENDPOINT, cxt)
 
         self.assertEqual(expected, actual)
@@ -146,8 +146,6 @@ class DenseTests(HostTest):
         cxt.actual = cxt.matrices.norm()
 
         actual = self.host.post(ENDPOINT, cxt)
-        print(actual, actual)
-        print("expected", expected)
         self.assertTrue(all_close(actual, expected))
 
     def testPow(self):
@@ -247,7 +245,7 @@ class DenseTests(HostTest):
         actual = self.host.post(ENDPOINT, cxt)
 
         big = np.arange(0, 24).reshape(shape)
-        expected = np.product(big, axis)
+        expected = np.prod(big, axis)
 
         self.assertEqual(actual, expect_dense(tc.I64, [2, 4], expected.flatten()))
 
@@ -259,11 +257,11 @@ class DenseTests(HostTest):
         cxt.result = cxt.big.product()
 
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, np.product(range(1, 7)))
+        self.assertEqual(actual, np.prod(range(1, 7)))
 
     def testRound(self):
         shape = [10, 20]
-        x = (np.random.random(np.product(shape)) * 10).reshape(shape)
+        x = (np.random.random(np.prod(shape)) * 10).reshape(shape)
 
         cxt = tc.Context()
         cxt.x = tc.tensor.Dense.load(shape, x.flatten().tolist())
@@ -315,7 +313,7 @@ class DenseTests(HostTest):
 
     def testTanh(self):
         shape = [3, 4, 5]
-        x = np.random.random(np.product(shape)).reshape(shape)
+        x = np.random.random(np.prod(shape)).reshape(shape)
 
         cxt = tc.Context()
         cxt.x = load_dense(x)
@@ -334,7 +332,7 @@ class DenseTests(HostTest):
     def testExpandAndTranspose(self):
         input_shape = (5, 8)
         permutation = (0, 3, 1, 2)
-        x = np.arange(np.product(input_shape)).reshape(input_shape)
+        x = np.arange(np.prod(input_shape)).reshape(input_shape)
 
         cxt = tc.Context()
         cxt.x = tc.tensor.Dense.load(input_shape, x.flatten().tolist(), tc.I64)
