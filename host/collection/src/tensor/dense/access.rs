@@ -623,7 +623,7 @@ where
             buffer.write_owned().map_err(TCError::from).await
         } else {
             let block = self.source.read_block(txn_id, block_id).await?;
-            let platform = ha_ndarray::Platform::select(block.len());
+            let platform = ha_ndarray::Platform::select(block.size());
             let buffer = block.read()?;
             let buffer = platform.convert(buffer)?;
 
@@ -3003,11 +3003,11 @@ impl<S: DenseInstance + Clone> DenseSlice<S> {
     async fn block_stream<Get, Fut, Block>(
         self,
         get_block: Get,
-    ) -> TCResult<impl Stream<Item = TCResult<Block::Slice>>>
+    ) -> TCResult<impl Stream<Item = TCResult<Array<Block::DType, Block::Slice>>>>
     where
         Get: Fn(S, u64) -> Fut + Copy,
         Fut: Future<Output = TCResult<Block>>,
-        Block: NDArrayTransform,
+        Block: NDArrayTransform<Platform = Platform>,
     {
         let block_axis = block_axis_for(self.shape(), self.block_size);
         let block_shape = block_shape_for(block_axis, self.shape(), self.block_size);

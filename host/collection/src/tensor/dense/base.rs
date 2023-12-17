@@ -8,7 +8,7 @@ use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, FileWriteGuardOwned};
 use futures::{join, try_join};
-use ha_ndarray::{AccessBuf, Accessor, Array, Buffer, Convert, CType, PlatformInstance};
+use ha_ndarray::{AccessBuf, Accessor, Array, Buffer, CType, Convert, PlatformInstance};
 use log::{debug, trace, warn};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
