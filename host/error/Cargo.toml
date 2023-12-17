@@ -13,7 +13,7 @@ categories = ["rust-patterns"]
 
 [dependencies]
 destream = "0.7"
-ha-ndarray = "0.2"
+ha-ndarray = { path = "../../../ha-ndarray" }
 log = { version = "0.4", features = ["release_max_level_info"] }
 pathlink = "0.2"
 serde = "1.0"

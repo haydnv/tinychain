@@ -8,7 +8,7 @@ use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::DirLock;
 use futures::{join, try_join, TryFutureExt};
-use ha_ndarray::{Array, Buffer, CDatatype};
+use ha_ndarray::{Accessor, Buffer, CType};
 use log::{debug, trace};
 use safecast::{AsType, CastInto};
 use smallvec::SmallVec;
@@ -128,7 +128,7 @@ impl<Txn, FE, T> State<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     #[inline]
     fn latest_version(
@@ -251,7 +251,7 @@ impl<Txn, FE, T> SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn access(&self, txn_id: TxnId) -> TCResult<SparseAccess<Txn, FE, T>> {
         let state = self.state.read().expect("sparse state");
@@ -324,7 +324,7 @@ impl<Txn, FE, T> TensorInstance for SparseBase<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn dtype(&self) -> NumberType {
         T::dtype()
@@ -340,7 +340,7 @@ impl<Txn, FE, T> TensorPermitRead for SparseBase<Txn, FE, T>
 where
     Txn: Send + Sync,
     FE: Send + Sync,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     async fn read_permit(
         &self,
@@ -356,7 +356,7 @@ impl<Txn, FE, T> TensorPermitWrite for SparseBase<Txn, FE, T>
 where
     Txn: Send + Sync,
     FE: Send + Sync,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
         self.canon.write_permit(txn_id, range).await
@@ -368,13 +368,13 @@ impl<Txn, FE, T> SparseInstance for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + AsType<Buffer<T>>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type CoordBlock = Array<u64>;
-    type ValueBlock = Array<T>;
-    type Blocks = Blocks<Self::CoordBlock, Self::ValueBlock>;
+    type CoordBlock = Accessor<u64>;
+    type ValueBlock = Accessor<T>;
+    type Blocks = Blocks<T, Self::CoordBlock, Self::ValueBlock>;
     type DType = T;
 
     async fn blocks(
@@ -408,7 +408,7 @@ impl<'a, Txn, FE, T> SparseWriteLock<'a> for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + AsType<Buffer<T>>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -428,7 +428,7 @@ impl<'a, Txn, FE, T> SparseWriteGuard<T> for SparseBaseWriteGuard<'a, Txn, FE, T
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + AsType<Buffer<T>>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -486,7 +486,7 @@ impl<Txn, FE, T> Transact for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe + for<'a> fs::FileSave<'a> + Clone,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
     type Commit = ();
@@ -659,7 +659,7 @@ impl<Txn, FE, T, O> fs::CopyFrom<FE, O> for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe + Clone,
-    T: CDatatype + DType,
+    T: CType + DType,
     O: SparseInstance<DType = T>,
     Number: From<T> + CastInto<T>,
 {
@@ -679,7 +679,7 @@ impl<Txn, FE, T> fs::Restore<FE> for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Node> + AsType<Buffer<T>> + Clone,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -713,7 +713,7 @@ impl<Txn, FE, T> de::FromStream for SparseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe + Clone,
-    T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
+    T: CType + DType + de::FromStream<Context = ()> + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
     type Context = (Txn, Shape);
@@ -756,7 +756,7 @@ impl<Txn, FE, T> SparseComplexBaseVisitor<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe + Clone,
-    T: CDatatype,
+    T: CType,
 {
     async fn new(txn: Txn, shape: Shape) -> TCResult<Self> {
         let (re, im) = {
@@ -799,7 +799,7 @@ impl<Txn, FE, T> de::FromStream for SparseComplexBaseVisitor<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe + Clone,
-    T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
+    T: CType + DType + de::FromStream<Context = ()> + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
     type Context = (Txn, Shape);
@@ -819,7 +819,7 @@ impl<Txn, FE, T> de::Visitor for SparseComplexBaseVisitor<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
+    T: CType + DType + de::FromStream<Context = ()> + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
     type Value = Self;
@@ -844,7 +844,7 @@ where
     }
 }
 
-impl<Txn, FE, T: CDatatype> From<SparseBase<Txn, FE, T>> for SparseAccess<Txn, FE, T> {
+impl<Txn, FE, T: CType> From<SparseBase<Txn, FE, T>> for SparseAccess<Txn, FE, T> {
     fn from(base: SparseBase<Txn, FE, T>) -> Self {
         Self::Base(base)
     }
@@ -854,7 +854,7 @@ impl<Txn, FE, T> fmt::Debug for SparseBase<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(

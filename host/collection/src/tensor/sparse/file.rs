@@ -8,7 +8,7 @@ use destream::de;
 use freqfs::DirLock;
 use futures::future::TryFutureExt;
 use futures::stream::TryStreamExt;
-use ha_ndarray::{ArrayBase, CDatatype};
+use ha_ndarray::{AccessBuf, Buffer, CType};
 use log::{debug, trace};
 use safecast::{AsType, CastInto};
 use smallvec::SmallVec;
@@ -134,11 +134,11 @@ where
 impl<FE, T> SparseInstance for SparseFile<FE, T>
 where
     FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
     Number: CastInto<T>,
 {
-    type CoordBlock = ArrayBase<Vec<u64>>;
-    type ValueBlock = ArrayBase<Vec<Self::DType>>;
+    type CoordBlock = AccessBuf<Buffer<u64>>;
+    type ValueBlock = AccessBuf<Buffer<Self::DType>>;
     type Blocks = BlockCoords<Elements<T>, T>;
     type DType = T;
 
@@ -190,7 +190,7 @@ where
             let value = row.pop().expect("value");
             Ok(value.cast_into())
         } else {
-            Ok(T::zero())
+            Ok(T::ZERO)
         }
     }
 }
@@ -199,7 +199,7 @@ where
 impl<'a, FE, T> SparseWriteLock<'a> for SparseFile<FE, T>
 where
     FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
     type Guard = SparseFileWriteGuard<'a, FE, T>;
@@ -219,7 +219,7 @@ where
 impl<FE, T> de::FromStream for SparseFile<FE, T>
 where
     FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
+    T: CType + DType + de::FromStream<Context = ()> + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
     type Context = (DirLock<FE>, Shape);
@@ -234,7 +234,7 @@ where
     }
 }
 
-impl<Txn, FE, T: CDatatype> From<SparseFile<FE, T>> for SparseAccess<Txn, FE, T> {
+impl<Txn, FE, T: CType> From<SparseFile<FE, T>> for SparseAccess<Txn, FE, T> {
     fn from(table: SparseFile<FE, T>) -> Self {
         Self::Table(table)
     }
@@ -260,7 +260,7 @@ pub struct SparseFileWriteGuard<'a, FE, T> {
 impl<'a, FE, T> SparseWriteGuard<T> for SparseFileWriteGuard<'a, FE, T>
 where
     FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Number: From<T>,
 {
     async fn clear(&mut self, _txn_id: TxnId, range: Range) -> TCResult<()> {
@@ -305,7 +305,7 @@ where
     async fn write_value(&mut self, _txn_id: TxnId, coord: Coord, value: T) -> Result<(), TCError> {
         self.shape.validate_coord(&coord)?;
 
-        if value == T::zero() {
+        if value == T::ZERO {
             let coord = coord
                 .into_iter()
                 .map(|i| Number::UInt(i.into()))
@@ -335,7 +335,7 @@ impl<FE, T> SparseFileVisitor<FE, T> {
 impl<'a, FE, T> de::Visitor for SparseFileVisitor<FE, T>
 where
     FE: AsType<Node> + ThreadSafe,
-    T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
+    T: CType + DType + de::FromStream<Context = ()> + fmt::Debug,
     Number: From<T> + CastInto<T>,
 {
     type Value = SparseFile<FE, T>;
@@ -357,7 +357,7 @@ where
 
             let coord = coord.into_iter().map(|i| Number::UInt(i.into())).collect();
 
-            if value != T::zero() {
+            if value != T::ZERO {
                 guard
                     .upsert(coord, vec![value.into()])
                     .map_err(de::Error::custom)

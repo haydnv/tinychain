@@ -27,10 +27,10 @@ safecast = "0.2"
 tbon = "0.5"
 tc-chain = { path = "../chain" }
 tc-collection = { path = "../collection" }
-tc-error = "0.9"
-tc-scalar = "0.2"
-tc-transact = "0.18"
-tc-value = "0.10"
-tcgeneric = "0.8"
-tokio = { version = "1.33", features = ["rt-multi-thread", "signal"] }
+tc-error = { path = "../error" }
+tc-scalar = { path = "../scalar" }
+tc-transact = { path = "../transact" }
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }
+tokio = { version = "1.35", features = ["rt-multi-thread", "signal"] }
 tokio-util = { version = "0.7", features = ["io"] }

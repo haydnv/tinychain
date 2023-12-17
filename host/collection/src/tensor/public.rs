@@ -1146,7 +1146,7 @@ where
             tensor
                 .pow_const(2i32.into())
                 .and_then(|pow| {
-                    let axes = smallvec![pow.ndim() - 1, pow.ndim() - 2];
+                    let axes = (0..pow.ndim()).into_iter().rev().take(2).collect();
                     pow.sum(axes, keepdims)
                 })
                 .and_then(|sum| sum.pow_const(0.5f32.into()))
