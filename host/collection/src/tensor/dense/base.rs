@@ -8,7 +8,7 @@ use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, FileWriteGuardOwned};
 use futures::{join, try_join};
-use ha_ndarray::{Array, ArrayBase, Buffer, CDatatype};
+use ha_ndarray::{AccessBuf, Accessor, Array, Buffer, CType, Convert, PlatformInstance};
 use log::{debug, trace, warn};
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
@@ -48,7 +48,7 @@ struct State<Txn, FE, T> {
 impl<Txn, FE, T> State<Txn, FE, T>
 where
     FE: DenseCacheFile + AsType<Buffer<T>> + 'static,
-    T: CDatatype + DType,
+    T: CType + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     #[inline]
@@ -139,7 +139,7 @@ impl<Txn, FE, T> DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + Clone,
-    T: CDatatype + DType,
+    T: CType + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     pub async fn constant(store: fs::Dir<FE>, shape: Shape, value: T) -> TCResult<Self> {
@@ -198,7 +198,7 @@ impl<Txn, FE, T> DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>>,
-    T: CDatatype + DType,
+    T: CType + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     fn access(&self, txn_id: TxnId) -> TCResult<DenseAccess<Txn, FE, T>> {
@@ -211,7 +211,7 @@ impl<Txn, FE, T> DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Buffer<T>> + ThreadSafe,
-    T: CDatatype,
+    T: CType,
 {
     fn new(dir: DirLock<FE>, canon: DenseFile<FE, T>, committed: DirLock<FE>) -> TCResult<Self> {
         let semaphore = Semaphore::new(Collator::default());
@@ -269,7 +269,7 @@ impl<Txn, FE, T> TensorInstance for DenseBase<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn dtype(&self) -> NumberType {
         T::dtype()
@@ -285,7 +285,7 @@ impl<Txn, FE, T> TensorPermitRead for DenseBase<Txn, FE, T>
 where
     Txn: Send + Sync,
     FE: Send + Sync,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     async fn read_permit(
         &self,
@@ -301,7 +301,7 @@ impl<Txn, FE, T> TensorPermitWrite for DenseBase<Txn, FE, T>
 where
     Txn: Send + Sync,
     FE: Send + Sync,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     async fn write_permit(&self, txn_id: TxnId, range: Range) -> TCResult<PermitWrite<Range>> {
         self.canon.write_permit(txn_id, range).await
@@ -313,23 +313,23 @@ impl<Txn, FE, T> DenseInstance for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type Block = Array<T>;
+    type Block = Accessor<T>;
     type DType = T;
 
     fn block_size(&self) -> usize {
         self.canon.block_size()
     }
 
-    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::Block> {
+    async fn read_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Array<T, Self::Block>> {
         let version = self.access(txn_id)?;
         version.read_block(txn_id, block_id).await
     }
 
-    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::Block>> {
+    async fn read_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::DType, Self::Block>> {
         let version = self.access(txn_id)?;
         version.read_blocks(txn_id).await
     }
@@ -345,13 +345,17 @@ impl<Txn, FE, T> DenseWrite for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
-    type BlockWrite = ArrayBase<FileWriteGuardOwned<FE, Buffer<T>>>;
+    type BlockWrite = AccessBuf<FileWriteGuardOwned<FE, Buffer<T>>>;
 
-    async fn write_block(&self, txn_id: TxnId, block_id: u64) -> TCResult<Self::BlockWrite> {
+    async fn write_block(
+        &self,
+        txn_id: TxnId,
+        block_id: u64,
+    ) -> TCResult<Array<T, Self::BlockWrite>> {
         let version = {
             let dir = self.dir.read().await;
             let mut state = self.state.write().expect("dense state");
@@ -361,7 +365,10 @@ where
         version.write_block(txn_id, block_id).await
     }
 
-    async fn write_blocks(self, txn_id: TxnId) -> TCResult<BlockStream<Self::BlockWrite>> {
+    async fn write_blocks(
+        self,
+        txn_id: TxnId,
+    ) -> TCResult<BlockStream<Self::DType, Self::BlockWrite>> {
         let version = {
             let dir = self.dir.read().await;
             let mut state = self.state.write().expect("dense state");
@@ -377,7 +384,7 @@ impl<'a, Txn, FE, T> DenseWriteLock<'a> for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -397,7 +404,7 @@ impl<'a, Txn, FE, T> DenseWriteGuard<T> for DenseBaseWriteGuard<'a, Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node>,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -445,7 +452,7 @@ impl<Txn, FE, T> Transact for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + for<'en> fs::FileSave<'en> + Clone,
-    T: CDatatype + DType,
+    T: CType + DType,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     type Commit = ();
@@ -572,7 +579,7 @@ impl<Txn, FE, T> fs::Persist<FE> for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + Clone,
-    T: CDatatype + DType + de::FromStream<Context = ()>,
+    T: CType + DType + de::FromStream<Context = ()>,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     type Txn = Txn;
@@ -580,7 +587,7 @@ where
 
     async fn create(_txn_id: TxnId, shape: Shape, store: fs::Dir<FE>) -> TCResult<Self> {
         let (dir, canon, versions) = fs_init(store).await?;
-        let canon = DenseFile::constant(canon, shape, T::zero()).await?;
+        let canon = DenseFile::constant(canon, shape, T::ZERO).await?;
         Self::new(dir, canon, versions)
     }
 
@@ -602,7 +609,7 @@ where
 
         // handle the case that no canonical version was ever finalized
         let canon = if canon.try_read()?.is_empty() {
-            DenseFile::constant(canon, shape, T::zero()).await?
+            DenseFile::constant(canon, shape, T::ZERO).await?
         } else {
             DenseFile::load(canon, shape).await?
         };
@@ -620,7 +627,7 @@ impl<Txn, FE, T, O> fs::CopyFrom<FE, O> for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + Clone,
-    T: CDatatype + DType + de::FromStream<Context = ()>,
+    T: CType + DType + de::FromStream<Context = ()>,
     O: DenseInstance<DType = T>,
     Buffer<T>: de::FromStream<Context = ()>,
 {
@@ -636,7 +643,8 @@ impl<Txn, FE, T> fs::Restore<FE> for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + Clone,
-    T: CDatatype + DType + de::FromStream<Context = ()> + fmt::Debug,
+    T: CType + DType + de::FromStream<Context = ()> + fmt::Debug,
+    Accessor<T>: From<AccessBuf<Buffer<T>>>,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -661,7 +669,7 @@ impl<Txn, FE, T> de::FromStream for DenseBase<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: AsType<Buffer<T>> + ThreadSafe + Clone,
-    T: CDatatype + DType,
+    T: CType + DType,
     DenseFile<FE, T>: de::FromStream<Context = (DirLock<FE>, Shape)>,
 {
     type Context = (Txn, Shape);
@@ -694,7 +702,7 @@ where
     }
 }
 
-impl<Txn, FE, T: CDatatype> From<DenseBase<Txn, FE, T>> for DenseAccess<Txn, FE, T> {
+impl<Txn, FE, T: CType> From<DenseBase<Txn, FE, T>> for DenseAccess<Txn, FE, T> {
     fn from(base: DenseBase<Txn, FE, T>) -> Self {
         Self::Base(base)
     }
@@ -704,7 +712,7 @@ impl<Txn, FE, T> fmt::Debug for DenseBase<Txn, FE, T>
 where
     Txn: ThreadSafe,
     FE: ThreadSafe,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
@@ -727,7 +735,7 @@ impl<Txn, FE, T> DenseComplexBaseVisitor<Txn, FE, T>
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + Clone,
-    T: CDatatype + DType + de::FromStream<Context = ()>,
+    T: CType + DType + de::FromStream<Context = ()>,
     Buffer<T>: de::FromStream<Context = ()>,
 {
     pub async fn end(self) -> TCResult<(DenseBase<Txn, FE, T>, DenseBase<Txn, FE, T>)> {
@@ -838,14 +846,17 @@ macro_rules! impl_from_stream_complex {
                         .copied()
                         .collect::<Vec<$t>>();
 
+                    let platform = ha_ndarray::Platform::select(size / 2);
                     let block_size = size * type_size;
 
+                    let re = platform.convert(re.into()).map_err(de::Error::custom)?;
                     contents_r
-                        .create_file(block_id.to_string(), Buffer::from(re), block_size)
+                        .create_file(block_id.to_string(), re, block_size)
                         .map_err(de::Error::custom)?;
 
+                    let im = platform.convert(im.into()).map_err(de::Error::custom)?;
                     contents_i
-                        .create_file(block_id.to_string(), Buffer::from(im), block_size)
+                        .create_file(block_id.to_string(), im, block_size)
                         .map_err(de::Error::custom)?;
                 }
 

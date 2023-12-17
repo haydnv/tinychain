@@ -1,6 +1,5 @@
 import itertools
 import math
-import os
 
 import numpy as np
 import tinychain as tc
@@ -22,7 +21,7 @@ class DenseTests(HostTest):
         cxt.tensor = tc.tensor.Dense.constant(shape, c)
         cxt.result = tc.after(cxt.tensor[0, 0, 0].write(0), cxt.tensor)
 
-        expected = expect_dense(tc.F64, shape, [0] + [c] * (np.product(shape) - 1))
+        expected = expect_dense(tc.F64, shape, [0] + [c] * (np.prod(shape) - 1))
         actual = self.host.post(ENDPOINT, cxt)
 
         self.assertEqual(expected, actual)
@@ -109,7 +108,7 @@ class DenseTests(HostTest):
         expected = expect_dense(tc.F64, shape, np.arange(1, 4))
         self.assertEqual(actual, expected)
 
-    def testMul(self):
+    def testMulReal(self):
         shape = [5, 2, 1]
 
         cxt = tc.Context()
@@ -125,18 +124,6 @@ class DenseTests(HostTest):
         expected = expect_dense(tc.I64, list(expected.shape), expected.flatten())
         self.assertEqual(actual, expected)
 
-    def testNorm_matrix(self):
-        shape = [2, 3, 4]
-        matrices = np.arange(24).reshape(shape)
-        expected = np.stack([np.linalg.norm(matrix) for matrix in matrices])
-
-        cxt = tc.Context()
-        cxt.matrices = load_dense(matrices, tc.F32)
-        cxt.actual = cxt.matrices.norm()
-
-        actual = self.host.post(ENDPOINT, cxt)
-        self.assertTrue(all_close(actual, expected))
-
     def testNorm_column(self):
         shape = [2, 3, 4]
         matrices = np.arange(24).reshape(shape)
@@ -145,6 +132,18 @@ class DenseTests(HostTest):
         cxt = tc.Context()
         cxt.matrices = load_dense(matrices, tc.F32)
         cxt.actual = cxt.matrices.norm(-1)
+
+        actual = self.host.post(ENDPOINT, cxt)
+        self.assertTrue(all_close(actual, expected))
+
+    def testNorm_matrix(self):
+        shape = [2, 3, 4]
+        matrices = np.arange(24).reshape(shape)
+        expected = np.stack([np.linalg.norm(matrix) for matrix in matrices])
+
+        cxt = tc.Context()
+        cxt.matrices = load_dense(matrices, tc.F32)
+        cxt.actual = cxt.matrices.norm()
 
         actual = self.host.post(ENDPOINT, cxt)
         self.assertTrue(all_close(actual, expected))
@@ -246,7 +245,7 @@ class DenseTests(HostTest):
         actual = self.host.post(ENDPOINT, cxt)
 
         big = np.arange(0, 24).reshape(shape)
-        expected = np.product(big, axis)
+        expected = np.prod(big, axis)
 
         self.assertEqual(actual, expect_dense(tc.I64, [2, 4], expected.flatten()))
 
@@ -258,11 +257,11 @@ class DenseTests(HostTest):
         cxt.result = cxt.big.product()
 
         actual = self.host.post(ENDPOINT, cxt)
-        self.assertEqual(actual, np.product(range(1, 7)))
+        self.assertEqual(actual, np.prod(range(1, 7)))
 
     def testRound(self):
         shape = [10, 20]
-        x = (np.random.random(np.product(shape)) * 10).reshape(shape)
+        x = (np.random.random(np.prod(shape)) * 10).reshape(shape)
 
         cxt = tc.Context()
         cxt.x = tc.tensor.Dense.load(shape, x.flatten().tolist())
@@ -287,19 +286,22 @@ class DenseTests(HostTest):
             actual, expect_dense(tc.F64, expected.shape, expected.flatten())
         )
 
-    def testSum(self):
+    def testSum_axis(self):
         shape = [4, 2, 3, 5]
+        size = int(np.prod(shape))
         axis = 2
 
         cxt = tc.Context()
-        cxt.big = tc.tensor.Dense.arange(shape, 0.0, 120.0)
+        cxt.big = tc.tensor.Dense.arange(shape, 0.0, size)
         cxt.result = cxt.big.sum(axis)
 
         actual = self.host.post(ENDPOINT, cxt)
-        expected = np.sum(np.arange(0, 120).reshape(shape), axis)
-        self.assertEqual(actual, expect_dense(tc.F64, [4, 2, 5], expected.flatten()))
+        expected = np.arange(0, size).reshape(shape)
+        expected = np.sum(expected, axis)
+        expected = expect_dense(tc.F64, [4, 2, 5], expected.flatten())
+        self.assertEqual(actual, expected)
 
-    def testSumAll(self):
+    def testSum_all(self):
         shape = [5, 2]
 
         cxt = tc.Context()
@@ -311,7 +313,7 @@ class DenseTests(HostTest):
 
     def testTanh(self):
         shape = [3, 4, 5]
-        x = np.random.random(np.product(shape)).reshape(shape)
+        x = np.random.random(np.prod(shape)).reshape(shape)
 
         cxt = tc.Context()
         cxt.x = load_dense(x)
@@ -330,7 +332,7 @@ class DenseTests(HostTest):
     def testExpandAndTranspose(self):
         input_shape = (5, 8)
         permutation = (0, 3, 1, 2)
-        x = np.arange(np.product(input_shape)).reshape(input_shape)
+        x = np.arange(np.prod(input_shape)).reshape(input_shape)
 
         cxt = tc.Context()
         cxt.x = tc.tensor.Dense.load(input_shape, x.flatten().tolist(), tc.I64)

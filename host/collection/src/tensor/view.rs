@@ -5,7 +5,7 @@ use destream::{de, en};
 use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::try_join;
-use ha_ndarray::{Buffer, CDatatype, NDArrayRead};
+use ha_ndarray::{Buffer, CType, NDArrayRead};
 use log::trace;
 use rayon::prelude::*;
 use safecast::{AsType, CastInto};
@@ -19,7 +19,7 @@ use tcgeneric::{NativeClass, TCPathBuf};
 
 use super::dense::{DenseAccess, DenseCacheFile, DenseInstance, DenseTensor};
 use super::sparse::Node;
-use super::{autoqueue, Coord, Dense, Range, Sparse, Tensor, TensorInstance, TensorPermitRead};
+use super::{Coord, Dense, Range, Sparse, Tensor, TensorInstance, TensorPermitRead};
 
 type Blocks<T> = Pin<Box<dyn Stream<Item = Vec<T>> + Send>>;
 
@@ -51,8 +51,7 @@ impl DenseViewBlocks {
                 let blocks = blocks
                     .map(move |result| {
                         let block = result?;
-                        let queue = autoqueue(&block)?;
-                        let buffer = block.read(&queue)?.to_slice()?.into_vec();
+                        let buffer = block.buffer()?.to_slice()?.into_vec();
                         TCResult::Ok(buffer.into_iter().map(|i| i != 0).collect::<Vec<bool>>())
                     })
                     .take_while(|result| future::ready(result.is_ok()))
@@ -88,7 +87,7 @@ async fn read_from_complex<Txn, FE, T>(
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + Clone,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -98,10 +97,9 @@ where
 
     let re = re.map(move |result| {
         let block = result?;
-        let queue = autoqueue(&block)?;
 
         block
-            .read(&queue)
+            .buffer()
             .and_then(|buffer| buffer.to_slice())
             .map(|slice| slice.into_vec())
             .map_err(TCError::from)
@@ -109,10 +107,9 @@ where
 
     let im = im.map(move |result| {
         let block = result?;
-        let queue = autoqueue(&block)?;
 
         block
-            .read(&queue)
+            .buffer()
             .and_then(|buffer| buffer.to_slice())
             .map(|slice| slice.into_vec())
             .map_err(TCError::from)
@@ -142,7 +139,7 @@ async fn read_from_real<Txn, FE, T>(
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + Clone,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Number: From<T> + CastInto<T>,
 {
@@ -151,7 +148,6 @@ where
     let blocks = blocks
         .map(move |result| {
             let block = result?;
-            let queue = autoqueue(&block)?;
 
             trace!(
                 "encoding dense block of {} elements...",
@@ -159,7 +155,7 @@ where
             );
 
             block
-                .read(&queue)
+                .buffer()
                 .and_then(|buffer| buffer.to_slice())
                 .map(|slice| slice.into_vec())
                 .map_err(TCError::from)

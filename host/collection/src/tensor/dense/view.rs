@@ -18,10 +18,10 @@ use tcgeneric::ThreadSafe;
 use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTrig, ComplexUnary};
 use crate::tensor::sparse::{sparse_from, Node};
 use crate::tensor::{
-    autoqueue, Axes, Coord, Range, Shape, SparseView, TensorBoolean, TensorBooleanConst,
-    TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal,
-    TensorInstance, TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead,
-    TensorReduce, TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
+    Axes, Coord, Range, Shape, SparseView, TensorBoolean, TensorBooleanConst, TensorCast,
+    TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal, TensorInstance,
+    TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce,
+    TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{dense_from, DenseAccess, DenseCacheFile, DenseInstance, DenseTensor, DenseUnaryCast};
@@ -218,8 +218,7 @@ where
                         let _permit = &permit; // force this closure to capture (move/own) the permit
 
                         let block = result?;
-                        let queue = autoqueue(&block)?;
-                        let buffer = block.read(&queue)?.to_slice()?.into_vec();
+                        let buffer = block.buffer()?.to_slice()?.into_vec();
                         let buffer = buffer
                             .into_par_iter()
                             .map(|n| Number::Bool((n != 0).into()))
@@ -245,10 +244,9 @@ where
 
                 let r_blocks = r_blocks.map(move |result| {
                     let block = result?;
-                    let queue = autoqueue(&block)?;
 
                     block
-                        .read(&queue)
+                        .buffer()
                         .and_then(|buffer| buffer.to_slice())
                         .map(|slice| slice.into_vec())
                         .map_err(TCError::from)
@@ -256,10 +254,9 @@ where
 
                 let i_blocks = i_blocks.map(move |result| {
                     let block = result?;
-                    let queue = autoqueue(&block)?;
 
                     block
-                        .read(&queue)
+                        .buffer()
                         .and_then(|buffer| buffer.to_slice())
                         .map(|slice| slice.into_vec())
                         .map_err(TCError::from)
@@ -293,8 +290,7 @@ where
                         let _permit = &permit; // force this closure to capture (move/own) the permit
 
                         let block = result?;
-                        let queue = autoqueue(&block)?;
-                        let buffer = block.read(&queue)?.to_slice()?.into_vec();
+                        let buffer = block.buffer()?.to_slice()?.into_vec();
                         let buffer = buffer
                             .into_par_iter()
                             .map(|n| Number::from(n))

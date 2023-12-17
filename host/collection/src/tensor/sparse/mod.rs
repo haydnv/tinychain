@@ -111,7 +111,7 @@ mod reduce {
                 .map(|result| {
                     result.and_then(|(_coords, values)| values.max_all().map_err(TCError::from))
                 })
-                .try_fold(A::DType::min(), move |max, block_max| {
+                .try_fold(A::DType::MIN, move |max, block_max| {
                     let max = match collator.cmp(&max.into(), &block_max.into()) {
                         Ordering::Less => block_max,
                         Ordering::Equal | Ordering::Greater => max,
@@ -141,7 +141,7 @@ mod reduce {
                 .map(|result| {
                     result.and_then(|(_coords, values)| values.max_all().map_err(TCError::from))
                 })
-                .try_fold(A::DType::min(), move |max, block_max| {
+                .try_fold(A::DType::MAX, move |max, block_max| {
                     let max = match collator.cmp(&max.into(), &block_max.into()) {
                         Ordering::Less => block_max,
                         Ordering::Equal | Ordering::Greater => max,
@@ -163,7 +163,7 @@ mod reduce {
             let _permit = accessor.read_permit(txn_id, Range::default()).await?;
 
             if !reduce_all(txn_id, accessor.clone()).await? {
-                return Ok(A::DType::zero());
+                return Ok(A::DType::ZERO);
             } else {
                 log::trace!("all elements in {accessor:?} are filled...");
             }
@@ -177,9 +177,9 @@ mod reduce {
                     result.and_then(|(_coords, values)| values.product_all().map_err(TCError::from))
                 })
                 .try_fold(
-                    A::DType::one(),
+                    A::DType::ONE,
                     move |product: A::DType, block_product: A::DType| {
-                        futures::future::ready(Ok(product * block_product))
+                        futures::future::ready(Ok(A::DType::mul(product, block_product)))
                     },
                 )
                 .await?;
@@ -203,8 +203,8 @@ mod reduce {
                 .map(|result| {
                     result.and_then(|(_coords, values)| values.sum_all().map_err(TCError::from))
                 })
-                .try_fold(A::DType::zero(), move |sum, block_sum| {
-                    futures::future::ready(Ok(sum + block_sum))
+                .try_fold(A::DType::ZERO, move |sum, block_sum| {
+                    futures::future::ready(Ok(A::DType::add(sum, block_sum)))
                 })
                 .await
         })
@@ -213,16 +213,25 @@ mod reduce {
 
 const BLOCK_SIZE: usize = 4_096;
 
-pub type Blocks<C, V> = Pin<Box<dyn Stream<Item = Result<(C, V), TCError>> + Send>>;
+pub type Blocks<T, C, V> =
+    Pin<Box<dyn Stream<Item = Result<(Array<u64, C>, Array<T, V>), TCError>> + Send>>;
 pub type Elements<T> = Pin<Box<dyn Stream<Item = Result<(Coord, T), TCError>> + Send>>;
 pub type Node = b_table::Node<Number>;
 
 #[async_trait]
 pub trait SparseInstance: TensorInstance + fmt::Debug {
-    type CoordBlock: NDArrayRead<DType = u64> + NDArrayMath + NDArrayTransform + Into<Array<u64>>;
-    type ValueBlock: NDArrayRead<DType = Self::DType> + Into<Array<Self::DType>>;
-    type Blocks: Stream<Item = Result<(Self::CoordBlock, Self::ValueBlock), TCError>> + Send;
-    type DType: CDatatype + DType;
+    type CoordBlock: Access<u64>;
+    type ValueBlock: Access<Self::DType>;
+    type Blocks: Stream<
+            Item = Result<
+                (
+                    Array<u64, Self::CoordBlock>,
+                    Array<Self::DType, Self::ValueBlock>,
+                ),
+                TCError,
+            >,
+        > + Send;
+    type DType: CType + DType;
 
     async fn blocks(
         self,
@@ -275,6 +284,7 @@ pub trait SparseInstance: TensorInstance + fmt::Debug {
                 .unique()
                 .collect::<Axes>();
 
+            // TODO: use Table::group_by to implement this
             let filled_at = self
                 .elements(txn_id, range, order)
                 .map_ok(|elements| stream::FilledAt::new(elements, axes, ndim))
@@ -319,7 +329,7 @@ impl<Txn, FE, A> SparseTensor<Txn, FE, A> {
     }
 }
 
-impl<Txn, FE, T: CDatatype> SparseTensor<Txn, FE, SparseAccess<Txn, FE, T>> {
+impl<Txn, FE, T: CType> SparseTensor<Txn, FE, SparseAccess<Txn, FE, T>> {
     pub fn from_access<A: Into<SparseAccess<Txn, FE, T>>>(accessor: A) -> Self {
         Self {
             accessor: accessor.into(),
@@ -635,7 +645,7 @@ where
     FE: AsType<Node> + ThreadSafe,
     L: SparseInstance<DType = T>,
     R: SparseInstance<DType = T>,
-    T: CDatatype + DType,
+    T: CType + DType,
 {
     type Combine = SparseTensor<Txn, FE, SparseCombine<L, R, T>>;
     type LeftCombine = SparseTensor<Txn, FE, SparseCombineLeft<L, R, T>>;
@@ -645,7 +655,7 @@ where
             self.accessor,
             other.accessor,
             |l, r| l.add(r).map(Array::from).map_err(TCError::from),
-            |l, r| l + r,
+            |l, r| T::add(l, r),
         )
         .map(SparseTensor::from)
     }
@@ -655,13 +665,13 @@ where
             self.accessor,
             other.accessor,
             |l, r| l.div(r).map(Array::from).map_err(TCError::from),
-            |l, r| if r == T::zero() { T::zero() } else { l / r },
+            |l, r| T::div(l, r),
         )
         .map(SparseTensor::from)
     }
 
     fn log(self, base: SparseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
-        fn log<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn log<T: CType>(left: ArrayAccess<T>, right: ArrayAccess<T>) -> TCResult<ArrayAccess<T>> {
             let right = right.cast()?;
             left.log(right).map(Array::from).map_err(TCError::from)
         }
@@ -677,13 +687,13 @@ where
             self.accessor,
             other.accessor,
             |l, r| l.mul(r).map(Array::from).map_err(TCError::from),
-            |l, r| l * r,
+            |l, r| T::mul(l, r),
         )
         .map(SparseTensor::from)
     }
 
     fn pow(self, other: SparseTensor<Txn, FE, R>) -> TCResult<Self::LeftCombine> {
-        fn pow<T: CDatatype>(left: Array<T>, right: Array<T>) -> TCResult<Array<T>> {
+        fn pow<T: CType>(left: ArrayAccess<T>, right: ArrayAccess<T>) -> TCResult<ArrayAccess<T>> {
             let right = right.cast()?;
             left.pow(right).map(Array::from).map_err(TCError::from)
         }
@@ -699,7 +709,7 @@ where
             self.accessor,
             other.accessor,
             |l, r| l.sub(r).map(Array::from).map_err(TCError::from),
-            |l, r| l - r,
+            |l, r| T::sub(l, r),
         )
         .map(SparseTensor::from)
     }
@@ -711,7 +721,7 @@ where
     FE: ThreadSafe,
     A: SparseInstance,
     A::DType: CastFrom<Number>,
-    <A::DType as CDatatype>::Float: CastFrom<Number>,
+    <A::DType as CType>::Float: CastFrom<Number>,
     Number: From<A::DType>,
 {
     type Combine = SparseTensor<Txn, FE, SparseCombineConst<A, A::DType>>;
@@ -730,7 +740,7 @@ where
                         .map(Array::from)
                         .map_err(TCError::from)
                 },
-                |l, r| l / r.cast_into(),
+                |l, r| A::DType::div(l, r.cast_into()),
             );
 
             Ok(SparseTensor::from(access))
@@ -767,7 +777,7 @@ where
                     .map(Array::from)
                     .map_err(TCError::from)
             },
-            |l, r| l * r.cast_into(),
+            |l, r| A::DType::mul(l, r.cast_into()),
         );
 
         Ok(SparseTensor::from(access))
@@ -1881,7 +1891,7 @@ pub fn sparse_from<Txn, FE, A, T>(
 ) -> SparseTensor<Txn, FE, SparseAccess<Txn, FE, T>>
 where
     A: Into<SparseAccess<Txn, FE, T>>,
-    T: CDatatype,
+    T: CType,
 {
     SparseTensor::from_access(tensor.into_inner())
 }

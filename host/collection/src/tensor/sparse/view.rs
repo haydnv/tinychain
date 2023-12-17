@@ -4,7 +4,7 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use destream::de;
 use futures::{Stream, TryStreamExt};
-use ha_ndarray::{Array, Buffer, CDatatype, NDArrayBoolean, NDArrayRead};
+use ha_ndarray::{Array, Buffer, CType, NDArrayBoolean, NDArrayRead};
 use log::trace;
 use rayon::prelude::*;
 use safecast::{AsType, CastFrom, CastInto};
@@ -21,10 +21,10 @@ use tcgeneric::ThreadSafe;
 use crate::tensor::complex::{ComplexCompare, ComplexMath, ComplexRead, ComplexTrig, ComplexUnary};
 use crate::tensor::dense::{dense_from, DenseCacheFile, DenseView};
 use crate::tensor::{
-    autoqueue, broadcast_shape, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst,
-    TensorCast, TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal,
-    TensorInstance, TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead,
-    TensorReduce, TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
+    broadcast_shape, Axes, Coord, Range, Shape, TensorBoolean, TensorBooleanConst, TensorCast,
+    TensorCompare, TensorCompareConst, TensorCond, TensorConvert, TensorDiagonal, TensorInstance,
+    TensorMatMul, TensorMath, TensorMathConst, TensorPermitRead, TensorRead, TensorReduce,
+    TensorTransform, TensorTrig, TensorUnary, TensorUnaryBoolean,
 };
 
 use super::{sparse_from, Node, SparseAccess, SparseCombine, SparseTensor, SparseUnaryCast};
@@ -133,7 +133,7 @@ async fn into_complex_elements<Txn, FE, T>(
 where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<Buffer<T>> + AsType<Node> + Clone,
-    T: CDatatype + DType + fmt::Debug,
+    T: CType + DType + fmt::Debug,
     Buffer<T>: de::FromStream<Context = ()>,
     Complex: From<(T, T)>,
     Number: From<T> + CastInto<T>,
@@ -156,20 +156,18 @@ where
 
     let elements = blocks
         .map_ok(move |(coords, (re, im))| async move {
-            let queue = autoqueue(&coords)?;
-
             let coords = coords
-                .read(&queue)
+                .buffer()
                 .and_then(|buffer| buffer.to_slice())
                 .map(|slice| slice.into_vec())?;
 
             let re = re
-                .read(&queue)
+                .buffer()
                 .and_then(|buffer| buffer.to_slice())
                 .map(|slice| slice.into_vec())?;
 
             let im = im
-                .read(&queue)
+                .buffer()
                 .and_then(|buffer| buffer.to_slice())
                 .map(|slice| slice.into_vec())?;
 

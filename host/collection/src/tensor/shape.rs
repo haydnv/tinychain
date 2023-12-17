@@ -49,11 +49,11 @@ impl AxisRange {
     }
 
     /// The length of this range
-    pub fn dim(&self) -> u64 {
+    pub fn dim(&self) -> Option<u64> {
         match self {
-            Self::At(_) => 1,
-            Self::In(range, step) => (range.end - range.start) / step,
-            Self::Of(indices) => indices.len() as u64,
+            Self::At(_) => None,
+            Self::In(range, step) => Some((range.end - range.start) / step),
+            Self::Of(indices) => Some(indices.len() as u64),
         }
     }
 
@@ -134,14 +134,14 @@ impl From<ops::Range<u64>> for AxisRange {
     }
 }
 
-impl TryFrom<AxisRange> for ha_ndarray::AxisBound {
+impl TryFrom<AxisRange> for ha_ndarray::AxisRange {
     type Error = TCError;
 
     fn try_from(range: AxisRange) -> Result<Self, Self::Error> {
         match range {
             AxisRange::At(i) => i
                 .try_into()
-                .map(ha_ndarray::AxisBound::At)
+                .map(ha_ndarray::AxisRange::At)
                 .map_err(|cause| bad_request!("bad range: {cause}")),
 
             AxisRange::In(range, step) => {
@@ -159,7 +159,7 @@ impl TryFrom<AxisRange> for ha_ndarray::AxisBound {
                     .try_into()
                     .map_err(|cause| bad_request!("bad range start: {cause}"))?;
 
-                Ok(ha_ndarray::AxisBound::In(start, stop, step))
+                Ok(ha_ndarray::AxisRange::In(start, stop, step))
             }
 
             AxisRange::Of(indices) => {
@@ -171,7 +171,7 @@ impl TryFrom<AxisRange> for ha_ndarray::AxisBound {
                     })
                     .collect::<Result<_, TCError>>()?;
 
-                Ok(ha_ndarray::AxisBound::Of(indices))
+                Ok(ha_ndarray::AxisRange::Of(indices))
             }
         }
     }
@@ -301,20 +301,13 @@ impl Range {
 
     /// Return the [`Shape`] of the `Tensor` slice with this `Range`.
     pub fn shape(&self) -> Shape {
-        self.axes
-            .iter()
-            .filter_map(|bound| match bound {
-                AxisRange::At(_) => None,
-                AxisRange::In(range, step) => Some((range.end - range.start) / *step),
-                AxisRange::Of(indices) => Some(indices.len() as u64),
-            })
-            .collect()
+        self.axes.iter().filter_map(AxisRange::dim).collect()
     }
 
     /// Return the size of the slice with this `Range`,
     /// assuming they are of the same length as the source shape.
     pub fn size(&self) -> u64 {
-        self.axes.iter().map(|bound| bound.dim()).product()
+        self.axes.iter().filter_map(AxisRange::dim).product()
     }
 }
 

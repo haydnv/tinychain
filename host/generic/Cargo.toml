@@ -23,4 +23,4 @@ safecast = "0.2"
 serde = { version = "1.0", features = [] }
 sha2 = "0.10"
 smallvec = "1.11"
-tc-error = "0.9"
+tc-error = { path = "../error" }

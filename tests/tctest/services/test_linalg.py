@@ -144,7 +144,7 @@ class LinearAlgebraTests(unittest.TestCase):
         n = 2
         m = 3
         shape = [num_matrices, n, m]
-        matrices = np.random.random(np.product(shape)).reshape(shape)
+        matrices = np.random.random(np.prod(shape)).reshape(shape)
         tensor = tc.tensor.Dense.load(shape, matrices.flatten().tolist(), tc.F32)
 
         start = time.time()
@@ -170,7 +170,7 @@ class LinearAlgebraTests(unittest.TestCase):
         n = 3
         m = 2
         shape = [num_matrices, n, m]
-        matrices = np.random.random(np.product(shape)).reshape(shape)
+        matrices = np.random.random(np.prod(shape)).reshape(shape)
         tensor = tc.tensor.Dense.load(shape, matrices.flatten().tolist(), tc.F32)
 
         start = time.time()
