@@ -284,7 +284,7 @@ where
     {
         Self::construct_with_op(dir, shape, |block_shape| {
             let arr = ArrayOp::range(start, stop, block_shape)?;
-            let buf = arr.read()?.into_buffer()?;
+            let buf = arr.buffer()?.into_buffer()?;
             Ok(buf)
         })
         .await
@@ -364,7 +364,7 @@ where
                 .mul_scalar(std)?
                 .add_scalar(mean)?;
 
-            let buf = arr.read()?.into_buffer()?;
+            let buf = arr.buffer()?.into_buffer()?;
 
             Ok(buf)
         })
@@ -374,7 +374,7 @@ where
     pub async fn random_uniform(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
         Self::construct_with_op(dir, shape, |block_shape| {
             let arr = ArrayOp::random_uniform(block_shape.iter().product())?;
-            let buf = arr.read()?.into_buffer()?;
+            let buf = arr.buffer()?.into_buffer()?;
             Ok(buf)
         })
         .await
@@ -415,6 +415,7 @@ where
         block_id: u64,
     ) -> TCResult<Array<Self::DType, Self::Block>> {
         let dir = self.dir.read().await;
+
         let file = dir
             .get_file(&block_id)
             .ok_or_else(|| internal!("tensor missing block {block_id}"))?;
@@ -458,7 +459,7 @@ where
         let block_offset = (offset % self.block_size() as u64) as usize;
 
         let block = self.read_block(txn_id, block_id).await?;
-        let buffer = block.read()?;
+        let buffer = block.buffer()?;
         Ok(buffer.to_slice()?.as_ref()[block_offset])
     }
 }
@@ -638,7 +639,7 @@ where
                     let mut block = dir.write_file(&block_id).await?;
 
                     let data = result?;
-                    let data = data.read()?;
+                    let data = data.buffer()?;
                     debug_assert_eq!(block.len(), data.len());
                     block.write(data)?;
 

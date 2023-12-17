@@ -59,7 +59,7 @@ where
                 break Some(data);
             } else {
                 match ready!(this.source.as_mut().poll_next(cxt)) {
-                    Some(Ok(block)) => match block.read() {
+                    Some(Ok(block)) => match block.buffer() {
                         Ok(buffer) => match buffer.to_slice() {
                             Ok(slice) => this.pending.extend(slice.as_ref()),
                             Err(cause) => break Some(Err(TCError::from(cause))),

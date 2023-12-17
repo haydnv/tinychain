@@ -467,7 +467,7 @@ impl<S: DenseInstance> DenseBroadcast<S> {
             source_block_map.reshape(map_shape)
         } else {
             let block_map = source_block_map.broadcast(map_shape.clone())?;
-            ArrayBuf::new(block_map.read()?.to_slice()?.into_stackvec(), map_shape)
+            ArrayBuf::new(block_map.buffer()?.to_slice()?.into_stackvec(), map_shape)
         }?;
 
         Ok(Self {
@@ -624,7 +624,7 @@ where
         } else {
             let block = self.source.read_block(txn_id, block_id).await?;
             let platform = ha_ndarray::Platform::select(block.size());
-            let buffer = block.read()?;
+            let buffer = block.buffer()?;
             let buffer = platform.convert(buffer)?;
 
             let type_size = S::DType::dtype().size();
@@ -722,7 +722,7 @@ where
         let block_offset = (offset % self.block_size() as u64) as usize;
 
         let block = self.read_block(txn_id, block_id).await?;
-        let buffer = block.read()?;
+        let buffer = block.buffer()?;
         Ok(buffer.to_slice()?.as_ref()[block_offset])
     }
 }
@@ -2445,7 +2445,7 @@ where
             }
 
             let block_map_slice = self.block_map.clone().slice(map_slice)?;
-            block_map_slice.read()?.to_slice()?.into_stackvec()
+            block_map_slice.buffer()?.to_slice()?.into_stackvec()
         } else {
             let block_id = self.block_map.read_value(&map_coord)?;
             stackvec![block_id]
@@ -2738,7 +2738,7 @@ impl<S: DenseInstance> DenseInstance for DenseResizeBlocks<S> {
             .map(|block_id| self.source.read_block(txn_id, block_id))
             .buffered(num_cpus::get())
             .map_ok(|block| async move {
-                let buffer = block.read()?;
+                let buffer = block.buffer()?;
 
                 buffer
                     .to_slice()
@@ -2914,7 +2914,7 @@ impl<S: DenseInstance> DenseSlice<S> {
         } else {
             let block_map = block_map.slice(block_map_bounds)?;
             ArrayBuf::new(
-                block_map.read()?.to_slice()?.into_stackvec(),
+                block_map.buffer()?.to_slice()?.into_stackvec(),
                 BlockShape::from_slice(block_map.shape()),
             )?
         };
@@ -3451,7 +3451,7 @@ impl<S: DenseInstance> DenseTranspose<S> {
         let block_map = if num_blocks > 1 {
             let block_map = block_map.transpose(Some(ha_ndarray::Axes::from_slice(map_axes)))?;
             let map_shape = BlockShape::from_slice(block_map.shape());
-            let block_map = block_map.read()?.to_slice()?.into_stackvec();
+            let block_map = block_map.buffer()?.to_slice()?.into_stackvec();
             ArrayBuf::new(block_map, map_shape)
         } else {
             Ok(block_map)

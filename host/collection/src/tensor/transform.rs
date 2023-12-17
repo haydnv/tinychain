@@ -1,5 +1,9 @@
 use std::iter;
 
+use ha_ndarray::{
+    range, shape, ArrayBuf, Buffer, NDArray, NDArrayMathScalar, NDArrayRead, NDArrayTransform,
+    NDArrayWrite, StackVec,
+};
 use itertools::Itertools;
 use log::{trace, warn};
 use smallvec::{smallvec, SmallVec};
@@ -595,13 +599,8 @@ impl Slice {
                     coord.push(i / step);
                 }
                 AxisRange::Of(indices) => {
-                    let i = indices
-                        .iter()
-                        .copied()
-                        .position(|idx| idx == i)
-                        .expect("index");
-
-                    coord.push(i as u64);
+                    assert!(i < indices.len() as u64);
+                    coord.push(indices[i as usize]);
                 }
             }
         }
@@ -611,6 +610,63 @@ impl Slice {
         debug_assert_eq!(coord.len(), self.shape.len());
 
         coord
+    }
+
+    pub fn map_coords(
+        &self,
+        source_coords: ArrayBuf<u64, Buffer<u64>>,
+    ) -> TCResult<ArrayBuf<u64, Buffer<u64>>> {
+        assert_eq!(source_coords.ndim(), 2);
+        assert_eq!(source_coords.shape()[1], self.source_shape.len());
+
+        let batch_size = source_coords.shape()[0];
+        let batch_range = ha_ndarray::AxisRange::In(0, batch_size, 1);
+
+        let mut coords = ArrayBuf::constant(0, shape![batch_size, self.shape.len()])?;
+        let mut x = 0;
+
+        for (x_source, axis_range) in self.range.iter().enumerate() {
+            let i = source_coords.as_ref().slice(range![
+                batch_range.clone(),
+                ha_ndarray::AxisRange::At(x_source)
+            ])?;
+
+            match axis_range {
+                AxisRange::At(_) => {
+                    // no-op
+                }
+                AxisRange::In(range, step) => {
+                    let i = i.as_ref().sub_scalar(range.start)?.div_scalar(*step)?;
+
+                    coords
+                        .as_mut()
+                        .slice(range![batch_range.clone(), ha_ndarray::AxisRange::At(x)])?
+                        .write(&i)?;
+
+                    x += 1;
+                }
+                AxisRange::Of(indices) => {
+                    let i = i
+                        .buffer()?
+                        .to_slice()?
+                        .into_iter()
+                        .copied()
+                        .map(|i| indices[i as usize])
+                        .collect::<StackVec<u64>>();
+
+                    let i = ArrayBuf::new(i, shape![batch_size])?;
+
+                    coords
+                        .as_mut()
+                        .slice(range![batch_range.clone(), ha_ndarray::AxisRange::At(x)])?
+                        .write(&i)?;
+
+                    x += 1;
+                }
+            }
+        }
+
+        Ok(coords)
     }
 }
 
@@ -674,13 +730,29 @@ impl Transpose {
         source_coord
     }
 
-    pub fn map_coord(&self, source_coord: Coord) -> Coord {
-        debug_assert_eq!(source_coord.len(), self.permutation.len());
+    pub fn map_coords(
+        &self,
+        source_coords: ArrayBuf<u64, Buffer<u64>>,
+    ) -> TCResult<ArrayBuf<u64, Buffer<u64>>> {
+        debug_assert_eq!(source_coords.ndim(), 2);
+        debug_assert_eq!(source_coords.shape()[1], self.permutation.len());
 
-        self.permutation
-            .iter()
-            .copied()
-            .map(|x| source_coord[x])
-            .collect()
+        let batch_size = source_coords.shape()[0];
+        let batch_range = ha_ndarray::AxisRange::In(0, batch_size, 1);
+
+        let mut coords = ArrayBuf::constant(0, shape![batch_size, self.shape.len()])?;
+
+        for (x, x_source) in self.permutation.iter().copied().enumerate() {
+            let i = source_coords
+                .as_ref()
+                .slice(range![batch_range.clone(), ha_ndarray::AxisRange::At(x_source)])?;
+
+            coords
+                .as_mut()
+                .slice(range![batch_range.clone(), ha_ndarray::AxisRange::At(x)])?
+                .write(&i)?;
+        }
+
+        Ok(coords)
     }
 }

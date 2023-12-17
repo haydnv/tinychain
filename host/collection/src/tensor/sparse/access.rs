@@ -823,7 +823,6 @@ impl<S: SparseInstance + Clone> SparseInstance for SparseBroadcastAxis<S> {
         } else if self.axis == self.ndim() - 1 {
             let source_elements = self.source.elements(txn_id, source_range, order).await?;
 
-            // TODO: write a range to a slice of a coordinate block instead
             let elements = source_elements
                 .map_ok(move |(source_coord, value)| {
                     futures::stream::iter(axis_range.clone()).map(move |i| {
@@ -2484,7 +2483,7 @@ where
             .zip(source_blocks)
             .map(|(coords, values)| values.map(|values| (coords, values)))
             .try_filter_map(move |(coords, values)| async move {
-                let values = values.read()?.to_slice()?;
+                let values = values.buffer()?.to_slice()?;
 
                 let (coords, values) = coords
                     .into_par_iter()
@@ -3078,7 +3077,7 @@ impl<S> SparseInstance for SparseSlice<S>
 where
     S: SparseInstance,
 {
-    type CoordBlock = AccessBuf<Vec<u64>>;
+    type CoordBlock = AccessBuf<Buffer<u64>>;
     type ValueBlock = S::ValueBlock;
     type Blocks = Blocks<S::DType, Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
@@ -3099,27 +3098,14 @@ where
             .await?;
 
         let transform = self.transform;
-        let ndim = transform.shape().len();
         let source_ndim = transform.source_shape().len();
 
-        // TODO: it should be possible to parallelize this without reading into a Vec
         let blocks = source_blocks.map(move |result| {
             let (source_coords, values) = result?;
-
             debug_assert_eq!(source_coords.shape(), [values.size(), source_ndim]);
 
-            let source_coords = source_coords.read()?;
-
-            let coords = source_coords
-                .to_slice()?
-                .as_ref()
-                .chunks(source_ndim)
-                .map(Coord::from_slice)
-                .map(|source_coord| transform.map_coord(source_coord))
-                .flatten()
-                .collect();
-
-            let coords = ArrayBuf::new(coords, shape![values.size(), ndim])?;
+            let source_coords = source_coords.into_read()?;
+            let coords = transform.map_coords(source_coords)?;
 
             Ok((coords, values))
         });
@@ -3310,7 +3296,7 @@ impl<S> SparseInstance for SparseTranspose<S>
 where
     S: SparseInstance,
 {
-    type CoordBlock = AccessBuf<Vec<u64>>;
+    type CoordBlock = AccessBuf<Buffer<u64>>;
     type ValueBlock = S::ValueBlock;
     type Blocks = Blocks<S::DType, Self::CoordBlock, Self::ValueBlock>;
     type DType = S::DType;
@@ -3345,23 +3331,10 @@ where
             .blocks(txn_id, source_range, source_order)
             .await?;
 
-        // TODO: it should be possible to parallelize this without reading into a Vec
         let blocks = source_blocks.map(move |result| {
             let (source_coords, values) = result?;
-
-            let source_coords = source_coords.read()?.to_slice()?;
-
-            let ndim = self.transform.shape().len();
-            let coords = source_coords
-                .as_ref()
-                .chunks(ndim)
-                .map(Coord::from_slice)
-                .map(|source_coord| self.transform.map_coord(source_coord))
-                .flatten()
-                .collect();
-
-            let coords = ArrayBuf::new(coords, shape![values.size(), ndim])?;
-
+            let source_coords = source_coords.into_read()?;
+            let coords = self.transform.map_coords(source_coords)?;
             Ok((coords, values))
         });
 
@@ -4096,8 +4069,8 @@ fn block_elements<T: CType, C: NDArrayRead<DType = u64>, V: NDArrayRead<DType = 
         .map(move |result| {
             let (coords, values) = result?;
 
-            let coords = coords.read()?.to_slice()?;
-            let values = values.read()?.to_slice()?;
+            let coords = coords.buffer()?.to_slice()?;
+            let values = values.buffer()?.to_slice()?;
 
             let tuples = coords
                 .as_ref()
@@ -4132,8 +4105,8 @@ where
             let strides = NDArrayTransform::broadcast(strides.clone(), shape)?;
             let offsets = NDArrayMath::mul(coords, strides).map(ArrayAccess::from)?;
             let offsets = NDArrayReduce::sum(offsets, axes![1], false)?;
-            let offsets = offsets.read()?.to_slice()?.into_vec();
-            let values = values.read()?.to_slice()?.into_vec();
+            let offsets = offsets.buffer()?.to_slice()?.into_vec();
+            let values = values.buffer()?.to_slice()?.into_vec();
 
             debug_assert_eq!(offsets.len(), values.len());
 
@@ -4162,7 +4135,7 @@ fn filter_zeros<T: CType>(
     if NDArrayReduceBoolean::all(values.as_ref())? {
         Ok(Some((coords, ArrayAccess::from(values))))
     } else {
-        let coord_slice = coords.read()?.to_slice()?;
+        let coord_slice = coords.buffer()?.to_slice()?;
         let value_slice = values.into_access().into_inner();
         let value_slice = value_slice.read().to_slice()?;
         debug_assert_eq!(coord_slice.len() % ndim, 0);

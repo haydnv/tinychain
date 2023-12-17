@@ -157,17 +157,17 @@ where
     let elements = blocks
         .map_ok(move |(coords, (re, im))| async move {
             let coords = coords
-                .read()
+                .buffer()
                 .and_then(|buffer| buffer.to_slice())
                 .map(|slice| slice.into_vec())?;
 
             let re = re
-                .read()
+                .buffer()
                 .and_then(|buffer| buffer.to_slice())
                 .map(|slice| slice.into_vec())?;
 
             let im = im
-                .read()
+                .buffer()
                 .and_then(|buffer| buffer.to_slice())
                 .map(|slice| slice.into_vec())?;
 

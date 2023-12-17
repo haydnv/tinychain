@@ -51,7 +51,7 @@ impl DenseViewBlocks {
                 let blocks = blocks
                     .map(move |result| {
                         let block = result?;
-                        let buffer = block.read()?.to_slice()?.into_vec();
+                        let buffer = block.buffer()?.to_slice()?.into_vec();
                         TCResult::Ok(buffer.into_iter().map(|i| i != 0).collect::<Vec<bool>>())
                     })
                     .take_while(|result| future::ready(result.is_ok()))
@@ -99,7 +99,7 @@ where
         let block = result?;
 
         block
-            .read()
+            .buffer()
             .and_then(|buffer| buffer.to_slice())
             .map(|slice| slice.into_vec())
             .map_err(TCError::from)
@@ -109,7 +109,7 @@ where
         let block = result?;
 
         block
-            .read()
+            .buffer()
             .and_then(|buffer| buffer.to_slice())
             .map(|slice| slice.into_vec())
             .map_err(TCError::from)
@@ -155,7 +155,7 @@ where
             );
 
             block
-                .read()
+                .buffer()
                 .and_then(|buffer| buffer.to_slice())
                 .map(|slice| slice.into_vec())
                 .map_err(TCError::from)
