@@ -743,9 +743,10 @@ impl Transpose {
         let mut coords = ArrayBuf::constant(0, shape![batch_size, self.shape.len()])?;
 
         for (x, x_source) in self.permutation.iter().copied().enumerate() {
-            let i = source_coords
-                .as_ref()
-                .slice(range![batch_range.clone(), ha_ndarray::AxisRange::At(x_source)])?;
+            let i = source_coords.as_ref().slice(range![
+                batch_range.clone(),
+                ha_ndarray::AxisRange::At(x_source)
+            ])?;
 
             coords
                 .as_mut()
