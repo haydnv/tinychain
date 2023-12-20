@@ -1,6 +1,6 @@
 [package]
 name = "tcgeneric"
-version = "0.8.1"
+version = "0.9.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "Generic data types used internally by TinyChain"
@@ -23,4 +23,4 @@ safecast = "0.2"
 serde = { version = "1.0", features = [] }
 sha2 = "0.10"
 smallvec = "1.11"
-tc-error = { path = "../error" }
+tc-error = "0.10"

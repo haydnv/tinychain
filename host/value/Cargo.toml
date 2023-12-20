@@ -1,6 +1,6 @@
 [package]
 name = "tc-value"
-version = "0.10.0"
+version = "0.11.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "TinyChain's representation of a value which can be collated and stored."
@@ -31,6 +31,6 @@ safecast = "0.2"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0", features = [] }
 smallvec = { version = "1.11", features = ["serde"] }
-tcgeneric = { path = "../generic" }
-tc-error = { path = "../error" }
-uuid = { version = "1.5", features = ["v4"] }
+tcgeneric = "0.9"
+tc-error = "0.10"
+uuid = { version = "1.6", features = ["v4"] }

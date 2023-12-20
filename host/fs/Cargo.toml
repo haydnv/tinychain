@@ -1,6 +1,6 @@
 [package]
 name = "tc-fs"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "TinyChain's transactional filesystem interface layer"
@@ -14,23 +14,23 @@ categories = ["concurrency", "data-structures"]
 [dependencies]
 async-hash = "0.5"
 async-trait = "0.1"
-bytes = "1.4"
+bytes = "1.5"
 destream = "0.7"
 futures = "0.3"
 freqfs = { version = "0.9", features = ["all"] }
 get-size = "0.1"
 get-size-derive = "0.1"
 log = { version = "0.4", features = ["release_max_level_info"] }
-num_cpus = "1.15"
+num_cpus = "1.16"
 rjwt = "0.4"
 safecast = "0.2"
 tbon = "0.5"
-tc-chain = { path = "../chain" }
-tc-collection = { path = "../collection" }
-tc-error = { path = "../error" }
-tc-scalar = { path = "../scalar" }
-tc-transact = { path = "../transact" }
-tc-value = { path = "../value" }
-tcgeneric = { path = "../generic" }
+tc-chain = "0.3"
+tc-collection = "0.3"
+tc-error = "0.10"
+tc-scalar = "0.3"
+tc-transact = "0.19"
+tc-value = "0.11"
+tcgeneric = "0.9"
 tokio = { version = "1.35", features = ["rt-multi-thread", "signal"] }
 tokio-util = { version = "0.7", features = ["io"] }
