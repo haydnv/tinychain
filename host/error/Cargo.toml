@@ -1,6 +1,6 @@
 [package]
 name = "tc-error"
-version = "0.9.0"
+version = "0.10.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "TinyChain's generic error struct"
@@ -13,7 +13,7 @@ categories = ["rust-patterns"]
 
 [dependencies]
 destream = "0.7"
-ha-ndarray = { path = "../../../ha-ndarray" }
+ha-ndarray = "0.3"
 log = { version = "0.4", features = ["release_max_level_info"] }
 pathlink = "0.2"
 serde = "1.0"
