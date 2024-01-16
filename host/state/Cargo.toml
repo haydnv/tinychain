@@ -20,13 +20,13 @@ futures = "0.3"
 get-size = "0.1"
 get-size-derive = "0.1"
 log = "0.4"
-num_cpus = "1.13"
+num_cpus = "1.16"
 safecast = "0.2"
-tc-chain = "0.3"
-tc-collection = "0.3"
-tc-error = "0.10"
-tc-fs = "0.3"
-tc-scalar = "0.3"
-tc-transact = "0.19"
-tc-value = "0.11"
-tcgeneric = "0.9"
+tc-chain = { path = "../chain" }
+tc-collection = { path = "../collection" }
+tc-error = { path = "../error" }
+tc-fs = { path = "../fs" }
+tc-scalar = { path = "../scalar" }
+tc-transact = { path = "../transact" }
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }

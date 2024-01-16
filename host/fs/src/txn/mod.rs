@@ -21,7 +21,6 @@ use tcgeneric::{
 
 use crate::block::CacheBlock;
 
-pub use hypothetical::Hypothetical;
 pub use request::*;
 pub use server::*;
 pub use tc_transact::TxnId;
