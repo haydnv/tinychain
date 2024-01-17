@@ -324,11 +324,7 @@ where
         let subject = seq.next_element::<T>(self.txn.clone()).await?;
         let subject = subject.ok_or_else(|| de::Error::invalid_length(0, "a BlockChain schema"))?;
 
-        let txn = self
-            .txn
-            .subcontext(HISTORY)
-            .map_err(de::Error::custom)
-            .await?;
+        let txn = self.txn.subcontext(HISTORY);
 
         let history = seq.next_element::<History<State>>(txn).await?;
         let history =

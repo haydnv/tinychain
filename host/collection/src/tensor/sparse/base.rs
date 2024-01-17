@@ -724,7 +724,7 @@ where
     ) -> Result<Self, D::Error> {
         let (txn, shape) = cxt;
 
-        let dir = txn.context().clone();
+        let dir = txn.context().map_err(de::Error::custom).await?;
 
         let (canon, versions) = {
             let mut dir = dir.write().await;
@@ -761,7 +761,8 @@ where
     async fn new(txn: Txn, shape: Shape) -> TCResult<Self> {
         let (re, im) = {
             let dir = {
-                let mut cxt = txn.context().write().await;
+                let cxt = txn.context().await?;
+                let mut cxt = cxt.write().await;
                 let (_dir_name, dir) = cxt.create_dir_unique()?;
                 dir
             };

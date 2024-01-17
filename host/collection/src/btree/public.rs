@@ -63,8 +63,9 @@ where
                 // let txn_id = *txn.id();
                 //
                 // let store = {
-                //     let mut dir = txn.context().write().await;
-                //     let (_, cache) = dir.create_dir_unique()?;
+                //     let cxt = txn.context().await?;
+                //     let mut cxt = cxt.write().await;
+                //     let (_, cache) = cxt.create_dir_unique()?;
                 //     Dir::load(*txn.id(), cache).await?
                 // };
 
@@ -92,8 +93,9 @@ where
             Box::pin(async move {
                 let schema = cast_into_schema(value)?;
                 let store = {
-                    let mut dir = txn.context().write().await;
-                    let (_, cache) = dir.create_dir_unique()?;
+                    let cxt = txn.context().await?;
+                    let mut cxt = cxt.write().await;
+                    let (_, cache) = cxt.create_dir_unique()?;
                     Dir::load(*txn.id(), cache).await?
                 };
 

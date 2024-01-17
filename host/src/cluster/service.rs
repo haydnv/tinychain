@@ -94,7 +94,7 @@ impl Replica for Version {
         for (name, attr) in self.attrs.iter() {
             if let Attr::Chain(chain) = attr {
                 let source = source.clone().append(name.clone());
-                let txn = txn.subcontext(name.clone()).await?;
+                let txn = txn.subcontext(name.clone());
                 // TODO: parallelize
                 chain.replicate(&txn, source).await?;
             }
@@ -328,7 +328,7 @@ impl Replica for Service {
             let source = source.clone().append(number);
 
             // TODO: parallelize
-            let txn = txn.subcontext(number).await?;
+            let txn = txn.subcontext(number);
             version.replicate(&txn, source).await?;
         }
 

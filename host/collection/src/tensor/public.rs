@@ -1868,7 +1868,8 @@ where
         };
 
         let (_name, store) = {
-            let mut cxt = txn.context().write().await;
+            let cxt = txn.context().await?;
+            let mut cxt = cxt.write().await;
             cxt.create_dir_unique()?
         };
 
@@ -1900,7 +1901,8 @@ where
     Txn: Transaction<FE>,
     FE: Clone + ThreadSafe,
 {
-    let mut cxt = txn.context().write().await;
+    let cxt = txn.context().await?;
+    let mut cxt = cxt.write().await;
     let (_dir_name, dir) = cxt.create_dir_unique()?;
     fs::Dir::load(*txn.id(), dir).await
 }

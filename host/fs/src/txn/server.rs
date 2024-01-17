@@ -15,12 +15,12 @@ use tcgeneric::NetworkTime;
 use crate::block::CacheBlock;
 
 use super::request::*;
-use super::{Active, Gateway, Txn, TxnId};
+use super::{Gateway, Txn, TxnId};
 
 /// Server to keep track of the transactions currently active for this host.
 #[derive(Clone)]
 pub struct TxnServer {
-    active: Arc<RwLock<HashMap<TxnId, Arc<Active>>>>,
+    active: Arc<RwLock<HashMap<TxnId, NetworkTime>>>,
     workspace: DirLock<CacheBlock>,
 }
 
@@ -47,16 +47,14 @@ impl TxnServer {
         let mut active = self.active.write().await;
 
         match active.entry(txn_id) {
-            Entry::Occupied(entry) => {
+            Entry::Occupied(_entry) => {
                 trace!("txn {} is already known", txn_id);
-                Ok(Txn::new(entry.get().clone(), gateway, request))
+                Ok(Txn::new(self.workspace.clone(), gateway, request))
             }
             Entry::Vacant(entry) => {
                 trace!("creating new workspace for txn {}...", txn_id);
-                let workspace = self.txn_dir(txn_id).await?;
-                let active = Arc::new(Active::new(&txn_id, workspace.clone(), expires));
-                let txn = Txn::new(active.clone(), gateway, request);
-                entry.insert(active);
+                let txn = Txn::new(self.workspace.clone(), gateway, request);
+                entry.insert(expires);
                 Ok(txn)
             }
         }
@@ -91,8 +89,7 @@ impl TxnServer {
 
             let expired = active
                 .iter()
-                .filter(|(_, active)| active.expires() <= &now)
-                .map(|(txn_id, _)| txn_id)
+                .filter_map(|(txn_id, expires)| if expires <= &now { Some(txn_id) } else { None })
                 .copied()
                 .collect::<Vec<TxnId>>();
 
@@ -120,15 +117,5 @@ impl TxnServer {
         }
 
         workspace.sync().await.expect("sync workspace dir");
-    }
-
-    async fn txn_dir(&self, txn_id: TxnId) -> TCResult<DirLock<CacheBlock>> {
-        debug!("TxnServer::txn_dir");
-
-        let mut workspace = self.workspace.write().await;
-
-        workspace
-            .create_dir(txn_id.to_string())
-            .map_err(TCError::from)
     }
 }

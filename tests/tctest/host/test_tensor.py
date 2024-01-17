@@ -678,6 +678,7 @@ class TensorTests(HostTest):
         expected = expected * np.arange(0, 3)
         self.assertEqual(actual, expect_sparse(tc.I64, [2, 3], expected))
 
+    @unittest.skipIf("debug" in TC_PATH, "too slow for debug mode")
     def testSubAndSum(self):
         x = 300
         y = 250
