@@ -64,8 +64,9 @@ where
                 // params.expect_empty()?;
                 //
                 // let _store = {
-                //     let mut context = txn.context().write().await;
-                //     let (_, dir) = context.create_dir_unique()?;
+                //     let cxt = txn.context().await?;
+                //     let mut cxt = cxt.write().await;
+                //     let (_, dir) = cxt.create_dir_unique()?;
                 //     Dir::load(*txn.id(), dir).await?
                 // };
 
@@ -91,8 +92,9 @@ where
                 let schema = TableSchema::try_cast_from_value(value)?;
 
                 let store = {
-                    let mut context = txn.context().write().await;
-                    let (_, dir) = context.create_dir_unique()?;
+                    let cxt = txn.context().await?;
+                    let mut cxt = cxt.write().await;
+                    let (_, dir) = cxt.create_dir_unique()?;
                     Dir::load(*txn.id(), dir).await?
                 };
 
@@ -283,8 +285,9 @@ where
         txn: &Txn,
     ) -> TCResult<b_tree::BTreeLock<BTreeSchema, ValueCollator, FE>> {
         let (_, tmp) = {
-            let mut context = txn.context().write().await;
-            context.create_dir_unique()?
+            let cxt = txn.context().await?;
+            let mut cxt = cxt.write().await;
+            cxt.create_dir_unique()?
         };
 
         b_tree::BTreeLock::create(

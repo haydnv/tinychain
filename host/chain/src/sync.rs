@@ -360,12 +360,15 @@ where
     ) -> Result<Self, D::Error> {
         let subject = T::from_stream(txn.clone(), decoder).await?;
 
-        let mut context = txn.context().write().await;
+        let cxt = txn.context().map_err(de::Error::custom).await?;
 
         let store = {
-            let dir = context
-                .create_dir(STORE.to_string())
-                .map_err(de::Error::custom)?;
+            let dir = {
+                let mut cxt = cxt.write().await;
+
+                cxt.create_dir(STORE.to_string())
+                    .map_err(de::Error::custom)?
+            };
 
             fs::Dir::load(*txn.id(), dir)
                 .map_ok(super::data::Store::new)
@@ -374,9 +377,12 @@ where
         };
 
         let mut blocks_dir = {
-            let file = context
-                .create_dir(BLOCKS.to_string())
-                .map_err(de::Error::custom)?;
+            let file = {
+                let mut cxt = cxt.write().await;
+
+                cxt.create_dir(BLOCKS.to_string())
+                    .map_err(de::Error::custom)?
+            };
 
             file.write_owned().await
         };

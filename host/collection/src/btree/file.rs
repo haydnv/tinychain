@@ -936,13 +936,14 @@ where
         let (canon, versions) = {
             trace!("lock txn context dir to create canon and versions directories...");
 
-            let mut dir = self.txn.context().write().await;
+            let cxt = self.txn.context().map_err(de::Error::custom).await?;
+            let mut cxt = cxt.write().await;
 
-            let canon = dir
+            let canon = cxt
                 .create_dir(CANON.to_string())
                 .map_err(de::Error::custom)?;
 
-            let versions = dir
+            let versions = cxt
                 .create_dir(VERSIONS.to_string())
                 .map_err(de::Error::custom)?;
 
@@ -1003,8 +1004,10 @@ where
 
         trace!("decoded BTreeFile");
 
+        let dir = self.txn.context().map_err(de::Error::custom).await?;
+
         Ok(BTreeFile {
-            dir: self.txn.context().clone(),
+            dir,
             state: Arc::new(RwLock::new(State {
                 commits: OrdHashSet::with_capacity(0),
                 deltas: OrdHashMap::with_capacity(0),

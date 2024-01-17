@@ -3,21 +3,21 @@
 use std::hash::{Hash, Hasher};
 use std::iter::FromIterator;
 use std::ops::Deref;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use freqfs::DirLock;
-use futures::future::TryFutureExt;
+use futures::future::{Future, TryFutureExt};
 use log::debug;
 use safecast::CastInto;
 
 use tc_error::*;
 use tc_transact::public::StateInstance;
 use tc_transact::Transaction;
+use tc_value::uuid::Uuid;
 use tc_value::{Host, Link, ToUrl, Value};
-use tcgeneric::{
-    Id, NetworkTime, PathSegment, TCBoxFuture, TCBoxTryFuture, TCPathBuf, ThreadSafe, Tuple,
-};
+use tcgeneric::{Id, PathSegment, TCBoxFuture, TCBoxTryFuture, TCPathBuf, ThreadSafe, Tuple};
 
 use crate::block::CacheBlock;
 
@@ -82,55 +82,67 @@ pub trait Gateway: ThreadSafe {
     fn finalize(&self, txn_id: TxnId) -> TCBoxFuture<()>;
 }
 
-struct Active {
-    workspace: DirLock<CacheBlock>,
-    expires: NetworkTime,
-    scope: Scope,
+#[derive(Clone)]
+enum LazyDir {
+    Workspace(DirLock<CacheBlock>),
+    Lazy(Arc<Self>, Id),
 }
 
-impl Active {
-    fn new(txn_id: &TxnId, workspace: DirLock<CacheBlock>, expires: NetworkTime) -> Self {
-        let scope = TCPathBuf::from(txn_id.to_id());
+impl LazyDir {
+    fn get_or_create<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+    ) -> Pin<Box<dyn Future<Output = TCResult<DirLock<CacheBlock>>> + Send + 'a>> {
+        Box::pin(async move {
+            match self {
+                Self::Workspace(workspace) => {
+                    let mut parent = workspace.write().await;
+                    parent.get_or_create_dir(txn_id.to_string()).map_err(TCError::from)
+                }
+                Self::Lazy(parent, name) => {
+                    let parent = parent.get_or_create(txn_id).await?;
+                    let mut parent = parent.write().await;
 
-        Self {
-            workspace,
-            expires,
-            scope,
-        }
+                    parent
+                        .get_or_create_dir(name.to_string())
+                        .map_err(TCError::from)
+                }
+            }
+        })
     }
 
-    fn expires(&self) -> &NetworkTime {
-        &self.expires
+    fn create_dir(self, name: Id) -> Self {
+        Self::Lazy(Arc::new(self), name)
     }
 
-    fn scope(&self) -> &Scope {
-        &self.scope
+    fn create_dir_unique(self) -> Self {
+        Self::Lazy(Arc::new(self), Uuid::new_v4().into())
     }
 }
 
 /// A transaction context.
 #[derive(Clone)]
 pub struct Txn<State> {
-    active: Arc<Active>,
     gateway: Arc<dyn Gateway<State = State>>,
     request: Arc<Request>,
-    dir: DirLock<CacheBlock>,
+    scope: TCPathBuf,
+    dir: LazyDir,
 }
 
 impl<State> Txn<State> {
     fn new(
-        active: Arc<Active>,
+        workspace: DirLock<CacheBlock>,
         gateway: Arc<dyn Gateway<State = State>>,
         request: Request,
     ) -> Self {
+        let scope = request.txn_id().to_id().into();
         let request = Arc::new(request);
-        let dir = active.workspace.clone();
 
         Self {
-            active,
             gateway,
             request,
-            dir,
+            scope,
+            dir: LazyDir::Workspace(workspace),
         }
     }
 }
@@ -180,10 +192,10 @@ where
             .await?;
 
         Ok(Self {
-            active: self.active.clone(),
             gateway: self.gateway.clone(),
-            dir: self.dir.clone(),
             request: Arc::new(Request::new(*txn_id, token, claims)),
+            scope: self.scope.clone(),
+            dir: self.dir.clone(),
         })
     }
 
@@ -200,7 +212,7 @@ where
         }
 
         if self.owner().is_none() {
-            self.grant(actor, cluster_path, vec![self.active.scope().clone()])
+            self.grant(actor, cluster_path, vec![self.scope.clone()])
                 .await
         } else {
             Err(forbidden!(
@@ -228,14 +240,12 @@ where
 
     /// Return the owner of this transaction, if there is one.
     pub fn owner(&self) -> Option<&Link> {
-        let active_scope = self.active.scope();
-
         self.request
             .scopes()
             .iter()
             .filter(|(_, actor_id, _)| *actor_id == &Value::None)
             .filter_map(|(host, _actor_id, scopes)| {
-                if scopes.contains(active_scope) {
+                if scopes.contains(&self.scope) {
                     Some(host)
                 } else {
                     None
@@ -280,21 +290,19 @@ where
                 leader
             ))
         } else {
-            let scopes = vec![self.active.scope().clone()];
+            let scopes = vec![self.scope.clone()];
             self.grant(actor, cluster_path, scopes).await
         }
     }
 
     /// Return the leader of this transaction for the given cluster, if there is one.
     pub fn leader(&self, cluster_path: &[PathSegment]) -> Option<&Link> {
-        let active_scope = self.active.scope();
-
         self.request
             .scopes()
             .iter()
             .filter(|(_, actor_id, _)| *actor_id == &Value::None)
             .filter_map(|(host, _actor_id, scopes)| {
-                if scopes.contains(active_scope) && cluster_path.starts_with(host.path()) {
+                if scopes.contains(&self.scope) && cluster_path.starts_with(host.path()) {
                     Some(host)
                 } else {
                     None
@@ -311,31 +319,26 @@ impl<State: Clone + 'static> Transaction<CacheBlock> for Txn<State> {
         self.request.txn_id()
     }
 
-    fn context(&self) -> &tc_transact::fs::Inner<CacheBlock> {
-        &self.dir
+    async fn context(&self) -> TCResult<DirLock<CacheBlock>> {
+        self.dir.get_or_create(self.request.txn_id()).await
     }
 
-    async fn subcontext<I: Into<Id> + Send>(&self, id: I) -> TCResult<Self> {
-        let mut dir = self.dir.write().await;
-        let dir = dir.create_dir(id.into().to_string())?;
-
-        Ok(Txn {
-            active: self.active.clone(),
+    fn subcontext<I: Into<Id> + Send>(&self, id: I) -> Self {
+        Txn {
             gateway: self.gateway.clone(),
             request: self.request.clone(),
-            dir,
-        })
+            scope: self.scope.clone(),
+            dir: self.dir.clone().create_dir(id.into()),
+        }
     }
 
-    async fn subcontext_unique(&self) -> TCResult<Self> {
-        let (_, subcontext) = self.dir.write().await.create_dir_unique()?;
-
-        Ok(Self {
-            active: self.active.clone(),
+    fn subcontext_unique(&self) -> Self {
+        Txn {
             gateway: self.gateway.clone(),
             request: self.request.clone(),
-            dir: subcontext,
-        })
+            scope: self.scope.clone(),
+            dir: self.dir.clone().create_dir_unique(),
+        }
     }
 }
 

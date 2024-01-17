@@ -24,7 +24,7 @@ use tc_transact::lock::TxnLock;
 use tc_transact::public::{Public, Route, StateInstance};
 use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
-use tcgeneric::{label, Id, Label, Map, TCBoxStream, TCBoxTryStream, ThreadSafe, Tuple};
+use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, ThreadSafe, Tuple};
 
 use crate::{null_hash, BLOCK_SIZE, CHAIN};
 
@@ -720,14 +720,14 @@ where
         let null_hash = null_hash();
         let txn_id = *self.txn.id();
 
+        let cxt = self.txn.context().map_err(de::Error::custom).await?;
+
         let store = {
-            let dir = self
-                .txn
-                .context()
-                .write()
-                .await
-                .create_dir(STORE.to_string())
-                .map_err(de::Error::custom)?;
+            let dir = {
+                let mut cxt = cxt.write().await;
+                cxt.create_dir(STORE.to_string())
+                    .map_err(de::Error::custom)?
+            };
 
             let dir = fs::Dir::load(txn_id, dir)
                 .map_err(de::Error::custom)
@@ -737,9 +737,8 @@ where
         };
 
         let file = {
-            let mut dir = self.txn.context().write().await;
-
-            dir.create_dir(CHAIN.to_string())
+            let mut cxt = cxt.write().await;
+            cxt.create_dir(CHAIN.to_string())
                 .map_err(de::Error::custom)?
         };
 
@@ -757,12 +756,10 @@ where
             .create_file(WRITE_AHEAD.into(), block, size_hint)
             .map_err(de::Error::custom)?;
 
-        let subcontext = |i: u64| self.txn.subcontext(Id::from(i)).map_err(de::Error::custom);
-
         let mut i = 0u64;
         let mut last_hash = null_hash.clone();
 
-        while let Some(state) = seq.next_element::<State>(subcontext(i).await?).await? {
+        while let Some(state) = seq.next_element::<State>(self.txn.subcontext(i)).await? {
             let (hash, block_data): (Bytes, Map<Tuple<State>>) = state
                 .try_cast_into(|s| de::Error::invalid_type(format!("{s:?}"), "a chain block"))?;
 

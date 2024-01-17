@@ -91,13 +91,13 @@ pub trait Transaction<FE>: Clone + Sized + Send + Sync + 'static {
 
     /// Allows locking the filesystem directory of this transaction context,
     /// e.g. to cache un-committed state or to compute an intermediate result.
-    fn context(&self) -> &DirLock<FE>;
+    async fn context(&self) -> TCResult<DirLock<FE>>;
 
     /// Create a new transaction context with the given `id`.
-    async fn subcontext<I: Into<Id> + Send>(&self, id: I) -> TCResult<Self>;
+    fn subcontext<I: Into<Id> + Send>(&self, id: I) -> Self;
 
     /// Create a new transaction subcontext with its own unique [`Dir`].
-    async fn subcontext_unique(&self) -> TCResult<Self>;
+    fn subcontext_unique(&self) -> Self;
 }
 
 /// A transactional remote procedure call client

@@ -176,7 +176,7 @@ impl HTTPServer {
 
             &hyper::Method::PUT => {
                 let key = get_param(&mut params, "key")?.unwrap_or_default();
-                let sub_txn = txn.subcontext_unique().await?;
+                let sub_txn = txn.subcontext_unique();
                 let value = destream_body(http_request.into_body(), encoding, sub_txn).await?;
                 let result = self
                     .gateway
@@ -191,7 +191,7 @@ impl HTTPServer {
             }
 
             &hyper::Method::POST => {
-                let sub_txn = txn.subcontext_unique().await?;
+                let sub_txn = txn.subcontext_unique();
                 let data = destream_body(http_request.into_body(), encoding, sub_txn).await?;
                 self.gateway.post(txn, path.into(), data).await
             }
