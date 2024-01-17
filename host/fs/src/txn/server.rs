@@ -36,7 +36,7 @@ impl TxnServer {
     /// Return the active `Txn` with the given [`TxnId`], or initiate a new [`Txn`].
     pub async fn new_txn<State>(
         &self,
-        gateway: Arc<Box<dyn Gateway<State = State>>>,
+        gateway: Arc<dyn Gateway<State = State>>,
         txn_id: TxnId,
         token: (String, Claims),
     ) -> TCResult<Txn<State>> {

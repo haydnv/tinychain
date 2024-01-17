@@ -112,7 +112,7 @@ impl Active {
 #[derive(Clone)]
 pub struct Txn<State> {
     active: Arc<Active>,
-    gateway: Arc<Box<dyn Gateway<State = State>>>,
+    gateway: Arc<dyn Gateway<State = State>>,
     request: Arc<Request>,
     dir: DirLock<CacheBlock>,
 }
@@ -120,7 +120,7 @@ pub struct Txn<State> {
 impl<State> Txn<State> {
     fn new(
         active: Arc<Active>,
-        gateway: Arc<Box<dyn Gateway<State = State>>>,
+        gateway: Arc<dyn Gateway<State = State>>,
         request: Request,
     ) -> Self {
         let request = Arc::new(request);
@@ -166,7 +166,7 @@ where
 
         use rjwt::Resolve;
         let host = self.gateway.link(cluster_path);
-        let resolver = Resolver::new(&self.gateway, &host, self.request.txn_id());
+        let resolver = Resolver::new(&*self.gateway, &host, self.request.txn_id());
 
         debug!(
             "granting scopes {} to {}",
@@ -387,7 +387,7 @@ where
     }
 }
 
-impl<G> Hash for Txn<G> {
+impl<State> Hash for Txn<State> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.request.txn_id().hash(state)
     }

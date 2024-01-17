@@ -140,8 +140,7 @@ impl Gateway {
         let token = if let Some(token) = token {
             use rjwt::Resolve;
 
-            let gateway: Box<dyn GatewayInstance<State = State>> = Box::new(self.clone());
-            Resolver::new(&gateway, &self.host().clone().into(), &txn_id)
+            Resolver::new(&self, &self.host().clone().into(), &txn_id)
                 .consume_and_sign(&self.inner.actor, vec![], token, txn_id.time().into())
                 .map_err(|cause| unauthorized!("credential error").consume(cause))
                 .await?
@@ -151,15 +150,13 @@ impl Gateway {
 
         let txn_server = self.inner.txn_server.clone();
 
-        txn_server
-            .new_txn(Arc::new(Box::new(self)), txn_id, token)
-            .await
+        txn_server.new_txn(Arc::new(self), txn_id, token).await
     }
 
     /// Start this `Gateway`'s server
     pub fn listen(self) -> Pin<Box<impl Future<Output = Result<(), TokioError>> + 'static>> {
         let port = self.inner.config.http_port;
-        let server = crate::http::HTTPServer::new(self);
+        let server = http::HTTPServer::new(self);
         let listener = server.listen(port).map_err(|e| {
             let e: TokioError = Box::new(e);
             e

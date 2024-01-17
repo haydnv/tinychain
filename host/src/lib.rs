@@ -166,7 +166,6 @@ impl Builder {
         let txn_id = tc_transact::TxnId::new(gateway::Gateway::time());
         let token = gateway.new_token(&txn_id).expect("token");
 
-        let gateway: Box<dyn tc_fs::Gateway<State = tc_state::State>> = Box::new(gateway);
         let txn = txn_server
             .new_txn(Arc::new(gateway), txn_id, token)
             .await

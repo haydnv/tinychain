@@ -72,18 +72,14 @@ impl Request {
 
 /// Struct responsible for resolving JWT auth identities (cf. the [`rjwt`] crate).
 pub struct Resolver<'a, State> {
-    gateway: &'a Box<dyn Gateway<State = State>>,
+    gateway: &'a dyn Gateway<State = State>,
     host: &'a Link,
     txn_id: &'a TxnId,
 }
 
 impl<'a, State> Resolver<'a, State> {
     /// Construct a new `Resolver`.
-    pub fn new(
-        gateway: &'a Box<dyn Gateway<State = State>>,
-        host: &'a Link,
-        txn_id: &'a TxnId,
-    ) -> Self {
+    pub fn new(gateway: &'a dyn Gateway<State = State>, host: &'a Link, txn_id: &'a TxnId) -> Self {
         Self {
             gateway,
             host,
