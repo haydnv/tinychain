@@ -1551,7 +1551,7 @@ impl<'a> de::Visitor for StateVisitor {
         loop {
             let txn = self
                 .txn
-                .subcontext(i.into())
+                .subcontext(i)
                 .map_err(de::Error::custom)
                 .await?;
 

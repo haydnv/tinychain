@@ -145,7 +145,7 @@ impl crate::gateway::Client for Client {
             .header(hyper::header::CONTENT_TYPE, Encoding::Tbon.as_str());
 
         let txn = txn.subcontext_unique().await?;
-        let subcontext = txn.subcontext(label("_params").into()).await?;
+        let subcontext = txn.subcontext(label("_params")).await?;
         let params_view = params.clone().into_view(subcontext).await?;
         let body = tbon::en::encode(params_view)
             .map_err(|cause| bad_request!("unable to encode stream").consume(cause))?;

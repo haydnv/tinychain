@@ -307,20 +307,17 @@ where
 #[async_trait]
 impl<State: Clone + 'static> Transaction<CacheBlock> for Txn<State> {
     #[inline]
-    fn id(&'_ self) -> &'_ TxnId {
+    fn id(&self) -> &TxnId {
         self.request.txn_id()
     }
 
-    fn context(&'_ self) -> &'_ tc_transact::fs::Inner<CacheBlock> {
+    fn context(&self) -> &tc_transact::fs::Inner<CacheBlock> {
         &self.dir
     }
 
-    // TODO: accept a ToOwned<Id>
-    async fn subcontext(&self, id: Id) -> TCResult<Self> {
-        let dir = {
-            let mut dir = self.dir.write().await;
-            dir.create_dir(id.to_string())?
-        };
+    async fn subcontext<I: Into<Id> + Send>(&self, id: I) -> TCResult<Self> {
+        let mut dir = self.dir.write().await;
+        let dir = dir.create_dir(id.into().to_string())?;
 
         Ok(Txn {
             active: self.active.clone(),

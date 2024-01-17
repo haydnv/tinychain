@@ -328,7 +328,7 @@ impl Replica for Service {
             let source = source.clone().append(number);
 
             // TODO: parallelize
-            let txn = txn.subcontext(number.into()).await?;
+            let txn = txn.subcontext(number).await?;
             version.replicate(&txn, source).await?;
         }
 

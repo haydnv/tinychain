@@ -24,7 +24,7 @@ use tc_transact::lock::TxnLock;
 use tc_transact::public::{Public, Route, StateInstance};
 use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
-use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, ThreadSafe, Tuple};
+use tcgeneric::{label, Id, Label, Map, TCBoxStream, TCBoxTryStream, ThreadSafe, Tuple};
 
 use crate::{null_hash, BLOCK_SIZE, CHAIN};
 
@@ -757,7 +757,7 @@ where
             .create_file(WRITE_AHEAD.into(), block, size_hint)
             .map_err(de::Error::custom)?;
 
-        let subcontext = |i: u64| self.txn.subcontext(i.into()).map_err(de::Error::custom);
+        let subcontext = |i: u64| self.txn.subcontext(Id::from(i)).map_err(de::Error::custom);
 
         let mut i = 0u64;
         let mut last_hash = null_hash.clone();

@@ -326,7 +326,7 @@ where
 
         let txn = self
             .txn
-            .subcontext(HISTORY.into())
+            .subcontext(HISTORY)
             .map_err(de::Error::custom)
             .await?;
 
