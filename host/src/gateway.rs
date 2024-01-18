@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{Future, TryFutureExt};
 use log::debug;
-use tokio::time::Duration;
+use tokio::time::{Duration, MissedTickBehavior};
 
 use tc_error::*;
 use tc_fs::{Actor, Claims, Gateway as GatewayInstance, Resolver, Token, TxnServer};
@@ -140,6 +140,7 @@ impl Gateway {
         let token = if let Some(token) = token {
             use rjwt::Resolve;
 
+            // TODO: don't require resolving an actor or validating the existing token in order to create a new token (just validate on receipt)
             Resolver::new(&self, &self.host().clone().into(), &txn_id)
                 .consume_and_sign(&self.inner.actor, vec![], token, txn_id.time().into())
                 .map_err(|cause| unauthorized!("credential error").consume(cause))
@@ -150,7 +151,7 @@ impl Gateway {
 
         let txn_server = self.inner.txn_server.clone();
 
-        txn_server.new_txn(Arc::new(self), txn_id, token).await
+        txn_server.new_txn(Arc::new(self), txn_id, token)
     }
 
     /// Start this `Gateway`'s server
@@ -264,6 +265,7 @@ impl GatewayInstance for Gateway {
 
 fn spawn_cleanup_thread(gateway: Gateway) {
     let mut interval = tokio::time::interval(INTERVAL);
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     tokio::spawn(async move {
         loop {

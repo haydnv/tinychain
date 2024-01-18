@@ -1,13 +1,14 @@
 //! A server to keep track of active transactions.
 
+use std::cmp::Ordering;
 use std::collections::hash_map::{Entry, HashMap};
 use std::convert::TryFrom;
 use std::sync::Arc;
 
 use freqfs::DirLock;
 use futures::future::TryFutureExt;
-use log::{debug, trace};
-use tokio::sync::RwLock;
+use log::*;
+use tokio::sync::{mpsc, RwLock};
 
 use tc_error::*;
 use tcgeneric::NetworkTime;
@@ -22,19 +23,27 @@ use super::{Gateway, Txn, TxnId};
 pub struct TxnServer {
     active: Arc<RwLock<HashMap<TxnId, NetworkTime>>>,
     workspace: DirLock<CacheBlock>,
+    tx: mpsc::UnboundedSender<(TxnId, NetworkTime)>,
 }
 
 impl TxnServer {
     /// Construct a new `TxnServer`.
     pub async fn new(workspace: DirLock<CacheBlock>) -> Self {
-        Self {
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        let server = Self {
             active: Arc::new(RwLock::new(HashMap::new())),
             workspace,
-        }
+            tx,
+        };
+
+        spawn_receiver_thread(server.clone(), rx);
+
+        server
     }
 
     /// Return the active `Txn` with the given [`TxnId`], or initiate a new [`Txn`].
-    pub async fn new_txn<State>(
+    pub fn new_txn<State>(
         &self,
         gateway: Arc<dyn Gateway<State = State>>,
         txn_id: TxnId,
@@ -44,20 +53,12 @@ impl TxnServer {
 
         let expires = NetworkTime::try_from(token.1.expires())?;
         let request = Request::new(txn_id, token.0, token.1);
-        let mut active = self.active.write().await;
 
-        match active.entry(txn_id) {
-            Entry::Occupied(_entry) => {
-                trace!("txn {} is already known", txn_id);
-                Ok(Txn::new(self.workspace.clone(), gateway, request))
-            }
-            Entry::Vacant(entry) => {
-                trace!("creating new workspace for txn {}...", txn_id);
-                let txn = Txn::new(self.workspace.clone(), gateway, request);
-                entry.insert(expires);
-                Ok(txn)
-            }
-        }
+        self.tx
+            .send((txn_id, expires))
+            .map_err(|cause| internal!("transaction queue failure: {cause}"))?;
+
+        Ok(Txn::new(self.workspace.clone(), gateway, request))
     }
 
     /// Gracefully shut down this `TxnServer` by allowing all active transactions to drain.
@@ -118,4 +119,38 @@ impl TxnServer {
 
         workspace.sync().await.expect("sync workspace dir");
     }
+}
+
+fn spawn_receiver_thread(server: TxnServer, mut rx: mpsc::UnboundedReceiver<(TxnId, NetworkTime)>) {
+    let new_txn = |active: &mut HashMap<TxnId, NetworkTime>, txn_id, expires| {
+        match active.entry(txn_id) {
+            Entry::Occupied(mut entry) => {
+                trace!("txn {} is already known", txn_id);
+
+                match entry.get().cmp(&expires) {
+                    Ordering::Greater | Ordering::Equal => {
+                        // no-op
+                    }
+                    Ordering::Less => {
+                        warn!("expiration time of txn {txn_id} extended");
+                        entry.insert(expires);
+                    }
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(expires);
+            }
+        }
+    };
+
+    tokio::spawn(async move {
+        while let Some((txn_id, expires)) = rx.recv().await {
+            let mut active = server.active.write().await;
+            new_txn(&mut *active, txn_id, expires);
+
+            while let Ok((txn_id, expires)) = rx.try_recv() {
+                new_txn(&mut *active, txn_id, expires);
+            }
+        }
+    });
 }

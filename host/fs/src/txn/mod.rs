@@ -97,7 +97,9 @@ impl LazyDir {
             match self {
                 Self::Workspace(workspace) => {
                     let mut parent = workspace.write().await;
-                    parent.get_or_create_dir(txn_id.to_string()).map_err(TCError::from)
+                    parent
+                        .get_or_create_dir(txn_id.to_string())
+                        .map_err(TCError::from)
                 }
                 Self::Lazy(parent, name) => {
                     let parent = parent.get_or_create(txn_id).await?;

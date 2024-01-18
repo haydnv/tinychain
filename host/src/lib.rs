@@ -168,7 +168,6 @@ impl Builder {
 
         let txn = txn_server
             .new_txn(Arc::new(gateway), txn_id, token)
-            .await
             .expect("transaction");
 
         // no need to claim ownership of this txn since there's no way to make outbound requests
