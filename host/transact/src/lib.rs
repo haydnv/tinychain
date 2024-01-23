@@ -36,6 +36,9 @@ pub mod lock {
     /// A read guard on a committed transactional version
     pub type TxnLockVersionGuard<T> = Arc<T>;
 
+    /// A transactional message queue.
+    pub type TxnMessageQueue<M> = txn_lock::queue::message::MessageQueue<TxnId, M>;
+
     /// A transactional read-write lock on a key-value map
     pub type TxnMapLock<K, V> = txn_lock::map::TxnMapLock<TxnId, K, V>;
 
@@ -47,6 +50,9 @@ pub mod lock {
 
     /// A read guard on a committed transactional version of a set
     pub type TxnSetLockVersionGuard<T> = HashSet<T>;
+
+    /// A transactional task queue.
+    pub type TxnTaskQueue<I, O> = txn_lock::queue::task::TaskQueue<TxnId, I, O>;
 }
 
 /// Defines a method to compute the hash of this state as of a given [`TxnId`]

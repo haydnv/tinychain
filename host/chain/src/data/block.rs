@@ -14,6 +14,13 @@ use tc_scalar::Scalar;
 use tc_transact::TxnId;
 use tc_value::Value;
 
+use super::StoreEntry;
+
+pub enum MutationPending<Txn, FE> {
+    Delete(Value),
+    Put(Txn, Value, StoreEntry<Txn, FE>),
+}
+
 #[derive(Clone, Eq, PartialEq)]
 pub enum MutationRecord {
     Delete(Value),
@@ -110,6 +117,20 @@ impl GetSize for ChainBlock {
 }
 
 impl ChainBlock {
+    fn txn_hash<'a, R>(txn_id: &TxnId, mutations: R) -> Output<Sha256>
+    where
+        R: IntoIterator<Item = &'a MutationRecord>,
+    {
+        let mut mutation_hasher = Sha256::new();
+        mutation_hasher.update(Hash::<Sha256>::hash(txn_id));
+
+        for mutation in mutations {
+            mutation_hasher.update(Hash::<Sha256>::hash(mutation));
+        }
+
+        mutation_hasher.finalize()
+    }
+
     /// Compute the hash of a [`ChainBlock`] with the given contents
     pub fn hash<'a, M, R>(last_hash: &'a [u8], mutations: M) -> Output<Sha256>
     where
@@ -121,15 +142,34 @@ impl ChainBlock {
 
         let mut txn_hasher = Sha256::new();
         for (txn_id, mutations) in mutations {
-            let mut mutation_hasher = Sha256::new();
-            mutation_hasher.update(Hash::<Sha256>::hash(txn_id));
-
-            for mutation in mutations {
-                mutation_hasher.update(Hash::<Sha256>::hash(mutation));
-            }
-
-            txn_hasher.update(mutation_hasher.finalize());
+            txn_hasher.update(Self::txn_hash(txn_id, mutations));
         }
+
+        hasher.update(txn_hasher.finalize());
+        hasher.finalize()
+    }
+
+    /// Compute the hash of a [`ChainBlock`] with the given contents and pending contents
+    pub fn pending_hash<'a, M, R, P>(
+        last_hash: &'a [u8],
+        mutations: M,
+        txn_id: &TxnId,
+        pending: P,
+    ) -> Output<Sha256>
+    where
+        M: IntoIterator<Item = (&'a TxnId, &'a R)> + 'a,
+        &'a R: IntoIterator<Item = &'a MutationRecord> + 'a,
+        P: IntoIterator<Item = &'a MutationRecord> + 'a,
+    {
+        let mut hasher = Sha256::new();
+        hasher.update(last_hash);
+
+        let mut txn_hasher = Sha256::new();
+        for (txn_id, mutations) in mutations {
+            txn_hasher.update(Self::txn_hash(txn_id, mutations));
+        }
+
+        txn_hasher.update(Self::txn_hash(txn_id, pending));
 
         hasher.update(txn_hasher.finalize());
         hasher.finalize()

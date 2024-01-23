@@ -20,22 +20,22 @@ use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_transact::fs;
-use tc_transact::lock::TxnLock;
+use tc_transact::lock::{TxnLock, TxnTaskQueue};
 use tc_transact::public::{Public, Route, StateInstance};
 use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, ThreadSafe, Tuple};
 
-use crate::{null_hash, BLOCK_SIZE, CHAIN};
+use crate::{new_queue, null_hash, BLOCK_SIZE, CHAIN};
 
-use super::block::{ChainBlock, MutationRecord};
+use super::block::{ChainBlock, MutationPending, MutationRecord};
 use super::store::{Store, StoreEntry, StoreEntryView};
 
 const STORE: Label = label("store");
-const PENDING: &str = "pending";
 const WRITE_AHEAD: &str = "write_ahead";
 
 pub struct History<State: StateInstance> {
+    queue: TxnTaskQueue<MutationPending<State::Txn, State::FE>, TCResult<MutationRecord>>,
     file: DirLock<State::FE>,
     store: Store<State::Txn, State::FE>,
     latest: TxnLock<u64>,
@@ -45,6 +45,7 @@ pub struct History<State: StateInstance> {
 impl<State: StateInstance> Clone for History<State> {
     fn clone(&self) -> Self {
         Self {
+            queue: self.queue.clone(),
             file: self.file.clone(),
             store: self.store.clone(),
             latest: self.latest.clone(),
@@ -56,7 +57,11 @@ impl<State: StateInstance> Clone for History<State> {
 impl<State> History<State>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
+    State::FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>,
 {
     fn new(
         file: DirLock<State::FE>,
@@ -66,23 +71,34 @@ where
     ) -> Self {
         debug_assert!(file.try_read().expect("history").contains(&latest));
 
+        let queue = new_queue::<State>(store.clone());
+
         Self {
+            queue,
             file,
             store,
             latest: TxnLock::new(latest),
             cutoff: TxnLock::new(cutoff),
         }
     }
+}
 
+impl<State: StateInstance> History<State> {
     pub fn store(&self) -> &Store<State::Txn, State::FE> {
         &self.store
     }
+}
 
-    pub async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
+impl<State> History<State>
+where
+    State: StateInstance,
+    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
+{
+    pub fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
         debug!("History::append_delete {} {}", txn_id, key);
-        let mut block = self.write_pending().await?;
-        block.append_delete(txn_id, key);
-        Ok(())
+        self.queue
+            .push(txn_id, MutationPending::Delete(key))
+            .map_err(TCError::from)
     }
 
     async fn read_block(
@@ -109,28 +125,6 @@ where
         block.write_owned().map_err(TCError::from).await
     }
 
-    pub async fn read_pending(
-        &self,
-    ) -> TCResult<freqfs::FileReadGuardOwned<State::FE, ChainBlock>> {
-        let file = self.file.read().await;
-        let block: &FileLock<State::FE> = file
-            .get_file(PENDING)
-            .ok_or_else(|| internal!("BlockChain is missing its pending block"))?;
-
-        block.read_owned().map_err(TCError::from).await
-    }
-
-    pub async fn write_pending(
-        &self,
-    ) -> TCResult<freqfs::FileWriteGuardOwned<State::FE, ChainBlock>> {
-        let file = self.file.read().await;
-        let block: &FileLock<State::FE> = file
-            .get_file(PENDING)
-            .ok_or_else(|| internal!("BlockChain is missing its pending block"))?;
-
-        block.write_owned().map_err(TCError::from).await
-    }
-
     pub async fn read_log(&self) -> TCResult<freqfs::FileReadGuardOwned<State::FE, ChainBlock>> {
         let log: FileLock<State::FE> = {
             let file = self.file.read().await;
@@ -141,28 +135,34 @@ where
     }
 
     pub async fn write_ahead(&self, txn_id: TxnId) {
+        let handles = self.queue.commit(txn_id).await;
+
+        let mutations = handles
+            .into_iter()
+            .collect::<TCResult<Vec<_>>>()
+            .expect("mutations");
+
+        if mutations.is_empty() {
+            return;
+        }
+
         self.store.commit(txn_id).await;
 
         let file = self.file.read().await;
-        let pending: &FileLock<State::FE> = file.get_file(PENDING).expect("pending transactions");
-        let mut pending: FileWriteGuard<ChainBlock> =
-            pending.write().await.expect("pending block write lock");
 
-        if let Some(mutations) = pending.mutations.remove(&txn_id) {
-            let write_ahead: &FileLock<State::FE> =
-                file.get_file(WRITE_AHEAD).expect("write-ahead log");
+        let write_ahead: &FileLock<State::FE> =
+            file.get_file(WRITE_AHEAD).expect("write-ahead log");
 
-            {
-                let mut write_ahead: FileWriteGuard<ChainBlock> = write_ahead
-                    .write()
-                    .await
-                    .expect("write-ahead log write lock");
+        {
+            let mut write_ahead: FileWriteGuard<ChainBlock> = write_ahead
+                .write()
+                .await
+                .expect("write-ahead log write lock");
 
-                write_ahead.mutations.insert(txn_id, mutations);
-            }
-
-            write_ahead.sync().await.expect("sync write-ahead log");
+            write_ahead.mutations.insert(txn_id, mutations);
         }
+
+        write_ahead.sync().await.expect("sync write-ahead log");
     }
 }
 
@@ -175,19 +175,18 @@ where
         + AsType<TensorNode>
         + for<'a> fs::FileSave<'a>,
 {
-    pub async fn append_put(&self, txn: &State::Txn, key: Value, value: State) -> TCResult<()>
+    pub fn append_put(&self, txn: State::Txn, key: Value, value: State) -> TCResult<()>
     where
         Collection<State::Txn, State::FE>: TryCastFrom<State>,
         Scalar: TryCastFrom<State>,
     {
-        let value = StoreEntry::try_from_state(value)?;
-        let value = self.store.save_state(txn, value).await?;
-
         debug!("History::append_put {} {} {:?}", txn.id(), key, value);
-        let mut block = self.write_pending().await?;
-        block.append_put(*txn.id(), key, value);
 
-        Ok(())
+        let value = StoreEntry::try_from_state(value)?;
+
+        self.queue
+            .push(*txn.id(), MutationPending::Put(txn, key, value))
+            .map_err(TCError::from)
     }
 
     pub async fn replicate<T>(&self, txn: &State::Txn, subject: &T, other: Self) -> TCResult<()>
@@ -323,7 +322,11 @@ where
 impl<State> fs::Persist<State::FE> for History<State>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
+    State::FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>,
 {
     type Txn = State::Txn;
     type Schema = ();
@@ -350,7 +353,6 @@ where
         let cutoff = txn_id;
         let latest = 0;
 
-        create_block(&mut file_lock, PENDING)?;
         create_block(&mut file_lock, WRITE_AHEAD)?;
         create_block(&mut file_lock, latest)?;
 
@@ -377,7 +379,6 @@ where
         let mut cutoff = txn_id;
         let mut latest = 0;
 
-        get_or_create_block(&mut file_lock, PENDING.to_string())?;
         get_or_create_block(&mut file_lock, WRITE_AHEAD.to_string())?;
 
         let mut last_hash = Bytes::from(null_hash().to_vec());
@@ -459,15 +460,34 @@ where
 
             Ok(ChainBlock::hash(latest_block.last_hash(), mutations))
         } else {
-            let pending = self.read_pending().await?;
-            if let Some(mutations) = pending.mutations.get(&txn_id) {
+            let pending = self.queue.peek(&txn_id).await?;
+
+            if let Some(pending_mutations) = pending {
+                if let Some(err) = pending_mutations
+                    .iter()
+                    .map(Result::as_ref)
+                    .filter_map(Result::err)
+                    .next()
+                {
+                    return Err(err.clone());
+                }
+
+                let pending_mutations = pending_mutations
+                    .iter()
+                    .map(Result::as_ref)
+                    .filter_map(Result::ok);
+
                 let mutations = latest_block
                     .mutations
                     .iter()
-                    .take_while(|(past_txn_id, _)| *past_txn_id <= &txn_id)
-                    .chain(iter::once((&txn_id, mutations)));
+                    .take_while(|(past_txn_id, _)| *past_txn_id <= &txn_id);
 
-                Ok(ChainBlock::hash(latest_block.last_hash(), mutations))
+                Ok(ChainBlock::pending_hash(
+                    latest_block.last_hash(),
+                    mutations,
+                    &txn_id,
+                    pending_mutations,
+                ))
             } else {
                 // TODO: validate the length of the hash before calling clone_from_slice
                 Ok(GenericArray::clone_from_slice(latest_block.last_hash()))
@@ -575,35 +595,17 @@ where
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        let file = self.file.read().await;
-        let mut pending: FileWriteGuard<ChainBlock> = file
-            .get_file(PENDING)
-            .expect("pending transactions")
-            .write()
-            .await
-            .expect("pending transaction lock");
-
-        pending.mutations.remove(txn_id);
-
         self.latest.rollback(txn_id);
         self.cutoff.rollback(txn_id);
+        self.queue.rollback(txn_id);
         self.store.rollback(txn_id).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.latest.finalize(*txn_id);
         self.cutoff.finalize(*txn_id);
+        self.queue.finalize(*txn_id);
         self.store.finalize(txn_id).await;
-
-        let file = self.file.read().await;
-        let mut pending: FileWriteGuard<ChainBlock> = file
-            .get_file(PENDING)
-            .expect("pending transactions")
-            .write()
-            .await
-            .expect("pending transaction lock");
-
-        pending.mutations.remove(txn_id);
     }
 }
 
@@ -743,12 +745,6 @@ where
         };
 
         let mut guard = file.write().await;
-
-        let block = ChainBlock::new(null_hash.to_vec());
-        let size_hint = block.get_size();
-        guard
-            .create_file(PENDING.into(), block, size_hint)
-            .map_err(de::Error::custom)?;
 
         let block = ChainBlock::new(null_hash.to_vec());
         let size_hint = block.get_size();

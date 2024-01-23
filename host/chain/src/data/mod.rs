@@ -9,7 +9,7 @@ use tc_scalar::Scalar;
 use tc_transact::public::{Public, Route, StateInstance};
 use tc_transact::{Transaction, TxnId};
 
-pub use block::{ChainBlock, MutationRecord};
+pub use block::{ChainBlock, MutationPending, MutationRecord};
 pub use history::{History, HistoryView};
 pub(super) use store::{Store, StoreEntry};
 
