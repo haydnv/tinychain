@@ -4138,16 +4138,16 @@ where
     Buffer<T>: de::FromStream<Context = ()>,
 {
     pub fn commit(&self, txn_id: &TxnId) {
-        self.semaphore.finalize(txn_id, true)
+        self.semaphore.finalize(txn_id, false)
+    }
+
+    pub fn rollback(&self, txn_id: &TxnId) {
+        self.semaphore.finalize(txn_id, false)
     }
 
     pub async fn finalize(&self, txn_id: &TxnId) {
         self.file.commit().await;
         self.semaphore.finalize(txn_id, true)
-    }
-
-    pub fn rollback(&self, txn_id: &TxnId) {
-        self.semaphore.finalize(txn_id, false)
     }
 }
 

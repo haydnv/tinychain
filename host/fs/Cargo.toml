@@ -16,6 +16,7 @@ async-hash = "0.5"
 async-trait = "0.1"
 bytes = "1.5"
 destream = "0.7"
+ds-ext = "0.1"
 futures = "0.3"
 freqfs = { version = "0.9", features = ["all"] }
 get-size = "0.1"
