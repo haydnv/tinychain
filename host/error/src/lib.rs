@@ -10,6 +10,7 @@ use destream::en;
 /// A result of type `T`, or a [`TCError`]
 pub type TCResult<T> = Result<T, TCError>;
 
+#[derive(Clone)]
 struct ErrorData {
     message: String,
     stack: Vec<String>,
@@ -118,6 +119,7 @@ impl fmt::Display for ErrorKind {
 }
 
 /// A general error description.
+#[derive(Clone)]
 pub struct TCError {
     kind: ErrorKind,
     data: ErrorData,

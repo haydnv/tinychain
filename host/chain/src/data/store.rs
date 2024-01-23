@@ -1,10 +1,11 @@
+use std::fmt;
+use std::marker::PhantomData;
+
 use async_trait::async_trait;
-use core::fmt;
 use destream::en;
 use futures::future::TryFutureExt;
 use log::debug;
 use safecast::*;
-use std::marker::PhantomData;
 
 use tc_collection::btree::Node as BTreeNode;
 use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
@@ -225,7 +226,6 @@ where
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         debug!("commit chain data store at {}", txn_id);
-
         self.dir.commit(txn_id, true).await
     }
 

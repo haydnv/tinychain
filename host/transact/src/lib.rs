@@ -20,6 +20,9 @@ mod id;
 pub mod public;
 
 pub mod lock {
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
+
     use super::TxnId;
 
     pub use txn_lock::semaphore::{PermitRead, PermitWrite};
@@ -31,19 +34,25 @@ pub mod lock {
     pub type TxnLock<T> = txn_lock::scalar::TxnLock<TxnId, T>;
 
     /// A read guard on a committed transactional version
-    pub type TxnLockVersionGuard<T> = txn_lock::scalar::TxnLockVersionGuard<TxnId, T>;
+    pub type TxnLockVersionGuard<T> = Arc<T>;
+
+    /// A transactional message queue.
+    pub type TxnMessageQueue<M> = txn_lock::queue::message::MessageQueue<TxnId, M>;
 
     /// A transactional read-write lock on a key-value map
     pub type TxnMapLock<K, V> = txn_lock::map::TxnMapLock<TxnId, K, V>;
 
     /// A read guard on a committed transactional version of a set
-    pub type TxnMapLockVersionGuard<K, V> = txn_lock::map::TxnMapLockVersionGuard<TxnId, K, V>;
+    pub type TxnMapLockVersionGuard<K, V> = HashMap<K, V>;
 
     /// A transactional read-write lock on a set of values
     pub type TxnSetLock<T> = txn_lock::set::TxnSetLock<TxnId, T>;
 
     /// A read guard on a committed transactional version of a set
-    pub type TxnSetLockVersionGuard<T> = txn_lock::set::TxnSetLockVersionGuard<TxnId, T>;
+    pub type TxnSetLockVersionGuard<T> = HashSet<T>;
+
+    /// A transactional task queue.
+    pub type TxnTaskQueue<I, O> = txn_lock::queue::task::TaskQueue<TxnId, I, O>;
 }
 
 /// Defines a method to compute the hash of this state as of a given [`TxnId`]

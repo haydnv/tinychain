@@ -28,5 +28,5 @@ tc-error = { path = "../error" }
 tc-value = { path = "../value" }
 tcgeneric = { path = "../generic" }
 tokio = { version = "1.35", features = ["sync"] }
-txfs = { version = "0.2", features = ["logging"] }
-txn_lock = { version = "0.8", features = ["logging"] }
+txfs = { path = "../../../txfs", features = ["logging"] }
+txn_lock = { path = "../../../txn_lock", features = ["logging"] }

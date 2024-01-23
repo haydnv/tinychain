@@ -59,11 +59,8 @@ where
                 Some(put_handler) => Some(Box::new(|txn, key, value| {
                     Box::pin(async move {
                         debug!("Chain::put {} <- {:?}", key, value);
-
                         self.chain
-                            .append_put(txn, key.clone(), value.clone())
-                            .await?;
-
+                            .append_put(txn.clone(), key.clone(), value.clone())?;
                         put_handler(txn, key, value).await
                     })
                 })),
@@ -90,9 +87,7 @@ where
                 Some(delete_handler) => Some(Box::new(|txn, key| {
                     Box::pin(async move {
                         debug!("Chain::delete {}", key);
-
-                        self.chain.append_delete(*txn.id(), key.clone()).await?;
-
+                        self.chain.append_delete(*txn.id(), key.clone())?;
                         delete_handler(txn, key).await
                     })
                 })),

@@ -17,5 +17,5 @@ ha-ndarray = "0.3"
 log = { version = "0.4", features = ["release_max_level_info"] }
 pathlink = "0.2"
 serde = "1.0"
-txn_lock = "0.8"
-txfs = "0.2"
+txfs = { path = "../../../txfs" }
+txn_lock = { path = "../../../txn_lock" }
