@@ -11,7 +11,7 @@ use log::debug;
 use tokio::time::{Duration, MissedTickBehavior};
 
 use tc_error::*;
-use tc_fs::{Actor, Claims, Gateway as GatewayInstance, Resolver, Token, TxnServer};
+use tc_fs::{Actor, Gateway as GatewayInstance, SignedToken, Token, TxnServer};
 use tc_state::State;
 use tc_transact::TxnId;
 use tc_value::{Host, Link, Protocol, ToUrl, Value};
@@ -115,7 +115,7 @@ impl Gateway {
     }
 
     /// Return a new, signed auth token with no claims.
-    pub fn new_token(&self, txn_id: &TxnId) -> TCResult<(String, Claims)> {
+    pub fn new_token(&self, txn_id: &TxnId) -> TCResult<SignedToken> {
         let token = Token::new(
             self.inner.host.clone().into(),
             txn_id.time().into(),
@@ -127,24 +127,21 @@ impl Gateway {
         let signed = self
             .inner
             .actor
-            .sign_token(&token)
+            .sign_token(token)
             .map_err(|cause| internal!("signing error").consume(cause))?;
 
-        let claims = token.claims();
-
-        Ok((signed, claims))
+        Ok(signed)
     }
 
     /// Authorize a transaction to execute on this host.
-    pub async fn new_txn(self, txn_id: TxnId, token: Option<String>) -> TCResult<Txn> {
+    pub fn new_txn(self, txn_id: TxnId, token: Option<SignedToken>) -> TCResult<Txn> {
         let token = if let Some(token) = token {
-            use rjwt::Resolve;
-
-            // TODO: don't require resolving an actor or validating the existing token in order to create a new token (just validate on receipt)
-            Resolver::new(&self, &self.host().clone().into(), &txn_id)
-                .consume_and_sign(&self.inner.actor, vec![], token, txn_id.time().into())
-                .map_err(|cause| unauthorized!("credential error").consume(cause))
-                .await?
+            self.inner.actor.consume_and_sign(
+                token,
+                self.host().clone().into(),
+                vec![],
+                txn_id.time().into(),
+            )?
         } else {
             self.new_token(&txn_id)?
         };

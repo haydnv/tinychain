@@ -59,7 +59,7 @@ where
     }
 
     pub async fn execute(&self, txn: &Txn<State>, data: State) -> TCResult<State> {
-        let txn = txn.clone().claim(&self.actor, PATH.into()).await?;
+        let txn = txn.clone().claim(&self.actor, PATH.into())?;
         let context = Map::<State>::default();
 
         let result = if Vec::<(Id, State)>::can_cast_from(&data) {

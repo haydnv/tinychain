@@ -1,15 +1,14 @@
 //! The transaction context [`Txn`].
 
 use std::hash::{Hash, Hasher};
-use std::iter::FromIterator;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use freqfs::DirLock;
-use futures::future::{Future, TryFutureExt};
-use log::debug;
+use futures::Future;
+use log::{debug, trace};
 use safecast::CastInto;
 
 use tc_error::*;
@@ -17,7 +16,7 @@ use tc_transact::public::StateInstance;
 use tc_transact::Transaction;
 use tc_value::uuid::Uuid;
 use tc_value::{Host, Link, ToUrl, Value};
-use tcgeneric::{Id, PathSegment, TCBoxFuture, TCBoxTryFuture, TCPathBuf, ThreadSafe, Tuple};
+use tcgeneric::{Id, PathSegment, TCBoxFuture, TCBoxTryFuture, TCPathBuf, ThreadSafe};
 
 use crate::block::CacheBlock;
 
@@ -169,40 +168,31 @@ where
     }
 
     /// Return a new `Txn` which grants the given [`Scope`]s to the given [`Actor`].
-    pub async fn grant(
+    pub fn grant(
         &self,
         actor: &Actor,
         cluster_path: TCPathBuf,
         scopes: Vec<Scope>,
     ) -> TCResult<Self> {
-        let token = self.request.token().to_string();
+        trace!("grant {scopes:?} for {cluster_path} to {}", actor.id());
+
+        let host_id = self.gateway.link(cluster_path);
         let txn_id = self.request.txn_id();
+        let now = txn_id.time().into();
+        let token = actor.consume_and_sign(self.request.token().clone(), host_id, scopes, now)?;
 
-        use rjwt::Resolve;
-        let host = self.gateway.link(cluster_path);
-        let resolver = Resolver::new(&*self.gateway, &host, self.request.txn_id());
-
-        debug!(
-            "granting scopes {} to {}",
-            Tuple::<Scope>::from_iter(scopes.clone()),
-            host
-        );
-
-        let (token, claims) = resolver
-            .consume_and_sign(actor, scopes, token, txn_id.time().into())
-            .map_err(|cause| unauthorized!("signature error").consume(cause))
-            .await?;
+        trace!("granted scopes to {}", actor.id());
 
         Ok(Self {
             gateway: self.gateway.clone(),
-            request: Arc::new(Request::new(*txn_id, token, claims)),
+            request: Arc::new(Request::new(*txn_id, token)),
             scope: self.scope.clone(),
             dir: self.dir.clone(),
         })
     }
 
     /// Claim ownership of this transaction.
-    pub async fn claim(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
+    pub fn claim(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
         debug!(
             "{} claims ownership of transaction {}",
             cluster_path,
@@ -215,7 +205,6 @@ where
 
         if self.owner().is_none() {
             self.grant(actor, cluster_path, vec![self.scope.clone()])
-                .await
         } else {
             Err(forbidden!(
                 "tried to claim owned transaction {}",
@@ -242,18 +231,14 @@ where
 
     /// Return the owner of this transaction, if there is one.
     pub fn owner(&self) -> Option<&Link> {
-        self.request
-            .scopes()
-            .iter()
-            .filter(|(_, actor_id, _)| *actor_id == &Value::None)
-            .filter_map(|(host, _actor_id, scopes)| {
-                if scopes.contains(&self.scope) {
-                    Some(host)
-                } else {
-                    None
-                }
-            })
-            .fold(None, |_, host| Some(host))
+        let (host, _, _) = self
+            .request
+            .token()
+            .first_claim(|(_host, actor_id, scopes)| {
+                actor_id == &Value::None && scopes.contains(&self.scope)
+            })?;
+
+        Some(host)
     }
 
     /// Check if this transaction has a leader for the given cluster.
@@ -273,7 +258,7 @@ where
     }
 
     /// Claim leadership of this transaction for the given cluster.
-    pub async fn lead(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
+    pub fn lead(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
         debug!(
             "{} claim leadership of transaction {}",
             cluster_path,
@@ -293,24 +278,19 @@ where
             ))
         } else {
             let scopes = vec![self.scope.clone()];
-            self.grant(actor, cluster_path, scopes).await
+            self.grant(actor, cluster_path, scopes)
         }
     }
 
     /// Return the leader of this transaction for the given cluster, if there is one.
     pub fn leader(&self, cluster_path: &[PathSegment]) -> Option<&Link> {
-        self.request
-            .scopes()
-            .iter()
-            .filter(|(_, actor_id, _)| *actor_id == &Value::None)
-            .filter_map(|(host, _actor_id, scopes)| {
-                if scopes.contains(&self.scope) && cluster_path.starts_with(host.path()) {
-                    Some(host)
-                } else {
-                    None
-                }
-            })
-            .next()
+        let (host, _, _) = self.request.token().last_claim(|(host, actor, scopes)| {
+            actor == &Value::None
+                && scopes.contains(&self.scope)
+                && cluster_path.starts_with(host.path())
+        })?;
+
+        Some(host)
     }
 }
 

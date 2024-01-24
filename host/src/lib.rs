@@ -128,6 +128,8 @@ impl Builder {
         use tc_transact::fs::Persist;
         use tc_transact::Transaction;
 
+        log::debug!("load or create cluster...");
+
         let txn_id = *txn.id();
         let host = self.gateway.as_ref().expect("gateway config").host();
 
@@ -166,17 +168,26 @@ impl Builder {
         let txn_id = tc_transact::TxnId::new(gateway::Gateway::time());
         let token = gateway.new_token(&txn_id).expect("token");
 
+        log::debug!("loading userspace...");
+
         let txn = txn_server
             .new_txn(Arc::new(gateway), txn_id, token)
             .expect("transaction");
+
+        log::trace!("new txn at {txn_id}");
 
         // no need to claim ownership of this txn since there's no way to make outbound requests
         // because they would be impossible to authorize since userspace is not yet loaded
         // i.e. there is no way for other hosts to check any of these Clusters' public keys
 
         let class: kernel::Class = self.load_or_create(&txn, kernel::CLASS).await;
+        log::trace!("loaded class");
+
         let library: kernel::Library = self.load_or_create(&txn, kernel::LIB).await;
+        log::trace!("loaded library");
+
         let service: kernel::Service = self.load_or_create(&txn, kernel::SERVICE).await;
+        log::trace!("loaded service");
 
         futures::try_join!(
             class.recover(&txn),
@@ -195,6 +206,8 @@ impl Builder {
     }
 
     async fn bootstrap(self) -> (gateway::Gateway, UserSpace) {
+        log::debug!("running bootstrap...");
+
         let gateway_config = self.gateway.clone().expect("gateway config");
 
         let kernel = kernel::Kernel::bootstrap();
@@ -212,15 +225,24 @@ impl Builder {
     }
 
     async fn replicate(gateway: gateway::Gateway, userspace: UserSpace) -> TCResult<()> {
-        let txn = gateway
-            .new_txn(tc_transact::TxnId::new(gateway::Gateway::time()), None)
-            .await?;
-
-        async fn replicate_cluster<T>(txn: &txn::Txn, cluster: cluster::Cluster<T>) -> TCResult<()>
+        async fn replicate_cluster<T>(
+            gateway: gateway::Gateway,
+            cluster: cluster::Cluster<T>,
+        ) -> TCResult<()>
         where
             T: cluster::Replica + tc_transact::Transact + Send + Sync,
         {
+            log::trace!("replicate cluster {}...", cluster.link().path());
+
+            let txn_id = tc_transact::TxnId::new(gateway::Gateway::time());
+
+            let txn = gateway.new_txn(txn_id, None)?;
+
+            log::trace!("{:?} replication will use txn {}", cluster, txn_id);
+
             let txn = cluster.claim(&txn).await?;
+
+            log::trace!("{:?} will add replica at {}...", cluster, txn.host());
 
             cluster.add_replica(&txn, txn.host().clone()).await?;
 
@@ -228,9 +250,9 @@ impl Builder {
         }
 
         futures::try_join!(
-            replicate_cluster(&txn, userspace.0),
-            replicate_cluster(&txn, userspace.1),
-            replicate_cluster(&txn, userspace.2),
+            replicate_cluster(gateway.clone(), userspace.0),
+            replicate_cluster(gateway.clone(), userspace.1),
+            replicate_cluster(gateway.clone(), userspace.2),
         )?;
 
         Ok(())

@@ -1,5 +1,5 @@
 pub use block::CacheBlock;
-pub use txn::{Actor, Claims, Gateway, Resolver, Token, Txn, TxnServer};
+pub use txn::{Actor, Gateway, Resolver, SignedToken, Token, Txn, TxnServer};
 
 pub use txn::hypothetical;
 
