@@ -9,12 +9,12 @@ import requests
 import rjwt
 import urllib.parse
 
-from ..service import Library, Model, Service
-from ..context import to_json
-from ..error import *
-from ..scalar.value import Nil
-from ..state import State
-from ..uri import URI
+from .service import Library, Model, Service
+from .context import to_json
+from .error import *
+from .scalar.value import Nil
+from .state import State
+from .uri import URI
 
 
 DEFAULT_PORT = 8702

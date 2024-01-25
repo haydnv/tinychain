@@ -6,8 +6,8 @@ import shutil
 import subprocess
 import time
 
-import rjwt
 import tinychain as tc
+import tinychain_async as tc_async
 
 
 CONFIG = "config"
@@ -215,7 +215,7 @@ def start_local_host(ns, host_uri=None, public_key=None, wait_time=1, **flags):
 
 def start_local_host_async(ns, host_uri=None, public_key=None, wait_time=1, **flags):
     process, port = _start_local_host_process(ns, host_uri, public_key, wait_time, **flags)
-    return tc.host.asynchronous.Local(process, f"http://{process.ADDRESS}:{port}")
+    return tc_async.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
 # use this alias to switch between Local and Docker host types
