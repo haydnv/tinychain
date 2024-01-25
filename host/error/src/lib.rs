@@ -23,6 +23,7 @@ impl<'en> en::ToStream<'en> for ErrorData {
         }
 
         use en::EncodeMap;
+
         let mut map = encoder.encode_map(Some(2))?;
         map.encode_entry("message", &self.message)?;
         map.encode_entry("stack", &self.stack)?;
@@ -37,6 +38,7 @@ impl<'en> en::IntoStream<'en> for ErrorData {
         }
 
         use en::EncodeMap;
+
         let mut map = encoder.encode_map(Some(2))?;
         map.encode_entry("message", self.message)?;
         map.encode_entry("stack", self.stack)?;
@@ -168,6 +170,11 @@ impl TCError {
         }
     }
 
+    /// Error to indicate a malformed or nonsensical request
+    pub fn bad_request<I: fmt::Display>(info: I) -> Self {
+        Self::new(ErrorKind::BadGateway, info)
+    }
+
     /// Error to convey an upstream problem
     pub fn bad_gateway<I: fmt::Display>(locator: I) -> Self {
         Self::new(ErrorKind::BadGateway, locator)
@@ -197,15 +204,19 @@ impl TCError {
         Self::new(ErrorKind::NotFound, locator)
     }
 
-    pub fn unexpected<V: fmt::Debug>(value: V, expected: &str) -> Self {
-        Self::new(
-            ErrorKind::BadRequest,
-            format!("invalid value {value:?}: expected {expected}"),
-        )
+    /// Error to indicate that the end-user is not authorized to perform the requested action
+    pub fn unauthorized<I: fmt::Display>(info: I) -> Self {
+        Self::new(ErrorKind::Unauthorized, info)
     }
 
+    /// Error to indicate an unexpected input value or type
+    pub fn unexpected<V: fmt::Debug>(value: V, expected: &str) -> Self {
+        Self::bad_request(format!("invalid value {value:?}: expected {expected}"))
+    }
+
+    /// Error to indicate that the requested action cannot be performed due to technical limitations
     pub fn unsupported<I: fmt::Display>(info: I) -> Self {
-        Self::new(ErrorKind::BadRequest, info.to_string())
+        Self::bad_request(info)
     }
 
     /// The [`ErrorKind`] of this error
@@ -214,7 +225,7 @@ impl TCError {
     }
 
     /// The error message of this error
-    pub fn message(&'_ self) -> &'_ str {
+    pub fn message(&self) -> &str {
         &self.data.message
     }
 
@@ -229,13 +240,25 @@ impl std::error::Error for TCError {}
 
 impl From<pathlink::ParseError> for TCError {
     fn from(err: pathlink::ParseError) -> Self {
-        Self::new(ErrorKind::BadRequest, err)
+        Self::bad_request(err)
     }
 }
 
 impl From<ha_ndarray::Error> for TCError {
     fn from(err: ha_ndarray::Error) -> Self {
         Self::new(ErrorKind::Internal, err)
+    }
+}
+
+impl From<rjwt::Error> for TCError {
+    fn from(err: rjwt::Error) -> Self {
+        match err.into_inner() {
+            (rjwt::ErrorKind::Auth | rjwt::ErrorKind::Time, msg) => Self::unauthorized(msg),
+            (rjwt::ErrorKind::Base64 | rjwt::ErrorKind::Format | rjwt::ErrorKind::Json, msg) => {
+                Self::bad_request(msg)
+            }
+            (rjwt::ErrorKind::Fetch, msg) => Self::bad_gateway(msg),
+        }
     }
 }
 
@@ -331,7 +354,7 @@ macro_rules! bad_gateway {
 #[macro_export]
 macro_rules! bad_request {
     ($($t:tt)*) => {{
-        $crate::TCError::new($crate::ErrorKind::BadRequest, format!($($t)*))
+        $crate::TCError::bad_request(format!($($t)*))
     }}
 }
 
@@ -379,7 +402,7 @@ macro_rules! internal {
 #[macro_export]
 macro_rules! unauthorized {
     ($($t:tt)*) => {{
-        $crate::TCError::new($crate::ErrorKind::Unauthorized, format!($($t)*))
+        $crate::TCError::unauthorized(format!($($t)*))
     }}
 }
 

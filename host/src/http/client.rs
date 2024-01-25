@@ -77,7 +77,7 @@ impl crate::gateway::Client for Client {
         }
 
         let uri = build_url(&link, txn.id(), &key)?;
-        let req = req_builder("GET", uri, Some(txn.request().token()));
+        let req = req_builder("GET", uri, Some(txn.request().token().jwt()));
 
         let txn = txn.subcontext_unique();
         let response = self
@@ -107,7 +107,7 @@ impl crate::gateway::Client for Client {
         }
 
         let uri = build_url(&link, txn.id(), &key)?;
-        let req = req_builder("PUT", uri, Some(txn.request().token()))
+        let req = req_builder("PUT", uri, Some(txn.request().token().jwt()))
             .header(hyper::header::CONTENT_TYPE, Encoding::Tbon.as_str());
 
         let txn = txn.subcontext_unique();
@@ -141,7 +141,7 @@ impl crate::gateway::Client for Client {
         }
 
         let uri = build_url(&link, txn.id(), &Value::default())?;
-        let req = req_builder("POST", uri, Some(txn.request().token()))
+        let req = req_builder("POST", uri, Some(txn.request().token().jwt()))
             .header(hyper::header::CONTENT_TYPE, Encoding::Tbon.as_str());
 
         let txn = txn.subcontext_unique();
@@ -184,7 +184,7 @@ impl crate::gateway::Client for Client {
         }
 
         let uri = build_url(&link, txn.id(), &key)?;
-        let req = req_builder("DELETE", uri, Some(txn.request().token()));
+        let req = req_builder("DELETE", uri, Some(txn.request().token().jwt()));
 
         let response = self
             .client

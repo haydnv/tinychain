@@ -171,14 +171,13 @@ impl<T> Cluster<T> {
     pub async fn claim(&self, txn: &Txn) -> TCResult<Txn> {
         debug_assert!(!txn.has_owner(), "tried to claim an owned transaction");
 
+        trace!("adding {} to the list of owned transactions...", txn.id());
         let mut led = self.led.write().await;
 
-        let txn = txn
-            .clone()
-            .claim(&self.actor, self.schema.path.clone())
-            .await?;
+        let txn = txn.clone().claim(&self.actor, self.schema.path.clone())?;
 
         led.insert(*txn.id(), leader::Leader::new());
+        trace!("added {} to the list of owned transactions...", txn.id());
 
         Ok(txn)
     }
@@ -189,7 +188,7 @@ impl<T> Cluster<T> {
             Ok(txn)
         } else {
             let mut led = self.led.write().await;
-            let txn = txn.lead(&self.actor, self.schema.path.clone()).await?;
+            let txn = txn.lead(&self.actor, self.schema.path.clone())?;
             led.insert(*txn.id(), leader::Leader::new());
             Ok(txn)
         }
@@ -225,7 +224,7 @@ where
         if txn.has_leader(self.path()) {
             self.distribute_commit(&txn).await
         } else {
-            let txn = txn.lead(&self.actor, self.schema.path.clone()).await?;
+            let txn = txn.lead(&self.actor, self.schema.path.clone())?;
             self.distribute_commit(&txn).await
         }
     }
@@ -312,6 +311,8 @@ where
     /// Commit the given [`Txn`] for all members of this `Cluster`.
     pub async fn distribute_commit(&self, txn: &Txn) -> TCResult<()> {
         debug!("{:?} will distribute commit {}", self, txn.id());
+
+        assert!(txn.is_leader(self.path()));
 
         #[cfg(debug_assertions)]
         let results = self.distribute_commit_debug(txn).await?;
@@ -445,7 +446,7 @@ where
         if txn.has_leader(self.path()) {
             self.add_replica(&txn, self.schema.host.clone()).await
         } else {
-            let txn = txn.lead(&self.actor, self.schema.path.clone()).await?;
+            let txn = txn.lead(&self.actor, self.schema.path.clone())?;
             self.add_replica(&txn, self.schema.host.clone()).await
         }
     }

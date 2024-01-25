@@ -91,12 +91,12 @@ impl TxnServer {
         &self,
         gateway: Arc<dyn Gateway<State = State>>,
         txn_id: TxnId,
-        token: (String, Claims),
+        token: SignedToken,
     ) -> TCResult<Txn<State>> {
         debug!("TxnServer::new_txn");
 
-        let expires = NetworkTime::try_from(token.1.expires())?;
-        let request = Request::new(txn_id, token.0, token.1);
+        let expires = NetworkTime::try_from(token.expires())?;
+        let request = Request::new(txn_id, token);
 
         self.tx
             .send(Active::new(txn_id, expires))

@@ -130,9 +130,18 @@ where
                         ));
                     }
                 } else {
-                    return Err(bad_request!(
-                        "commit message for an ownerless transaction {}",
+                    #[cfg(debug_assertions)]
+                    panic!(
+                        "commit message for an ownerless transaction {} (token is {:?})",
                         txn.id(),
+                        txn.request().token(),
+                    );
+
+                    #[cfg(not(debug_assertions))]
+                    return Err(bad_request!(
+                        "commit message for an ownerless transaction {} (token is {:?})",
+                        txn.id(),
+                        txn.request().token(),
                     ));
                 }
 
@@ -345,8 +354,8 @@ fn authorize_install(txn: &Txn, parent: &Link, entry_path: &TCPathBuf) -> TCResu
 
         let authorized = txn
             .request()
-            .scopes()
-            .get(&parent, &TCPathBuf::default().into())
+            .token()
+            .get_claim(&parent, &TCPathBuf::default().into())
             .ok_or_else(|| unauthorized!("install request for {}", parent))?;
 
         if authorized.iter().any(|scope| entry_path.starts_with(scope)) {
