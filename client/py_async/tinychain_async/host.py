@@ -2,10 +2,10 @@ import aiohttp
 import asyncio
 import json
 
-from ..context import to_json
-from ..uri import URI
+from tinychain.context import to_json
+from tinychain.uri import URI
 
-from .sync import auth_header, Local, Host
+from tinychain.host import auth_header, Local, Host
 
 
 BACKOFF = 0.01

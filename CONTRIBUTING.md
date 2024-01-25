@@ -23,9 +23,12 @@ If you prefer, you can [fork](https://docs.github.com/en/pull-requests/collabora
 To run the client unit tests, make sure Python knows where to find your local copy of the TinyChain client:
 
 ```bash
-# for example, if you cloned into /home/usernames/tinychain
-# then the path below should be /home/username/tinychain/client
-export PYTHONPATH=$PYTHONPATH:/<path to your clone of the repo>/client
+# optional: create a virtual environment
+# note: python may be python3 on some systems
+python -m venv myenv
+
+# note: pip may be pip3 on some systems
+pip install -e client/py
 ```
 
 Then, try running the client tests to make sure you've got everything configured correctly:
@@ -64,13 +67,11 @@ python3 -m tests.tctest.client
 
 ## Rust Development
 
-If you need to make changes to the TinyChain host software itself, you'll need to run it locally. Follow the steps in the "Manual Install" section of `INSTALL.md` to set up Rust and ArrayFire, then check that you've gotten everything set up correctly by running the host tests:
+If you need to make changes to the TinyChain host software itself, you'll need to run it locally. Follow the steps in the [Manual install](https://docs.tinychain.net/fundamentals/install-tinychain) section of the documentation to set up Rust, then check that you've gotten everything set up correctly by running the host tests:
 
 ```bash
 python3 -m tests.tctest.host
 ```
-
-If you have any problems, first check that you have all your environment variables set correctly. If `PYTHONPATH`, `AF_PATH`, and `LD_LIBRARY_PATH` are all set correctly and your installation still doesn't behave as expected, [create an issue](https://github.com/haydnv/tinychain/issues) to get help.
 
 ## Licensing
 
