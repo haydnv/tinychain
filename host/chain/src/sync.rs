@@ -6,11 +6,12 @@ use std::fmt;
 use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use destream::{de, FromStream};
-use freqfs::{FileLock, FileWriteGuard};
+use freqfs::{FileLock, FileSave, FileWriteGuard};
 use futures::TryFutureExt;
 use get_size::GetSize;
 use log::{debug, trace};
 use safecast::{AsType, TryCastFrom, TryCastInto};
+use tokio::sync::{mpsc, oneshot};
 
 use tc_collection::btree::Node as BTreeNode;
 use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
@@ -32,12 +33,30 @@ const BLOCKS: Label = label(".blocks");
 const COMMITTED: &str = "committed.chain_block";
 const STORE: Label = label(".store");
 
+enum Message {
+    WriteAhead(TxnId, Vec<MutationRecord>, oneshot::Sender<()>),
+    Commit(TxnId, oneshot::Sender<()>),
+}
+
+impl Message {
+    fn commit(txn_id: TxnId) -> (Self, oneshot::Receiver<()>) {
+        let (tx, rx) = oneshot::channel();
+        (Self::Commit(txn_id, tx), rx)
+    }
+
+    fn write_ahead(txn_id: TxnId, mutations: Vec<MutationRecord>) -> (Self, oneshot::Receiver<()>) {
+        let (tx, rx) = oneshot::channel();
+        (Self::WriteAhead(txn_id, mutations, tx), rx)
+    }
+}
+
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 /// event of a transaction failure.
 #[derive(Clone)]
 pub struct SyncChain<State: StateInstance, T> {
     committed: FileLock<State::FE>,
     queue: TxnTaskQueue<MutationPending<State::Txn, State::FE>, TCResult<MutationRecord>>,
+    commit_log: mpsc::UnboundedSender<Message>,
     store: super::data::Store<State::Txn, State::FE>,
     subject: T,
 }
@@ -63,14 +82,13 @@ where
 
         self.store.commit(txn_id).await;
 
-        {
-            let mut committed: FileWriteGuard<ChainBlock> =
-                self.committed.write().await.expect("SyncChain block");
+        let (message, rx) = Message::write_ahead(txn_id, mutations);
 
-            committed.mutations.insert(txn_id, mutations);
-        }
+        self.commit_log
+            .send(message)
+            .expect("send write-ahead message");
 
-        self.committed.sync().await.expect("sync SyncChain block")
+        rx.await.expect("sync write-ahead block");
     }
 }
 
@@ -152,17 +170,10 @@ where
         let guard = self.subject.commit(txn_id).await;
         trace!("SyncChain committed subject, moving its mutations out of the write-head log...");
 
-        // assume the mutations for the transaction have already been moved and sync'd
-        // from `self.pending` to `self.committed` by calling the `write_ahead` method
-        {
-            let mut committed: FileWriteGuard<ChainBlock> =
-                self.committed.write().await.expect("committed");
-
-            committed.mutations.remove(&txn_id);
-            trace!("mutations are out of the write-ahead log");
-        }
-
-        self.committed.sync().await.expect("sync commit block");
+        // assume the mutations have already been moved and sync'd by `write_ahead`
+        let (message, rx) = Message::commit(txn_id);
+        self.commit_log.send(message).expect("send commit message");
+        rx.await.expect("sync commit");
 
         guard
     }
@@ -224,9 +235,12 @@ where
         let size_hint = block.get_size();
         let committed = blocks_dir.create_file(COMMITTED.to_string(), block, size_hint)?;
 
+        let commit_log = spawn_commit_thread::<State>(committed.clone());
+
         Ok(Self {
             subject,
             queue,
+            commit_log,
             committed,
             store,
         })
@@ -264,9 +278,12 @@ where
             blocks_dir.create_file(COMMITTED.to_string(), block, size_hint)?
         };
 
+        let commit_log = spawn_commit_thread::<State>(committed.clone());
+
         Ok(Self {
             subject,
             queue,
+            commit_log,
             committed,
             store,
         })
@@ -332,7 +349,11 @@ where
 impl<State, T> de::FromStream for SyncChain<State, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<ChainBlock> + AsType<TensorNode>,
+    State::FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> FileSave<'a>,
     T: FromStream<Context = State::Txn>,
 {
     type Context = State::Txn;
@@ -379,9 +400,12 @@ where
             .create_file(COMMITTED.to_string(), block, size_hint)
             .map_err(de::Error::custom)?;
 
+        let commit_log = spawn_commit_thread::<State>(committed.clone());
+
         Ok(Self {
             subject,
             queue,
+            commit_log,
             committed,
             store,
         })
@@ -409,4 +433,62 @@ where
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "SyncChain<{}>", std::any::type_name::<T>())
     }
+}
+
+fn spawn_commit_thread<State: StateInstance>(
+    block: FileLock<State::FE>,
+) -> mpsc::UnboundedSender<Message>
+where
+    State::FE: AsType<ChainBlock> + for<'a> FileSave<'a>,
+{
+    let (tx, mut rx) = mpsc::unbounded_channel();
+
+    let mut oneshot_buffer = Vec::new();
+
+    fn handle_message(
+        block: &mut ChainBlock,
+        buffer: &mut Vec<oneshot::Sender<()>>,
+        message: Message,
+    ) -> bool {
+        match message {
+            Message::WriteAhead(txn_id, mutations, tx) => {
+                debug_assert!(!mutations.is_empty());
+                buffer.push(tx);
+                block.mutations.insert(txn_id, mutations);
+                true
+            }
+            Message::Commit(txn_id, tx) => {
+                buffer.push(tx);
+                block.mutations.remove(&txn_id).is_some()
+            }
+        }
+    }
+
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            let needs_sync = {
+                let mut needs_sync = false;
+                let mut block = block.write().await.expect("commit block");
+
+                needs_sync = needs_sync || handle_message(&mut *block, &mut oneshot_buffer, msg);
+
+                while let Ok(msg) = rx.try_recv() {
+                    needs_sync =
+                        needs_sync || handle_message(&mut *block, &mut oneshot_buffer, msg);
+                }
+
+                needs_sync
+            };
+
+            if needs_sync {
+                block.sync().await.expect("sync commit block");
+            }
+
+            for tx in oneshot_buffer.drain(..) {
+                tx.send(()).expect("confirm commit");
+            }
+        }
+    });
+
+    tx
 }
