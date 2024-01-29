@@ -22,7 +22,7 @@ copyright = '2023'
 author = 'The TinyChain Contributors'
 
 # The full version, including alpha/beta/rc tags
-release = '0.15.0'
+release = '0.16.0'
 
 
 # -- General configuration ---------------------------------------------------
