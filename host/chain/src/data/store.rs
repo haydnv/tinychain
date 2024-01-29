@@ -179,7 +179,7 @@ where
                     .await
             } else {
                 Err(internal!(
-                    "invalid subject for historical Chain state {:?}",
+                    "invalid subject for historical Chain state: {:?}",
                     tc_ref
                 ))
             }

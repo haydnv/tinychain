@@ -5,11 +5,10 @@ use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
-use futures::{future, TryFutureExt, TryStreamExt};
+use futures::TryFutureExt;
 use get_size::GetSize;
 use log::debug;
 
-use tc_error::*;
 use tc_scalar::Scalar;
 use tc_transact::TxnId;
 use tc_value::Value;
@@ -233,18 +232,6 @@ impl ChainBlock {
     /// The hash of the previous block in the chain
     pub fn last_hash(&self) -> &Bytes {
         &self.last_hash
-    }
-
-    /// The current size of this block
-    // TODO: delete
-    pub async fn size(&self) -> TCResult<usize> {
-        let encoded = tbon::en::encode(self)
-            .map_err(|cause| internal!("TBON encoding error").consume(cause))?;
-
-        encoded
-            .map_err(|cause| internal!("TBON encoding error").consume(cause))
-            .try_fold(0, |size, chunk| future::ready(Ok(size + chunk.len())))
-            .await
     }
 }
 

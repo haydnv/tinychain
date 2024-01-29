@@ -168,7 +168,7 @@ where
         trace!("SyncChain::commit logged the mutations to be applied");
 
         let guard = self.subject.commit(txn_id).await;
-        trace!("SyncChain committed subject, moving its mutations out of the write-head log...");
+        trace!("SyncChain subject committed, removing mutations from the write-ahead log...");
 
         // assume the mutations have already been moved and sync'd by `write_ahead`
         let (message, rx) = Message::commit(txn_id);

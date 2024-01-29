@@ -1,18 +1,21 @@
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::iter;
+use std::sync::Arc;
 
 use async_hash::generic_array::GenericArray;
 use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
-use freqfs::{DirLock, DirWriteGuard, FileLock, FileReadGuard, FileReadGuardOwned, FileWriteGuard};
+use freqfs::*;
 use futures::stream::{self, StreamExt};
-use futures::{try_join, TryFutureExt, TryStreamExt};
+use futures::{join, try_join, TryFutureExt, TryStreamExt};
 use get_size::GetSize;
 use log::{debug, error, info, trace};
 use safecast::*;
+use tokio::sync::{mpsc, oneshot, RwLock};
 
 use tc_collection::btree::Node as BTreeNode;
 use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
@@ -20,7 +23,7 @@ use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_transact::fs;
-use tc_transact::lock::{TxnLock, TxnTaskQueue};
+use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Public, Route, StateInstance};
 use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
@@ -34,12 +37,52 @@ use super::store::{Store, StoreEntry, StoreEntryView};
 const STORE: Label = label("store");
 const WRITE_AHEAD: &str = "write_ahead";
 
+struct Commit(TxnId, oneshot::Sender<()>);
+
+impl Commit {
+    fn new(txn_id: TxnId) -> (Self, oneshot::Receiver<()>) {
+        let (tx, rx) = oneshot::channel();
+        (Self(txn_id, tx), rx)
+    }
+}
+
+impl Eq for Commit {}
+
+impl PartialEq for Commit {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Ord for Commit {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl PartialOrd for Commit {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+struct WriteAhead(TxnId, Vec<MutationRecord>, oneshot::Sender<()>);
+
+impl WriteAhead {
+    fn new(txn_id: TxnId, mutations: Vec<MutationRecord>) -> (Self, oneshot::Receiver<()>) {
+        let (tx, rx) = oneshot::channel();
+        (Self(txn_id, mutations, tx), rx)
+    }
+}
+
 pub struct History<State: StateInstance> {
     queue: TxnTaskQueue<MutationPending<State::Txn, State::FE>, TCResult<MutationRecord>>,
     file: DirLock<State::FE>,
     store: Store<State::Txn, State::FE>,
-    latest: TxnLock<u64>,
-    cutoff: TxnLock<TxnId>,
+    latest: Arc<RwLock<u64>>,
+    cutoff: Arc<RwLock<TxnId>>,
+    write_ahead_log: mpsc::UnboundedSender<WriteAhead>,
+    commit_log: mpsc::UnboundedSender<Commit>,
 }
 
 impl<State: StateInstance> Clone for History<State> {
@@ -50,6 +93,8 @@ impl<State: StateInstance> Clone for History<State> {
             store: self.store.clone(),
             latest: self.latest.clone(),
             cutoff: self.cutoff.clone(),
+            write_ahead_log: self.write_ahead_log.clone(),
+            commit_log: self.commit_log.clone(),
         }
     }
 }
@@ -65,20 +110,28 @@ where
 {
     fn new(
         file: DirLock<State::FE>,
+        writeahead_block: FileLock<State::FE>,
         store: Store<State::Txn, State::FE>,
         latest: u64,
         cutoff: TxnId,
     ) -> Self {
         debug_assert!(file.try_read().expect("history").contains(&latest));
 
+        let latest = Arc::new(RwLock::new(latest));
+        let cutoff = Arc::new(RwLock::new(cutoff));
+
         let queue = new_queue::<State>(store.clone());
+        let write_ahead_log = spawn_writeahead_thread::<State>(writeahead_block);
+        let commit_log = spawn_commit_thread::<State>(file.clone(), cutoff.clone(), latest.clone());
 
         Self {
             queue,
             file,
             store,
-            latest: TxnLock::new(latest),
-            cutoff: TxnLock::new(cutoff),
+            latest,
+            cutoff,
+            write_ahead_log,
+            commit_log,
         }
     }
 }
@@ -148,21 +201,13 @@ where
 
         self.store.commit(txn_id).await;
 
-        let file = self.file.read().await;
+        let (message, rx) = WriteAhead::new(txn_id, mutations);
 
-        let write_ahead: &FileLock<State::FE> =
-            file.get_file(WRITE_AHEAD).expect("write-ahead log");
+        self.write_ahead_log
+            .send(message)
+            .expect("send write-ahead message");
 
-        {
-            let mut write_ahead: FileWriteGuard<ChainBlock> = write_ahead
-                .write()
-                .await
-                .expect("write-ahead log write lock");
-
-            write_ahead.mutations.insert(txn_id, mutations);
-        }
-
-        write_ahead.sync().await.expect("sync write-ahead log");
+        rx.await.expect("write-ahead confirmation");
     }
 }
 
@@ -201,8 +246,7 @@ where
 
         info!("replicate {subject:?} from chain history {other:?}");
 
-        let (latest, other_latest) =
-            try_join!(self.latest.read(*txn.id()), other.latest.read(*txn.id()))?;
+        let (latest, other_latest) = join!(self.latest.read(), other.latest.read());
 
         debug!("chain to replicate ends with block {}", *other_latest);
 
@@ -353,12 +397,18 @@ where
         let cutoff = txn_id;
         let latest = 0;
 
-        create_block(&mut file_lock, WRITE_AHEAD)?;
+        let writeahead_block = create_block(&mut file_lock, WRITE_AHEAD)?;
         create_block(&mut file_lock, latest)?;
 
         std::mem::drop(file_lock);
 
-        Ok(Self::new(file.clone(), store, latest, cutoff))
+        Ok(Self::new(
+            file.clone(),
+            writeahead_block,
+            store,
+            latest,
+            cutoff,
+        ))
     }
 
     async fn load(txn_id: TxnId, _schema: Self::Schema, dir: fs::Dir<State::FE>) -> TCResult<Self> {
@@ -379,7 +429,7 @@ where
         let mut cutoff = txn_id;
         let mut latest = 0;
 
-        get_or_create_block(&mut file_lock, WRITE_AHEAD.to_string())?;
+        let writeahead_block = get_or_create_block(&mut file_lock, WRITE_AHEAD.to_string())?;
 
         let mut last_hash = Bytes::from(null_hash().to_vec());
         while let Some(block) = file_lock.get_file(&latest) {
@@ -412,7 +462,13 @@ where
 
         std::mem::drop(file_lock);
 
-        Ok(Self::new(file.clone(), store, latest, cutoff))
+        Ok(Self::new(
+            file.clone(),
+            writeahead_block,
+            store,
+            latest,
+            cutoff,
+        ))
     }
 
     fn dir(&self) -> DirLock<State::FE> {
@@ -427,7 +483,7 @@ where
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
 {
     async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
-        let latest_block_id = self.latest.read(txn_id).await?;
+        let latest_block_id = self.latest.read().await;
         let latest_block = self.read_block(*latest_block_id).await?;
 
         let latest_block = if latest_block.mutations.is_empty() {
@@ -509,101 +565,17 @@ where
 
         // assume `self.store` has already been committed by calling `write_ahead`
 
-        let mut file = self.file.write().await;
-        trace!("got write lock on chain history file");
-
-        let write_ahead = file.get_file(WRITE_AHEAD).expect("write-ahead log").clone();
-
-        let needs_sync = {
-            let mut write_ahead: FileWriteGuard<ChainBlock> =
-                write_ahead.write().await.expect("write-ahead lock");
-
-            trace!("locked write-ahead block for writing");
-
-            if let Some(mutations) = write_ahead.mutations.remove(&txn_id) {
-                trace!("locking latest block ordinal for writing...");
-
-                let mut latest = self
-                    .latest
-                    .write(txn_id)
-                    .await
-                    .expect("latest block ordinal");
-
-                trace!("locked latest block ordinal for writing");
-
-                let latest_block = file.get_file(&*latest).expect("latest block").clone();
-
-                {
-                    let mut latest_block: FileWriteGuard<ChainBlock> =
-                        latest_block.write().await.expect("latest block write lock");
-
-                    trace!("locked latest ChainBlock for writing");
-
-                    latest_block.mutations.insert(txn_id, mutations);
-
-                    if latest_block.size().await.expect("block size") > BLOCK_SIZE {
-                        let mut cutoff = self.cutoff.write(txn_id).await.expect("block cutoff id");
-
-                        trace!("locked block cutoff ID for writing");
-
-                        assert!(
-                            &txn_id >= &*cutoff,
-                            "cannot commit transaction {} since a block has already been committed at {}",
-                            txn_id,
-                            *cutoff
-                        );
-
-                        *cutoff = txn_id;
-
-                        let hash = latest_block.current_hash();
-
-                        let block = ChainBlock::new(hash.to_vec());
-                        let size_hint = block.get_size();
-                        let new_block = file
-                            .create_file(latest.to_string(), block, size_hint)
-                            .expect("new chain block");
-
-                        new_block.sync().await.expect("sync new chain block");
-
-                        trace!("sync'd new ChainBlock to disk");
-
-                        *latest += 1;
-                    }
-                }
-
-                latest_block.sync().await.expect("sync latest chain block");
-
-                trace!("sync'd last ChainBlock to disk");
-
-                true
-            } else {
-                false
-            }
-        };
-
-        if needs_sync {
-            write_ahead
-                .sync()
-                .await
-                .expect("sync write-ahead log after commit");
-
-            trace!("sync'd write-ahead block to disk");
-        }
-
-        self.latest.commit(txn_id);
-        self.cutoff.commit(txn_id);
+        let (message, rx) = Commit::new(txn_id);
+        self.commit_log.send(message).expect("send commit message");
+        rx.await.expect("commit confirmation");
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
-        self.latest.rollback(txn_id);
-        self.cutoff.rollback(txn_id);
         self.queue.rollback(txn_id);
         self.store.rollback(txn_id).await;
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        self.latest.finalize(*txn_id);
-        self.cutoff.finalize(*txn_id);
         self.queue.finalize(*txn_id);
         self.store.finalize(txn_id).await;
     }
@@ -621,8 +593,7 @@ where
     async fn into_view(self, txn: State::Txn) -> TCResult<Self::View> {
         debug!("History::into_view");
 
-        let latest = self.latest.read(*txn.id()).await?;
-
+        let latest = self.latest.clone().read_owned().await;
         let file = self.file.read_owned().await;
 
         let seq = stream::iter(0..((*latest) + 1))
@@ -748,7 +719,7 @@ where
 
         let block = ChainBlock::new(null_hash.to_vec());
         let size_hint = block.get_size();
-        guard
+        let writeahead_block = guard
             .create_file(WRITE_AHEAD.into(), block, size_hint)
             .map_err(de::Error::custom)?;
 
@@ -792,8 +763,155 @@ where
 
         std::mem::drop(guard);
 
-        Ok(History::new(file, store, latest, txn_id))
+        Ok(History::new(file, writeahead_block, store, latest, txn_id))
     }
+}
+
+fn spawn_writeahead_thread<State: StateInstance>(
+    log: FileLock<State::FE>,
+) -> mpsc::UnboundedSender<WriteAhead>
+where
+    State::FE: AsType<ChainBlock> + for<'a> FileSave<'a>,
+{
+    let (tx, mut rx) = mpsc::unbounded_channel();
+
+    let mut oneshot_buffer = Vec::new();
+
+    fn handle_message(
+        block: &mut ChainBlock,
+        buffer: &mut Vec<oneshot::Sender<()>>,
+        message: WriteAhead,
+    ) -> bool {
+        let WriteAhead(txn_id, mutations, tx) = message;
+        debug_assert!(!mutations.is_empty());
+        buffer.push(tx);
+        block.mutations.insert(txn_id, mutations);
+        true
+    }
+
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            {
+                let mut block = log.write().await.expect("write-ahead log");
+
+                handle_message(&mut *block, &mut oneshot_buffer, msg);
+
+                while let Ok(msg) = rx.try_recv() {
+                    handle_message(&mut *block, &mut oneshot_buffer, msg);
+                }
+            }
+
+            log.sync().await.expect("sync write-ahead log");
+
+            for tx in oneshot_buffer.drain(..) {
+                tx.send(()).expect("confirm write-ahead");
+            }
+        }
+    });
+
+    tx
+}
+
+fn spawn_commit_thread<State: StateInstance>(
+    blocks: DirLock<State::FE>,
+    cutoff: Arc<RwLock<TxnId>>,
+    latest: Arc<RwLock<u64>>,
+) -> mpsc::UnboundedSender<Commit>
+where
+    State::FE: AsType<ChainBlock> + for<'a> FileSave<'a>,
+{
+    let write_ahead = blocks
+        .try_read()
+        .expect("blocks")
+        .get_file(WRITE_AHEAD)
+        .expect("write-ahead log")
+        .clone();
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+
+    let mut message_buffer = Vec::new();
+    let mut oneshot_buffer = Vec::new();
+
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            let mut latest = latest.write().await;
+            let mut cutoff = cutoff.write().await;
+            let mut write_ahead = write_ahead.write().await.expect("write-ahead log");
+            let mut blocks = blocks.write().await;
+
+            message_buffer.push(msg);
+
+            while let Ok(msg) = rx.try_recv() {
+                message_buffer.push(msg);
+            }
+
+            message_buffer.sort();
+
+            let mut latest_block = blocks.get_file(&*latest).cloned().expect("latest block");
+            let mut latest_block_mut = latest_block.write_owned().await.expect("latest block");
+
+            for Commit(txn_id, tx) in message_buffer.drain(..) {
+                let mutations = if let Some(mutations) = write_ahead.mutations.remove(&txn_id) {
+                    mutations
+                } else {
+                    tx.send(()).expect("confirm empty commit");
+                    continue;
+                };
+
+                // this condition is technically possible but should be extraordinarily rare
+                // it prevents replicas from diverging in case of out-of-order commits
+                assert!(
+                    &txn_id >= &*cutoff,
+                    "cannot commit transaction {} since a block has already been committed at {}",
+                    txn_id,
+                    *cutoff
+                );
+
+                oneshot_buffer.push(tx);
+
+                latest_block_mut.mutations.insert(txn_id, mutations);
+
+                if latest_block_mut.get_size() > BLOCK_SIZE {
+                    *cutoff = txn_id;
+
+                    let waiters = oneshot_buffer.drain(..).collect::<Vec<_>>();
+
+                    tokio::spawn(async move {
+                        latest_block.sync().await.expect("sync block");
+
+                        for waiter in waiters {
+                            waiter.send(()).expect("confirm commit");
+                        }
+                    });
+
+                    let hash = latest_block_mut.current_hash();
+
+                    *latest += 1;
+
+                    let block = ChainBlock::new(hash.to_vec());
+                    let size_hint = block.get_size();
+
+                    latest_block = blocks
+                        .create_file(latest.to_string(), block, size_hint)
+                        .expect("new chain block");
+
+                    latest_block_mut = latest_block.write_owned().await.expect("latest block");
+                }
+            }
+
+            std::mem::drop(latest_block_mut);
+
+            if !oneshot_buffer.is_empty() {
+                latest_block.sync().await.expect("sync block");
+
+                for waiter in oneshot_buffer.drain(..) {
+                    waiter.send(()).expect("confirm commit");
+                }
+            }
+        }
+    });
+
+    tx
 }
 
 async fn parse_block_state<State>(
