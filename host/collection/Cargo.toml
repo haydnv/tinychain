@@ -1,6 +1,6 @@
 [package]
 name = "tc-collection"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "TinyChain's collection types"
@@ -32,9 +32,9 @@ smallvec = "1.11"
 pin-project = "1.1"
 rayon = "1.8"
 safecast = "0.2"
-tc-error = { path = "../error" }
-tc-scalar = { path = "../scalar" }
-tc-transact = { path = "../transact" }
-tc-value = { path = "../value" }
-tcgeneric = { path = "../generic" }
+tc-error = "0.11"
+tc-scalar = "0.4"
+tc-transact = "0.20"
+tc-value = "0.12"
+tcgeneric = "0.10"
 tokio = { version = "1.35", features = ["sync"] }

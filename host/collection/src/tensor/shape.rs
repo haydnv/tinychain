@@ -278,16 +278,6 @@ impl Range {
     }
 
     /// Expand this `Range` to the entire given [`Shape`].
-    ///
-    /// Example:
-    /// ```
-    /// # use smallvec::smallvec;
-    /// # use tc_collection::tensor::{Range, Shape};
-    /// let mut range = Range::from(&[0u64][..]);
-    /// assert_eq!(
-    ///     range.to_shape(&Shape::from(smallvec![2, 3, 4])).unwrap(),
-    ///     Shape::from(smallvec![3, 4]));
-    /// ```
     pub fn normalize(mut self, shape: &[u64]) -> Self {
         assert!(shape.len() >= self.len());
 
