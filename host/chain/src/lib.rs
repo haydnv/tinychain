@@ -16,7 +16,7 @@ use tc_collection::btree::Node as BTreeNode;
 use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
 use tc_collection::Collection;
 use tc_error::*;
-use tc_scalar::Scalar;
+use tc_scalar::{Refer, Scalar};
 use tc_transact::fs;
 use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Route, StateInstance};
@@ -146,7 +146,7 @@ where
         + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
-    Scalar: TryCastFrom<State>,
+    Scalar: TryCastFrom<State> + Refer<State>,
 {
     fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
         match self {
@@ -432,7 +432,7 @@ where
     T: Route<State> + de::FromStream<Context = State::Txn> + fmt::Debug,
     (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
-    Scalar: TryCastFrom<State>,
+    Scalar: TryCastFrom<State> + Refer<State>,
     Value: TryCastFrom<State>,
     (Value,): TryCastFrom<State>,
     (Value, State): TryCastFrom<State>,
@@ -479,7 +479,7 @@ where
     T: Route<State> + de::FromStream<Context = State::Txn> + fmt::Debug,
     (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
-    Scalar: TryCastFrom<State>,
+    Scalar: TryCastFrom<State> + Refer<State>,
     Value: TryCastFrom<State>,
     (Value,): TryCastFrom<State>,
     (Value, State): TryCastFrom<State>,
@@ -517,7 +517,7 @@ where
     T: Route<State> + de::FromStream<Context = State::Txn> + fmt::Debug,
     (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
-    Scalar: TryCastFrom<State>,
+    Scalar: TryCastFrom<State> + Refer<State>,
     Value: TryCastFrom<State>,
     (Value,): TryCastFrom<State>,
     (Value, State): TryCastFrom<State>,

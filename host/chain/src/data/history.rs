@@ -21,7 +21,7 @@ use tc_collection::btree::Node as BTreeNode;
 use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
 use tc_collection::Collection;
 use tc_error::*;
-use tc_scalar::Scalar;
+use tc_scalar::{Refer, Scalar};
 use tc_transact::fs;
 use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Public, Route, StateInstance};
@@ -223,7 +223,7 @@ where
     pub fn append_put(&self, txn: State::Txn, key: Value, value: State) -> TCResult<()>
     where
         Collection<State::Txn, State::FE>: TryCastFrom<State>,
-        Scalar: TryCastFrom<State>,
+        Scalar: TryCastFrom<State> + Refer<State>,
     {
         debug!("History::append_put {} {} {:?}", txn.id(), key, value);
 
@@ -641,7 +641,7 @@ where
         + AsType<TensorNode>
         + for<'a> fs::FileSave<'a>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
-    Scalar: TryCastFrom<State>,
+    Scalar: TryCastFrom<State> + Refer<State>,
     Value: TryCastFrom<State>,
     (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
     (Value,): TryCastFrom<State>,
@@ -677,7 +677,7 @@ where
         + AsType<TensorNode>
         + for<'a> fs::FileSave<'a>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
-    Scalar: TryCastFrom<State>,
+    Scalar: TryCastFrom<State> + Refer<State>,
     Value: TryCastFrom<State>,
     (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
     (Value,): TryCastFrom<State>,
@@ -924,7 +924,7 @@ where
     State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
     State: StateInstance + From<Scalar>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
-    Scalar: TryCastFrom<State>,
+    Scalar: TryCastFrom<State> + Refer<State>,
     Value: TryCastFrom<State>,
     (Value,): TryCastFrom<State>,
     (Value, State): TryCastFrom<State>,

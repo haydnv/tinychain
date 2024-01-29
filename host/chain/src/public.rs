@@ -7,7 +7,7 @@ use safecast::{AsType, TryCastFrom};
 use tc_collection::btree::Node as BTreeNode;
 use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
 use tc_collection::Collection;
-use tc_scalar::Scalar;
+use tc_scalar::{Refer, Scalar};
 use tc_transact::fs;
 use tc_transact::public::*;
 use tc_transact::Transaction;
@@ -59,8 +59,10 @@ where
                 Some(put_handler) => Some(Box::new(|txn, key, value| {
                     Box::pin(async move {
                         debug!("Chain::put {} <- {:?}", key, value);
+
                         self.chain
                             .append_put(txn.clone(), key.clone(), value.clone())?;
+
                         put_handler(txn, key, value).await
                     })
                 })),
@@ -126,7 +128,7 @@ where
         + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + Clone + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
-    Scalar: TryCastFrom<State>,
+    Scalar: TryCastFrom<State> + Refer<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         debug!("Chain::route {}", TCPath::from(path));

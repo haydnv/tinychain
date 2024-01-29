@@ -11,7 +11,7 @@ use tc_collection::btree::Node as BTreeNode;
 use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
 use tc_collection::{btree, Collection, CollectionBase, CollectionView, Schema};
 use tc_error::*;
-use tc_scalar::{OpRef, Scalar, TCRef};
+use tc_scalar::{OpRef, Refer, Scalar, TCRef};
 use tc_transact::fs;
 use tc_transact::public::StateInstance;
 use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
@@ -42,7 +42,7 @@ impl<Txn, FE> StoreEntry<Txn, FE> {
         Txn: Transaction<FE>,
         FE: DenseCacheFile + AsType<btree::Node> + AsType<TensorNode> + Clone,
         Collection<Txn, FE>: TryCastFrom<State>,
-        Scalar: TryCastFrom<State>,
+        Scalar: TryCastFrom<State> + Refer<State>,
         BTreeNode: freqfs::FileLoad,
     {
         if Collection::<_, _>::can_cast_from(&state) {
@@ -50,9 +50,15 @@ impl<Txn, FE> StoreEntry<Txn, FE> {
                 .try_cast_into(|s| bad_request!("not a collection: {s:?}"))
                 .map(Self::Collection)
         } else if Scalar::can_cast_from(&state) {
-            state
-                .try_cast_into(|s| bad_request!("not a scalar: {s:?}"))
-                .map(Self::Scalar)
+            let scalar = Scalar::try_cast_from(state, |s| bad_request!("not a scalar: {s:?}"))?;
+
+            if scalar.is_ref() {
+                Err(bad_request!(
+                    "cannot modify a chain subject using a reference: {scalar:?}"
+                ))
+            } else {
+                Ok(Self::Scalar(scalar))
+            }
         } else {
             Err(bad_request!("invalid Chain value entry: {state:?}"))
         }
