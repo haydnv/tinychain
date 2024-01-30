@@ -3,7 +3,7 @@ use destream::de;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use http_body_util::{BodyStream, Empty, StreamBody};
 use hyper::body::{Body, Bytes, Frame, Incoming};
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 
 use tc_error::*;
@@ -18,16 +18,12 @@ use crate::txn::Txn;
 const ERR_NO_OWNER: &str = "an ownerless transaction may not make outgoing requests";
 
 /// A TinyChain HTTP client. Should only be used through a `Gateway`.
-pub struct Client {
-    exec: TokioExecutor,
-}
+pub struct Client;
 
 impl Client {
     /// Construct a new `Client`.
     pub fn new() -> Self {
-        Self {
-            exec: TokioExecutor::new(),
-        }
+        Self
     }
 
     async fn connect_and_send<B>(
@@ -43,7 +39,7 @@ impl Client {
         let io = TokioIo::new(stream);
 
         // TCP handshake
-        let (mut sender, conn) = hyper::client::conn::http2::handshake(self.exec.clone(), io)
+        let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
             .map_err(|cause| bad_gateway!("handshake failed").consume(cause))
             .await?;
 

@@ -8,9 +8,9 @@ use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::{BodyStream, StreamBody};
 use hyper::body::{Body, Bytes, Frame};
-use hyper::server::conn::http2;
+use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::rt::TokioIo;
 use log::{info, trace, warn};
 use serde::de::DeserializeOwned;
 use tokio::net::TcpListener;
@@ -265,7 +265,6 @@ impl crate::gateway::Server for HTTPServer {
             .await?;
 
         let server = Arc::new(self);
-        let exec = TokioExecutor::new();
 
         info!("HTTP server listening on port {}...", port);
 
@@ -275,17 +274,12 @@ impl crate::gateway::Server for HTTPServer {
                 .map_err(|cause| internal!("could not accept TCP connection: {cause}"))
                 .await?;
 
-            let exec = exec.clone();
+            let io = TokioIo::new(stream);
             let server = server.clone();
             let service = service_fn(move |request| server.clone().handle_timeout(request));
 
             tokio::task::spawn(async move {
-                let io = TokioIo::new(stream);
-
-                if let Err(err) = http2::Builder::new(exec)
-                    .serve_connection(io, service)
-                    .await
-                {
+                if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
                     warn!("HTTP connection error: {:?}", err);
                 }
             });

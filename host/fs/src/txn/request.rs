@@ -60,6 +60,7 @@ impl Request {
     }
 }
 
+// TODO: move this to the main crate & remove the dependency on `Gateway`
 /// Struct responsible for resolving JWT auth identities (cf. the [`rjwt`] crate).
 pub struct Resolver<'a, State> {
     gateway: &'a dyn Gateway<State = State>,
