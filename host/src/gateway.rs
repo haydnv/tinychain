@@ -65,10 +65,8 @@ pub trait Client {
 /// A server used by [`Gateway`].
 #[async_trait]
 pub trait Server {
-    type Error: std::error::Error;
-
     /// Handle incoming requests.
-    async fn listen(self, port: u16) -> Result<(), Self::Error>;
+    async fn listen(self, port: u16) -> TCResult<()>;
 }
 
 struct Inner {

@@ -3,13 +3,17 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Response};
-use log::trace;
+use http_body_util::combinators::UnsyncBoxBody;
+use http_body_util::{BodyStream, StreamBody};
+use hyper::body::{Body, Bytes, Frame};
+use hyper::server::conn::http2;
+use hyper::service::service_fn;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use log::{info, trace, warn};
 use serde::de::DeserializeOwned;
+use tokio::net::TcpListener;
 
 use tc_error::*;
 use tc_fs::{Gateway as GatewayInstance, Resolver};
@@ -34,10 +38,14 @@ impl HTTPServer {
         Self { gateway }
     }
 
-    async fn handle_timeout(
+    async fn handle_timeout<B>(
         self: Arc<Self>,
-        request: hyper::Request<Body>,
-    ) -> Result<Response<Body>, hyper::Error> {
+        request: hyper::Request<B>,
+    ) -> Result<hyper::Response<UnsyncBoxBody<Bytes, TCError>>, hyper::Error>
+    where
+        B: Body<Data = Bytes> + Send + Unpin,
+        B::Error: std::error::Error,
+    {
         match tokio::time::timeout(self.gateway.request_ttl(), self.handle(request)).await {
             Ok(result) => result,
             Err(cause) => Ok(transform_error(
@@ -47,10 +55,14 @@ impl HTTPServer {
         }
     }
 
-    async fn handle(
+    async fn handle<B>(
         self: Arc<Self>,
-        request: hyper::Request<Body>,
-    ) -> Result<Response<Body>, hyper::Error> {
+        request: hyper::Request<B>,
+    ) -> Result<hyper::Response<UnsyncBoxBody<Bytes, TCError>>, hyper::Error>
+    where
+        B: Body<Data = Bytes> + Send + Unpin,
+        B::Error: std::error::Error,
+    {
         let (params, txn, accept_encoding, request_encoding) =
             match self.process_headers(&request).await {
                 Ok(header_data) => header_data,
@@ -74,7 +86,14 @@ impl HTTPServer {
 
         let body = match accept_encoding {
             Encoding::Json => match destream_json::encode(view) {
-                Ok(response) => Body::wrap_stream(response.chain(delimiter(b"\n"))),
+                Ok(response) => {
+                    let response = response
+                        .chain(delimiter(b"\n"))
+                        .map_ok(Frame::data)
+                        .map_err(|cause| internal!("JSON encoding error").consume(cause));
+
+                    UnsyncBoxBody::new(StreamBody::new(response))
+                }
                 Err(cause) => {
                     return Ok(transform_error(
                         internal!("JSON encoding error").consume(cause),
@@ -84,10 +103,11 @@ impl HTTPServer {
             },
             Encoding::Tbon => match tbon::en::encode(view) {
                 Ok(response) => {
-                    let response =
-                        response.map_err(|cause| internal!("TBON encoding error").consume(cause));
+                    let response = response
+                        .map_ok(Frame::data)
+                        .map_err(|cause| internal!("TBON encoding error").consume(cause));
 
-                    Body::wrap_stream(response)
+                    UnsyncBoxBody::new(StreamBody::new(response))
                 }
                 Err(cause) => {
                     return Ok(transform_error(
@@ -98,7 +118,7 @@ impl HTTPServer {
             },
         };
 
-        let mut response = Response::new(body);
+        let mut response = hyper::Response::new(body);
 
         response.headers_mut().insert(
             hyper::header::CONTENT_TYPE,
@@ -113,7 +133,7 @@ impl HTTPServer {
 
     async fn process_headers(
         &self,
-        http_request: &hyper::Request<Body>,
+        http_request: &hyper::Request<impl Body>,
     ) -> TCResult<(GetParams, Txn, Encoding, Encoding)> {
         trace!("reading headers");
 
@@ -181,13 +201,17 @@ impl HTTPServer {
         Ok((params, txn, accept_encoding, content_type))
     }
 
-    async fn route(
+    async fn route<B>(
         &self,
         encoding: Encoding,
         txn: &Txn,
         mut params: GetParams,
-        http_request: hyper::Request<Body>,
-    ) -> TCResult<State> {
+        http_request: hyper::Request<B>,
+    ) -> TCResult<State>
+    where
+        B: Body<Data = Bytes> + Send + Unpin,
+        B::Error: std::error::Error,
+    {
         let path: TCPathBuf = http_request.uri().path().parse()?;
 
         match http_request.method() {
@@ -207,7 +231,7 @@ impl HTTPServer {
                     .await;
 
                 #[cfg(debug_assertions)]
-                log::trace!("PUT request completed with result {:?}", result);
+                trace!("PUT request completed with result {:?}", result);
 
                 result
             }
@@ -220,6 +244,7 @@ impl HTTPServer {
 
             &hyper::Method::DELETE => {
                 let key = get_param(&mut params, "key")?.unwrap_or_default();
+
                 self.gateway
                     .delete(txn, path.into(), key)
                     .map_ok(State::from)
@@ -233,35 +258,53 @@ impl HTTPServer {
 
 #[async_trait]
 impl crate::gateway::Server for HTTPServer {
-    type Error = hyper::Error;
-
-    async fn listen(self, port: u16) -> Result<(), Self::Error> {
-        println!("HTTP server listening on port {}...", port);
-        println!();
+    async fn listen(self, port: u16) -> TCResult<()> {
+        let addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), port);
+        let listener = TcpListener::bind(addr)
+            .map_err(|cause| internal!("could not bind to Ipv4 interface: {cause}"))
+            .await?;
 
         let server = Arc::new(self);
+        let exec = TokioExecutor::new();
 
-        let new_service = make_service_fn(move |_| {
+        info!("HTTP server listening on port {}...", port);
+
+        loop {
+            let (stream, _) = listener
+                .accept()
+                .map_err(|cause| internal!("could not accept TCP connection: {cause}"))
+                .await?;
+
+            let exec = exec.clone();
             let server = server.clone();
+            let service = service_fn(move |request| server.clone().handle_timeout(request));
 
-            async {
-                Ok::<_, hyper::Error>(service_fn(move |req| {
-                    let server = server.clone();
-                    HTTPServer::handle_timeout(server, req)
-                }))
-            }
-        });
+            tokio::task::spawn(async move {
+                let io = TokioIo::new(stream);
 
-        let addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), port);
-        hyper::Server::bind(&addr)
-            .serve(new_service)
-            .with_graceful_shutdown(shutdown_signal())
-            .await
+                if let Err(err) = http2::Builder::new(exec)
+                    .serve_connection(io, service)
+                    .await
+                {
+                    warn!("HTTP connection error: {:?}", err);
+                }
+            });
+        }
     }
 }
 
-async fn destream_body(body: hyper::Body, encoding: Encoding, txn: Txn) -> TCResult<State> {
+async fn destream_body<B>(body: B, encoding: Encoding, txn: Txn) -> TCResult<State>
+where
+    B: Body<Data = Bytes> + Send + Unpin,
+    B::Error: std::error::Error,
+{
     const ERR_DESERIALIZE: &str = "error deserializing HTTP request body";
+
+    let body = BodyStream::new(body).map_ok(|frame| {
+        frame
+            .into_data()
+            .unwrap_or_else(|_err| Bytes::from_static(&[]))
+    });
 
     match encoding {
         Encoding::Json => {
@@ -291,7 +334,10 @@ fn get_param<T: DeserializeOwned>(
     }
 }
 
-fn transform_error(err: TCError, encoding: Encoding) -> hyper::Response<Body> {
+fn transform_error(
+    err: TCError,
+    encoding: Encoding,
+) -> hyper::Response<UnsyncBoxBody<Bytes, TCError>> {
     use hyper::StatusCode;
     use tc_error::ErrorKind::*;
 
@@ -312,10 +358,21 @@ fn transform_error(err: TCError, encoding: Encoding) -> hyper::Response<Body> {
     let body = match encoding {
         Encoding::Json => {
             let encoded = destream_json::encode(err).expect("encode error");
-            let encoded = encoded.chain(delimiter(b"\n"));
-            Body::wrap_stream(encoded)
+            let encoded = encoded
+                .chain(delimiter(b"\n"))
+                .map_ok(Frame::data)
+                .map_err(|cause| internal!("JSON encoding error").consume(cause));
+
+            UnsyncBoxBody::new(StreamBody::new(encoded))
         }
-        Encoding::Tbon => Body::wrap_stream(tbon::en::encode(err).expect("encode error")),
+        Encoding::Tbon => {
+            let encoded = tbon::en::encode(err).expect("encode error");
+            let encoded = encoded
+                .map_ok(Frame::data)
+                .map_err(|cause| internal!("TBON encoding error").consume(cause));
+
+            UnsyncBoxBody::new(StreamBody::new(encoded))
+        }
     };
 
     let mut response = hyper::Response::new(body);
@@ -328,10 +385,6 @@ fn transform_error(err: TCError, encoding: Encoding) -> hyper::Response<Body> {
     *response.status_mut() = code;
 
     response
-}
-
-async fn shutdown_signal() {
-    tokio::signal::ctrl_c().await.expect("SIGTERM handler")
 }
 
 fn delimiter<E>(content: &'static [u8]) -> impl Stream<Item = Result<Bytes, E>> {

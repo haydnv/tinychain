@@ -1,12 +1,10 @@
 use async_trait::async_trait;
-use bytes::Bytes;
 use destream::de;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use http_body_util::{BodyStream, Empty, StreamBody};
-use hyper::body::{Body, Frame, Incoming};
+use hyper::body::{Body, Bytes, Frame, Incoming};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use tokio::net::TcpStream;
-use urlencoding::encode as urlencode;
 
 use tc_error::*;
 use tc_state::view::StateView;
@@ -17,7 +15,6 @@ use tc_value::{ToUrl, Value};
 use crate::http::Encoding;
 use crate::txn::Txn;
 
-const IDLE_TIMEOUT: u64 = 30;
 const ERR_NO_OWNER: &str = "an ownerless transaction may not make outgoing requests";
 
 /// A TinyChain HTTP client. Should only be used through a `Gateway`.
@@ -58,6 +55,7 @@ impl Client {
             .body(body)
             .map_err(|cause| internal!("encoding outbound request failed").consume(cause))?;
 
+        // TODO: implement a timeout
         sender
             .send_request(request)
             .map_err(|cause| bad_gateway!("{cause}"))
@@ -81,7 +79,8 @@ impl Client {
             let key_json = serde_json::to_string(&key)
                 .map_err(|cause| internal!("unable to encode key {}", key).consume(cause))?;
 
-            let key_encoded = urlencode(&key_json);
+            let key_encoded =
+                url::form_urlencoded::byte_serialize(key_json.as_bytes()).collect::<String>();
 
             format!("{link}?txn_id={txn_id}&key={key_encoded}")
         } else {
@@ -167,8 +166,9 @@ impl crate::gateway::Client for Client {
     async fn get(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<State> {
         if txn.has_owner() {
             let token = Some(txn.request().token().jwt());
+            let txn_id = txn.id();
             let txn = txn.subcontext_unique();
-            self.request("GET", link, txn.id(), &key, None, token, txn)
+            self.request("GET", link, txn_id, &key, None, token, txn)
                 .await
         } else {
             Err(bad_request!("{}", ERR_NO_OWNER))
@@ -190,17 +190,11 @@ impl crate::gateway::Client for Client {
         if txn.has_owner() {
             let params = params.into_view(txn.subcontext_unique()).await?;
             let token = Some(txn.request().token().jwt());
+            let txn_id = txn.id();
             let txn = txn.subcontext_unique();
-            self.request(
-                "POST",
-                link,
-                txn.id(),
-                &Value::None,
-                Some(params),
-                token,
-                txn,
-            )
-            .await
+
+            self.request("POST", link, txn_id, &Value::None, Some(params), token, txn)
+                .await
         } else {
             Err(bad_request!("{}", ERR_NO_OWNER))
         }
