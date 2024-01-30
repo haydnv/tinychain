@@ -8,10 +8,10 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::future::{Future, TryFutureExt};
 use log::debug;
-use tokio::time::Duration;
+use tokio::time::{Duration, MissedTickBehavior};
 
 use tc_error::*;
-use tc_fs::{Actor, Claims, Gateway as GatewayInstance, Resolver, Token, TxnServer};
+use tc_fs::{Actor, Gateway as GatewayInstance, SignedToken, Token, TxnServer};
 use tc_state::State;
 use tc_transact::TxnId;
 use tc_value::{Host, Link, Protocol, ToUrl, Value};
@@ -115,7 +115,7 @@ impl Gateway {
     }
 
     /// Return a new, signed auth token with no claims.
-    pub fn new_token(&self, txn_id: &TxnId) -> TCResult<(String, Claims)> {
+    pub fn new_token(&self, txn_id: &TxnId) -> TCResult<SignedToken> {
         let token = Token::new(
             self.inner.host.clone().into(),
             txn_id.time().into(),
@@ -127,39 +127,34 @@ impl Gateway {
         let signed = self
             .inner
             .actor
-            .sign_token(&token)
+            .sign_token(token)
             .map_err(|cause| internal!("signing error").consume(cause))?;
 
-        let claims = token.claims();
-
-        Ok((signed, claims))
+        Ok(signed)
     }
 
     /// Authorize a transaction to execute on this host.
-    pub async fn new_txn(self, txn_id: TxnId, token: Option<String>) -> TCResult<Txn> {
+    pub fn new_txn(self, txn_id: TxnId, token: Option<SignedToken>) -> TCResult<Txn> {
         let token = if let Some(token) = token {
-            use rjwt::Resolve;
-
-            let gateway: Box<dyn GatewayInstance<State = State>> = Box::new(self.clone());
-            Resolver::new(&gateway, &self.host().clone().into(), &txn_id)
-                .consume_and_sign(&self.inner.actor, vec![], token, txn_id.time().into())
-                .map_err(|cause| unauthorized!("credential error").consume(cause))
-                .await?
+            self.inner.actor.consume_and_sign(
+                token,
+                self.host().clone().into(),
+                vec![],
+                txn_id.time().into(),
+            )?
         } else {
             self.new_token(&txn_id)?
         };
 
         let txn_server = self.inner.txn_server.clone();
 
-        txn_server
-            .new_txn(Arc::new(Box::new(self)), txn_id, token)
-            .await
+        txn_server.new_txn(Arc::new(self), txn_id, token)
     }
 
     /// Start this `Gateway`'s server
     pub fn listen(self) -> Pin<Box<impl Future<Output = Result<(), TokioError>> + 'static>> {
         let port = self.inner.config.http_port;
-        let server = crate::http::HTTPServer::new(self);
+        let server = http::HTTPServer::new(self);
         let listener = server.listen(port).map_err(|e| {
             let e: TokioError = Box::new(e);
             e
@@ -267,6 +262,7 @@ impl GatewayInstance for Gateway {
 
 fn spawn_cleanup_thread(gateway: Gateway) {
     let mut interval = tokio::time::interval(INTERVAL);
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     tokio::spawn(async move {
         loop {

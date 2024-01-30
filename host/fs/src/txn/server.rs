@@ -1,13 +1,16 @@
 //! A server to keep track of active transactions.
 
-use std::collections::hash_map::{Entry, HashMap};
+use std::cmp::Ordering;
 use std::convert::TryFrom;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
+use ds_ext::OrdHashSet;
 use freqfs::DirLock;
 use futures::future::TryFutureExt;
-use log::{debug, trace};
-use tokio::sync::RwLock;
+use log::*;
+use tokio::sync::{mpsc, RwLock};
 
 use tc_error::*;
 use tcgeneric::NetworkTime;
@@ -15,51 +18,91 @@ use tcgeneric::NetworkTime;
 use crate::block::CacheBlock;
 
 use super::request::*;
-use super::{Active, Gateway, Txn, TxnId};
+use super::{Gateway, Txn, TxnId};
+
+// allow the end-user request to time out gracefully before garbage collection
+const GRACE: Duration = Duration::from_secs(1);
+
+struct Active {
+    txn_id: TxnId,
+    expires: NetworkTime,
+}
+
+impl Active {
+    fn new(txn_id: TxnId, expires: NetworkTime) -> Self {
+        Self { txn_id, expires }
+    }
+}
+
+impl Eq for Active {}
+
+impl PartialEq<Self> for Active {
+    fn eq(&self, other: &Self) -> bool {
+        self.txn_id == other.txn_id
+    }
+}
+
+impl Ord for Active {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.expires
+            .cmp(&other.expires)
+            .then(self.txn_id.cmp(&other.txn_id))
+    }
+}
+
+impl Hash for Active {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        self.txn_id.hash(hasher)
+    }
+}
+
+impl PartialOrd for Active {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 /// Server to keep track of the transactions currently active for this host.
 #[derive(Clone)]
 pub struct TxnServer {
-    active: Arc<RwLock<HashMap<TxnId, Arc<Active>>>>,
+    active: Arc<RwLock<OrdHashSet<Active>>>,
+    tx: mpsc::UnboundedSender<Active>,
     workspace: DirLock<CacheBlock>,
 }
 
 impl TxnServer {
     /// Construct a new `TxnServer`.
     pub async fn new(workspace: DirLock<CacheBlock>) -> Self {
-        Self {
-            active: Arc::new(RwLock::new(HashMap::new())),
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        let server = Self {
+            active: Arc::new(RwLock::new(OrdHashSet::new())),
             workspace,
-        }
+            tx,
+        };
+
+        spawn_receiver_thread(server.clone(), rx);
+
+        server
     }
 
     /// Return the active `Txn` with the given [`TxnId`], or initiate a new [`Txn`].
-    pub async fn new_txn<State>(
+    pub fn new_txn<State>(
         &self,
-        gateway: Arc<Box<dyn Gateway<State = State>>>,
+        gateway: Arc<dyn Gateway<State = State>>,
         txn_id: TxnId,
-        token: (String, Claims),
+        token: SignedToken,
     ) -> TCResult<Txn<State>> {
         debug!("TxnServer::new_txn");
 
-        let expires = NetworkTime::try_from(token.1.expires())?;
-        let request = Request::new(txn_id, token.0, token.1);
-        let mut active = self.active.write().await;
+        let expires = NetworkTime::try_from(token.expires())?;
+        let request = Request::new(txn_id, token);
 
-        match active.entry(txn_id) {
-            Entry::Occupied(entry) => {
-                trace!("txn {} is already known", txn_id);
-                Ok(Txn::new(entry.get().clone(), gateway, request))
-            }
-            Entry::Vacant(entry) => {
-                trace!("creating new workspace for txn {}...", txn_id);
-                let workspace = self.txn_dir(txn_id).await?;
-                let active = Arc::new(Active::new(&txn_id, workspace.clone(), expires));
-                let txn = Txn::new(active.clone(), gateway, request);
-                entry.insert(active);
-                Ok(txn)
-            }
-        }
+        self.tx
+            .send(Active::new(txn_id, expires))
+            .map_err(|cause| internal!("transaction queue failure: {cause}"))?;
+
+        Ok(Txn::new(self.workspace.clone(), gateway, request))
     }
 
     /// Gracefully shut down this `TxnServer` by allowing all active transactions to drain.
@@ -86,18 +129,19 @@ impl TxnServer {
     where
         G: Gateway,
     {
+        let now = SystemTime::from(now);
+
         let expired = {
             let mut active = self.active.write().await;
+            let mut expired = Vec::with_capacity(active.len());
 
-            let expired = active
-                .iter()
-                .filter(|(_, active)| active.expires() <= &now)
-                .map(|(txn_id, _)| txn_id)
-                .copied()
-                .collect::<Vec<TxnId>>();
-
-            for txn_id in &expired {
-                active.remove(txn_id);
+            while let Some(txn) = active.first() {
+                if SystemTime::from(txn.expires) + GRACE < now {
+                    let txn = active.pop_first().expect("expired txn id");
+                    expired.push(txn.txn_id);
+                } else {
+                    break;
+                }
             }
 
             expired
@@ -121,14 +165,17 @@ impl TxnServer {
 
         workspace.sync().await.expect("sync workspace dir");
     }
+}
 
-    async fn txn_dir(&self, txn_id: TxnId) -> TCResult<DirLock<CacheBlock>> {
-        debug!("TxnServer::txn_dir");
+fn spawn_receiver_thread(server: TxnServer, mut rx: mpsc::UnboundedReceiver<Active>) {
+    tokio::spawn(async move {
+        while let Some(txn) = rx.recv().await {
+            let mut active = server.active.write().await;
+            active.insert(txn);
 
-        let mut workspace = self.workspace.write().await;
-
-        workspace
-            .create_dir(txn_id.to_string())
-            .map_err(TCError::from)
-    }
+            while let Ok(txn) = rx.try_recv() {
+                active.insert(txn);
+            }
+        }
+    });
 }

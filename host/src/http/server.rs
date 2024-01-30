@@ -8,10 +8,11 @@ use futures::future::{self, TryFutureExt};
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response};
+use log::trace;
 use serde::de::DeserializeOwned;
 
 use tc_error::*;
-use tc_fs::Gateway as GatewayInstance;
+use tc_fs::{Gateway as GatewayInstance, Resolver};
 use tc_state::State;
 use tc_transact::{IntoView, Transaction, TxnId};
 use tcgeneric::{NetworkTime, TCPathBuf};
@@ -55,6 +56,11 @@ impl HTTPServer {
                 Ok(header_data) => header_data,
                 Err(cause) => return Ok(transform_error(cause, Encoding::default())),
             };
+
+        trace!(
+            "headers check out, routing request to {}...",
+            request.uri().path()
+        );
 
         let state = match self.route(request_encoding, &txn, params, request).await {
             Ok(state) => state,
@@ -109,6 +115,8 @@ impl HTTPServer {
         &self,
         http_request: &hyper::Request<Body>,
     ) -> TCResult<(GetParams, Txn, Encoding, Encoding)> {
+        trace!("reading headers");
+
         let content_type =
             if let Some(header) = http_request.headers().get(hyper::header::CONTENT_TYPE) {
                 header
@@ -149,13 +157,27 @@ impl HTTPServer {
             None
         };
 
+        let now = NetworkTime::now();
         let txn_id = if let Some(txn_id) = params.remove("txn_id") {
             txn_id.parse()?
         } else {
-            TxnId::new(NetworkTime::now())
+            TxnId::new(now)
         };
 
-        let txn = self.gateway.clone().new_txn(txn_id, token).await?;
+        let token = if let Some(token) = token {
+            let resolver = Resolver::new(&self.gateway, &txn_id);
+            let token = rjwt::Resolve::verify(&resolver, token, now.into()).await?;
+            Some(token)
+        } else {
+            None
+        };
+
+        trace!("token is {token:?}, creating new txn...");
+
+        let txn = self.gateway.clone().new_txn(txn_id, token)?;
+
+        trace!("transaction {txn_id} created");
+
         Ok((params, txn, accept_encoding, content_type))
     }
 
@@ -176,7 +198,7 @@ impl HTTPServer {
 
             &hyper::Method::PUT => {
                 let key = get_param(&mut params, "key")?.unwrap_or_default();
-                let sub_txn = txn.subcontext_unique().await?;
+                let sub_txn = txn.subcontext_unique();
                 let value = destream_body(http_request.into_body(), encoding, sub_txn).await?;
                 let result = self
                     .gateway
@@ -191,7 +213,7 @@ impl HTTPServer {
             }
 
             &hyper::Method::POST => {
-                let sub_txn = txn.subcontext_unique().await?;
+                let sub_txn = txn.subcontext_unique();
                 let data = destream_body(http_request.into_body(), encoding, sub_txn).await?;
                 self.gateway.post(txn, path.into(), data).await
             }

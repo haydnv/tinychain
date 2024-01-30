@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use async_hash::generic_array::GenericArray;
 use async_hash::{Output, Sha256};
@@ -17,10 +18,13 @@ use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_transact::fs;
+use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Route, StateInstance};
 use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::*;
+
+use data::{MutationPending, MutationRecord};
 
 pub use block::BlockChain;
 pub use data::ChainBlock;
@@ -37,6 +41,11 @@ pub const HISTORY: Label = label(".history");
 const BLOCK_SIZE: usize = 1_000_000; // TODO: reduce to 4,096
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
+/// A block in a file managed by a [`Chain`]
+pub trait ChainCacheFile: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> {}
+
+impl<FE> ChainCacheFile for FE where FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> {}
+
 /// Defines a method to recover the state of this [`Chain`] from a transaction failure.
 #[async_trait]
 pub trait Recover<FE> {
@@ -46,14 +55,13 @@ pub trait Recover<FE> {
     async fn recover(&self, txn: &Self::Txn) -> TCResult<()>;
 }
 
-/// Methods common to any instance of a [`Chain`], such as a [`SyncChain`].
-#[async_trait]
+/// Methods common to any type of [`Chain`].
 pub trait ChainInstance<State: StateInstance, T> {
     /// Append the given DELETE op to the latest block in this `Chain`.
-    async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()>;
+    fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()>;
 
     /// Append the given PUT op to the latest block in this `Chain`.
-    async fn append_put(&self, txn: &State::Txn, key: Value, value: State) -> TCResult<()>;
+    fn append_put(&self, txn: State::Txn, key: Value, value: State) -> TCResult<()>;
 
     /// Borrow the subject of this [`Chain`].
     fn subject(&self) -> &T;
@@ -128,7 +136,6 @@ where
     }
 }
 
-#[async_trait]
 impl<State, T> ChainInstance<State, T> for Chain<State, T>
 where
     State: StateInstance,
@@ -141,17 +148,17 @@ where
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
 {
-    async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
+    fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
         match self {
-            Self::Block(chain) => chain.append_delete(txn_id, key).await,
-            Self::Sync(chain) => chain.append_delete(txn_id, key).await,
+            Self::Block(chain) => chain.append_delete(txn_id, key),
+            Self::Sync(chain) => chain.append_delete(txn_id, key),
         }
     }
 
-    async fn append_put(&self, txn: &State::Txn, key: Value, value: State) -> TCResult<()> {
+    fn append_put(&self, txn: State::Txn, key: Value, value: State) -> TCResult<()> {
         match self {
-            Self::Block(chain) => chain.append_put(txn, key, value).await,
-            Self::Sync(chain) => chain.append_put(txn, key, value).await,
+            Self::Block(chain) => chain.append_put(txn, key, value),
+            Self::Sync(chain) => chain.append_put(txn, key, value),
         }
     }
 
@@ -241,7 +248,11 @@ where
 impl<State, T> fs::Persist<State::FE> for Chain<State, T>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
+    State::FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + fmt::Debug,
 {
     type Txn = State::Txn;
@@ -300,7 +311,11 @@ where
 impl<State, T> fs::CopyFrom<State::FE, Self> for Chain<State, T>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
+    State::FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + fmt::Debug,
 {
     async fn copy_from(
@@ -523,6 +538,28 @@ where
 
         self.visit_map_value(class, &mut map).await
     }
+}
+
+fn new_queue<State>(
+    store: data::Store<State::Txn, State::FE>,
+) -> TxnTaskQueue<MutationPending<State::Txn, State::FE>, TCResult<MutationRecord>>
+where
+    State: StateInstance,
+    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+{
+    TxnTaskQueue::new(Arc::pin(move |mutation| {
+        let store = store.clone();
+
+        Box::pin(async move {
+            match mutation {
+                MutationPending::Delete(key) => Ok(MutationRecord::Delete(key)),
+                MutationPending::Put(txn, key, state) => {
+                    let value = store.save_state(&txn, state).await?;
+                    Ok(MutationRecord::Put(key, value))
+                }
+            }
+        })
+    }))
 }
 
 #[inline]

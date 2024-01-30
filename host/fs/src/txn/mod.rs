@@ -1,27 +1,25 @@
 //! The transaction context [`Txn`].
 
 use std::hash::{Hash, Hasher};
-use std::iter::FromIterator;
 use std::ops::Deref;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use freqfs::DirLock;
-use futures::future::TryFutureExt;
-use log::debug;
+use futures::Future;
+use log::{debug, trace};
 use safecast::CastInto;
 
 use tc_error::*;
 use tc_transact::public::StateInstance;
 use tc_transact::Transaction;
+use tc_value::uuid::Uuid;
 use tc_value::{Host, Link, ToUrl, Value};
-use tcgeneric::{
-    Id, NetworkTime, PathSegment, TCBoxFuture, TCBoxTryFuture, TCPathBuf, ThreadSafe, Tuple,
-};
+use tcgeneric::{Id, PathSegment, TCBoxFuture, TCBoxTryFuture, TCPathBuf, ThreadSafe};
 
 use crate::block::CacheBlock;
 
-pub use hypothetical::Hypothetical;
 pub use request::*;
 pub use server::*;
 pub use tc_transact::TxnId;
@@ -83,55 +81,69 @@ pub trait Gateway: ThreadSafe {
     fn finalize(&self, txn_id: TxnId) -> TCBoxFuture<()>;
 }
 
-struct Active {
-    workspace: DirLock<CacheBlock>,
-    expires: NetworkTime,
-    scope: Scope,
+#[derive(Clone)]
+enum LazyDir {
+    Workspace(DirLock<CacheBlock>),
+    Lazy(Arc<Self>, Id),
 }
 
-impl Active {
-    fn new(txn_id: &TxnId, workspace: DirLock<CacheBlock>, expires: NetworkTime) -> Self {
-        let scope = TCPathBuf::from(txn_id.to_id());
+impl LazyDir {
+    fn get_or_create<'a>(
+        &'a self,
+        txn_id: &'a TxnId,
+    ) -> Pin<Box<dyn Future<Output = TCResult<DirLock<CacheBlock>>> + Send + 'a>> {
+        Box::pin(async move {
+            match self {
+                Self::Workspace(workspace) => {
+                    let mut parent = workspace.write().await;
+                    parent
+                        .get_or_create_dir(txn_id.to_string())
+                        .map_err(TCError::from)
+                }
+                Self::Lazy(parent, name) => {
+                    let parent = parent.get_or_create(txn_id).await?;
+                    let mut parent = parent.write().await;
 
-        Self {
-            workspace,
-            expires,
-            scope,
-        }
+                    parent
+                        .get_or_create_dir(name.to_string())
+                        .map_err(TCError::from)
+                }
+            }
+        })
     }
 
-    fn expires(&self) -> &NetworkTime {
-        &self.expires
+    fn create_dir(self, name: Id) -> Self {
+        Self::Lazy(Arc::new(self), name)
     }
 
-    fn scope(&self) -> &Scope {
-        &self.scope
+    fn create_dir_unique(self) -> Self {
+        Self::Lazy(Arc::new(self), Uuid::new_v4().into())
     }
 }
 
 /// A transaction context.
 #[derive(Clone)]
 pub struct Txn<State> {
-    active: Arc<Active>,
-    gateway: Arc<Box<dyn Gateway<State = State>>>,
+    gateway: Arc<dyn Gateway<State = State>>,
     request: Arc<Request>,
-    dir: DirLock<CacheBlock>,
+    scope: TCPathBuf,
+    dir: LazyDir,
 }
 
 impl<State> Txn<State> {
     fn new(
-        active: Arc<Active>,
-        gateway: Arc<Box<dyn Gateway<State = State>>>,
+        workspace: DirLock<CacheBlock>,
+        gateway: Arc<dyn Gateway<State = State>>,
         request: Request,
     ) -> Self {
+        let scope = request.txn_id().to_id().into();
         let request = Arc::new(request);
-        let dir = active.workspace.clone();
 
         Self {
-            active,
             gateway,
             request,
-            dir,
+            scope,
+            dir: LazyDir::Workspace(workspace),
         }
     }
 }
@@ -156,40 +168,31 @@ where
     }
 
     /// Return a new `Txn` which grants the given [`Scope`]s to the given [`Actor`].
-    pub async fn grant(
+    pub fn grant(
         &self,
         actor: &Actor,
         cluster_path: TCPathBuf,
         scopes: Vec<Scope>,
     ) -> TCResult<Self> {
-        let token = self.request.token().to_string();
+        trace!("grant {scopes:?} for {cluster_path} to {}", actor.id());
+
+        let host_id = self.gateway.link(cluster_path);
         let txn_id = self.request.txn_id();
+        let now = txn_id.time().into();
+        let token = actor.consume_and_sign(self.request.token().clone(), host_id, scopes, now)?;
 
-        use rjwt::Resolve;
-        let host = self.gateway.link(cluster_path);
-        let resolver = Resolver::new(&self.gateway, &host, self.request.txn_id());
-
-        debug!(
-            "granting scopes {} to {}",
-            Tuple::<Scope>::from_iter(scopes.clone()),
-            host
-        );
-
-        let (token, claims) = resolver
-            .consume_and_sign(actor, scopes, token, txn_id.time().into())
-            .map_err(|cause| unauthorized!("signature error").consume(cause))
-            .await?;
+        trace!("granted scopes to {}", actor.id());
 
         Ok(Self {
-            active: self.active.clone(),
             gateway: self.gateway.clone(),
+            request: Arc::new(Request::new(*txn_id, token)),
+            scope: self.scope.clone(),
             dir: self.dir.clone(),
-            request: Arc::new(Request::new(*txn_id, token, claims)),
         })
     }
 
     /// Claim ownership of this transaction.
-    pub async fn claim(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
+    pub fn claim(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
         debug!(
             "{} claims ownership of transaction {}",
             cluster_path,
@@ -201,8 +204,7 @@ where
         }
 
         if self.owner().is_none() {
-            self.grant(actor, cluster_path, vec![self.active.scope().clone()])
-                .await
+            self.grant(actor, cluster_path, vec![self.scope.clone()])
         } else {
             Err(forbidden!(
                 "tried to claim owned transaction {}",
@@ -229,20 +231,14 @@ where
 
     /// Return the owner of this transaction, if there is one.
     pub fn owner(&self) -> Option<&Link> {
-        let active_scope = self.active.scope();
+        let (host, _, _) = self
+            .request
+            .token()
+            .first_claim(|(_host, actor_id, scopes)| {
+                actor_id == &Value::None && scopes.contains(&self.scope)
+            })?;
 
-        self.request
-            .scopes()
-            .iter()
-            .filter(|(_, actor_id, _)| *actor_id == &Value::None)
-            .filter_map(|(host, _actor_id, scopes)| {
-                if scopes.contains(active_scope) {
-                    Some(host)
-                } else {
-                    None
-                }
-            })
-            .fold(None, |_, host| Some(host))
+        Some(host)
     }
 
     /// Check if this transaction has a leader for the given cluster.
@@ -262,7 +258,7 @@ where
     }
 
     /// Claim leadership of this transaction for the given cluster.
-    pub async fn lead(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
+    pub fn lead(self, actor: &Actor, cluster_path: TCPathBuf) -> TCResult<Self> {
         debug!(
             "{} claim leadership of transaction {}",
             cluster_path,
@@ -281,65 +277,50 @@ where
                 leader
             ))
         } else {
-            let scopes = vec![self.active.scope().clone()];
-            self.grant(actor, cluster_path, scopes).await
+            let scopes = vec![self.scope.clone()];
+            self.grant(actor, cluster_path, scopes)
         }
     }
 
     /// Return the leader of this transaction for the given cluster, if there is one.
     pub fn leader(&self, cluster_path: &[PathSegment]) -> Option<&Link> {
-        let active_scope = self.active.scope();
+        let (host, _, _) = self.request.token().last_claim(|(host, actor, scopes)| {
+            actor == &Value::None
+                && scopes.contains(&self.scope)
+                && cluster_path.starts_with(host.path())
+        })?;
 
-        self.request
-            .scopes()
-            .iter()
-            .filter(|(_, actor_id, _)| *actor_id == &Value::None)
-            .filter_map(|(host, _actor_id, scopes)| {
-                if scopes.contains(active_scope) && cluster_path.starts_with(host.path()) {
-                    Some(host)
-                } else {
-                    None
-                }
-            })
-            .next()
+        Some(host)
     }
 }
 
 #[async_trait]
 impl<State: Clone + 'static> Transaction<CacheBlock> for Txn<State> {
     #[inline]
-    fn id(&'_ self) -> &'_ TxnId {
+    fn id(&self) -> &TxnId {
         self.request.txn_id()
     }
 
-    fn context(&'_ self) -> &'_ tc_transact::fs::Inner<CacheBlock> {
-        &self.dir
+    async fn context(&self) -> TCResult<DirLock<CacheBlock>> {
+        self.dir.get_or_create(self.request.txn_id()).await
     }
 
-    // TODO: accept a ToOwned<Id>
-    async fn subcontext(&self, id: Id) -> TCResult<Self> {
-        let dir = {
-            let mut dir = self.dir.write().await;
-            dir.create_dir(id.to_string())?
-        };
-
-        Ok(Txn {
-            active: self.active.clone(),
+    fn subcontext<I: Into<Id> + Send>(&self, id: I) -> Self {
+        Txn {
             gateway: self.gateway.clone(),
             request: self.request.clone(),
-            dir,
-        })
+            scope: self.scope.clone(),
+            dir: self.dir.clone().create_dir(id.into()),
+        }
     }
 
-    async fn subcontext_unique(&self) -> TCResult<Self> {
-        let (_, subcontext) = self.dir.write().await.create_dir_unique()?;
-
-        Ok(Self {
-            active: self.active.clone(),
+    fn subcontext_unique(&self) -> Self {
+        Txn {
             gateway: self.gateway.clone(),
             request: self.request.clone(),
-            dir: subcontext,
-        })
+            scope: self.scope.clone(),
+            dir: self.dir.clone().create_dir_unique(),
+        }
     }
 }
 
@@ -388,7 +369,7 @@ where
     }
 }
 
-impl<G> Hash for Txn<G> {
+impl<State> Hash for Txn<State> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.request.txn_id().hash(state)
     }

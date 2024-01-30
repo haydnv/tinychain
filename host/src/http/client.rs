@@ -77,9 +77,9 @@ impl crate::gateway::Client for Client {
         }
 
         let uri = build_url(&link, txn.id(), &key)?;
-        let req = req_builder("GET", uri, Some(txn.request().token()));
+        let req = req_builder("GET", uri, Some(txn.request().token().jwt()));
 
-        let txn = txn.subcontext_unique().await?;
+        let txn = txn.subcontext_unique();
         let response = self
             .client
             .request(req.body(Body::empty()).unwrap())
@@ -107,10 +107,10 @@ impl crate::gateway::Client for Client {
         }
 
         let uri = build_url(&link, txn.id(), &key)?;
-        let req = req_builder("PUT", uri, Some(txn.request().token()))
+        let req = req_builder("PUT", uri, Some(txn.request().token().jwt()))
             .header(hyper::header::CONTENT_TYPE, Encoding::Tbon.as_str());
 
-        let txn = txn.subcontext_unique().await?;
+        let txn = txn.subcontext_unique();
         let view = value.into_view(txn).await?;
         let body = tbon::en::encode(view)
             .map_err(|cause| bad_request!("unable to encode stream").consume(cause))?;
@@ -141,11 +141,11 @@ impl crate::gateway::Client for Client {
         }
 
         let uri = build_url(&link, txn.id(), &Value::default())?;
-        let req = req_builder("POST", uri, Some(txn.request().token()))
+        let req = req_builder("POST", uri, Some(txn.request().token().jwt()))
             .header(hyper::header::CONTENT_TYPE, Encoding::Tbon.as_str());
 
-        let txn = txn.subcontext_unique().await?;
-        let subcontext = txn.subcontext(label("_params").into()).await?;
+        let txn = txn.subcontext_unique();
+        let subcontext = txn.subcontext(label("_params"));
         let params_view = params.clone().into_view(subcontext).await?;
         let body = tbon::en::encode(params_view)
             .map_err(|cause| bad_request!("unable to encode stream").consume(cause))?;
@@ -184,7 +184,7 @@ impl crate::gateway::Client for Client {
         }
 
         let uri = build_url(&link, txn.id(), &key)?;
-        let req = req_builder("DELETE", uri, Some(txn.request().token()));
+        let req = req_builder("DELETE", uri, Some(txn.request().token().jwt()));
 
         let response = self
             .client

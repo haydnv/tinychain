@@ -1394,11 +1394,7 @@ impl StateVisitor {
             }
             StateType::Map => access.next_value(self.txn.clone()).await,
             StateType::Object(ot) => {
-                let txn = self
-                    .txn
-                    .subcontext_unique()
-                    .map_err(de::Error::custom)
-                    .await?;
+                let txn = self.txn.subcontext_unique();
 
                 let state = access.next_value(txn).await?;
                 ObjectVisitor::new()
@@ -1514,22 +1510,12 @@ impl<'a> de::Visitor for StateVisitor {
             let mut map = Map::new();
 
             let id = Id::from_str(&key).map_err(de::Error::custom)?;
-            let txn = self
-                .txn
-                .subcontext(id.clone())
-                .map_err(de::Error::custom)
-                .await?;
-
+            let txn = self.txn.subcontext(id.clone());
             let value = access.next_value(txn).await?;
             map.insert(id, value);
 
             while let Some(id) = access.next_key::<Id>(()).await? {
-                let txn = self
-                    .txn
-                    .subcontext(id.clone())
-                    .map_err(de::Error::custom)
-                    .await?;
-
+                let txn = self.txn.subcontext(id.clone());
                 let state = access.next_value(txn).await?;
                 map.insert(id, state);
             }
@@ -1549,11 +1535,7 @@ impl<'a> de::Visitor for StateVisitor {
 
         let mut i = 0usize;
         loop {
-            let txn = self
-                .txn
-                .subcontext(i.into())
-                .map_err(de::Error::custom)
-                .await?;
+            let txn = self.txn.subcontext(i);
 
             if let Some(next) = access.next_element(txn).await? {
                 seq.push(next);

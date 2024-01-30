@@ -10,6 +10,7 @@ Modules
    btree
    chain
    generic
+   host
    interface
    math.interface
    math.linalg

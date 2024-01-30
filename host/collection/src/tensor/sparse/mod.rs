@@ -1746,7 +1746,7 @@ where
         dtype: NumberType,
         shape: Shape,
     ) -> Result<SparseBase<Txn, FE>, E> {
-        let store = self.txn.context().clone();
+        let store = self.txn.context().map_err(de::Error::custom).await?;
 
         let txn_id = *self.txn.id();
         let store = fs::Dir::load(txn_id, store)

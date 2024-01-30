@@ -48,7 +48,6 @@ where
     }
 }
 
-#[async_trait]
 impl<State, T> ChainInstance<State, T> for BlockChain<State, T>
 where
     State: StateInstance,
@@ -61,12 +60,12 @@ where
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
 {
-    async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
-        self.history.append_delete(txn_id, key).await
+    fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
+        self.history.append_delete(txn_id, key)
     }
 
-    async fn append_put(&self, txn: &State::Txn, key: Value, value: State) -> TCResult<()> {
-        self.history.append_put(txn, key, value).await
+    fn append_put(&self, txn: State::Txn, key: Value, value: State) -> TCResult<()> {
+        self.history.append_put(txn, key, value)
     }
 
     fn subject(&self) -> &T {
@@ -78,7 +77,12 @@ where
 impl<State, T> fs::Persist<State::FE> for BlockChain<State, T>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + ThreadSafe + for<'a> fs::FileSave<'a>,
+    State::FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + ThreadSafe
+        + for<'a> fs::FileSave<'a>,
     T: Route<State> + fs::Persist<State::FE, Txn = State::Txn> + fmt::Debug,
 {
     type Txn = State::Txn;
@@ -168,7 +172,11 @@ where
 impl<State, T> fs::CopyFrom<State::FE, Self> for BlockChain<State, T>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + ThreadSafe + for<'a> fs::FileSave<'a>,
+    State::FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>,
     T: Route<State> + fs::Persist<State::FE, Txn = State::Txn> + fmt::Debug,
 {
     async fn copy_from(
@@ -324,11 +332,7 @@ where
         let subject = seq.next_element::<T>(self.txn.clone()).await?;
         let subject = subject.ok_or_else(|| de::Error::invalid_length(0, "a BlockChain schema"))?;
 
-        let txn = self
-            .txn
-            .subcontext(HISTORY.into())
-            .map_err(de::Error::custom)
-            .await?;
+        let txn = self.txn.subcontext(HISTORY);
 
         let history = seq.next_element::<History<State>>(txn).await?;
         let history =

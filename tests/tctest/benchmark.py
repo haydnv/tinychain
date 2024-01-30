@@ -9,7 +9,7 @@ import random
 import time
 
 import rjwt
-import tinychain as tc
+import tinychain_async as tc_async
 
 from .process import Local
 
@@ -58,7 +58,7 @@ def start_local_host(ns, host_uri=None, public_key=None, wait_time=1, **flags):
         **flags)
 
     process.start(wait_time)
-    return tc.host.asyncronous.Local(process, f"http://{process.ADDRESS}:{port}")
+    return tc_async.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
 class Benchmark(object):
@@ -70,7 +70,6 @@ class Benchmark(object):
             yield item
 
     async def run(self, requests, concurrency):
-        requests = [pause_and_run(request) for request in requests]
         responses = []
 
         start = time.time()
@@ -96,8 +95,6 @@ class Benchmark(object):
 
 
 async def main(benchmarks):
-    import sys
-
     parser = argparse.ArgumentParser(description="Run benchmarks")
     parser.add_argument('-k', type=str, help="filter benchmarks to run by name")
     parser.add_argument('--cache_size', type=str, default=DEFAULT_CACHE_SIZE, help="host cache size")
@@ -141,9 +138,3 @@ async def main(benchmarks):
             benchmark.stop()
             # clean the workspace again after running a benchmark
             shutil.rmtree(WORKSPACE)
-
-
-async def pause_and_run(task, pause_length = None):
-    pause_length = (random.random() / 10) if pause_length is None else pause_length
-    await asyncio.sleep(pause_length)
-    return await task

@@ -7,7 +7,7 @@ use collate::Collator;
 use destream::de;
 use ds_ext::{OrdHashMap, OrdHashSet};
 use freqfs::{DirLock, FileWriteGuardOwned};
-use futures::{join, try_join};
+use futures::{join, try_join, TryFutureExt};
 use ha_ndarray::{AccessBuf, Accessor, Array, Buffer, CType, Convert, PlatformInstance};
 use log::{debug, trace, warn};
 use rayon::prelude::*;
@@ -680,7 +680,7 @@ where
     ) -> Result<Self, D::Error> {
         let (txn, shape) = cxt;
 
-        let dir = txn.context().clone();
+        let dir = txn.context().map_err(de::Error::custom).await?;
 
         let (canon, versions) = {
             let mut guard = dir.write().await;
@@ -768,7 +768,8 @@ macro_rules! impl_from_stream_complex {
 
                 let (re, im) = {
                     let dir = {
-                        let mut cxt = txn.context().write().await;
+                        let cxt = txn.context().map_err(de::Error::custom).await?;
+                        let mut cxt = cxt.write().await;
                         let (_dir_name, dir) =
                             cxt.create_dir_unique().map_err(de::Error::custom)?;
                         dir

@@ -20,6 +20,9 @@ mod id;
 pub mod public;
 
 pub mod lock {
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
+
     use super::TxnId;
 
     pub use txn_lock::semaphore::{PermitRead, PermitWrite};
@@ -31,19 +34,25 @@ pub mod lock {
     pub type TxnLock<T> = txn_lock::scalar::TxnLock<TxnId, T>;
 
     /// A read guard on a committed transactional version
-    pub type TxnLockVersionGuard<T> = txn_lock::scalar::TxnLockVersionGuard<TxnId, T>;
+    pub type TxnLockVersionGuard<T> = Arc<T>;
+
+    /// A transactional message queue.
+    pub type TxnMessageQueue<M> = txn_lock::queue::message::MessageQueue<TxnId, M>;
 
     /// A transactional read-write lock on a key-value map
     pub type TxnMapLock<K, V> = txn_lock::map::TxnMapLock<TxnId, K, V>;
 
     /// A read guard on a committed transactional version of a set
-    pub type TxnMapLockVersionGuard<K, V> = txn_lock::map::TxnMapLockVersionGuard<TxnId, K, V>;
+    pub type TxnMapLockVersionGuard<K, V> = HashMap<K, V>;
 
     /// A transactional read-write lock on a set of values
     pub type TxnSetLock<T> = txn_lock::set::TxnSetLock<TxnId, T>;
 
     /// A read guard on a committed transactional version of a set
-    pub type TxnSetLockVersionGuard<T> = txn_lock::set::TxnSetLockVersionGuard<TxnId, T>;
+    pub type TxnSetLockVersionGuard<T> = HashSet<T>;
+
+    /// A transactional task queue.
+    pub type TxnTaskQueue<I, O> = txn_lock::queue::task::TaskQueue<TxnId, I, O>;
 }
 
 /// Defines a method to compute the hash of this state as of a given [`TxnId`]
@@ -87,17 +96,17 @@ pub trait Transact {
 #[async_trait]
 pub trait Transaction<FE>: Clone + Sized + Send + Sync + 'static {
     /// The [`TxnId`] of this transaction context.
-    fn id(&'_ self) -> &'_ TxnId;
+    fn id(&self) -> &TxnId;
 
     /// Allows locking the filesystem directory of this transaction context,
     /// e.g. to cache un-committed state or to compute an intermediate result.
-    fn context(&'_ self) -> &'_ DirLock<FE>;
+    async fn context(&self) -> TCResult<DirLock<FE>>;
 
     /// Create a new transaction context with the given `id`.
-    async fn subcontext(&self, id: Id) -> TCResult<Self>;
+    fn subcontext<I: Into<Id> + Send>(&self, id: I) -> Self;
 
     /// Create a new transaction subcontext with its own unique [`Dir`].
-    async fn subcontext_unique(&self) -> TCResult<Self>;
+    fn subcontext_unique(&self) -> Self;
 }
 
 /// A transactional remote procedure call client

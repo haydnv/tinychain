@@ -7,8 +7,7 @@ use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use destream::{de, FromStream};
 use freqfs::{FileLock, FileWriteGuard};
-use futures::future::TryFutureExt;
-use futures::try_join;
+use futures::TryFutureExt;
 use get_size::GetSize;
 use log::{debug, trace};
 use safecast::{AsType, TryCastFrom, TryCastInto};
@@ -19,18 +18,18 @@ use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_transact::fs;
+use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Route, StateInstance};
 use tc_transact::{AsyncHash, IntoView, RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Label};
 
-use crate::data::StoreEntry;
+use crate::data::{MutationPending, MutationRecord, StoreEntry};
 
-use super::{null_hash, ChainBlock, ChainInstance, Recover};
+use super::{new_queue, null_hash, ChainBlock, ChainInstance, Recover};
 
 const BLOCKS: Label = label(".blocks");
 const COMMITTED: &str = "committed.chain_block";
-const PENDING: &str = "pending.chain_block";
 const STORE: Label = label(".store");
 
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
@@ -38,7 +37,7 @@ const STORE: Label = label(".store");
 #[derive(Clone)]
 pub struct SyncChain<State: StateInstance, T> {
     committed: FileLock<State::FE>,
-    pending: FileLock<State::FE>,
+    queue: TxnTaskQueue<MutationPending<State::Txn, State::FE>, TCResult<MutationRecord>>,
     store: super::data::Store<State::Txn, State::FE>,
     subject: T,
 }
@@ -51,20 +50,27 @@ where
     async fn write_ahead(&self, txn_id: TxnId) {
         trace!("SyncChain::write_ahead {}", txn_id);
 
+        let handles = self.queue.commit(txn_id).await;
+
+        let mutations = handles
+            .into_iter()
+            .collect::<TCResult<Vec<_>>>()
+            .expect("mutations");
+
+        if mutations.is_empty() {
+            return;
+        }
+
         self.store.commit(txn_id).await;
 
         {
-            let (mut pending, mut committed): (
-                FileWriteGuard<ChainBlock>,
-                FileWriteGuard<ChainBlock>,
-            ) = try_join!(self.pending.write(), self.committed.write()).expect("SyncChain blocks");
+            let mut committed: FileWriteGuard<ChainBlock> =
+                self.committed.write().await.expect("SyncChain block");
 
-            if let Some(mutations) = pending.mutations.remove(&txn_id) {
-                committed.mutations.insert(txn_id, mutations);
-            }
+            committed.mutations.insert(txn_id, mutations);
         }
 
-        try_join!(self.pending.sync(), self.committed.sync()).expect("sync SyncChain blocks");
+        self.committed.sync().await.expect("sync SyncChain block")
     }
 }
 
@@ -83,16 +89,14 @@ where
 
         self.subject.restore(*txn.id(), &backup).await?;
 
-        let (mut pending, mut committed) = try_join!(self.pending.write(), self.committed.write())?;
+        let mut committed = self.committed.write().await?;
 
-        *pending = ChainBlock::with_txn(null_hash().to_vec(), *txn.id());
         *committed = ChainBlock::new(null_hash().to_vec());
 
         Ok(())
     }
 }
 
-#[async_trait]
 impl<State, T> ChainInstance<State, T> for SyncChain<State, T>
 where
     State: StateInstance,
@@ -101,25 +105,17 @@ where
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
 {
-    async fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
-        let mut block: FileWriteGuard<ChainBlock> = self.pending.write().await?;
-        block.append_delete(txn_id, key);
-        Ok(())
+    fn append_delete(&self, txn_id: TxnId, key: Value) -> TCResult<()> {
+        self.queue
+            .push(txn_id, MutationPending::Delete(key))
+            .map_err(TCError::from)
     }
 
-    async fn append_put(&self, txn: &State::Txn, key: Value, value: State) -> TCResult<()> {
-        debug!("SyncChain::append_put {} <- {:?}", key, value);
-
+    fn append_put(&self, txn: State::Txn, key: Value, value: State) -> TCResult<()> {
+        let txn_id = *txn.id();
         let value = StoreEntry::try_from_state(value)?;
-        let value = self.store.save_state(txn, value).await?;
-
-        debug!("locking pending transaction log block...");
-        let mut block: FileWriteGuard<ChainBlock> = self.pending.write().await?;
-
-        block.append_put(*txn.id(), key, value);
-
-        debug!("locked pending transaction log block");
-        Ok(())
+        let mutation = MutationPending::Put(txn, key, value);
+        self.queue.push(txn_id, mutation).map_err(TCError::from)
     }
 
     fn subject(&self) -> &T {
@@ -174,27 +170,12 @@ where
     async fn rollback(&self, txn_id: &TxnId) {
         debug!("SyncChain::rollback");
 
+        self.queue.rollback(txn_id);
         self.subject.rollback(txn_id).await;
-
-        {
-            let mut pending: FileWriteGuard<ChainBlock> =
-                self.pending.write().await.expect("pending");
-
-            pending.mutations.remove(txn_id);
-        }
-
-        self.pending.sync().await.expect("sync pending block");
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        {
-            let mut pending: FileWriteGuard<ChainBlock> =
-                self.pending.write().await.expect("pending");
-
-            pending.mutations.remove(txn_id);
-        }
-
-        self.pending.sync().await.expect("sync pending block");
+        self.queue.finalize(*txn_id);
         self.subject.finalize(txn_id).await
     }
 }
@@ -203,7 +184,11 @@ where
 impl<State, T> fs::Persist<State::FE> for SyncChain<State, T>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
+    State::FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Send + Sync,
 {
     type Txn = State::Txn;
@@ -222,18 +207,18 @@ where
 
         let store = {
             let dir = dir.create_dir(STORE.to_string())?;
+
             fs::Dir::load(txn_id, dir)
                 .map_ok(super::data::Store::new)
                 .await?
         };
 
+        let queue = new_queue::<State>(store.clone());
+
+        // TODO: is this necessary?
         let mut blocks_dir = dir
             .create_dir(BLOCKS.to_string())
             .and_then(|dir| dir.try_write_owned())?;
-
-        let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
-        let size_hint = block.get_size();
-        let pending = blocks_dir.create_file(PENDING.to_string(), block, size_hint)?;
 
         let block = ChainBlock::new(null_hash().to_vec());
         let size_hint = block.get_size();
@@ -241,7 +226,7 @@ where
 
         Ok(Self {
             subject,
-            pending,
+            queue,
             committed,
             store,
         })
@@ -265,17 +250,11 @@ where
                 .await?
         };
 
+        let queue = new_queue::<State>(store.clone());
+
         let mut blocks_dir = dir
             .get_or_create_dir(BLOCKS.to_string())
             .and_then(|dir| dir.try_write_owned())?;
-
-        let pending = if let Some(file) = blocks_dir.get_file(&*PENDING) {
-            file.clone()
-        } else {
-            let block = ChainBlock::with_txn(null_hash().to_vec(), txn_id);
-            let size_hint = block.get_size();
-            blocks_dir.create_file(PENDING.to_string(), block, size_hint)?
-        };
 
         let committed = if let Some(file) = blocks_dir.get_file(&*COMMITTED) {
             file.clone()
@@ -287,7 +266,7 @@ where
 
         Ok(Self {
             subject,
-            pending,
+            queue,
             committed,
             store,
         })
@@ -333,7 +312,11 @@ where
 impl<State, T> fs::CopyFrom<State::FE, Self> for SyncChain<State, T>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
+    State::FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + fmt::Debug,
 {
     async fn copy_from(
@@ -349,7 +332,7 @@ where
 impl<State, T> de::FromStream for SyncChain<State, T>
 where
     State: StateInstance,
-    State::FE: AsType<ChainBlock>,
+    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<ChainBlock> + AsType<TensorNode>,
     T: FromStream<Context = State::Txn>,
 {
     type Context = State::Txn;
@@ -360,12 +343,15 @@ where
     ) -> Result<Self, D::Error> {
         let subject = T::from_stream(txn.clone(), decoder).await?;
 
-        let mut context = txn.context().write().await;
+        let cxt = txn.context().map_err(de::Error::custom).await?;
 
         let store = {
-            let dir = context
-                .create_dir(STORE.to_string())
-                .map_err(de::Error::custom)?;
+            let dir = {
+                let mut cxt = cxt.write().await;
+
+                cxt.create_dir(STORE.to_string())
+                    .map_err(de::Error::custom)?
+            };
 
             fs::Dir::load(*txn.id(), dir)
                 .map_ok(super::data::Store::new)
@@ -373,10 +359,15 @@ where
                 .await?
         };
 
+        let queue = new_queue::<State>(store.clone());
+
         let mut blocks_dir = {
-            let file = context
-                .create_dir(BLOCKS.to_string())
-                .map_err(de::Error::custom)?;
+            let file = {
+                let mut cxt = cxt.write().await;
+
+                cxt.create_dir(BLOCKS.to_string())
+                    .map_err(de::Error::custom)?
+            };
 
             file.write_owned().await
         };
@@ -388,15 +379,9 @@ where
             .create_file(COMMITTED.to_string(), block, size_hint)
             .map_err(de::Error::custom)?;
 
-        let block = ChainBlock::with_txn(null_hash.to_vec(), *txn.id());
-        let size_hint = block.get_size();
-        let pending = blocks_dir
-            .create_file(PENDING.to_string(), block, size_hint)
-            .map_err(de::Error::custom)?;
-
         Ok(Self {
             subject,
-            pending,
+            queue,
             committed,
             store,
         })
