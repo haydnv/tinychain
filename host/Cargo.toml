@@ -25,14 +25,15 @@ bytes = "1.5"
 clap = { version = "4.4", features = ["derive"] }
 destream = "0.7"
 destream_json = { version = "0.12", features = ["tokio-io"] }
-env_logger = "0.10"
+env_logger = "0.11"
 freqfs = { version = "0.9", features = ["logging", "stream"] }
 futures = "0.3"
 get-size = "0.1"
 get-size-derive = "0.1"
 hex = "0.4"
-http = "0.2"
-hyper = { version = "0.14", features = ["full"] }
+http-body-util = "0.1"
+hyper = { version = "1.1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
 log = { version = "0.4", features = ["release_max_level_info"] }
 num_cpus = "1.16"
 pin-project = "1.1"
@@ -50,5 +51,5 @@ tc-state = "0.4"
 tc-transact = "0.20"
 tc-value = "0.12"
 tcgeneric = "0.10"
-tokio = { version = "1.35", features = ["rt-multi-thread", "signal"] }
-url = { version = "2.5" }
+tokio = { version = "1.35", features = ["net", "rt-multi-thread", "signal"] }
+urlencoding = "2.1"

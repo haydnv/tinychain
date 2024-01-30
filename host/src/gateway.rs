@@ -47,15 +47,18 @@ pub trait Client {
         T: destream::FromStream<Context = ()>;
 
     /// Read a [`State`].
+    // TODO: accept a borrowed `key`
     async fn get(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<State>;
 
     /// Set `key` = `value` within the state referred to by `link`.
+    // TODO: accept a borrowed `key`
     async fn put(&self, txn: &Txn, link: ToUrl<'_>, key: Value, value: State) -> TCResult<()>;
 
     /// Execute a remote POST op.
     async fn post(&self, txn: &Txn, link: ToUrl<'_>, params: State) -> TCResult<State>;
 
     /// Delete `key` from the state referred to by `link`.
+    // TODO: accept a borrowed `key`
     async fn delete(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<()>;
 }
 
