@@ -393,7 +393,7 @@ where
 
 impl<Txn, FE> Instance for BTreeFile<Txn, FE>
 where
-    Txn: Transaction<FE>,
+    Txn: Send + Sync,
     FE: Send + Sync,
 {
     type Class = BTreeType;

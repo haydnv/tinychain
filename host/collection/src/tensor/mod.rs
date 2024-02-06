@@ -594,7 +594,11 @@ impl<Txn, FE> Dense<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for Dense<Txn, FE> {
+impl<Txn, FE> Instance for Dense<Txn, FE>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+{
     type Class = TensorType;
 
     fn class(&self) -> Self::Class {
@@ -746,7 +750,11 @@ impl<Txn, FE> Sparse<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for Sparse<Txn, FE> {
+impl<Txn, FE> Instance for Sparse<Txn, FE>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+{
     type Class = TensorType;
 
     fn class(&self) -> Self::Class {
@@ -867,7 +875,11 @@ impl<Txn, FE> Clone for Tensor<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for Tensor<Txn, FE> {
+impl<Txn, FE> Instance for Tensor<Txn, FE>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+{
     type Class = TensorType;
 
     fn class(&self) -> Self::Class {
@@ -1843,7 +1855,11 @@ impl<Txn, FE> Clone for TensorBase<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for TensorBase<Txn, FE> {
+impl<Txn, FE> Instance for TensorBase<Txn, FE>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+{
     type Class = TensorType;
 
     fn class(&self) -> Self::Class {

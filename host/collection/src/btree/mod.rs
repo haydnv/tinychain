@@ -148,7 +148,7 @@ impl<Txn, FE> Clone for BTree<Txn, FE> {
 
 impl<Txn, FE> Instance for BTree<Txn, FE>
 where
-    Txn: Transaction<FE>,
+    Txn: Send + Sync,
     FE: Send + Sync,
 {
     type Class = BTreeType;

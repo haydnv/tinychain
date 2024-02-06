@@ -122,10 +122,10 @@ where
     }
 }
 
-impl<T, FE> Instance for Collection<T, FE>
+impl<Txn, FE> Instance for Collection<Txn, FE>
 where
-    T: Transaction<FE>,
-    FE: ThreadSafe,
+    Txn: Send + Sync,
+    FE: Send + Sync,
 {
     type Class = CollectionType;
 

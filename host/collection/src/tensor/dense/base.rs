@@ -256,7 +256,9 @@ where
 
 impl<Txn, FE, T> Instance for DenseBase<Txn, FE, T>
 where
-    Self: Send + Sync,
+    Txn: Send + Sync,
+    FE: Send + Sync,
+    T: Send + Sync,
 {
     type Class = TensorType;
 

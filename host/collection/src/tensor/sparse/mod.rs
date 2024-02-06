@@ -1075,7 +1075,11 @@ impl<Txn, FE> Clone for SparseBase<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for SparseBase<Txn, FE> {
+impl<Txn, FE> Instance for SparseBase<Txn, FE>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+{
     type Class = TensorType;
 
     fn class(&self) -> Self::Class {
