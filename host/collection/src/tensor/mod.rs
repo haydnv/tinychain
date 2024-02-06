@@ -716,7 +716,7 @@ impl<Txn, FE> From<Dense<Txn, FE>> for DenseView<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Dense<Txn, FE> {
+impl<Txn, FE> fmt::Debug for Dense<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Base(base) => base.fmt(f),
@@ -843,7 +843,7 @@ impl<Txn, FE> From<Sparse<Txn, FE>> for SparseView<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Sparse<Txn, FE> {
+impl<Txn, FE> fmt::Debug for Sparse<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Base(base) => base.fmt(f),
@@ -1820,7 +1820,7 @@ impl<Txn, FE> From<Tensor<Txn, FE>> for TensorView<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Tensor<Txn, FE> {
+impl<Txn, FE> fmt::Debug for Tensor<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Dense(this) => this.fmt(f),

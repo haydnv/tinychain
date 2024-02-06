@@ -411,11 +411,7 @@ where
     }
 }
 
-impl<Txn, FE> fmt::Debug for Table<Txn, FE>
-where
-    Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe,
-{
+impl<Txn, FE> fmt::Debug for Table<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Limited(limited) => limited.fmt(f),

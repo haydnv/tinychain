@@ -267,7 +267,7 @@ where
 
 impl<T> fmt::Debug for Selection<T>
 where
-    T: TableInstance + fmt::Debug,
+    T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let columns = b_table::IndexSchema::columns(b_table::Schema::primary(&self.schema));

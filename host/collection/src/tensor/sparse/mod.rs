@@ -1706,17 +1706,13 @@ impl<Txn, FE> From<SparseBase<Txn, FE>> for SparseView<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for SparseBase<Txn, FE> {
+impl<Txn, FE> fmt::Debug for SparseBase<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         base_dispatch!(
             self,
             this,
             this.fmt(f),
-            write!(
-                f,
-                "a complex transactional sparse tensor of type {:?}",
-                this.0.dtype()
-            ),
+            write!(f, "a complex tensor ({:?}, {:?})", this.0, this.1),
             this.fmt(f)
         )
     }

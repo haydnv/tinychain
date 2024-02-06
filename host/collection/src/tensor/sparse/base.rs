@@ -851,19 +851,9 @@ impl<Txn, FE, T: CType> From<SparseBase<Txn, FE, T>> for SparseAccess<Txn, FE, T
     }
 }
 
-impl<Txn, FE, T> fmt::Debug for SparseBase<Txn, FE, T>
-where
-    Txn: ThreadSafe,
-    FE: ThreadSafe,
-    T: CType + DType,
-{
+impl<Txn, FE, T> fmt::Debug for SparseBase<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "transactional sparse tensor with shape {:?} and type {:?}",
-            self.shape(),
-            self.dtype()
-        )
+        f.write_str("a transactional sparse tensor")
     }
 }
 

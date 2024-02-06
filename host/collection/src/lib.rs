@@ -278,7 +278,11 @@ impl<Txn, FE> TryCastFrom<Collection<Txn, FE>> for Tensor<Txn, FE> {
 
 impl<Txn, FE> fmt::Debug for Collection<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a Collection")
+        match self {
+            Self::BTree(btree) => btree.fmt(f),
+            Self::Table(table) => table.fmt(f),
+            Self::Tensor(tensor) => tensor.fmt(f),
+        }
     }
 }
 
