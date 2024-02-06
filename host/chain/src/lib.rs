@@ -116,14 +116,16 @@ impl fmt::Debug for ChainType {
 
 /// A data structure responsible for maintaining the integrity of a mutable subject.
 #[derive(Clone)]
-pub enum Chain<State: StateInstance, T> {
-    Block(block::BlockChain<State, T>),
-    Sync(sync::SyncChain<State, T>),
+pub enum Chain<State, Txn, FE, T> {
+    Block(block::BlockChain<State, Txn, FE, T>),
+    Sync(sync::SyncChain<State, Txn, FE, T>),
 }
 
-impl<State, T> Instance for Chain<State, T>
+impl<State, Txn, FE, T> Instance for Chain<State, Txn, FE, T>
 where
-    State: StateInstance,
+    State: Send + Sync,
+    Txn: Send + Sync,
+    FE: Send + Sync,
     T: Send + Sync,
 {
     type Class = ChainType;
@@ -136,7 +138,7 @@ where
     }
 }
 
-impl<State, T> ChainInstance<State, T> for Chain<State, T>
+impl<State, T> ChainInstance<State, T> for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: DenseCacheFile
@@ -171,7 +173,7 @@ where
 }
 
 #[async_trait]
-impl<State, T> AsyncHash for Chain<State, T>
+impl<State, T> AsyncHash for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe,
@@ -186,7 +188,7 @@ where
 }
 
 #[async_trait]
-impl<State, T> Transact for Chain<State, T>
+impl<State, T> Transact for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: DenseCacheFile
@@ -221,7 +223,7 @@ where
 }
 
 #[async_trait]
-impl<State, T> Recover<State::FE> for Chain<State, T>
+impl<State, T> Recover<State::FE> for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Scalar>,
     State::FE: DenseCacheFile
@@ -245,7 +247,7 @@ where
 }
 
 #[async_trait]
-impl<State, T> fs::Persist<State::FE> for Chain<State, T>
+impl<State, T> fs::Persist<State::FE> for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: DenseCacheFile
@@ -308,7 +310,7 @@ where
 }
 
 #[async_trait]
-impl<State, T> fs::CopyFrom<State::FE, Self> for Chain<State, T>
+impl<State, T> fs::CopyFrom<State::FE, Self> for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: DenseCacheFile
@@ -338,9 +340,11 @@ where
     }
 }
 
-impl<State, T> fmt::Debug for Chain<State, T>
+impl<State, Txn, FE, T> fmt::Debug for Chain<State, Txn, FE, T>
 where
-    State: StateInstance,
+    State: Send + Sync,
+    Txn: Send + Sync,
+    FE: Send + Sync,
     T: Send + Sync,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -353,11 +357,8 @@ where
     }
 }
 
-impl<State, T> From<BlockChain<State, T>> for Chain<State, T>
-where
-    State: StateInstance,
-{
-    fn from(chain: BlockChain<State, T>) -> Self {
+impl<State, Txn, FE, T> From<BlockChain<State, Txn, FE, T>> for Chain<State, Txn, FE, T> {
+    fn from(chain: BlockChain<State, Txn, FE, T>) -> Self {
         Self::Block(chain)
     }
 }
@@ -393,14 +394,15 @@ where
 }
 
 #[async_trait]
-impl<'en, State, T> IntoView<'en, State::FE> for Chain<State, T>
+impl<'en, State, T> IntoView<'en, State::FE> for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     T: IntoView<'en, State::FE, Txn = State::Txn> + Send + Sync + 'en,
-    BlockChain<State, T>: IntoView<'en, State::FE, View = (T::View, data::HistoryView<'en>), Txn = State::Txn>
+    BlockChain<State, State::Txn, State::FE, T>: IntoView<'en, State::FE, View = (T::View, data::HistoryView<'en>), Txn = State::Txn>
         + Send
         + Sync,
-    SyncChain<State, T>: IntoView<'en, State::FE, View = T::View, Txn = State::Txn> + Send + Sync,
+    SyncChain<State, State::Txn, State::FE, T>:
+        IntoView<'en, State::FE, View = T::View, Txn = State::Txn> + Send + Sync,
 {
     type Txn = State::Txn;
     type View = ChainView<'en, T::View>;
@@ -418,7 +420,7 @@ where
 }
 
 #[async_trait]
-impl<State, T> de::FromStream for Chain<State, T>
+impl<State, T> de::FromStream for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance
         + de::FromStream<Context = State::Txn>
@@ -488,7 +490,7 @@ where
         self,
         class: ChainType,
         access: &mut A,
-    ) -> Result<Chain<State, T>, A::Error> {
+    ) -> Result<Chain<State, State::Txn, State::FE, T>, A::Error> {
         match class {
             ChainType::Block => {
                 access
@@ -522,7 +524,7 @@ where
     (Value,): TryCastFrom<State>,
     (Value, State): TryCastFrom<State>,
 {
-    type Value = Chain<State, T>;
+    type Value = Chain<State, State::Txn, State::FE, T>;
 
     fn expecting() -> &'static str {
         "a Chain"
