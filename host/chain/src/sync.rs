@@ -35,13 +35,27 @@ const STORE: Label = label(".store");
 
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 /// event of a transaction failure.
-#[derive(Clone)]
 pub struct SyncChain<State, Txn, FE, T> {
     committed: FileLock<FE>,
     queue: TxnTaskQueue<MutationPending<Txn, FE>, TCResult<MutationRecord>>,
     store: super::data::Store<Txn, FE>,
     subject: T,
     state: PhantomData<State>,
+}
+
+impl<State, Txn, FE, T> Clone for SyncChain<State, Txn, FE, T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            committed: self.committed.clone(),
+            queue: self.queue.clone(),
+            store: self.store.clone(),
+            subject: self.subject.clone(),
+            state: self.state,
+        }
+    }
 }
 
 impl<State, T> SyncChain<State, State::Txn, State::FE, T>

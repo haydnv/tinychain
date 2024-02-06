@@ -29,10 +29,21 @@ use super::data::{ChainBlock, History};
 use super::{ChainInstance, Recover, HISTORY};
 
 /// A `Chain` which stores every mutation of its subject in a series of `ChainBlock`s
-#[derive(Clone)]
 pub struct BlockChain<State, Txn, FE, T> {
     history: History<State, Txn, FE>,
     subject: T,
+}
+
+impl<State, Txn, FE, T> Clone for BlockChain<State, Txn, FE, T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            history: self.history.clone(),
+            subject: self.subject.clone(),
+        }
+    }
 }
 
 impl<State, Txn, FE, T> BlockChain<State, Txn, FE, T> {

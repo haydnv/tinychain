@@ -115,10 +115,21 @@ impl fmt::Debug for ChainType {
 }
 
 /// A data structure responsible for maintaining the integrity of a mutable subject.
-#[derive(Clone)]
 pub enum Chain<State, Txn, FE, T> {
     Block(block::BlockChain<State, Txn, FE, T>),
     Sync(sync::SyncChain<State, Txn, FE, T>),
+}
+
+impl<State, Txn, FE, T> Clone for Chain<State, Txn, FE, T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Block(chain) => Self::Block(chain.clone()),
+            Self::Sync(chain) => Self::Sync(chain.clone()),
+        }
+    }
 }
 
 impl<State, Txn, FE, T> Instance for Chain<State, Txn, FE, T>
@@ -340,20 +351,12 @@ where
     }
 }
 
-impl<State, Txn, FE, T> fmt::Debug for Chain<State, Txn, FE, T>
-where
-    State: Send + Sync,
-    Txn: Send + Sync,
-    FE: Send + Sync,
-    T: Send + Sync,
-{
+impl<State, Txn, FE, T> fmt::Debug for Chain<State, Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "instance of {:?} with subject type {}",
-            self.class(),
-            std::any::type_name::<T>()
-        )
+        match self {
+            Self::Block(chain) => chain.fmt(f),
+            Self::Sync(chain) => chain.fmt(f),
+        }
     }
 }
 
