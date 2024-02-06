@@ -31,6 +31,6 @@ safecast = "0.2"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0", features = [] }
 smallvec = { version = "1.11", features = ["serde"] }
-tc-error = "0.11"
-tcgeneric = "0.10"
+tc-error = { path = "../error" }
+tcgeneric = { path = "../generic" }
 uuid = { version = "1.6", features = ["v4"] }

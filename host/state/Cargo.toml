@@ -22,11 +22,11 @@ get-size-derive = "0.1"
 log = "0.4"
 num_cpus = "1.16"
 safecast = "0.2"
-tc-chain = "0.4"
-tc-collection = "0.4"
-tc-error = "0.11"
-tc-fs = "0.4"
-tc-scalar = "0.4"
-tc-transact = "0.20"
-tc-value = "0.12"
-tcgeneric = "0.10"
+tc-chain = { path = "../chain" }
+tc-collection = { path = "../collection" }
+tc-error = { path = "../error" }
+tc-fs = { path = "../fs" }
+tc-scalar = { path = "../scalar" }
+tc-transact = { path = "../transact" }
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }

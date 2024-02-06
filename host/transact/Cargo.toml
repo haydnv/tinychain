@@ -24,9 +24,9 @@ num_cpus = "1.16"
 rand = "0.8"
 safecast = "0.2"
 sha2 = "0.10"
-tc-error = "0.11"
-tc-value = "0.12"
-tcgeneric = "0.10"
+tc-error = { path = "../error" }
+tc-value = { path = "../value" }
+tcgeneric = { path = "../generic" }
 tokio = { version = "1.35", features = ["sync"] }
 txfs = { version = "0.3", features = ["logging"] }
 txn_lock = { version = "0.9", features = ["logging"] }
