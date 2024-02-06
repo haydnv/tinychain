@@ -1,6 +1,10 @@
 use std::fmt;
+use std::marker::PhantomData;
 
 use log::debug;
+use safecast::AsType;
+use tc_chain::ChainBlock;
+use tc_collection::{BTreeNode, DenseCacheFile, TensorNode};
 
 use tc_error::*;
 use tc_scalar::op::*;
@@ -8,29 +12,42 @@ use tc_scalar::Scalar;
 use tc_transact::public::{
     DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route, ToState,
 };
+use tc_transact::{fs, RPCClient, Transaction};
 use tc_value::Value;
 use tcgeneric::{Id, Instance, Map, PathSegment};
 
-use crate::{State, Txn};
+use crate::State;
 
-struct GetMethod<'a, T: Instance> {
+struct GetMethod<'a, Txn, FE, T: Instance> {
     subject: &'a T,
     name: &'a Id,
     method: GetOp,
+    phantom: PhantomData<(Txn, FE)>,
 }
 
-impl<'a, T: Instance> GetMethod<'a, T> {
+impl<'a, Txn, FE, T: Instance> GetMethod<'a, Txn, FE, T> {
     pub fn new(subject: &'a T, name: &'a Id, method: GetOp) -> Self {
         Self {
             subject,
             name,
             method,
+            phantom: PhantomData,
         }
     }
 }
 
-impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> GetMethod<'a, T> {
-    async fn call(self, txn: &Txn, key: Value) -> TCResult<State> {
+impl<'a, Txn, FE, T> GetMethod<'a, Txn, FE, T>
+where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'b> fs::FileSave<'b>
+        + Clone,
+    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
+{
+    async fn call(self, txn: &Txn, key: Value) -> TCResult<State<Txn, FE>> {
         let (key_name, op_def) = self.method;
 
         let mut context = Map::new();
@@ -45,10 +62,18 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> GetMetho
     }
 }
 
-impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<'a, State>
-    for GetMethod<'a, T>
+impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for GetMethod<'a, Txn, FE, T>
+where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'b> fs::FileSave<'b>
+        + Clone,
+    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn, FE>>>
     where
         'b: 'a,
     {
@@ -56,24 +81,36 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<
     }
 }
 
-struct PutMethod<'a, T: Instance> {
+struct PutMethod<'a, Txn, FE, T: Instance> {
     subject: &'a T,
     name: &'a Id,
     method: PutOp,
+    phantom: PhantomData<(Txn, FE)>,
 }
 
-impl<'a, T: Instance> PutMethod<'a, T> {
+impl<'a, Txn, FE, T: Instance> PutMethod<'a, Txn, FE, T> {
     pub fn new(subject: &'a T, name: &'a Id, method: PutOp) -> Self {
         Self {
             subject,
             name,
             method,
+            phantom: PhantomData,
         }
     }
 }
 
-impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> PutMethod<'a, T> {
-    async fn call(self, txn: &Txn, key: Value, value: State) -> TCResult<()> {
+impl<'a, Txn, FE, T> PutMethod<'a, Txn, FE, T>
+where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'b> fs::FileSave<'b>
+        + Clone,
+    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
+{
+    async fn call(self, txn: &Txn, key: Value, value: State<Txn, FE>) -> TCResult<()> {
         let (key_name, value_name, op_def) = self.method;
 
         let mut context = Map::new();
@@ -89,10 +126,18 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> PutMetho
     }
 }
 
-impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<'a, State>
-    for PutMethod<'a, T>
+impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for PutMethod<'a, Txn, FE, T>
+where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'b> fs::FileSave<'b>
+        + Clone,
+    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
 {
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State<Txn, FE>>>
     where
         'b: 'a,
     {
@@ -102,24 +147,36 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<
     }
 }
 
-struct PostMethod<'a, T: Instance> {
+struct PostMethod<'a, Txn, FE, T: Instance> {
     subject: &'a T,
     name: &'a Id,
     method: PostOp,
+    phantom: PhantomData<(Txn, FE)>,
 }
 
-impl<'a, T: Instance> PostMethod<'a, T> {
+impl<'a, Txn, FE, T: Instance> PostMethod<'a, Txn, FE, T> {
     pub fn new(subject: &'a T, name: &'a Id, method: PostOp) -> Self {
         Self {
             subject,
             name,
             method,
+            phantom: PhantomData,
         }
     }
 }
 
-impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> PostMethod<'a, T> {
-    async fn call(self, txn: &Txn, params: Map<State>) -> TCResult<State> {
+impl<'a, Txn, FE, T> PostMethod<'a, Txn, FE, T>
+where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'b> fs::FileSave<'b>
+        + Clone,
+    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
+{
+    async fn call(self, txn: &Txn, params: Map<State<Txn, FE>>) -> TCResult<State<Txn, FE>> {
         match call_method(txn, self.subject, params, self.method).await {
             Ok(state) => Ok(state),
             Err(cause) => {
@@ -129,10 +186,18 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> PostMeth
     }
 }
 
-impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<'a, State>
-    for PostMethod<'a, T>
+impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for PostMethod<'a, Txn, FE, T>
+where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'b> fs::FileSave<'b>
+        + Clone,
+    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
 {
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State<Txn, FE>>>
     where
         'b: 'a,
     {
@@ -142,23 +207,35 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<
     }
 }
 
-struct DeleteMethod<'a, T: Instance> {
+struct DeleteMethod<'a, Txn, FE, T: Instance> {
     subject: &'a T,
     name: &'a Id,
     method: DeleteOp,
+    phantom: PhantomData<(Txn, FE)>,
 }
 
-impl<'a, T: Instance> DeleteMethod<'a, T> {
+impl<'a, Txn, FE, T: Instance> DeleteMethod<'a, Txn, FE, T> {
     pub fn new(subject: &'a T, name: &'a Id, method: DeleteOp) -> Self {
         Self {
             subject,
             name,
             method,
+            phantom: PhantomData,
         }
     }
 }
 
-impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> DeleteMethod<'a, T> {
+impl<'a, Txn, FE, T> DeleteMethod<'a, Txn, FE, T>
+where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'b> fs::FileSave<'b>
+        + Clone,
+    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
+{
     async fn call(self, txn: &Txn, key: Value) -> TCResult<()> {
         let (key_name, op_def) = self.method;
 
@@ -175,9 +252,16 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> DeleteMe
     }
 }
 
-impl<'a, T> Handler<'a, State> for DeleteMethod<'a, T>
+impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for DeleteMethod<'a, Txn, FE, T>
 where
-    T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a,
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'b> fs::FileSave<'b>
+        + Clone,
+    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
 {
     fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
     where
@@ -188,14 +272,21 @@ where
 }
 
 #[inline]
-pub fn route_attr<'a, T>(
+pub fn route_attr<'a, Txn, FE, T>(
     subject: &'a T,
     name: &'a Id,
     attr: &'a Scalar,
     path: &'a [PathSegment],
-) -> Option<Box<dyn Handler<'a, State> + 'a>>
+) -> Option<Box<dyn Handler<'a, State<Txn, FE>> + 'a>>
 where
-    T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a,
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'b> fs::FileSave<'b>
+        + Clone,
+    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
 {
     match attr {
         Scalar::Op(OpDef::Get(get_op)) if path.is_empty() => {
@@ -226,14 +317,21 @@ where
     }
 }
 
-async fn call_method<T>(
+async fn call_method<Txn, FE, T>(
     txn: &Txn,
     subject: &T,
-    context: Map<State>,
+    context: Map<State<Txn, FE>>,
     form: Vec<(Id, Scalar)>,
-) -> TCResult<State>
+) -> TCResult<State<Txn, FE>>
 where
-    T: ToState<State> + Route<State> + Instance + fmt::Debug,
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>
+        + Clone,
+    T: ToState<State<Txn, FE>> + Route<State<Txn, FE>> + Instance + fmt::Debug,
 {
     debug!(
         "call method with form {}",

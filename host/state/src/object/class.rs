@@ -192,7 +192,7 @@ impl CastFrom<InstanceClass> for Scalar {
     }
 }
 
-impl CastFrom<InstanceClass> for (Link, Map<State>) {
+impl<Txn, FE> CastFrom<InstanceClass> for (Link, Map<State<Txn, FE>>) {
     fn cast_from(class: InstanceClass) -> Self {
         let proto = class
             .proto

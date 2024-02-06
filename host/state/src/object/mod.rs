@@ -1,20 +1,22 @@
 //! User-defined public-orientation features.
 
 use std::fmt;
+use std::marker::PhantomData;
 
 use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use destream::{de, en};
-use safecast::{TryCastFrom, TryCastInto};
+use safecast::{AsType, TryCastFrom, TryCastInto};
+use tc_chain::ChainBlock;
+use tc_collection::{BTreeNode, DenseCacheFile, TensorNode};
 
 use tc_error::*;
-use tc_fs::CacheBlock;
 use tc_scalar::Scalar;
-use tc_transact::{AsyncHash, IntoView, TxnId};
+use tc_transact::{fs, AsyncHash, IntoView, RPCClient, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, path_label, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
-use super::{State, Txn};
+use super::State;
 
 pub use class::*;
 pub use instance::*;
@@ -67,13 +69,25 @@ impl fmt::Debug for ObjectType {
 }
 
 /// A user-defined [`InstanceClass`] or [`InstanceExt`].
-#[derive(Clone)]
-pub enum Object {
+pub enum Object<Txn, FE> {
     Class(InstanceClass),
-    Instance(InstanceExt<State>),
+    Instance(InstanceExt<Txn, FE, State<Txn, FE>>),
 }
 
-impl tcgeneric::Instance for Object {
+impl<Txn, FE> Clone for Object<Txn, FE> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Class(class) => Self::Class(class.clone()),
+            Self::Instance(instance) => Self::Instance(instance.clone()),
+        }
+    }
+}
+
+impl<Txn, FE> tcgeneric::Instance for Object<Txn, FE>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+{
     type Class = ObjectType;
 
     fn class(&self) -> ObjectType {
@@ -85,7 +99,16 @@ impl tcgeneric::Instance for Object {
 }
 
 #[async_trait]
-impl AsyncHash for Object {
+impl<Txn, FE> AsyncHash for Object<Txn, FE>
+where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<TensorNode>
+        + AsType<ChainBlock>
+        + for<'a> fs::FileSave<'a>
+        + Clone,
+{
     async fn hash(self, _txn_id: TxnId) -> TCResult<Output<Sha256>> {
         match self {
             Self::Class(class) => Ok(async_hash::Hash::<Sha256>::hash(class)),
@@ -94,27 +117,27 @@ impl AsyncHash for Object {
     }
 }
 
-impl From<InstanceClass> for Object {
-    fn from(class: InstanceClass) -> Object {
+impl<Txn, FE> From<InstanceClass> for Object<Txn, FE> {
+    fn from(class: InstanceClass) -> Self {
         Object::Class(class)
     }
 }
 
-impl From<InstanceExt<State>> for Object {
-    fn from(instance: InstanceExt<State>) -> Object {
+impl<Txn, FE> From<InstanceExt<Txn, FE, State<Txn, FE>>> for Object<Txn, FE> {
+    fn from(instance: InstanceExt<Txn, FE, State<Txn, FE>>) -> Self {
         Object::Instance(instance)
     }
 }
 
-impl TryCastFrom<Object> for Scalar {
-    fn can_cast_from(object: &Object) -> bool {
+impl<Txn, FE> TryCastFrom<Object<Txn, FE>> for Scalar {
+    fn can_cast_from(object: &Object<Txn, FE>) -> bool {
         match object {
             Object::Class(class) => Self::can_cast_from(class),
             Object::Instance(instance) => Self::can_cast_from(instance),
         }
     }
 
-    fn opt_cast_from(object: Object) -> Option<Self> {
+    fn opt_cast_from(object: Object<Txn, FE>) -> Option<Self> {
         match object {
             Object::Class(class) => Self::opt_cast_from(class),
             Object::Instance(instance) => Self::opt_cast_from(instance),
@@ -122,15 +145,15 @@ impl TryCastFrom<Object> for Scalar {
     }
 }
 
-impl TryCastFrom<Object> for Value {
-    fn can_cast_from(object: &Object) -> bool {
+impl<Txn, FE> TryCastFrom<Object<Txn, FE>> for Value {
+    fn can_cast_from(object: &Object<Txn, FE>) -> bool {
         match object {
             Object::Class(class) => Self::can_cast_from(class),
             Object::Instance(instance) => Self::can_cast_from(instance),
         }
     }
 
-    fn opt_cast_from(object: Object) -> Option<Self> {
+    fn opt_cast_from(object: Object<Txn, FE>) -> Option<Self> {
         match object {
             Object::Class(class) => Self::opt_cast_from(class),
             Object::Instance(instance) => Self::opt_cast_from(instance),
@@ -139,7 +162,16 @@ impl TryCastFrom<Object> for Value {
 }
 
 #[async_trait]
-impl<'en> IntoView<'en, CacheBlock> for Object {
+impl<'en, Txn, FE> IntoView<'en, FE> for Object<Txn, FE>
+where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>
+        + Clone,
+{
     type Txn = Txn;
     type View = ObjectView;
 
@@ -152,7 +184,7 @@ impl<'en> IntoView<'en, CacheBlock> for Object {
 }
 
 #[async_trait]
-impl fmt::Debug for Object {
+impl<Txn, FE> fmt::Debug for Object<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Class(ict) => fmt::Debug::fmt(ict, f),
@@ -181,18 +213,26 @@ impl<'en> en::IntoStream<'en> for ObjectView {
 }
 
 /// A helper struct for Object deserialization
-pub struct ObjectVisitor;
+pub struct ObjectVisitor<Txn, FE> {
+    phantom: PhantomData<(Txn, FE)>,
+}
 
-impl ObjectVisitor {
+impl<Txn, FE> ObjectVisitor<Txn, FE>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+{
     pub fn new() -> Self {
-        Self
+        Self {
+            phantom: PhantomData,
+        }
     }
 
     pub async fn visit_map_value<Err: de::Error>(
         self,
         class: ObjectType,
-        state: State,
-    ) -> Result<Object, Err> {
+        state: State<Txn, FE>,
+    ) -> Result<Object<Txn, FE>, Err> {
         match class {
             ObjectType::Class => {
                 let class = state.try_cast_into(|s| {

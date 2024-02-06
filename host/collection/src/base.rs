@@ -21,12 +21,21 @@ use super::tensor::{
 };
 use super::{BTreeNode, Collection, CollectionType, CollectionView, Schema, TensorNode};
 
-#[derive(Clone)]
 /// The base type of a mutable transactional collection of data.
 pub enum CollectionBase<Txn, FE> {
     BTree(BTreeFile<Txn, FE>),
     Table(TableFile<Txn, FE>),
     Tensor(TensorBase<Txn, FE>),
+}
+
+impl<Txn, FE> Clone for CollectionBase<Txn, FE> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::BTree(btree) => Self::BTree(btree.clone()),
+            Self::Table(table) => Self::Table(table.clone()),
+            Self::Tensor(tensor) => Self::Tensor(tensor.clone()),
+        }
+    }
 }
 
 impl<Txn, FE> CollectionBase<Txn, FE>

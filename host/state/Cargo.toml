@@ -25,7 +25,6 @@ safecast = "0.2"
 tc-chain = { path = "../chain" }
 tc-collection = { path = "../collection" }
 tc-error = { path = "../error" }
-tc-fs = { path = "../fs" }
 tc-scalar = { path = "../scalar" }
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }

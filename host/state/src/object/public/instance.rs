@@ -2,14 +2,18 @@ use std::fmt;
 
 use futures::future;
 use log::{debug, info};
+use safecast::AsType;
+use tc_chain::ChainBlock;
+use tc_collection::{BTreeNode, DenseCacheFile, TensorNode};
 
 use tc_error::*;
 use tc_transact::public::generic::COPY;
 use tc_transact::public::{GetHandler, Handler, Route, ToState};
+use tc_transact::{fs, RPCClient, Transaction};
 use tcgeneric::{Instance, PathSegment, TCPath};
 
 use crate::object::InstanceExt;
-use crate::{State, Txn};
+use crate::State;
 
 use super::method::route_attr;
 
@@ -17,11 +21,18 @@ struct CopyHandler<'a, T> {
     instance: &'a T,
 }
 
-impl<'a, T> Handler<'a, State> for CopyHandler<'a, T>
+impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for CopyHandler<'a, T>
 where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'b> fs::FileSave<'b>
+        + Clone,
     T: Instance + fmt::Debug + 'a,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn, FE>>>
     where
         'b: 'a,
     {
@@ -40,11 +51,22 @@ impl<'a, T> From<&'a T> for CopyHandler<'a, T> {
     }
 }
 
-impl<T: ToState<State> + Instance + Route<State> + fmt::Debug> Route<State> for InstanceExt<T>
+impl<Txn, FE, T> Route<State<Txn, FE>> for InstanceExt<Txn, FE, T>
 where
-    Self: ToState<State>,
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>
+        + Clone,
+    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug,
+    Self: ToState<State<Txn, FE>>,
 {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
+    fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, State<Txn, FE>> + 'a>> {
         debug!(
             "{:?} with members {:?} route {} (parent is {} {:?})",
             self,

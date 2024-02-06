@@ -1,3 +1,5 @@
+# TODO: delete this sub-crate and replace it with a new "server" sub-crate
+
 [package]
 name = "tc-fs"
 version = "0.4.0"
