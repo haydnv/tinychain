@@ -1,9 +1,6 @@
-use tc_fs::CacheBlock;
-
-use super::Txn;
-
+pub use
 /// A collection such as a [`Table`] or [`Tensor`]
-pub type Collection = tc_collection::Collection<Txn, CacheBlock>;
+pub type Collection = tc_collection::Collection<Txn>;
 
 /// The base type of a [`Collection`]
 pub type CollectionBase = tc_collection::CollectionBase<Txn, CacheBlock>;

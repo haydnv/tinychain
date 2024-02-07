@@ -4,16 +4,17 @@ use async_trait::async_trait;
 use destream::{en, EncodeMap};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::TryFutureExt;
+use safecast::AsType;
 
-use tc_chain::ChainView;
-use tc_collection::CollectionView;
+use tc_chain::{ChainBlock, ChainView};
+use tc_collection::{BTreeNode, CollectionView, DenseCacheFile, TensorNode};
 use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
-use tc_transact::IntoView;
+use tc_transact::{fs, IntoView, RPCClient, Transaction};
 use tcgeneric::{Id, NativeClass};
 
 use super::object::ObjectView;
-use super::{StateType, Txn};
+use super::StateType;
 
 use super::State;
 
@@ -25,12 +26,20 @@ pub enum StateView<'en> {
     Map(HashMap<Id, StateView<'en>>),
     Object(Box<ObjectView>),
     Scalar(Scalar),
-    // Stream(en::SeqStream<TCResult<StateView<'en>>, TCBoxTryStream<'en, StateView<'en>>>),
     Tuple(Vec<StateView<'en>>),
 }
 
 #[async_trait]
-impl<'en> IntoView<'en, tc_fs::CacheBlock> for State {
+impl<'en, Txn, FE> IntoView<'en, FE> for State<Txn, FE>
+where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>
+        + Clone,
+{
     type Txn = Txn;
     type View = StateView<'en>;
 
@@ -61,7 +70,6 @@ impl<'en> IntoView<'en, tc_fs::CacheBlock> for State {
                     .await
             }
             Self::Scalar(scalar) => Ok(StateView::Scalar(scalar)),
-            // Self::Stream(stream) => stream.into_view(txn).map_ok(StateView::Stream).await,
             Self::Tuple(tuple) => {
                 let tuple_view = stream::iter(tuple.into_iter())
                     .map(|state| state.into_view(txn.clone()))
@@ -89,7 +97,6 @@ impl<'en> en::IntoStream<'en> for StateView<'en> {
             Self::Map(map) => map.into_stream(encoder),
             Self::Object(object) => object.into_stream(encoder),
             Self::Scalar(scalar) => scalar.into_stream(encoder),
-            // Self::Stream(stream) => stream.into_stream(encoder),
             Self::Tuple(tuple) => tuple.into_stream(encoder),
         }
     }

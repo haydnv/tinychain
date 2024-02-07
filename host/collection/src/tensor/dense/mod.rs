@@ -906,7 +906,11 @@ impl<Txn, FE> Clone for DenseBase<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for DenseBase<Txn, FE> {
+impl<Txn, FE> Instance for DenseBase<Txn, FE>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+{
     type Class = TensorType;
 
     fn class(&self) -> Self::Class {
@@ -1837,17 +1841,13 @@ impl<Txn, FE> From<DenseBase<Txn, FE>> for DenseView<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for DenseBase<Txn, FE> {
+impl<Txn, FE> fmt::Debug for DenseBase<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         base_dispatch!(
             self,
             this,
             this.fmt(f),
-            write!(
-                f,
-                "a complex transactional dense tensor of type {:?}",
-                this.0.dtype()
-            ),
+            write!(f, "a complex tensor ({:?}, {:?})", this.0, this.1),
             this.fmt(f)
         )
     }

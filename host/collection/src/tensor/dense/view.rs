@@ -1917,13 +1917,8 @@ impl<Txn, FE> From<DenseComplex<Txn, FE, f64>> for DenseView<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for DenseView<Txn, FE> {
+impl<Txn, FE> fmt::Debug for DenseView<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "dense tensor of type {:?} with shape {:?}",
-            self.dtype(),
-            self.shape()
-        )
+        f.write_str("a dense tensor")
     }
 }

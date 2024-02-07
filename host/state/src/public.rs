@@ -1,16 +1,21 @@
 use futures::TryFutureExt;
 use log::debug;
-use safecast::TryCastInto;
+use safecast::{AsType, TryCastInto};
+use std::marker::PhantomData;
+use tc_chain::ChainBlock;
 
+use tc_collection::btree::{BTreeFile, BTreeSchema};
+use tc_collection::table::{TableFile, TableSchema};
+use tc_collection::{BTreeNode, Collection, DenseCacheFile, TensorNode};
 use tc_error::*;
 use tc_transact::public::helpers::{AttributeHandler, EchoHandler, SelfHandler};
 use tc_transact::public::{GetHandler, Handler, PostHandler, Route};
-use tc_transact::{AsyncHash, Transaction};
+use tc_transact::{fs, AsyncHash, RPCClient, Transaction};
 use tc_value::{Link, Number, Value};
 use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, PathSegment, TCPath};
 
 use crate::object::{InstanceClass, Object};
-use crate::{State, StateType, Txn};
+use crate::{State, StateType};
 
 pub const PREFIX: Label = label("state");
 
@@ -18,8 +23,17 @@ struct ClassHandler {
     class: StateType,
 }
 
-impl<'a> Handler<'a, State> for ClassHandler {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+impl<'a, Txn, FE> Handler<'a, State<Txn, FE>> for ClassHandler
+where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'b> fs::FileSave<'b>
+        + Clone,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn, FE>>>
     where
         'b: 'a,
     {
@@ -28,7 +42,7 @@ impl<'a> Handler<'a, State> for ClassHandler {
         }))
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State<Txn, FE>>>
     where
         'b: 'a,
     {
@@ -50,12 +64,21 @@ impl<'a> Handler<'a, State> for ClassHandler {
     }
 }
 
-struct HashHandler {
-    state: State,
+struct HashHandler<Txn, FE> {
+    state: State<Txn, FE>,
 }
 
-impl<'a> Handler<'a, State> for HashHandler {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+impl<'a, Txn, FE> Handler<'a, State<Txn, FE>> for HashHandler<Txn, FE>
+where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'b> fs::FileSave<'b>
+        + Clone,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn, FE>>>
     where
         'b: 'a,
     {
@@ -74,8 +97,8 @@ impl<'a> Handler<'a, State> for HashHandler {
     }
 }
 
-impl From<State> for HashHandler {
-    fn from(state: State) -> HashHandler {
+impl<Txn, FE> From<State<Txn, FE>> for HashHandler<Txn, FE> {
+    fn from(state: State<Txn, FE>) -> HashHandler<Txn, FE> {
         Self { state }
     }
 }
@@ -86,8 +109,20 @@ impl From<StateType> for ClassHandler {
     }
 }
 
-impl Route<State> for StateType {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
+impl<Txn, FE> Route<State<Txn, FE>> for StateType
+where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>
+        + Clone,
+{
+    fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, State<Txn, FE>> + 'a>> {
         let child_handler = match self {
             Self::Chain(ct) => ct.route(path),
             Self::Collection(ct) => ct.route(path),
@@ -108,8 +143,20 @@ impl Route<State> for StateType {
     }
 }
 
-impl Route<State> for State {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
+impl<Txn, FE> Route<State<Txn, FE>> for State<Txn, FE>
+where
+    Txn: Transaction<FE> + RPCClient<Self>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>
+        + Clone,
+{
+    fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, State<Txn, FE>> + 'a>> {
         debug!(
             "instance of {:?} route {}",
             self.class(),
@@ -119,14 +166,13 @@ impl Route<State> for State {
         if let Some(handler) = match self {
             Self::Chain(chain) => chain.route(path),
             Self::Closure(closure) if path.is_empty() => {
-                let handler: Box<dyn Handler<'a, State> + 'a> = Box::new(closure.clone());
+                let handler: Box<dyn Handler<'a, State<Txn, FE>> + 'a> = Box::new(closure.clone());
                 Some(handler)
             }
             Self::Collection(collection) => collection.route(path),
             Self::Map(map) => map.route(path),
             Self::Object(object) => object.route(path),
             Self::Scalar(scalar) => scalar.route(path),
-            // Self::Stream(stream) => stream.route(path),
             Self::Tuple(tuple) => tuple.route(path),
             _ => None,
         } {
@@ -150,10 +196,36 @@ impl Route<State> for State {
     }
 }
 
-pub struct Static;
+#[derive(Copy, Clone)]
+pub struct Static<Txn, FE> {
+    phantom: PhantomData<(Txn, FE)>,
+}
 
-impl Route<State> for Static {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
+impl<Txn, FE> Default for Static<Txn, FE> {
+    fn default() -> Self {
+        Self {
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<Txn, FE> Route<State<Txn, FE>> for Static<Txn, FE>
+where
+    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    FE: DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>
+        + for<'a> fs::FileSave<'a>
+        + Clone,
+    BTreeFile<Txn, FE>: fs::Persist<FE, Schema = BTreeSchema, Txn = Txn>,
+    TableFile<Txn, FE>: fs::Persist<FE, Schema = TableSchema, Txn = Txn>,
+    Collection<Txn, FE>: From<BTreeFile<Txn, FE>>,
+{
+    fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, State<Txn, FE>> + 'a>> {
         if path.is_empty() {
             return Some(Box::new(EchoHandler));
         }

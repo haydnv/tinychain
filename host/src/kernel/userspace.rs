@@ -8,16 +8,16 @@ use futures::join;
 use log::{debug, info};
 
 use tc_error::*;
-use tc_fs::hypothetical;
-use tc_state::chain::BlockChain;
-use tc_state::State;
 use tc_transact::public::{Public, Route};
 use tc_transact::{RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, PathLabel, PathSegment, TCPath};
 
+use crate::chain::BlockChain;
 use crate::cluster::{Cluster, Dir, DirEntry, Replica};
-use crate::txn::{Hypothetical, Txn};
+use crate::state::State;
+use crate::txn::hypothetical;
+use crate::txn::Txn;
 
 use super::Dispatch;
 
@@ -41,7 +41,7 @@ pub const SERVICE: PathLabel = path_label(&["service"]);
 
 /// The host userspace, responsible for dispatching requests to stateful services
 pub struct UserSpace {
-    hypothetical: Hypothetical,
+    hypothetical: hypothetical::Hypothetical,
     class: Class,
     library: Library,
     service: Service,
@@ -51,7 +51,7 @@ impl UserSpace {
     /// Construct a new `Kernel` to host the given [`Cluster`]s.
     pub fn new(class: Class, library: Library, service: Service) -> Self {
         Self {
-            hypothetical: Hypothetical::new(),
+            hypothetical: hypothetical::Hypothetical::new(),
             class,
             library,
             service,

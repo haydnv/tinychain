@@ -311,7 +311,9 @@ where
 
 impl<Txn, FE, T> Instance for SparseBase<Txn, FE, T>
 where
-    Self: Send + Sync,
+    Txn: Send + Sync,
+    FE: Send + Sync,
+    T: Send + Sync,
 {
     type Class = TensorType;
 
@@ -851,19 +853,9 @@ impl<Txn, FE, T: CType> From<SparseBase<Txn, FE, T>> for SparseAccess<Txn, FE, T
     }
 }
 
-impl<Txn, FE, T> fmt::Debug for SparseBase<Txn, FE, T>
-where
-    Txn: ThreadSafe,
-    FE: ThreadSafe,
-    T: CType + DType,
-{
+impl<Txn, FE, T> fmt::Debug for SparseBase<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "transactional sparse tensor with shape {:?} and type {:?}",
-            self.shape(),
-            self.dtype()
-        )
+        f.write_str("a transactional sparse tensor")
     }
 }
 

@@ -40,7 +40,7 @@ where
     State: StateInstance,
     C: ChainInstance<State, T> + Send + Sync + 'a,
     T: Route<State> + fmt::Debug + 'a,
-    Chain<State, T>: ChainInstance<State, T>,
+    Chain<State, State::Txn, State::FE, T>: ChainInstance<State, T>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -98,7 +98,7 @@ where
     }
 }
 
-impl<State, T> Route<State> for Chain<State, T>
+impl<State, T> Route<State> for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + Clone + fmt::Debug,
@@ -115,10 +115,9 @@ where
     }
 }
 
-impl<State, T> Route<State> for BlockChain<State, T>
+impl<State, T> Route<State> for BlockChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-
     State::FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>

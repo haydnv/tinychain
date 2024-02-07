@@ -6,7 +6,6 @@ use tc_error::*;
 use tc_scalar::{OpRef, OpRefType, Scalar, Subject, TCRef};
 use tc_state::object::public::method::route_attr;
 use tc_state::object::InstanceClass;
-use tc_state::State;
 use tc_transact::public::helpers::MethodNotAllowedHandler;
 use tc_transact::public::{Handler, Public, Route};
 use tc_transact::{RPCClient, Transaction};
@@ -16,6 +15,7 @@ use tcgeneric::{Id, Map, PathSegment, TCPath, TCPathBuf, Tuple};
 use crate::cluster::{service, DirItem, Replica, Service};
 use crate::kernel::CLASS;
 use crate::public::cluster::dir::{expect_version, extract_classes};
+use crate::state::State;
 use crate::txn::Txn;
 
 use super::dir::DirHandler;

@@ -1199,15 +1199,8 @@ where
     }
 }
 
-impl<Txn, FE> fmt::Debug for TableFile<Txn, FE>
-where
-    Self: TableInstance,
-{
+impl<Txn, FE> fmt::Debug for TableFile<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "a relational database table with schema {:?}",
-            self.schema()
-        )
+        f.write_str("a relational database table")
     }
 }

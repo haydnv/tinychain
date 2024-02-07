@@ -16,10 +16,7 @@ use tc_chain::{ChainType, Recover};
 use tc_collection::Schema as CollectionSchema;
 use tc_error::*;
 use tc_scalar::{OpRef, Refer, Scalar, Subject, TCRef};
-use tc_state::chain::Chain;
-use tc_state::collection::CollectionBase;
 use tc_state::object::{InstanceClass, ObjectType};
-use tc_state::State;
 use tc_transact::fs::*;
 use tc_transact::lock::TxnMapLock;
 use tc_transact::public::ToState;
@@ -27,7 +24,10 @@ use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, TCPathBuf};
 
+use crate::block::CacheBlock;
+use crate::chain::Chain;
 use crate::cluster::{DirItem, Replica};
+use crate::state::{CollectionBase, State};
 use crate::txn::Txn;
 
 pub(super) const SCHEMA: Label = label("schemata");
@@ -105,11 +105,11 @@ impl Replica for Version {
 }
 
 #[async_trait]
-impl Persist<tc_fs::CacheBlock> for Version {
+impl Persist<CacheBlock> for Version {
     type Txn = Txn;
     type Schema = (Link, Map<Scalar>);
 
-    async fn create(txn_id: TxnId, schema: Self::Schema, dir: tc_fs::Dir) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, schema: Self::Schema, dir: crate::txn::Dir) -> TCResult<Self> {
         let (link, proto) = schema;
 
         let mut attrs = Map::new();
@@ -141,7 +141,7 @@ impl Persist<tc_fs::CacheBlock> for Version {
         })
     }
 
-    async fn load(txn_id: TxnId, schema: Self::Schema, dir: tc_fs::Dir) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, schema: Self::Schema, dir: crate::txn::Dir) -> TCResult<Self> {
         debug!("cluster::service::Version::load {:?}", schema);
 
         let (link, proto) = schema;
@@ -175,7 +175,7 @@ impl Persist<tc_fs::CacheBlock> for Version {
         })
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
         unimplemented!("cluster::service::Version::dir")
     }
 }
@@ -216,7 +216,7 @@ impl Transact for Version {
 }
 
 #[async_trait]
-impl Recover<tc_fs::CacheBlock> for Version {
+impl Recover<CacheBlock> for Version {
     type Txn = Txn;
 
     async fn recover(&self, txn: &Txn) -> TCResult<()> {
@@ -241,8 +241,8 @@ impl fmt::Debug for Version {
 /// A stateful collection of [`Chain`]s and [`Scalar`] methods ([`Attr`]s)
 #[derive(Clone)]
 pub struct Service {
-    dir: tc_fs::Dir,
-    schema: tc_fs::File<(Link, Map<Scalar>)>,
+    dir: crate::txn::Dir,
+    schema: crate::txn::File<(Link, Map<Scalar>)>,
     versions: TxnMapLock<VersionNumber, Version>,
 }
 
@@ -382,7 +382,7 @@ impl Transact for Service {
 }
 
 #[async_trait]
-impl Recover<tc_fs::CacheBlock> for Service {
+impl Recover<CacheBlock> for Service {
     type Txn = Txn;
 
     async fn recover(&self, txn: &Txn) -> TCResult<()> {
@@ -396,11 +396,11 @@ impl Recover<tc_fs::CacheBlock> for Service {
 }
 
 #[async_trait]
-impl Persist<tc_fs::CacheBlock> for Service {
+impl Persist<CacheBlock> for Service {
     type Txn = Txn;
     type Schema = ();
 
-    async fn create(txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, _schema: (), dir: crate::txn::Dir) -> TCResult<Self> {
         if dir.is_empty(txn_id).await? {
             let schema = dir.create_file(txn_id, SCHEMA.into()).await?;
 
@@ -416,7 +416,7 @@ impl Persist<tc_fs::CacheBlock> for Service {
         }
     }
 
-    async fn load(txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, _schema: (), dir: crate::txn::Dir) -> TCResult<Self> {
         debug!("load Service");
 
         let schema = dir
@@ -455,7 +455,7 @@ impl Persist<tc_fs::CacheBlock> for Service {
         })
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
         self.dir.clone().into_inner()
     }
 }

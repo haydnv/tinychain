@@ -16,9 +16,7 @@ use safecast::CastInto;
 use tc_chain::Recover;
 use tc_error::*;
 use tc_scalar::Scalar;
-use tc_state::chain::BlockChain;
 use tc_state::object::InstanceClass;
-use tc_state::State;
 use tc_transact::fs::Persist;
 use tc_transact::lock::TxnMapLock;
 use tc_transact::public::Route;
@@ -26,12 +24,15 @@ use tc_transact::{RPCClient, Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{label, Id, Label, Map, PathSegment, ThreadSafe};
 
-use crate::txn::Txn;
+use crate::block::CacheBlock;
+use crate::chain::BlockChain;
+use crate::state::State;
+use crate::txn::{Actor, Txn};
 
 use super::{Class, Cluster, Library, Replica, Schema, Service, REPLICAS};
 
 /// The type of file stored in a [`Library`] directory
-pub type File = tc_fs::File<Map<Scalar>>;
+pub type File = crate::txn::File<Map<Scalar>>;
 
 /// The name of the endpoint which lists the names of each entry in a [`Dir`]
 pub const ENTRIES: Label = label("entries");
@@ -55,7 +56,7 @@ pub trait DirCreateItem<T: DirItem> {
 /// Defines methods common to any item in a [`Dir`].
 #[async_trait]
 pub trait DirItem:
-    Persist<tc_fs::CacheBlock, Txn = Txn, Schema = ()> + Transact + Clone + Send + Sync
+    Persist<CacheBlock, Txn = Txn, Schema = ()> + Transact + Clone + Send + Sync
 {
     type Schema;
     type Version;
@@ -126,7 +127,7 @@ impl<T> fmt::Debug for DirEntry<T> {
 #[derive(Clone)]
 pub struct Dir<T> {
     schema: Schema,
-    dir: tc_fs::Dir,
+    dir: crate::txn::Dir,
     contents: TxnMapLock<PathSegment, DirEntry<T>>,
 }
 
@@ -138,7 +139,7 @@ impl<T> Dir<T> {
 }
 
 impl<T: Clone> Dir<T> {
-    fn new(txn_id: TxnId, schema: Schema, dir: tc_fs::Dir) -> TCResult<Self> {
+    fn new(txn_id: TxnId, schema: Schema, dir: crate::txn::Dir) -> TCResult<Self> {
         let contents = TxnMapLock::new(txn_id);
 
         Ok(Self {
@@ -151,7 +152,7 @@ impl<T: Clone> Dir<T> {
     fn with_contents<C: IntoIterator<Item = (PathSegment, DirEntry<T>)>>(
         txn_id: TxnId,
         schema: Schema,
-        dir: tc_fs::Dir,
+        dir: crate::txn::Dir,
         contents: C,
     ) -> TCResult<Self> {
         let contents = TxnMapLock::with_contents(txn_id, contents);
@@ -202,7 +203,7 @@ impl<T: Send + Sync> DirCreate for Dir<T>
 where
     DirEntry<T>: Clone,
     Cluster<Self>: Clone,
-    Self: Persist<tc_fs::CacheBlock, Txn = Txn, Schema = Schema> + Route<State> + fmt::Debug,
+    Self: Persist<CacheBlock, Txn = Txn, Schema = Schema> + Route<State> + fmt::Debug,
 {
     /// Create a new subdirectory in this [`Dir`].
     async fn create_dir(
@@ -299,7 +300,7 @@ where
     BlockChain<T>: Replica,
     DirEntry<T>: Clone,
     Cluster<Self>: Clone,
-    Self: Persist<tc_fs::CacheBlock, Txn = Txn, Schema = Schema> + Route<State> + fmt::Debug,
+    Self: Persist<CacheBlock, Txn = Txn, Schema = Schema> + Route<State> + fmt::Debug,
 {
     async fn state(&self, txn_id: TxnId) -> TCResult<State> {
         let mut state = Map::<State>::new();
@@ -401,10 +402,10 @@ where
 }
 
 #[async_trait]
-impl<T: Send + Sync + 'static> Recover<tc_fs::CacheBlock> for Dir<T>
+impl<T: Send + Sync + 'static> Recover<CacheBlock> for Dir<T>
 where
     DirEntry<T>: Clone,
-    Cluster<BlockChain<T>>: Recover<tc_fs::CacheBlock, Txn = Txn>,
+    Cluster<BlockChain<T>>: Recover<CacheBlock, Txn = Txn>,
 {
     type Txn = Txn;
 
@@ -424,15 +425,15 @@ where
 }
 
 #[async_trait]
-impl Persist<tc_fs::CacheBlock> for Dir<Class> {
+impl Persist<CacheBlock> for Dir<Class> {
     type Txn = Txn;
     type Schema = Schema;
 
-    async fn create(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: crate::txn::Dir) -> TCResult<Self> {
         Self::new(txn_id, schema, store)
     }
 
-    async fn load(txn_id: TxnId, schema: Self::Schema, dir: tc_fs::Dir) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, schema: Self::Schema, dir: crate::txn::Dir) -> TCResult<Self> {
         dir.trim(txn_id).await?;
 
         let mut loaded = BTreeMap::new();
@@ -468,21 +469,21 @@ impl Persist<tc_fs::CacheBlock> for Dir<Class> {
         Self::with_contents(txn_id, schema, dir, loaded)
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
         self.dir.clone().into_inner()
     }
 }
 
 #[async_trait]
-impl Persist<tc_fs::CacheBlock> for Dir<Library> {
+impl Persist<CacheBlock> for Dir<Library> {
     type Txn = Txn;
     type Schema = Schema;
 
-    async fn create(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: crate::txn::Dir) -> TCResult<Self> {
         Self::new(txn_id, schema, store)
     }
 
-    async fn load(txn_id: TxnId, schema: Self::Schema, dir: tc_fs::Dir) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, schema: Self::Schema, dir: crate::txn::Dir) -> TCResult<Self> {
         // let mut contents = BTreeMap::new();
         //
         // let mut entries = dir.iter(txn_id).await?;
@@ -514,8 +515,8 @@ impl Persist<tc_fs::CacheBlock> for Dir<Library> {
             // otherwise, load it as a directory
 
             let dir = match entry {
-                tc_fs::DirEntry::Dir(dir) => dir,
-                tc_fs::DirEntry::File(file) => {
+                crate::txn::DirEntry::Dir(dir) => dir,
+                crate::txn::DirEntry::File(file) => {
                     return Err(internal!(
                         "tried to load a library file {name}: {file:?} as a cluster directory"
                     ));
@@ -554,21 +555,21 @@ impl Persist<tc_fs::CacheBlock> for Dir<Library> {
         Self::with_contents(txn_id, schema, dir, contents)
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
         self.dir.clone().into_inner()
     }
 }
 
 #[async_trait]
-impl Persist<tc_fs::CacheBlock> for Dir<Service> {
+impl Persist<CacheBlock> for Dir<Service> {
     type Txn = Txn;
     type Schema = Schema;
 
-    async fn create(txn_id: TxnId, schema: Self::Schema, store: tc_fs::Dir) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, schema: Self::Schema, store: crate::txn::Dir) -> TCResult<Self> {
         Self::new(txn_id, schema, store)
     }
 
-    async fn load(txn_id: TxnId, schema: Self::Schema, dir: tc_fs::Dir) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, schema: Self::Schema, dir: crate::txn::Dir) -> TCResult<Self> {
         let mut loaded = BTreeMap::new();
 
         let mut contents = dir.entries::<InstanceClass>(txn_id).await?;
@@ -607,7 +608,7 @@ impl Persist<tc_fs::CacheBlock> for Dir<Service> {
         Self::with_contents(txn_id, schema, dir, loaded)
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
         self.dir.clone().into_inner()
     }
 }
@@ -620,7 +621,7 @@ impl<T> fmt::Debug for Dir<T> {
 
 async fn entry_schema(
     txn: &Txn,
-    actor: &Arc<tc_fs::Actor>,
+    actor: &Arc<Actor>,
     name: &PathSegment,
     link: Link,
 ) -> TCResult<Schema> {

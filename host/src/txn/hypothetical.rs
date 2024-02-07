@@ -1,7 +1,6 @@
 use std::collections::btree_map::{self, BTreeMap};
 use std::collections::HashSet;
 use std::fmt;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -18,33 +17,28 @@ use tc_value::{Link, Value};
 use tcgeneric::{path_label, Id, Map, PathLabel, PathSegment};
 
 use crate::block::CacheBlock;
+use crate::state::State;
 
 use super::{Actor, Txn};
 
 pub const PATH: PathLabel = path_label(&["transact", "hypothetical"]);
 
 #[derive(Clone)]
-pub struct Hypothetical<State> {
+pub struct Hypothetical {
     actor: Actor,
     participants: Arc<RwLock<BTreeMap<TxnId, HashSet<Link>>>>,
-    state: PhantomData<State>,
 }
 
-impl<State> Hypothetical<State> {
+impl Hypothetical {
     pub fn new() -> Self {
         Self {
             actor: Actor::new(Link::default().into()),
             participants: Arc::new(RwLock::new(BTreeMap::new())),
-            state: PhantomData,
         }
     }
 }
 
-impl<State> Hypothetical<State>
-where
-    State: StateInstance<FE = CacheBlock, Txn = Txn<State>> + Refer<State>,
-    Vec<(Id, State)>: TryCastFrom<State>,
-{
+impl Hypothetical {
     pub async fn finalize(&self, txn_id: TxnId) {
         let mut participants = self.participants.write().await;
         let expired = participants
@@ -58,7 +52,7 @@ where
         }
     }
 
-    pub async fn execute(&self, txn: &Txn<State>, data: State) -> TCResult<State> {
+    pub async fn execute(&self, txn: &Txn, data: State) -> TCResult<State> {
         let txn = txn.clone().claim(&self.actor, PATH.into())?;
         let context = Map::<State>::default();
 
@@ -97,12 +91,12 @@ where
     }
 }
 
-impl<'a, State> Handler<'a, State> for &'a Hypothetical<State>
+impl<'a> Handler<'a, State> for &'a Hypothetical
 where
-    State: StateInstance<FE = CacheBlock, Txn = Txn<State>>,
+    State: StateInstance<FE = CacheBlock, Txn = Txn>,
     Link: TryCastFrom<State>,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn<State>, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -120,7 +114,7 @@ where
         }))
     }
 
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn<State>, State>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -149,7 +143,7 @@ where
         }))
     }
 
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn<State>>>
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
     where
         'b: 'a,
     {
@@ -167,11 +161,7 @@ where
     }
 }
 
-impl<State> Route<State> for Hypothetical<State>
-where
-    State: StateInstance<FE = CacheBlock, Txn = Txn<State>>,
-    Link: TryCastFrom<State>,
-{
+impl Route<State> for Hypothetical {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         if path.is_empty() {
             Some(Box::new(self))
@@ -181,7 +171,7 @@ where
     }
 }
 
-impl<State> fmt::Debug for Hypothetical<State> {
+impl fmt::Debug for Hypothetical {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a hypothetical transaction handler")
     }

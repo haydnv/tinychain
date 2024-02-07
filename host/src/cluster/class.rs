@@ -7,12 +7,13 @@ use futures::{TryFutureExt, TryStreamExt};
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_state::object::InstanceClass;
-use tc_state::State;
 use tc_transact::fs;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{Id, Map};
 
+use crate::block::CacheBlock;
+use crate::state::State;
 use crate::txn::Txn;
 
 use super::DirItem;
@@ -20,11 +21,11 @@ use super::DirItem;
 /// A version of a set of [`InstanceClass`]es
 #[derive(Clone)]
 pub struct Version {
-    classes: tc_fs::File<(Link, Map<Scalar>)>,
+    classes: crate::txn::File<(Link, Map<Scalar>)>,
 }
 
 impl Version {
-    fn with_file(classes: tc_fs::File<(Link, Map<Scalar>)>) -> Self {
+    fn with_file(classes: crate::txn::File<(Link, Map<Scalar>)>) -> Self {
         Self { classes }
     }
 
@@ -62,7 +63,7 @@ impl fmt::Debug for Version {
 /// A versioned set of [`InstanceClass`]es
 #[derive(Clone)]
 pub struct Class {
-    dir: tc_fs::Dir,
+    dir: crate::txn::Dir,
 }
 
 impl Class {
@@ -149,11 +150,11 @@ impl Transact for Class {
 }
 
 #[async_trait]
-impl fs::Persist<tc_fs::CacheBlock> for Class {
+impl fs::Persist<CacheBlock> for Class {
     type Txn = Txn;
     type Schema = ();
 
-    async fn create(txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, _schema: (), dir: crate::txn::Dir) -> TCResult<Self> {
         if dir.is_empty(txn_id).await? {
             Ok(Self { dir })
         } else {
@@ -163,11 +164,11 @@ impl fs::Persist<tc_fs::CacheBlock> for Class {
         }
     }
 
-    async fn load(_txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
+    async fn load(_txn_id: TxnId, _schema: (), dir: crate::txn::Dir) -> TCResult<Self> {
         Ok(Self { dir })
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
         self.dir.clone().into_inner()
     }
 }

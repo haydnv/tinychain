@@ -4,7 +4,6 @@ use safecast::TryCastFrom;
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_state::object::InstanceClass;
-use tc_state::State;
 use tc_transact::public::{
     DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route,
 };
@@ -14,6 +13,7 @@ use tcgeneric::{Map, PathSegment, TCPath, TCPathBuf};
 
 use crate::cluster::{DirItem, Library};
 use crate::kernel::CLASS;
+use crate::state::State;
 use crate::txn::Txn;
 
 use super::authorize_install;

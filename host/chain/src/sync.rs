@@ -2,6 +2,7 @@
 //! event of a transaction failure.
 
 use std::fmt;
+use std::marker::PhantomData;
 
 use async_hash::{Output, Sha256};
 use async_trait::async_trait;
@@ -34,15 +35,30 @@ const STORE: Label = label(".store");
 
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 /// event of a transaction failure.
-#[derive(Clone)]
-pub struct SyncChain<State: StateInstance, T> {
-    committed: FileLock<State::FE>,
-    queue: TxnTaskQueue<MutationPending<State::Txn, State::FE>, TCResult<MutationRecord>>,
-    store: super::data::Store<State::Txn, State::FE>,
+pub struct SyncChain<State, Txn, FE, T> {
+    committed: FileLock<FE>,
+    queue: TxnTaskQueue<MutationPending<Txn, FE>, TCResult<MutationRecord>>,
+    store: super::data::Store<Txn, FE>,
     subject: T,
+    state: PhantomData<State>,
 }
 
-impl<State, T> SyncChain<State, T>
+impl<State, Txn, FE, T> Clone for SyncChain<State, Txn, FE, T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            committed: self.committed.clone(),
+            queue: self.queue.clone(),
+            store: self.store.clone(),
+            subject: self.subject.clone(),
+            state: self.state,
+        }
+    }
+}
+
+impl<State, T> SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
@@ -74,7 +90,7 @@ where
     }
 }
 
-impl<State, T> SyncChain<State, T>
+impl<State, T> SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: AsType<ChainBlock>,
@@ -97,7 +113,7 @@ where
     }
 }
 
-impl<State, T> ChainInstance<State, T> for SyncChain<State, T>
+impl<State, T> ChainInstance<State, T> for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode>,
@@ -124,7 +140,7 @@ where
 }
 
 #[async_trait]
-impl<State, T> AsyncHash for SyncChain<State, T>
+impl<State, T> AsyncHash for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     T: AsyncHash + Send + Sync,
@@ -135,7 +151,7 @@ where
 }
 
 #[async_trait]
-impl<State, T> Transact for SyncChain<State, T>
+impl<State, T> Transact for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
@@ -181,7 +197,7 @@ where
 }
 
 #[async_trait]
-impl<State, T> fs::Persist<State::FE> for SyncChain<State, T>
+impl<State, T> fs::Persist<State::FE> for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: DenseCacheFile
@@ -229,6 +245,7 @@ where
             queue,
             committed,
             store,
+            state: PhantomData,
         })
     }
 
@@ -269,6 +286,7 @@ where
             queue,
             committed,
             store,
+            state: PhantomData,
         })
     }
 
@@ -278,7 +296,7 @@ where
 }
 
 #[async_trait]
-impl<State, T> Recover<State::FE> for SyncChain<State, T>
+impl<State, T> Recover<State::FE> for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Scalar>,
     State::FE: DenseCacheFile
@@ -309,7 +327,7 @@ where
 }
 
 #[async_trait]
-impl<State, T> fs::CopyFrom<State::FE, Self> for SyncChain<State, T>
+impl<State, T> fs::CopyFrom<State::FE, Self> for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: DenseCacheFile
@@ -329,7 +347,7 @@ where
 }
 
 #[async_trait]
-impl<State, T> de::FromStream for SyncChain<State, T>
+impl<State, T> de::FromStream for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<ChainBlock> + AsType<TensorNode>,
@@ -384,12 +402,13 @@ where
             queue,
             committed,
             store,
+            state: PhantomData,
         })
     }
 }
 
 #[async_trait]
-impl<'en, State, T> IntoView<'en, State::FE> for SyncChain<State, T>
+impl<'en, State, T> IntoView<'en, State::FE> for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     T: IntoView<'en, State::FE, Txn = State::Txn> + Send + Sync,
@@ -402,10 +421,7 @@ where
     }
 }
 
-impl<State, T> fmt::Debug for SyncChain<State, T>
-where
-    State: StateInstance,
-{
+impl<State, Txn, FE, T> fmt::Debug for SyncChain<State, Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "SyncChain<{}>", std::any::type_name::<T>())
     }
