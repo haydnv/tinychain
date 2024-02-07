@@ -12,13 +12,12 @@ use log::trace;
 use serde::de::DeserializeOwned;
 
 use tc_error::*;
-use tc_fs::{Gateway as GatewayInstance, Resolver};
-use tc_state::State;
 use tc_transact::{IntoView, Transaction, TxnId};
 use tcgeneric::{NetworkTime, TCPathBuf};
 
 use crate::gateway::Gateway;
-use crate::txn::Txn;
+use crate::state::State;
+use crate::txn::{Gateway as GatewayInstance, Resolver, Txn};
 
 use super::{Accept, Encoding};
 

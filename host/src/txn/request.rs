@@ -8,14 +8,11 @@ use futures::{FutureExt, TryFutureExt};
 use safecast::TryCastInto;
 
 use tc_error::*;
-use tc_transact::public::StateInstance;
 use tc_transact::TxnId;
 use tc_value::{Link, Value};
 use tcgeneric::{NetworkTime, TCPathBuf};
 
-use crate::block::CacheBlock;
-
-use super::{Gateway, Txn};
+use super::Gateway;
 
 /// The type of [`rjwt::Actor`] used to sign auth tokens
 pub type Actor = rjwt::Actor<Value>;
@@ -61,23 +58,20 @@ impl Request {
 }
 
 /// Struct responsible for resolving JWT auth identities (cf. the [`rjwt`] crate).
-pub struct Resolver<'a, State> {
-    gateway: &'a dyn Gateway<State = State>,
+pub struct Resolver<'a> {
+    gateway: &'a dyn Gateway,
     txn_id: &'a TxnId,
 }
 
-impl<'a, State> Resolver<'a, State> {
+impl<'a> Resolver<'a> {
     /// Construct a new `Resolver`.
-    pub fn new(gateway: &'a dyn Gateway<State = State>, txn_id: &'a TxnId) -> Self {
+    pub fn new(gateway: &'a dyn Gateway, txn_id: &'a TxnId) -> Self {
         Self { gateway, txn_id }
     }
 }
 
 #[async_trait]
-impl<'a, State> rjwt::Resolve for Resolver<'a, State>
-where
-    State: StateInstance<FE = CacheBlock, Txn = Txn<State>>,
-{
+impl<'a> rjwt::Resolve for Resolver<'a> {
     type HostId = Link;
     type ActorId = Value;
     type Claims = Vec<Scope>;

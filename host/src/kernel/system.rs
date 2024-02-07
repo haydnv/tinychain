@@ -8,19 +8,22 @@ use safecast::TryCastFrom;
 use tc_error::*;
 use tc_scalar::{OpRefType, Scalar, ScalarType};
 use tc_state::object::InstanceClass;
-use tc_state::{State, StateType};
 use tc_transact::public::Public;
 use tc_transact::TxnId;
 use tc_value::{Link, Value};
 use tcgeneric::{Map, NativeClass, PathSegment, TCPath, TCPathBuf};
 
 use crate::public::Static;
+use crate::state::{State, StateType};
 use crate::txn::Txn;
 
 use super::Dispatch;
 
 /// The host kernel, responsible for dispatching requests to the local host
-pub struct System;
+#[derive(Default)]
+pub struct System {
+    root: Static,
+}
 
 #[async_trait]
 impl Dispatch for System {
@@ -45,7 +48,7 @@ impl Dispatch for System {
                 .map(State::Scalar)
                 .ok_or_else(|| bad_request!("cannot case into an instance of {:?}", class))
         } else {
-            Static.get(txn, path, key).await
+            self.root.get(txn, path, key).await
         }
     }
 
@@ -70,7 +73,7 @@ impl Dispatch for System {
                 TCPath::from(path),
             ))
         } else {
-            Static.put(txn, path, key, value).await
+            self.root.put(txn, path, key, value).await
         }
     }
 
@@ -106,7 +109,7 @@ impl Dispatch for System {
             Ok(State::Object(InstanceClass::extend(extends, proto).into()))
         } else {
             let params = data.try_into()?;
-            Static.post(txn, path, params).await
+            self.root.post(txn, path, params).await
         }
     }
 
@@ -124,7 +127,7 @@ impl Dispatch for System {
                 TCPath::default(),
             ))
         } else {
-            Static.delete(txn, path, key).await
+            self.root.delete(txn, path, key).await
         }
     }
 

@@ -12,13 +12,13 @@ use log::{debug, trace};
 use safecast::CastInto;
 
 use tc_error::*;
-use tc_transact::public::StateInstance;
 use tc_transact::Transaction;
 use tc_value::uuid::Uuid;
 use tc_value::{Host, Link, ToUrl, Value};
 use tcgeneric::{Id, PathSegment, TCBoxFuture, TCBoxTryFuture, TCPathBuf, ThreadSafe};
 
 use crate::block::CacheBlock;
+use crate::state::State;
 
 pub use request::*;
 pub use server::*;
@@ -28,9 +28,16 @@ pub mod hypothetical;
 mod request;
 mod server;
 
-pub trait Gateway: ThreadSafe {
-    type State: StateInstance<FE = CacheBlock>;
+/// A transactional directory
+pub type Dir = tc_transact::fs::Dir<CacheBlock>;
 
+/// An entry in a transactional directory
+pub type DirEntry<B> = tc_transact::fs::DirEntry<CacheBlock, B>;
+
+/// A transactional file
+pub type File<B> = tc_transact::fs::File<CacheBlock, B>;
+
+pub trait Gateway: ThreadSafe {
     /// Return this [`Host`]
     fn host(&self) -> &Host;
 
@@ -46,37 +53,27 @@ pub trait Gateway: ThreadSafe {
     ) -> TCBoxTryFuture<Value>;
 
     /// Read the [`State`] at `link` with the given `key`.
-    fn get<'a>(
-        &'a self,
-        txn: &'a Txn<Self::State>,
-        link: ToUrl<'a>,
-        key: Value,
-    ) -> TCBoxTryFuture<'a, Self::State>;
+    fn get<'a>(&'a self, txn: &'a Txn, link: ToUrl<'a>, key: Value) -> TCBoxTryFuture<'a, State>;
 
     /// Update the [`State`] with the given `key` at `link` to `value`.
     fn put<'a>(
         &'a self,
-        txn: &'a Txn<Self::State>,
+        txn: &'a Txn,
         link: ToUrl<'a>,
         key: Value,
-        value: Self::State,
+        value: State,
     ) -> TCBoxTryFuture<'a, ()>;
 
     /// Execute the POST op at `link` with the `params`
     fn post<'a>(
         &'a self,
-        txn: &'a Txn<Self::State>,
+        txn: &'a Txn,
         link: ToUrl<'a>,
-        params: Self::State,
-    ) -> TCBoxTryFuture<'a, Self::State>;
+        params: State,
+    ) -> TCBoxTryFuture<'a, State>;
 
     /// Delete the [`State`] at `link` with the given `key`.
-    fn delete<'a>(
-        &'a self,
-        txn: &'a Txn<Self::State>,
-        link: ToUrl<'a>,
-        key: Value,
-    ) -> TCBoxTryFuture<'a, ()>;
+    fn delete<'a>(&'a self, txn: &'a Txn, link: ToUrl<'a>, key: Value) -> TCBoxTryFuture<'a, ()>;
 
     fn finalize(&self, txn_id: TxnId) -> TCBoxFuture<()>;
 }
@@ -123,19 +120,15 @@ impl LazyDir {
 
 /// A transaction context.
 #[derive(Clone)]
-pub struct Txn<State> {
-    gateway: Arc<dyn Gateway<State = State>>,
+pub struct Txn {
+    gateway: Arc<dyn Gateway>,
     request: Arc<Request>,
     scope: TCPathBuf,
     dir: LazyDir,
 }
 
-impl<State> Txn<State> {
-    fn new(
-        workspace: DirLock<CacheBlock>,
-        gateway: Arc<dyn Gateway<State = State>>,
-        request: Request,
-    ) -> Self {
+impl Txn {
+    fn new(workspace: DirLock<CacheBlock>, gateway: Arc<dyn Gateway>, request: Request) -> Self {
         let scope = request.txn_id().to_id().into();
         let request = Arc::new(request);
 
@@ -148,10 +141,7 @@ impl<State> Txn<State> {
     }
 }
 
-impl<State> Txn<State>
-where
-    State: StateInstance<FE = CacheBlock, Txn = Self>,
-{
+impl Txn {
     /// Return this [`Host`]
     pub fn host(&self) -> &Host {
         self.gateway.host()
@@ -295,7 +285,7 @@ where
 }
 
 #[async_trait]
-impl<State: Clone + 'static> Transaction<CacheBlock> for Txn<State> {
+impl Transaction<CacheBlock> for Txn {
     #[inline]
     fn id(&self) -> &TxnId {
         self.request.txn_id()
@@ -325,10 +315,7 @@ impl<State: Clone + 'static> Transaction<CacheBlock> for Txn<State> {
 }
 
 #[async_trait]
-impl<State> tc_transact::RPCClient<State> for Txn<State>
-where
-    State: StateInstance<FE = CacheBlock, Txn = Self>,
-{
+impl tc_transact::RPCClient<State> for Txn {
     async fn get<'a, L, V>(&'a self, link: L, key: V) -> TCResult<State>
     where
         L: Into<ToUrl<'a>> + Send,
@@ -369,7 +356,7 @@ where
     }
 }
 
-impl<State> Hash for Txn<State> {
+impl Hash for Txn {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.request.txn_id().hash(state)
     }

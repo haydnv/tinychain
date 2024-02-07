@@ -4,7 +4,6 @@ use safecast::{CastInto, TryCastFrom, TryCastInto};
 use tc_error::*;
 use tc_scalar::OpRefType;
 use tc_state::object::{InstanceClass, Object};
-use tc_state::State;
 use tc_transact::public::{
     DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route,
 };
@@ -13,6 +12,7 @@ use tc_value::Link;
 use tcgeneric::{Map, PathSegment, TCPath};
 
 use crate::cluster::{class, Class, DirItem};
+use crate::state::State;
 use crate::txn::Txn;
 
 use super::dir::DirHandler;

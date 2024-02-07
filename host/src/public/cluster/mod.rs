@@ -8,7 +8,6 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_state::object::InstanceClass;
-use tc_state::State;
 use tc_transact::public::{
     DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route,
 };
@@ -17,6 +16,7 @@ use tc_value::{Host, Link, Value};
 use tcgeneric::{label, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::cluster::{Cluster, Replica, REPLICAS};
+use crate::state::State;
 use crate::txn::Txn;
 
 mod class;

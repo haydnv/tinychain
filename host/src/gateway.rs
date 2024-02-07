@@ -11,14 +11,13 @@ use log::debug;
 use tokio::time::{Duration, MissedTickBehavior};
 
 use tc_error::*;
-use tc_fs::{Actor, Gateway as GatewayInstance, SignedToken, Token, TxnServer};
-use tc_state::State;
 use tc_transact::TxnId;
 use tc_value::{Host, Link, Protocol, ToUrl, Value};
 use tcgeneric::{NetworkTime, TCBoxFuture, TCBoxTryFuture, TCPathBuf};
 
 use crate::kernel::{Dispatch, Kernel};
-use crate::txn::*;
+use crate::state::State;
+use crate::txn::{Actor, Gateway as GatewayInstance, SignedToken, Token, Txn, TxnServer};
 use crate::{http, TokioError};
 
 const INTERVAL: Duration = Duration::from_millis(100);
@@ -165,8 +164,6 @@ impl Gateway {
 }
 
 impl GatewayInstance for Gateway {
-    type State = State;
-
     fn host(&self) -> &Host {
         &self.inner.host
     }

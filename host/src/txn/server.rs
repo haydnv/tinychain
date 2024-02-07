@@ -87,12 +87,12 @@ impl TxnServer {
     }
 
     /// Return the active `Txn` with the given [`TxnId`], or initiate a new [`Txn`].
-    pub fn new_txn<State>(
+    pub fn new_txn(
         &self,
-        gateway: Arc<dyn Gateway<State = State>>,
+        gateway: Arc<dyn Gateway>,
         txn_id: TxnId,
         token: SignedToken,
-    ) -> TCResult<Txn<State>> {
+    ) -> TCResult<Txn> {
         debug!("TxnServer::new_txn");
 
         let expires = NetworkTime::try_from(token.expires())?;

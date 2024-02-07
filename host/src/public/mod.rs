@@ -1,13 +1,17 @@
 use std::fmt;
 
-use tc_state::State;
 use tc_transact::public::helpers::ErrorHandler;
 use tc_transact::public::{Handler, Route};
 use tcgeneric::PathSegment;
 
+use crate::state::State;
+
 mod cluster;
 
-pub struct Static;
+#[derive(Default)]
+pub struct Static {
+    state: crate::state::Static,
+}
 
 impl Route<State> for Static {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
@@ -16,7 +20,7 @@ impl Route<State> for Static {
         }
 
         if path[0] == tc_state::public::PREFIX {
-            tc_state::public::Static.route(&path[1..])
+            self.state.route(&path[1..])
         } else if path[0].as_str() == "error" {
             if path.len() == 2 {
                 let code = &path[1];

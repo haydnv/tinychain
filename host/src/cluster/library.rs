@@ -15,12 +15,13 @@ use safecast::{AsType, TryCastFrom};
 use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
 use tc_state::object::ObjectType;
-use tc_state::State;
 use tc_transact::fs::Persist;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
 use tcgeneric::{label, Instance, Label, Map, PathSegment};
 
+use crate::block::CacheBlock;
+use crate::state::State;
 use crate::txn::Txn;
 
 use super::DirItem;
@@ -116,8 +117,8 @@ impl fmt::Debug for Version {
 /// A versioned collection of [`Scalar`]s
 #[derive(Clone)]
 pub struct Library {
-    dir: tc_fs::Dir,
-    versions: tc_fs::File<Map<Scalar>>,
+    dir: crate::txn::Dir,
+    versions: crate::txn::File<Map<Scalar>>,
 }
 
 impl Library {
@@ -193,21 +194,21 @@ impl Transact for Library {
 }
 
 #[async_trait]
-impl Persist<tc_fs::CacheBlock> for Library {
+impl Persist<CacheBlock> for Library {
     type Txn = Txn;
     type Schema = ();
 
-    async fn create(txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, _schema: (), dir: crate::txn::Dir) -> TCResult<Self> {
         let versions = dir.create_file(txn_id, LIB.into()).await?;
         Ok(Self { dir, versions })
     }
 
-    async fn load(txn_id: TxnId, _schema: (), dir: tc_fs::Dir) -> TCResult<Self> {
+    async fn load(txn_id: TxnId, _schema: (), dir: crate::txn::Dir) -> TCResult<Self> {
         let versions = dir.get_file(txn_id, &LIB.into()).await?;
         Ok(Self { dir, versions })
     }
 
-    fn dir(&self) -> tc_transact::fs::Inner<tc_fs::CacheBlock> {
+    fn dir(&self) -> tc_transact::fs::Inner<CacheBlock> {
         self.dir.clone().into_inner()
     }
 }
