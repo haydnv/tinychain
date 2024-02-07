@@ -1,0 +1,14 @@
+[package]
+name = "tc-server"
+version = "0.1.0"
+edition = "2021"
+description = "TinyChain's cluster server logic, including peer discovery and replication"
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/haydnv/tinychain.git"
+
+keywords = ["tinychain", "cluster", "peer", "discovery", "replication"]
+categories = ["concurrency", "data-structures", "network-programming"]
+
+[dependencies]
+libp2p = { version = "0.53" }
