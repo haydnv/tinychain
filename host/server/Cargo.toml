@@ -11,4 +11,6 @@ keywords = ["tinychain", "cluster", "peer", "discovery", "replication"]
 categories = ["concurrency", "data-structures", "network-programming"]
 
 [dependencies]
-libp2p = { version = "0.53" }
+
+[dev-dependencies]
+tokio = { version = "1.36", features = ["macros", "rt-multi-thread"] }
