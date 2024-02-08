@@ -24,10 +24,16 @@
 
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
-use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
-use rjwt::{Actor, VerifyingKey};
+use mdns_sd::{ServiceDaemon, ServiceInfo};
+use rjwt::Actor;
+use std::collections::HashMap;
+use std::net::Ipv4Addr;
 
 use tc_value::{Link, Value};
+
+use tc_server::{ServerBuilder, SERVICE_TYPE};
+
+const DATA_DIR: &'static str = "/tmp/tc/example/server";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -40,16 +46,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("hostname: {hostname}");
 
     let ifaces = local_ip_address::list_afinet_netifas().expect("network interface list");
-
-    for (name, ip) in &ifaces {
-        println!("{}:\t{:?}", name, ip);
-    }
+    let mut ip_addrs = Vec::with_capacity(ifaces.len());
 
     let mdns = ServiceDaemon::new().expect("Failed to create daemon");
 
-    let service_type = "_tinychain._tcp.local.";
     let port = 80;
-    let properties: [(&str, &str); 0] = [];
 
     for (name, ip) in ifaces {
         assert!(
@@ -59,48 +60,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if ip.is_loopback() {
             println!("not advertising local network interface {name}: {ip}");
-            continue;
         } else {
-            println!("advertising network interface {name}: {ip}");
-        }
-
-        let my_service = ServiceInfo::new(
-            service_type,
-            &public_key_encoded,
-            &hostname,
-            ip,
-            port,
-            &properties[..],
-        )
-        .expect("mDNS service definition");
-
-        mdns.register(my_service).expect("register mDNS service");
-    }
-
-    let receiver = mdns.browse(service_type).expect("browse mDNS peers");
-    let mut search_complete = false;
-
-    loop {
-        match receiver.recv_async().await {
-            Ok(event) => match event {
-                ServiceEvent::SearchStarted(_params) if search_complete => break,
-                ServiceEvent::SearchStarted(params) => {
-                    println!("searching for peers of {params}");
-                    search_complete = true;
-                },
-                ServiceEvent::ServiceFound(name, addr) => println!("discovered peer of {name} at {addr}"),
-                ServiceEvent::ServiceResolved(info) => {
-                    let full_name = info.get_fullname();
-                    let peer_key = &full_name[..full_name.len() - service_type.len() - 1];
-                    let peer_key = STANDARD_NO_PAD.decode(peer_key).expect("key");
-                    let peer_key = VerifyingKey::try_from(&peer_key[..]).expect("key");
-                    println!("resolved peer: {full_name}")
-                },
-                other => println!("ignoring mDNS event: {:?}", other),
-            },
-            Err(cause) => println!("mDNS error: {cause}"),
+            println!("will advertise network interface {name}: {ip}");
+            ip_addrs.push(ip);
         }
     }
+
+    let my_service = ServiceInfo::new(
+        SERVICE_TYPE,
+        &public_key_encoded,
+        &hostname,
+        &ip_addrs[..],
+        port,
+        HashMap::<String, String>::default(),
+    )
+    .expect("mDNS service definition");
+
+    mdns.register(my_service).expect("register mDNS service");
+
+    let builder = ServerBuilder::new(
+        DATA_DIR.parse().expect("data dir"),
+        Ipv4Addr::UNSPECIFIED.into(),
+        port,
+        vec![],
+    );
+
+    builder.discover().await;
 
     Ok(())
 }
