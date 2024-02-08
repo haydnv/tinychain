@@ -12,7 +12,12 @@ categories = ["concurrency", "data-structures", "network-programming"]
 
 [dependencies]
 gethostname = "0.4"
+base64 = "0.21"
 local-ip-address = "0.5"
+log = "0.4"
+mdns-sd = "0.10"
+rjwt = "0.5"
+tc-value = { path = "../value" }
 
 [dev-dependencies]
 tokio = { version = "1.36", features = ["macros", "rt-multi-thread"] }

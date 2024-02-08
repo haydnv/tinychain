@@ -245,10 +245,12 @@ impl Serialize for Value {
         match self {
             Self::Bytes(bytes) => {
                 let mut map = serializer.serialize_map(Some(1))?;
+
                 map.serialize_entry(
                     &self.class().path().to_string(),
                     &STANDARD_NO_PAD.encode(&bytes),
                 )?;
+
                 map.end()
             }
             Self::Email(email) => {
