@@ -11,6 +11,8 @@ keywords = ["tinychain", "cluster", "peer", "discovery", "replication"]
 categories = ["concurrency", "data-structures", "network-programming"]
 
 [dependencies]
+gethostname = "0.4"
+local-ip-address = "0.5"
 
 [dev-dependencies]
 tokio = { version = "1.36", features = ["macros", "rt-multi-thread"] }

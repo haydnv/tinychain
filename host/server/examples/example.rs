@@ -24,5 +24,14 @@
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    todo!()
+    let hostname = gethostname::gethostname().into_string().expect("hostname");
+    println!("hostname: {hostname}");
+
+    let ifaces = local_ip_address::list_afinet_netifas().expect("network interface list");
+
+    for (name, ip) in ifaces {
+        println!("{}:\t{:?}", name, ip);
+    }
+
+    Ok(())
 }
