@@ -22,14 +22,10 @@
 //  A second host joins from an on-premises datacenter.
 //  The list of peers and replicas is updated such that both hosts receive every write operation.
 
-use std::net::IpAddr;
-
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
-use log;
-use log::debug;
-use mdns_sd::{ServiceDaemon, ServiceInfo};
-use rjwt::Actor;
+use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use rjwt::{Actor, VerifyingKey};
 
 use tc_value::{Link, Value};
 
@@ -58,20 +54,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (name, ip) in ifaces {
         assert!(
             !ip.is_unspecified() && !ip.is_multicast(),
-            "the IP address {ip} cannot be a network interface"
+            "invalid network interface {name}: {ip}"
         );
 
-        let ip = match ip {
-            IpAddr::V4(ip) if ip.is_private() => {
-                debug!("not advertising private network interface {name}: {ip}");
-                continue;
-            }
-            ip if ip.is_loopback() => {
-                debug!("not advertising local network interface {name}: {ip}");
-                continue;
-            }
-            ip => ip,
-        };
+        if ip.is_loopback() {
+            println!("not advertising local network interface {name}: {ip}");
+            continue;
+        } else {
+            println!("advertising network interface {name}: {ip}");
+        }
 
         let my_service = ServiceInfo::new(
             service_type,
@@ -84,6 +75,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("mDNS service definition");
 
         mdns.register(my_service).expect("register mDNS service");
+    }
+
+    let receiver = mdns.browse(service_type).expect("browse mDNS peers");
+    let mut search_complete = false;
+
+    loop {
+        match receiver.recv_async().await {
+            Ok(event) => match event {
+                ServiceEvent::SearchStarted(_params) if search_complete => break,
+                ServiceEvent::SearchStarted(params) => {
+                    println!("searching for peers of {params}");
+                    search_complete = true;
+                },
+                ServiceEvent::ServiceFound(name, addr) => println!("discovered peer of {name} at {addr}"),
+                ServiceEvent::ServiceResolved(info) => {
+                    let full_name = info.get_fullname();
+                    let peer_key = &full_name[..full_name.len() - service_type.len() - 1];
+                    let peer_key = STANDARD_NO_PAD.decode(peer_key).expect("key");
+                    let peer_key = VerifyingKey::try_from(&peer_key[..]).expect("key");
+                    println!("resolved peer: {full_name}")
+                },
+                other => println!("ignoring mDNS event: {:?}", other),
+            },
+            Err(cause) => println!("mDNS error: {cause}"),
+        }
     }
 
     Ok(())
