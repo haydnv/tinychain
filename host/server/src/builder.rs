@@ -5,33 +5,72 @@ use std::path::PathBuf;
 use aes_gcm_siv::{Aes256GcmSiv, Key};
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
+use freqfs::{Cache, DirLock, FileSave};
 use log::{debug, info, warn};
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use rjwt::VerifyingKey;
+
+use tc_transact::fs;
+use tc_transact::TxnId;
+use tcgeneric::{NetworkTime, ThreadSafe};
+
+use crate::gateway::Gateway;
+use crate::kernel::Kernel;
 
 pub type Aes256Key = Key<Aes256GcmSiv>;
 
 pub const SERVICE_TYPE: &'static str = "_tinychain._tcp.local.";
 
-pub struct ServerBuilder {
+pub struct ServerBuilder<FE> {
     peers: HashMap<VerifyingKey, HashSet<IpAddr>>,
     address: IpAddr,
     port: u16,
     keys: Vec<Aes256Key>,
-    data_dir: PathBuf,
+    data_dir: DirLock<FE>,
+    workspace: DirLock<FE>,
 }
 
-impl ServerBuilder {
-    pub fn new(data_dir: PathBuf) -> Self {
+impl<FE> ServerBuilder<FE> {
+    pub fn load(cache_size: usize, data_dir: PathBuf, workspace: PathBuf) -> Self
+    where
+        FE: for<'a> FileSave<'a>,
+    {
+        let cache = Cache::new(cache_size.into(), None);
+
+        let data_dir = cache.clone().load(data_dir).expect("data directory");
+        let workspace = cache.clone().load(workspace).expect("workspace");
+
         Self {
             address: Ipv4Addr::UNSPECIFIED.into(),
             port: 0,
             peers: HashMap::new(),
             keys: vec![],
             data_dir,
+            workspace,
         }
     }
 
+    pub async fn build(self) -> Gateway<FE>
+    where
+        FE: ThreadSafe + Clone + for<'a> FileSave<'a>,
+    {
+        let txn_id = TxnId::new(NetworkTime::now());
+
+        let data_dir = fs::Dir::load(txn_id, self.data_dir)
+            .await
+            .expect("data dir");
+
+        let kernel: Kernel<FE> = fs::Persist::load_or_create(txn_id, (), data_dir)
+            .await
+            .expect("kernel");
+
+        kernel.commit(txn_id).await;
+
+        Gateway::new(kernel)
+    }
+}
+
+impl<FE> ServerBuilder<FE> {
     pub fn bind_address(mut self, address: IpAddr) -> Self {
         self.address = address;
         self
@@ -78,9 +117,5 @@ impl ServerBuilder {
     pub fn with_keys<Keys: IntoIterator<Item = Aes256Key>>(mut self, keys: Keys) -> Self {
         self.keys.extend(keys);
         self
-    }
-
-    pub fn load_kernel(self) -> Self {
-        todo!("load cluster state from the filesystem")
     }
 }

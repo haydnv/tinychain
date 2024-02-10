@@ -60,7 +60,7 @@ impl PartialOrd for Active {
 
 /// Server to keep track of the transactions currently active for this host.
 pub struct TxnServer<FE> {
-    gateway: Arc<Gateway>,
+    gateway: Arc<Gateway<FE>>,
     workspace: DirLock<FE>,
     active: Arc<RwLock<OrdHashSet<Active>>>,
     tx: mpsc::UnboundedSender<Active>,
@@ -68,7 +68,7 @@ pub struct TxnServer<FE> {
 }
 
 impl<FE: for<'a> FileSave<'a>> TxnServer<FE> {
-    pub fn create(gateway: Arc<Gateway>, workspace: DirLock<FE>, ttl: Duration) -> Self {
+    pub fn create(gateway: Arc<Gateway<FE>>, workspace: DirLock<FE>, ttl: Duration) -> Self {
         let active = Arc::new(RwLock::new(OrdHashSet::new()));
 
         let (tx, rx) = mpsc::unbounded_channel();
@@ -100,7 +100,7 @@ impl<FE: Send + Sync> TxnServer<FE> {
 }
 
 fn spawn_cleanup_thread<FE>(
-    gateway: Arc<Gateway>,
+    gateway: Arc<Gateway<FE>>,
     workspace: DirLock<FE>,
     active: Arc<RwLock<OrdHashSet<Active>>>,
 ) where

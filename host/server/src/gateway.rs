@@ -1,14 +1,14 @@
 use tc_transact::TxnId;
-use tcgeneric::{NetworkTime, TCBoxFuture};
+use tcgeneric::{NetworkTime, TCBoxFuture, ThreadSafe};
 
 use crate::kernel::Kernel;
 
-pub struct Gateway {
-    kernel: Kernel,
+pub struct Gateway<FE> {
+    kernel: Kernel<FE>,
 }
 
-impl Gateway {
-    pub fn new(kernel: Kernel) -> Self {
+impl<FE> Gateway<FE> {
+    pub fn new(kernel: Kernel<FE>) -> Self {
         Self { kernel }
     }
 
@@ -16,7 +16,10 @@ impl Gateway {
         NetworkTime::now()
     }
 
-    pub(crate) fn finalize(&self, txn_id: TxnId) -> TCBoxFuture<()> {
+    pub(crate) fn finalize(&self, txn_id: TxnId) -> TCBoxFuture<()>
+    where
+        FE: ThreadSafe,
+    {
         Box::pin(self.kernel.finalize(txn_id))
     }
 }

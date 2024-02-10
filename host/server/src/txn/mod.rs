@@ -1,5 +1,3 @@
-mod server;
-
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -11,6 +9,11 @@ use uuid::Uuid;
 use tc_error::*;
 use tc_transact::{Transaction, TxnId};
 use tcgeneric::{Id, NetworkTime, ThreadSafe};
+
+pub use hypothetical::Hypothetical;
+
+mod hypothetical;
+mod server;
 
 #[derive(Clone)]
 pub(super) enum LazyDir<FE> {
