@@ -13,6 +13,7 @@ categories = ["concurrency", "data-structures", "network-programming"]
 [dependencies]
 aes-gcm-siv = "0.11"
 async-trait = "0.1"
+ds-ext = "0.1"
 futures = "0.3"
 freqfs = "0.9"
 gethostname = "0.4"
@@ -25,6 +26,7 @@ tc-error = { path = "../error" }
 tc-value = { path = "../value" }
 tc-transact = { path = "../transact" }
 tcgeneric = { path = "../generic" }
+tokio = { version = "1.36", features = ["sync", "time"] }
 uuid = { version = "1.7", features = ["v4"] }
 
 [dev-dependencies]

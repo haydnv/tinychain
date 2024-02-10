@@ -1,3 +1,5 @@
+mod server;
+
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -8,10 +10,10 @@ use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::{Transaction, TxnId};
-use tcgeneric::{Id, ThreadSafe};
+use tcgeneric::{Id, NetworkTime, ThreadSafe};
 
 #[derive(Clone)]
-enum LazyDir<FE> {
+pub(super) enum LazyDir<FE> {
     Workspace(DirLock<FE>),
     Lazy(Arc<Self>, Id),
 }
@@ -51,10 +53,27 @@ impl<FE: Send + Sync> LazyDir<FE> {
     }
 }
 
+impl<FE> From<DirLock<FE>> for LazyDir<FE> {
+    fn from(dir: DirLock<FE>) -> Self {
+        Self::Workspace(dir)
+    }
+}
+
 #[derive(Clone)]
 pub struct Txn<FE> {
-    id: TxnId,
     workspace: LazyDir<FE>,
+    id: TxnId,
+    expiry: NetworkTime,
+}
+
+impl<FE> Txn<FE> {
+    pub(super) fn new(workspace: LazyDir<FE>, id: TxnId, expiry: NetworkTime) -> Self {
+        Self {
+            id,
+            workspace,
+            expiry,
+        }
+    }
 }
 
 #[async_trait]
@@ -70,15 +89,17 @@ impl<FE: ThreadSafe + Clone> Transaction<FE> for Txn<FE> {
 
     fn subcontext<I: Into<Id> + Send>(&self, id: I) -> Self {
         Txn {
-            id: self.id,
             workspace: self.workspace.clone().create_dir(id.into()),
+            id: self.id,
+            expiry: self.expiry,
         }
     }
 
     fn subcontext_unique(&self) -> Self {
         Txn {
-            id: self.id,
             workspace: self.workspace.clone().create_dir_unique(),
+            id: self.id,
+            expiry: self.expiry,
         }
     }
 }

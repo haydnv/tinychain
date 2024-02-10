@@ -80,7 +80,7 @@ impl ServerBuilder {
         self
     }
 
-    pub fn load(self) -> Self {
+    pub fn load_kernel(self) -> Self {
         todo!("load cluster state from the filesystem")
     }
 }
