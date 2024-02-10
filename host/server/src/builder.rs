@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use aes_gcm_siv::{Aes256GcmSiv, Key};
@@ -18,6 +17,7 @@ use tcgeneric::{NetworkTime, ThreadSafe};
 
 use crate::gateway::Gateway;
 use crate::kernel::Kernel;
+use crate::server::Server;
 use crate::txn::TxnServer;
 use crate::{DEFAULT_TTL, SERVICE_TYPE};
 
@@ -62,7 +62,7 @@ impl<FE> ServerBuilder<FE> {
         }
     }
 
-    pub async fn build(self) -> Arc<Gateway<FE>>
+    pub async fn build(self) -> Server<FE>
     where
         FE: ThreadSafe + Clone + for<'a> FileSave<'a>,
     {
@@ -80,7 +80,9 @@ impl<FE> ServerBuilder<FE> {
 
         kernel.commit(txn_id).await;
 
-        Gateway::new(txn_server, kernel)
+        let gateway = Gateway::new(kernel);
+
+        Server::new(gateway, txn_server)
     }
 }
 

@@ -6,6 +6,7 @@ mod builder;
 mod cluster;
 mod gateway;
 mod kernel;
+mod server;
 mod txn;
 
 pub use builder::{Aes256Key, ServerBuilder};

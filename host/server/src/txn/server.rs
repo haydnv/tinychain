@@ -64,6 +64,17 @@ pub struct TxnServer<FE> {
     ttl: Duration,
 }
 
+impl<FE> Clone for TxnServer<FE> {
+    fn clone(&self) -> Self {
+        Self {
+            workspace: self.workspace.clone(),
+            active: self.active.clone(),
+            tx: self.tx.clone(),
+            ttl: self.ttl,
+        }
+    }
+}
+
 impl<FE: for<'a> FileSave<'a>> TxnServer<FE> {
     pub fn create(workspace: DirLock<FE>, ttl: Duration) -> Self {
         let active = Arc::new(RwLock::new(OrdHashSet::new()));
