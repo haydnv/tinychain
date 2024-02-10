@@ -22,17 +22,30 @@
 //  A second host joins from an on-premises datacenter.
 //  The list of peers and replicas is updated such that both hosts receive every write operation.
 
+use std::collections::HashMap;
+use std::path::PathBuf;
+
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
+use destream::en;
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use rjwt::Actor;
-use std::collections::HashMap;
 
 use tc_value::{Link, Value};
 
 use tc_server::{ServerBuilder, SERVICE_TYPE};
 
-const DATA_DIR: &'static str = "/tmp/tc/example/server";
+const CACHE_SIZE: usize = 1_000_000;
+const DATA_DIR: &'static str = "/tmp/tc/example/";
+const WORKSPACE: &'static str = "/tmp/tc/example/_workspace";
+
+enum CacheBlock {}
+
+impl<'en> en::ToStream<'en> for CacheBlock {
+    fn to_stream<En: en::Encoder<'en>>(&self, encoder: En) -> Result<En::Ok, En::Error> {
+        en::IntoStream::into_stream((), encoder)
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -77,9 +90,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     mdns.register(my_service).expect("register mDNS service");
 
-    let builder = ServerBuilder::new(DATA_DIR.parse().expect("data dir"));
+    let data_dir: PathBuf = DATA_DIR.parse()?;
+    std::fs::create_dir_all(&data_dir)?;
+
+    let builder = ServerBuilder::<CacheBlock>::load(
+        CACHE_SIZE,
+        data_dir.clone(),
+        WORKSPACE.parse().expect("workspace"),
+    );
 
     builder.discover().await;
+
+    std::fs::remove_dir_all(data_dir)?;
 
     Ok(())
 }

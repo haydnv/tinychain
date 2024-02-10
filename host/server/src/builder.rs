@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 
 use aes_gcm_siv::{Aes256GcmSiv, Key};
 use base64::engine::general_purpose::STANDARD_NO_PAD;
@@ -11,20 +13,21 @@ use mdns_sd::{ServiceDaemon, ServiceEvent};
 use rjwt::VerifyingKey;
 
 use tc_transact::fs;
-use tc_transact::TxnId;
+use tc_transact::Transaction;
 use tcgeneric::{NetworkTime, ThreadSafe};
 
 use crate::gateway::Gateway;
 use crate::kernel::Kernel;
+use crate::txn::TxnServer;
+use crate::{DEFAULT_TTL, SERVICE_TYPE};
 
 pub type Aes256Key = Key<Aes256GcmSiv>;
-
-pub const SERVICE_TYPE: &'static str = "_tinychain._tcp.local.";
 
 pub struct ServerBuilder<FE> {
     peers: HashMap<VerifyingKey, HashSet<IpAddr>>,
     address: IpAddr,
     port: u16,
+    request_ttl: Duration,
     keys: Vec<Aes256Key>,
     data_dir: DirLock<FE>,
     workspace: DirLock<FE>,
@@ -35,6 +38,14 @@ impl<FE> ServerBuilder<FE> {
     where
         FE: for<'a> FileSave<'a>,
     {
+        if !data_dir.exists() {
+            panic!("there is no directory at {data_dir:?}");
+        }
+
+        if !workspace.exists() {
+            std::fs::create_dir_all(&workspace).expect("workspace");
+        }
+
         let cache = Cache::new(cache_size.into(), None);
 
         let data_dir = cache.clone().load(data_dir).expect("data directory");
@@ -45,16 +56,19 @@ impl<FE> ServerBuilder<FE> {
             port: 0,
             peers: HashMap::new(),
             keys: vec![],
+            request_ttl: DEFAULT_TTL,
             data_dir,
             workspace,
         }
     }
 
-    pub async fn build(self) -> Gateway<FE>
+    pub async fn build(self) -> Arc<Gateway<FE>>
     where
         FE: ThreadSafe + Clone + for<'a> FileSave<'a>,
     {
-        let txn_id = TxnId::new(NetworkTime::now());
+        let txn_server = TxnServer::create(self.workspace, self.request_ttl);
+        let txn = txn_server.new_txn(NetworkTime::now());
+        let txn_id = *txn.id();
 
         let data_dir = fs::Dir::load(txn_id, self.data_dir)
             .await
@@ -66,7 +80,7 @@ impl<FE> ServerBuilder<FE> {
 
         kernel.commit(txn_id).await;
 
-        Gateway::new(kernel)
+        Gateway::new(txn_server, kernel)
     }
 }
 

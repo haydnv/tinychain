@@ -11,6 +11,7 @@ use tc_transact::{Transaction, TxnId};
 use tcgeneric::{Id, NetworkTime, ThreadSafe};
 
 pub use hypothetical::Hypothetical;
+pub use server::TxnServer;
 
 mod hypothetical;
 mod server;

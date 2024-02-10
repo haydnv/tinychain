@@ -2,19 +2,17 @@ use log::debug;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::time::Duration;
 
 use ds_ext::OrdHashSet;
 use freqfs::{DirLock, FileSave};
 use tokio::sync::{mpsc, RwLock};
-use tokio::time::{Duration, MissedTickBehavior};
 
 use tc_transact::TxnId;
 use tcgeneric::NetworkTime;
 
 use crate::gateway::Gateway;
 use crate::txn::{LazyDir, Txn};
-
-const INTERVAL: Duration = Duration::from_millis(100);
 
 // allow an end-user's request to time out gracefully before garbage collection
 const GRACE: Duration = Duration::from_secs(1);
@@ -60,7 +58,6 @@ impl PartialOrd for Active {
 
 /// Server to keep track of the transactions currently active for this host.
 pub struct TxnServer<FE> {
-    gateway: Arc<Gateway<FE>>,
     workspace: DirLock<FE>,
     active: Arc<RwLock<OrdHashSet<Active>>>,
     tx: mpsc::UnboundedSender<Active>,
@@ -68,26 +65,62 @@ pub struct TxnServer<FE> {
 }
 
 impl<FE: for<'a> FileSave<'a>> TxnServer<FE> {
-    pub fn create(gateway: Arc<Gateway<FE>>, workspace: DirLock<FE>, ttl: Duration) -> Self {
+    pub fn create(workspace: DirLock<FE>, ttl: Duration) -> Self {
         let active = Arc::new(RwLock::new(OrdHashSet::new()));
 
         let (tx, rx) = mpsc::unbounded_channel();
         spawn_receiver_thread(active.clone(), rx);
-        spawn_cleanup_thread(gateway.clone(), workspace.clone(), active.clone());
 
         Self {
-            gateway,
             workspace,
             active,
             tx,
             ttl,
         }
     }
+
+    pub(crate) async fn finalize(&self, gateway: &Gateway<FE>) {
+        let now = gateway.now();
+
+        let expired = {
+            let mut active = self.active.write().await;
+            let mut expired = Vec::with_capacity(active.len());
+
+            while let Some(txn) = active.first() {
+                if txn.expires + GRACE < now {
+                    let txn = active.pop_first().expect("expired txn id");
+                    expired.push(txn.txn_id);
+                } else {
+                    break;
+                }
+            }
+
+            expired
+        };
+
+        if expired.is_empty() {
+            return;
+        }
+
+        debug!("TxnServer::finalize_expired");
+
+        for txn_id in expired.iter().copied() {
+            gateway.finalize(txn_id).await;
+        }
+
+        let mut workspace = self.workspace.write().await;
+
+        for txn_id in expired {
+            workspace.delete(&txn_id).await;
+        }
+
+        workspace.sync().await.expect("sync workspace dir");
+    }
 }
 
 impl<FE: Send + Sync> TxnServer<FE> {
-    pub fn new_txn(&self) -> Txn<FE> {
-        let txn_id = TxnId::new(self.gateway.now());
+    pub fn new_txn(&self, now: NetworkTime) -> Txn<FE> {
+        let txn_id = TxnId::new(now);
         let workspace = LazyDir::from(self.workspace.clone()).create_dir(txn_id.to_id());
         let expiry = txn_id.time() + self.ttl;
 
@@ -97,59 +130,6 @@ impl<FE: Send + Sync> TxnServer<FE> {
 
         Txn::new(workspace, txn_id, expiry)
     }
-}
-
-fn spawn_cleanup_thread<FE>(
-    gateway: Arc<Gateway<FE>>,
-    workspace: DirLock<FE>,
-    active: Arc<RwLock<OrdHashSet<Active>>>,
-) where
-    FE: for<'a> FileSave<'a>,
-{
-    let mut interval = tokio::time::interval(INTERVAL);
-    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-    tokio::spawn(async move {
-        loop {
-            interval.tick().await;
-
-            let now = gateway.now();
-
-            let expired = {
-                let mut active = active.write().await;
-                let mut expired = Vec::with_capacity(active.len());
-
-                while let Some(txn) = active.first() {
-                    if txn.expires + GRACE < now {
-                        let txn = active.pop_first().expect("expired txn id");
-                        expired.push(txn.txn_id);
-                    } else {
-                        break;
-                    }
-                }
-
-                expired
-            };
-
-            if expired.is_empty() {
-                return;
-            }
-
-            debug!("TxnServer::finalize_expired");
-
-            for txn_id in expired.iter().copied() {
-                gateway.finalize(txn_id).await;
-            }
-
-            let mut workspace = workspace.write().await;
-
-            for txn_id in expired {
-                workspace.delete(&txn_id).await;
-            }
-
-            workspace.sync().await.expect("sync workspace dir");
-        }
-    });
 }
 
 fn spawn_receiver_thread(
