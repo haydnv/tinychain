@@ -27,7 +27,6 @@ use base64::Engine;
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use rjwt::Actor;
 use std::collections::HashMap;
-use std::net::Ipv4Addr;
 
 use tc_value::{Link, Value};
 
@@ -78,12 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     mdns.register(my_service).expect("register mDNS service");
 
-    let builder = ServerBuilder::new(
-        DATA_DIR.parse().expect("data dir"),
-        Ipv4Addr::UNSPECIFIED.into(),
-        port,
-        vec![],
-    );
+    let builder = ServerBuilder::new(DATA_DIR.parse().expect("data dir"));
 
     builder.discover().await;
 
