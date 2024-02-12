@@ -1,22 +1,23 @@
-use log::debug;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use ds_ext::OrdHashSet;
 use freqfs::{DirLock, FileSave};
-use tokio::sync::{mpsc, RwLock};
+use log::debug;
+use tokio::sync::mpsc;
 
 use tc_transact::TxnId;
 use tcgeneric::NetworkTime;
 
-use crate::gateway::Gateway;
+use crate::kernel::Kernel;
 use crate::txn::{LazyDir, Txn};
 
 // allow an end-user's request to time out gracefully before garbage collection
 const GRACE: Duration = Duration::from_secs(1);
 
+#[derive(Debug)]
 struct Active {
     txn_id: TxnId,
     expires: NetworkTime,
@@ -90,11 +91,9 @@ impl<FE: for<'a> FileSave<'a>> TxnServer<FE> {
         }
     }
 
-    pub(crate) async fn finalize(&self, gateway: &Gateway<FE>) {
-        let now = gateway.now();
-
+    pub(crate) async fn finalize(&self, kernel: &Kernel<FE>, now: NetworkTime) {
         let expired = {
-            let mut active = self.active.write().await;
+            let mut active = self.active.write().expect("active transactions");
             let mut expired = Vec::with_capacity(active.len());
 
             while let Some(txn) = active.first() {
@@ -116,7 +115,7 @@ impl<FE: for<'a> FileSave<'a>> TxnServer<FE> {
         debug!("TxnServer::finalize_expired");
 
         for txn_id in expired.iter().copied() {
-            gateway.finalize(txn_id).await;
+            kernel.finalize(txn_id).await;
         }
 
         let mut workspace = self.workspace.write().await;
@@ -149,7 +148,7 @@ fn spawn_receiver_thread(
 ) {
     tokio::spawn(async move {
         while let Some(txn) = rx.recv().await {
-            let mut active = active.write().await;
+            let mut active = active.write().expect("active transaction list");
             active.insert(txn);
 
             while let Ok(txn) = rx.try_recv() {

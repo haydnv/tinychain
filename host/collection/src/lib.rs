@@ -331,5 +331,5 @@ async fn finalize_dir<FE: Send + Sync>(dir: &freqfs::DirLock<FE>, txn_id: &TxnId
         .expect("transactional versions directory");
 
     let mut versions = versions.write().await;
-    versions.delete(txn_id);
+    versions.delete(txn_id).await;
 }

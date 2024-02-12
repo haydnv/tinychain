@@ -8,7 +8,7 @@ use std::time::Duration;
 use tc_error::*;
 
 /// The current time of the TinyChain network, used to generate transaction IDs.
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
 pub struct NetworkTime {
     nanos: u64,
 }

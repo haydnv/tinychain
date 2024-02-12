@@ -3,30 +3,27 @@ use std::sync::Arc;
 use freqfs::FileSave;
 use tokio::time::{Duration, MissedTickBehavior};
 
-use crate::gateway::Gateway;
+use tcgeneric::NetworkTime;
+
+use crate::kernel::Kernel;
 use crate::txn::TxnServer;
 
 const GC_INTERVAL: Duration = Duration::from_millis(100);
 
 pub struct Server<FE> {
-    gateway: Arc<Gateway<FE>>,
+    kernel: Arc<Kernel<FE>>,
     txn_server: TxnServer<FE>,
 }
 
 impl<FE: for<'a> FileSave<'a>> Server<FE> {
-    pub(crate) fn new(gateway: Gateway<FE>, txn_server: TxnServer<FE>) -> Self {
-        let gateway = Arc::new(gateway);
+    pub(crate) fn new(kernel: Arc<Kernel<FE>>, txn_server: TxnServer<FE>) -> Self {
+        spawn_cleanup_thread(kernel.clone(), txn_server.clone());
 
-        spawn_cleanup_thread(gateway.clone(), txn_server.clone());
-
-        Self {
-            gateway,
-            txn_server,
-        }
+        Self { kernel, txn_server }
     }
 }
 
-fn spawn_cleanup_thread<FE>(gateway: Arc<Gateway<FE>>, txn_server: TxnServer<FE>)
+fn spawn_cleanup_thread<FE>(kernel: Arc<Kernel<FE>>, txn_server: TxnServer<FE>)
 where
     FE: for<'a> FileSave<'a>,
 {
@@ -36,7 +33,7 @@ where
     tokio::spawn(async move {
         loop {
             interval.tick().await;
-            txn_server.finalize(&gateway).await;
+            txn_server.finalize(&kernel, NetworkTime::now()).await;
         }
     });
 }

@@ -15,7 +15,6 @@ use tc_transact::fs;
 use tc_transact::Transaction;
 use tcgeneric::{NetworkTime, ThreadSafe};
 
-use crate::gateway::Gateway;
 use crate::kernel::Kernel;
 use crate::server::Server;
 use crate::txn::TxnServer;
@@ -80,9 +79,7 @@ impl<FE> ServerBuilder<FE> {
 
         kernel.commit(txn_id).await;
 
-        let gateway = Gateway::new(kernel);
-
-        Server::new(gateway, txn_server)
+        Server::new(kernel.into(), txn_server)
     }
 }
 
