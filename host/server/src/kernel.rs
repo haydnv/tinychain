@@ -29,16 +29,16 @@ impl<FE: ThreadSafe + Clone> fs::Persist<FE> for Kernel<FE> {
     type Schema = ();
     type Txn = Txn<FE>;
 
-    async fn create(txn_id: TxnId, _schema: Self::Schema, _store: fs::Dir<FE>) -> TCResult<Self> {
+    async fn create(_txn_id: TxnId, _schema: Self::Schema, _store: fs::Dir<FE>) -> TCResult<Self> {
         Ok(Self {
-            hypothetical: Cluster::new(Hypothetical::PATH, Hypothetical::new(), txn_id),
+            hypothetical: Cluster::new(Hypothetical::PATH, Hypothetical::new()),
             file: PhantomData,
         })
     }
 
-    async fn load(txn_id: TxnId, _schema: Self::Schema, _store: fs::Dir<FE>) -> TCResult<Self> {
+    async fn load(_txn_id: TxnId, _schema: Self::Schema, _store: fs::Dir<FE>) -> TCResult<Self> {
         Ok(Self {
-            hypothetical: Cluster::new(Hypothetical::PATH, Hypothetical::new(), txn_id),
+            hypothetical: Cluster::new(Hypothetical::PATH, Hypothetical::new()),
             file: PhantomData,
         })
     }

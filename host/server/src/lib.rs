@@ -2,6 +2,8 @@
 
 use std::time::Duration;
 
+use tc_value::Value;
+
 pub use builder::{Aes256Key, ServerBuilder};
 
 mod builder;
@@ -13,3 +15,5 @@ mod txn;
 
 pub const DEFAULT_TTL: Duration = Duration::from_secs(3);
 pub const SERVICE_TYPE: &'static str = "_tinychain._tcp.local.";
+
+pub type Actor = rjwt::Actor<Value>;

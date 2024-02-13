@@ -1,28 +1,87 @@
+use std::collections::HashSet;
+
 use async_trait::async_trait;
-use futures::TryFutureExt;
+use futures::future::{Future, TryFutureExt};
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
+use rjwt::VerifyingKey;
 
 use tc_error::*;
 use tc_transact::fs;
-use tc_transact::lock::TxnSetLock;
+use tc_transact::lock::TxnLock;
 use tc_transact::{Transact, TxnId};
-use tc_value::Host as LinkHost;
-use tcgeneric::{TCPathBuf, ThreadSafe};
+use tc_value::{Host, Link};
+use tcgeneric::{PathSegment, TCPathBuf, ThreadSafe};
 
 use crate::txn::Txn;
+use crate::Actor;
+
+mod public;
 
 pub struct Cluster<T> {
+    actor: Actor,
     path: TCPathBuf,
     subject: T,
-    replicas: TxnSetLock<LinkHost>,
+    replicas: TxnLock<HashSet<Host>>,
 }
 
 impl<T> Cluster<T> {
-    pub fn new<Path: Into<TCPathBuf>>(path: Path, subject: T, txn_id: TxnId) -> Self {
+    pub fn new<Path: Into<TCPathBuf>>(path: Path, subject: T) -> Self {
         Self {
+            actor: Actor::new(TCPathBuf::default().into()),
             path: path.into(),
             subject,
-            replicas: TxnSetLock::new(txn_id),
+            replicas: TxnLock::new(HashSet::new()),
         }
+    }
+
+    pub fn path(&self) -> &TCPathBuf {
+        &self.path
+    }
+
+    pub fn public_key(&self) -> &VerifyingKey {
+        self.actor.public_key()
+    }
+
+    pub async fn replicate_write<Write, Fut>(
+        &self,
+        txn_id: TxnId,
+        path: &[PathSegment],
+        op: Write,
+    ) -> TCResult<()>
+    where
+        Write: Fn(Link) -> Fut,
+        Fut: Future<Output = TCResult<()>>,
+    {
+        let mut uri = self.path().clone();
+        uri.extend(path.into_iter().cloned());
+
+        let replicas = self.replicas.write(txn_id).await?;
+
+        let mut writes: FuturesUnordered<_> = replicas
+            .iter()
+            .map(|host| op(Link::new(host.clone(), uri.clone())))
+            .collect();
+
+        let mut failed = 0;
+
+        while let Some(result) = writes.next().await {
+            if result.is_ok() {
+                // no-op
+            } else {
+                failed += 1;
+            }
+        }
+
+        if failed > (replicas.len() / 2) {
+            todo!("remove failed replicas")
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn subject(&self) -> &T {
+        &self.subject
     }
 }
 
@@ -62,7 +121,7 @@ where
         let (path, schema) = schema;
 
         <T as fs::Persist<FE>>::create(txn_id, schema, store)
-            .map_ok(|subject| Self::new(path, subject, txn_id))
+            .map_ok(|subject| Self::new(path, subject))
             .await
     }
 
@@ -70,7 +129,7 @@ where
         let (path, schema) = schema;
 
         <T as fs::Persist<FE>>::load(txn_id, schema, store)
-            .map_ok(|subject| Self::new(path, subject, txn_id))
+            .map_ok(|subject| Self::new(path, subject))
             .await
     }
 
