@@ -138,7 +138,7 @@ impl<FE: Send + Sync> TxnServer<FE> {
             .send(Active::new(txn_id, expiry))
             .expect("active txn");
 
-        Txn::new(workspace, txn_id, expiry)
+        Txn::new(workspace, txn_id, None)
     }
 }
 

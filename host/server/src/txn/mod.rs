@@ -5,16 +5,19 @@ use async_trait::async_trait;
 use freqfs::DirLock;
 use futures::Future;
 use safecast::CastInto;
+use umask::Mode;
 use uuid::Uuid;
 
 use tc_error::*;
+use tc_transact::public::StateInstance;
 use tc_transact::{RPCClient, Transaction, TxnId};
-use tcgeneric::{Id, NetworkTime, PathSegment, ThreadSafe};
+use tc_value::{Link, ToUrl, Value};
+use tcgeneric::{Id, PathSegment, ThreadSafe};
+
+use crate::SignedToken;
 
 pub use hypothetical::Hypothetical;
 pub use server::TxnServer;
-use tc_transact::public::StateInstance;
-use tc_value::{ToUrl, Value};
 
 mod hypothetical;
 mod server;
@@ -68,18 +71,22 @@ impl<FE> From<DirLock<FE>> for LazyDir<FE> {
 
 #[derive(Clone)]
 pub struct Txn<FE> {
-    workspace: LazyDir<FE>,
     id: TxnId,
-    expiry: NetworkTime,
+    workspace: LazyDir<FE>,
+    token: Option<SignedToken>,
 }
 
 impl<FE> Txn<FE> {
-    pub(super) fn new(workspace: LazyDir<FE>, id: TxnId, expiry: NetworkTime) -> Self {
+    pub(super) fn new(workspace: LazyDir<FE>, id: TxnId, token: Option<SignedToken>) -> Self {
         Self {
             id,
             workspace,
-            expiry,
+            token,
         }
+    }
+
+    pub fn mode(&self, actor: &Link, path: &[PathSegment]) -> Mode {
+        todo!("Txn::mode")
     }
 
     pub fn is_leader(&self, path: &[PathSegment]) -> bool {
@@ -102,7 +109,7 @@ impl<FE: ThreadSafe + Clone> Transaction<FE> for Txn<FE> {
         Txn {
             workspace: self.workspace.clone().create_dir(id.into()),
             id: self.id,
-            expiry: self.expiry,
+            token: self.token.clone(),
         }
     }
 
@@ -110,7 +117,7 @@ impl<FE: ThreadSafe + Clone> Transaction<FE> for Txn<FE> {
         Txn {
             workspace: self.workspace.clone().create_dir_unique(),
             id: self.id,
-            expiry: self.expiry,
+            token: self.token.clone(),
         }
     }
 }

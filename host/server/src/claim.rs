@@ -4,6 +4,7 @@ use umask::Mode;
 
 use tcgeneric::TCPathBuf;
 
+#[derive(Clone)]
 pub struct Claim {
     mode: Mode,
     path: TCPathBuf,

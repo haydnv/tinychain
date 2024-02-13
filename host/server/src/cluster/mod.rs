@@ -5,6 +5,7 @@ use futures::future::{Future, TryFutureExt};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use rjwt::VerifyingKey;
+use umask::Mode;
 
 use tc_error::*;
 use tc_transact::fs;
@@ -16,35 +17,73 @@ use tcgeneric::{PathSegment, TCPathBuf, ThreadSafe};
 use crate::txn::Txn;
 use crate::Actor;
 
+pub const CLUSTER_MODE: Mode = Mode::new()
+    .with_class_perm(umask::USER, umask::ALL)
+    .with_class_perm(umask::GROUP, umask::ALL)
+    .with_class_perm(umask::OTHERS, umask::READ);
+
 mod public;
+
+#[derive(Clone)]
+pub struct Schema {
+    path: TCPathBuf,
+    owner: Option<Link>,
+    group: Option<Link>,
+}
+
+impl Schema {
+    pub fn new<Path: Into<TCPathBuf>>(
+        path: Path,
+        owner: Option<Link>,
+        group: Option<Link>,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            owner,
+            group,
+        }
+    }
+}
 
 pub struct Cluster<T> {
     actor: Actor,
-    path: TCPathBuf,
+    schema: Schema,
     subject: T,
     replicas: TxnLock<HashSet<Host>>,
 }
 
 impl<T> Cluster<T> {
-    pub fn new<Path: Into<TCPathBuf>>(path: Path, subject: T) -> Self {
+    pub fn new(schema: Schema, subject: T) -> Self {
         Self {
             actor: Actor::new(TCPathBuf::default().into()),
-            path: path.into(),
+            schema,
             subject,
             replicas: TxnLock::new(HashSet::new()),
         }
     }
 
     pub fn path(&self) -> &TCPathBuf {
-        &self.path
+        &self.schema.path
     }
 
     pub fn public_key(&self) -> &VerifyingKey {
         self.actor.public_key()
     }
 
-    pub fn check_auth<FE>(&self, txn: &Txn<FE>) -> TCResult<()> {
-        todo!()
+    pub fn authorization<FE>(&self, path: &[PathSegment], txn: &Txn<FE>) -> Mode {
+        assert!(path.is_empty(), "TODO: cluster subject umask");
+
+        let mut mode = CLUSTER_MODE;
+
+        if let Some(actor) = &self.schema.owner {
+            mode &= txn.mode(actor, path);
+        }
+
+        if let Some(actor) = &self.schema.group {
+            mode &= txn.mode(actor, path);
+        }
+
+        mode
     }
 
     pub async fn replicate_write<Write, Fut>(
@@ -116,24 +155,20 @@ where
 impl<FE, T> fs::Persist<FE> for Cluster<T>
 where
     FE: ThreadSafe + Clone,
-    T: fs::Persist<FE, Txn = Txn<FE>>,
+    T: fs::Persist<FE, Schema = (), Txn = Txn<FE>>,
 {
     type Txn = Txn<FE>;
-    type Schema = (TCPathBuf, T::Schema);
+    type Schema = Schema;
 
     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
-        let (path, schema) = schema;
-
-        <T as fs::Persist<FE>>::create(txn_id, schema, store)
-            .map_ok(|subject| Self::new(path, subject))
+        <T as fs::Persist<FE>>::create(txn_id, (), store)
+            .map_ok(|subject| Self::new(schema, subject))
             .await
     }
 
     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
-        let (path, schema) = schema;
-
-        <T as fs::Persist<FE>>::load(txn_id, schema, store)
-            .map_ok(|subject| Self::new(path, subject))
+        <T as fs::Persist<FE>>::load(txn_id, (), store)
+            .map_ok(|subject| Self::new(schema, subject))
             .await
     }
 

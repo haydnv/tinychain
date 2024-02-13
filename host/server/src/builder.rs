@@ -13,6 +13,7 @@ use rjwt::VerifyingKey;
 
 use tc_transact::fs;
 use tc_transact::Transaction;
+use tc_value::Link;
 use tcgeneric::{NetworkTime, ThreadSafe};
 
 use crate::kernel::Kernel;
@@ -30,6 +31,9 @@ pub struct ServerBuilder<FE> {
     keys: Vec<Aes256Key>,
     data_dir: DirLock<FE>,
     workspace: DirLock<FE>,
+    owner: Option<Link>,
+    group: Option<Link>,
+    secure: bool,
 }
 
 impl<FE> ServerBuilder<FE> {
@@ -58,13 +62,24 @@ impl<FE> ServerBuilder<FE> {
             request_ttl: DEFAULT_TTL,
             data_dir,
             workspace,
+            owner: None,
+            group: None,
+            secure: true,
         }
     }
 
-    pub async fn build(self) -> Server<FE>
+    pub async fn build(mut self) -> Server<FE>
     where
         FE: ThreadSafe + Clone + for<'a> FileSave<'a>,
     {
+        if self.secure {
+            if self.owner.is_none() {
+                panic!("a server without an owner cannot be secure--specify an owner or disable security");
+            } else if self.group.is_none() {
+                self.group = self.owner.clone();
+            }
+        }
+
         let txn_server = TxnServer::create(self.workspace, self.request_ttl);
         let txn = txn_server.new_txn(NetworkTime::now());
         let txn_id = *txn.id();
@@ -73,9 +88,10 @@ impl<FE> ServerBuilder<FE> {
             .await
             .expect("data dir");
 
-        let kernel: Kernel<FE> = fs::Persist::load_or_create(txn_id, (), data_dir)
-            .await
-            .expect("kernel");
+        let kernel: Kernel<FE> =
+            fs::Persist::load_or_create(txn_id, (self.owner, self.group), data_dir)
+                .await
+                .expect("kernel");
 
         kernel.commit(txn_id).await;
 
@@ -86,11 +102,6 @@ impl<FE> ServerBuilder<FE> {
 impl<FE> ServerBuilder<FE> {
     pub fn bind_address(mut self, address: IpAddr) -> Self {
         self.address = address;
-        self
-    }
-
-    pub fn set_port(mut self, port: u16) -> Self {
-        self.port = port;
         self
     }
 
@@ -124,6 +135,26 @@ impl<FE> ServerBuilder<FE> {
             }
         }
 
+        self
+    }
+
+    pub fn set_port(mut self, port: u16) -> Self {
+        self.port = port;
+        self
+    }
+
+    pub fn set_group(mut self, group: Link) -> Self {
+        self.group = Some(group);
+        self
+    }
+
+    pub fn set_owner(mut self, owner: Link) -> Self {
+        self.owner = Some(owner);
+        self
+    }
+
+    pub fn set_secure(mut self, secure: bool) -> Self {
+        self.secure = secure;
         self
     }
 

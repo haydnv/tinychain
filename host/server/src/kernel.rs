@@ -6,9 +6,10 @@ use umask::Mode;
 use tc_error::*;
 use tc_transact::public::{Handler, Route, StateInstance};
 use tc_transact::{fs, Transact, TxnId};
+use tc_value::Link;
 use tcgeneric::{PathSegment, TCPath, ThreadSafe};
 
-use crate::cluster::Cluster;
+use crate::cluster::{Cluster, Schema};
 use crate::txn::{Hypothetical, Txn};
 
 pub(crate) struct Kernel<FE> {
@@ -30,13 +31,15 @@ impl<FE> Kernel<FE> {
         if path.is_empty() {
             Err(unauthorized!("access to /"))
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
-            self.hypothetical.check_auth(txn)?;
-
-            self.hypothetical
-                .route(path)
-                .ok_or_else(|| TCError::not_found(TCPath::from(&path[2..])))
+            if self.hypothetical.authorization(path, txn) & mode == mode {
+                self.hypothetical
+                    .route(path)
+                    .ok_or_else(|| TCError::not_found(TCPath::from(&path[2..])))
+            } else {
+                Err(unauthorized!("access to {}", TCPath::from(path)))
+            }
         } else {
-            Err(TCError::not_found(TCPath::from(path)))
+            Err(not_found!("{}", TCPath::from(path)))
         }
     }
 }
@@ -53,19 +56,25 @@ impl<FE> Kernel<FE> {
 
 #[async_trait]
 impl<FE: ThreadSafe + Clone> fs::Persist<FE> for Kernel<FE> {
-    type Schema = ();
+    type Schema = (Option<Link>, Option<Link>);
     type Txn = Txn<FE>;
 
-    async fn create(_txn_id: TxnId, _schema: Self::Schema, _store: fs::Dir<FE>) -> TCResult<Self> {
+    async fn create(_txn_id: TxnId, schema: Self::Schema, _store: fs::Dir<FE>) -> TCResult<Self> {
+        let (owner, group) = schema;
+        let schema = Schema::new(Hypothetical::PATH, owner, group);
+
         Ok(Self {
-            hypothetical: Cluster::new(Hypothetical::PATH, Hypothetical::new()),
+            hypothetical: Cluster::new(schema, Hypothetical::new()),
             file: PhantomData,
         })
     }
 
-    async fn load(_txn_id: TxnId, _schema: Self::Schema, _store: fs::Dir<FE>) -> TCResult<Self> {
+    async fn load(_txn_id: TxnId, schema: Self::Schema, _store: fs::Dir<FE>) -> TCResult<Self> {
+        let (owner, group) = schema;
+        let schema = Schema::new(Hypothetical::PATH, owner, group);
+
         Ok(Self {
-            hypothetical: Cluster::new(Hypothetical::PATH, Hypothetical::new()),
+            hypothetical: Cluster::new(schema, Hypothetical::new()),
             file: PhantomData,
         })
     }
