@@ -23,6 +23,7 @@ local-ip-address = "0.5"
 log = "0.4"
 mdns-sd = "0.10"
 rjwt = "0.5"
+safecast = "0.2"
 serde = "1.0"
 tc-error = { path = "../error" }
 tc-value = { path = "../value" }

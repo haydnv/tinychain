@@ -1,11 +1,11 @@
 use tc_error::TCError;
 
-use tc_transact::public::{
-    DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route, StateInstance,
-};
+use tc_transact::public::*;
 use tc_transact::{RPCClient, Transaction};
-use tc_value::{Link, Value};
-use tcgeneric::{PathSegment, TCPathBuf};
+use tc_value::Value;
+use tcgeneric::{PathSegment, ThreadSafe};
+
+use crate::txn::Txn;
 
 use super::Cluster;
 
@@ -13,12 +13,12 @@ struct ClusterHandler<'a, T> {
     cluster: &'a Cluster<T>,
 }
 
-impl<'a, State, T> Handler<'a, State> for ClusterHandler<'a, T>
+impl<'a, FE, State, T> Handler<'a, State> for ClusterHandler<'a, T>
 where
-    State: StateInstance,
+    State: StateInstance<FE = FE, Txn = Txn<FE>>,
     T: Send + Sync,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn<FE>, State>>
     where
         'b: 'a,
     {
@@ -62,9 +62,10 @@ impl<'a, State, T> ReplicaHandler<'a, State, T> {
     }
 }
 
-impl<'a, State, T> Handler<'a, State> for ReplicaHandler<'a, State, T>
+impl<'a, FE, State, T> Handler<'a, State> for ReplicaHandler<'a, State, T>
 where
-    State: StateInstance,
+    FE: ThreadSafe + Clone,
+    State: StateInstance<FE = FE, Txn = Txn<FE>>,
     T: Send + Sync,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
@@ -78,20 +79,21 @@ where
     where
         'b: 'a,
     {
+        let path = self.path;
+        let cluster = self.cluster;
         let handler = self.handler.put()?;
 
-        Some(Box::new(|txn, key, value| {
+        Some(Box::new(move |txn, key, value| {
             Box::pin(async move {
                 (handler)(txn, key.clone(), value.clone()).await?;
 
-                // TODO: distribute this write operation
-                // if txn.is_leader(self.cluster.path()) {
-                //     self.cluster
-                //         .replicate_write(*txn.id(), self.path, |link| {
-                //             txn.put(link, key.clone(), value.clone())
-                //         })
-                //         .await?;
-                // }
+                if txn.is_leader(cluster.path()) {
+                    cluster
+                        .replicate_write(*txn.id(), path, |link| {
+                            RPCClient::<State>::put(txn, link, key.clone(), value.clone())
+                        })
+                        .await?;
+                }
 
                 Ok(())
             })
@@ -109,20 +111,23 @@ where
     where
         'b: 'a,
     {
+        let path = self.path;
+        let cluster = self.cluster;
         let handler = self.handler.delete()?;
 
-        Some(Box::new(|txn, key| {
+        Some(Box::new(move |txn, key| {
+            let is_leader = txn.is_leader(cluster.path());
+
             Box::pin(async move {
                 (handler)(txn, key.clone()).await?;
 
-                // TODO: distribute this write operation
-                // if txn.is_leader(self.cluster.path()) {
-                //     self.cluster
-                //         .replicate_write(*txn.id(), self.path, |link| {
-                //             txn.delete(link, key.clone())
-                //         })
-                //         .await?;
-                // }
+                if is_leader {
+                    cluster
+                        .replicate_write(*txn.id(), path, |link| {
+                            RPCClient::<State>::delete(txn, link, key.clone())
+                        })
+                        .await?;
+                }
 
                 Ok(())
             })
@@ -130,9 +135,10 @@ where
     }
 }
 
-impl<State, T> Route<State> for Cluster<T>
+impl<FE, State, T> Route<State> for Cluster<T>
 where
-    State: StateInstance,
+    FE: ThreadSafe + Clone,
+    State: StateInstance<FE = FE, Txn = Txn<FE>>,
     T: Route<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {

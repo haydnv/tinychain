@@ -1,18 +1,20 @@
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use freqfs::DirLock;
 use futures::Future;
+use safecast::CastInto;
 use uuid::Uuid;
 
 use tc_error::*;
-use tc_transact::{Transaction, TxnId};
-use tcgeneric::{Id, NetworkTime, ThreadSafe};
+use tc_transact::{RPCClient, Transaction, TxnId};
+use tcgeneric::{Id, NetworkTime, PathSegment, ThreadSafe};
 
 pub use hypothetical::Hypothetical;
 pub use server::TxnServer;
+use tc_transact::public::StateInstance;
+use tc_value::{ToUrl, Value};
 
 mod hypothetical;
 mod server;
@@ -79,6 +81,10 @@ impl<FE> Txn<FE> {
             expiry,
         }
     }
+
+    pub fn is_leader(&self, path: &[PathSegment]) -> bool {
+        todo!("Txn::is_leader")
+    }
 }
 
 #[async_trait]
@@ -106,5 +112,45 @@ impl<FE: ThreadSafe + Clone> Transaction<FE> for Txn<FE> {
             id: self.id,
             expiry: self.expiry,
         }
+    }
+}
+
+#[async_trait]
+impl<FE, State> RPCClient<State> for Txn<FE>
+where
+    FE: ThreadSafe + Clone,
+    State: StateInstance<FE = FE, Txn = Self>,
+{
+    async fn get<'a, L, V>(&'a self, link: L, key: V) -> TCResult<State>
+    where
+        L: Into<ToUrl<'a>> + Send,
+        V: CastInto<Value> + Send,
+    {
+        todo!()
+    }
+
+    async fn put<'a, L, K, V>(&'a self, link: L, key: K, value: V) -> TCResult<()>
+    where
+        L: Into<ToUrl<'a>> + Send,
+        K: CastInto<Value> + Send,
+        V: CastInto<State> + Send,
+    {
+        todo!()
+    }
+
+    async fn post<'a, L, P>(&'a self, link: L, params: P) -> TCResult<State>
+    where
+        L: Into<ToUrl<'a>> + Send,
+        P: CastInto<State> + Send,
+    {
+        todo!()
+    }
+
+    async fn delete<'a, L, V>(&'a self, link: L, key: V) -> TCResult<()>
+    where
+        L: Into<ToUrl<'a>> + Send,
+        V: CastInto<Value> + Send,
+    {
+        todo!()
     }
 }
