@@ -123,9 +123,9 @@ impl<'a, T> IntoIterator for &'a Tuple<T> {
 }
 
 impl<const N: usize, F, T> TryCastFrom<Tuple<F>> for SmallVec<[T; N]>
-    where
-        T: TryCastFrom<F>,
-        [T; N]: smallvec::Array<Item = T>,
+where
+    T: TryCastFrom<F>,
+    [T; N]: smallvec::Array<Item = T>,
 {
     fn can_cast_from(tuple: &Tuple<F>) -> bool {
         tuple.iter().all(T::can_cast_from)
@@ -163,7 +163,6 @@ impl<F, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for Vec<T> {
         Some(cast)
     }
 }
-
 
 impl<F, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for (T,) {
     fn can_cast_from(source: &Tuple<F>) -> bool {

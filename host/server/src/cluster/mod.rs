@@ -43,6 +43,10 @@ impl<T> Cluster<T> {
         self.actor.public_key()
     }
 
+    pub fn check_auth<FE>(&self, txn: &Txn<FE>) -> TCResult<()> {
+        todo!()
+    }
+
     pub async fn replicate_write<Write, Fut>(
         &self,
         txn_id: TxnId,
