@@ -97,7 +97,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         CACHE_SIZE,
         data_dir.clone(),
         WORKSPACE.parse().expect("workspace"),
-    );
+    )
+    .set_secure(false);
 
     builder.discover().await;
 

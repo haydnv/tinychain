@@ -1,5 +1,4 @@
-use tc_error::TCError;
-
+use tc_error::*;
 use tc_transact::public::*;
 use tc_transact::{RPCClient, Transaction};
 use tc_value::Value;
@@ -84,18 +83,24 @@ where
         let handler = self.handler.put()?;
 
         Some(Box::new(move |txn, key, value| {
-            Box::pin(async move {
-                (handler)(txn, key.clone(), value.clone()).await?;
+            debug_assert!(txn.leader(cluster.path()).is_some());
 
-                if txn.is_leader(cluster.path()) {
+            Box::pin(async move {
+                (handler)(&txn, key.clone(), value.clone()).await?;
+
+                if txn.leader(cluster.path()) == Some(cluster.public_key()) {
                     cluster
                         .replicate_write(*txn.id(), path, |link| {
-                            RPCClient::<State>::put(txn, link, key.clone(), value.clone())
+                            RPCClient::<State>::put(&txn, link, key.clone(), value.clone())
                         })
                         .await?;
                 }
 
-                Ok(())
+                if txn.owner().expect("owner") == cluster.public_key() {
+                    cluster.replicate_commit(*txn.id()).await
+                } else {
+                    Ok(())
+                }
             })
         }))
     }
@@ -116,20 +121,24 @@ where
         let handler = self.handler.delete()?;
 
         Some(Box::new(move |txn, key| {
-            let is_leader = txn.is_leader(cluster.path());
+            debug_assert!(txn.leader(cluster.path()).is_some());
 
             Box::pin(async move {
-                (handler)(txn, key.clone()).await?;
+                (handler)(&txn, key.clone()).await?;
 
-                if is_leader {
+                if txn.leader(cluster.path()).expect("leader") == cluster.public_key() {
                     cluster
                         .replicate_write(*txn.id(), path, |link| {
-                            RPCClient::<State>::delete(txn, link, key.clone())
+                            RPCClient::<State>::delete(&txn, link, key.clone())
                         })
                         .await?;
                 }
 
-                Ok(())
+                if txn.owner().expect("owner") == cluster.public_key() {
+                    cluster.replicate_commit(*txn.id()).await
+                } else {
+                    Ok(())
+                }
             })
         }))
     }

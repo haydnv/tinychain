@@ -26,19 +26,15 @@ mod public;
 
 #[derive(Clone)]
 pub struct Schema {
-    path: TCPathBuf,
+    lead: Link,
     owner: Option<Link>,
     group: Option<Link>,
 }
 
 impl Schema {
-    pub fn new<Path: Into<TCPathBuf>>(
-        path: Path,
-        owner: Option<Link>,
-        group: Option<Link>,
-    ) -> Self {
+    pub fn new<Lead: Into<Link>>(lead: Lead, owner: Option<Link>, group: Option<Link>) -> Self {
         Self {
-            path: path.into(),
+            lead: lead.into(),
             owner,
             group,
         }
@@ -63,7 +59,7 @@ impl<T> Cluster<T> {
     }
 
     pub fn path(&self) -> &TCPathBuf {
-        &self.schema.path
+        self.schema.lead.path()
     }
 
     pub fn public_key(&self) -> &VerifyingKey {
@@ -76,17 +72,25 @@ impl<T> Cluster<T> {
         let mut mode = CLUSTER_MODE;
 
         if let Some(actor) = &self.schema.owner {
-            mode &= txn.mode(actor, path);
+            if let Some(grant) = txn.mode(actor, &self.schema.lead) {
+                mode &= grant;
+            }
         }
 
         if let Some(actor) = &self.schema.group {
-            mode &= txn.mode(actor, path);
+            if let Some(grant) = txn.mode(actor, &self.schema.lead) {
+                mode &= grant;
+            }
         }
 
         mode
     }
 
-    pub async fn replicate_write<Write, Fut>(
+    pub(crate) fn subject(&self) -> &T {
+        &self.subject
+    }
+
+    async fn replicate_write<Write, Fut>(
         &self,
         txn_id: TxnId,
         path: &[PathSegment],
@@ -123,8 +127,12 @@ impl<T> Cluster<T> {
         }
     }
 
-    pub(crate) fn subject(&self) -> &T {
-        &self.subject
+    async fn replicate_commit(&self, _txn_id: TxnId) -> TCResult<()> {
+        Err(not_implemented!("Cluster::replicate_commit"))
+    }
+
+    async fn replicate_rollback(&self, _txn_id: TxnId) -> TCResult<()> {
+        Err(not_implemented!("Cluster::replicate_rollback"))
     }
 }
 

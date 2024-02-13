@@ -18,12 +18,12 @@ pub(crate) struct Kernel<FE> {
 }
 
 impl<FE> Kernel<FE> {
-    pub fn authorize_and_route<'a, State>(
+    pub fn authorize_claim_and_route<'a, State>(
         &'a self,
         mode: Mode,
         path: &'a [PathSegment],
-        txn: &Txn<FE>,
-    ) -> TCResult<Box<dyn Handler<State> + 'a>>
+        txn: Txn<FE>,
+    ) -> TCResult<(Txn<FE>, Box<dyn Handler<State> + 'a>)>
     where
         FE: ThreadSafe + Clone,
         State: StateInstance<FE = FE, Txn = Txn<FE>>,
@@ -31,10 +31,15 @@ impl<FE> Kernel<FE> {
         if path.is_empty() {
             Err(unauthorized!("access to /"))
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
-            if self.hypothetical.authorization(path, txn) & mode == mode {
-                self.hypothetical
+            if self.hypothetical.authorization(path, &txn) & mode == mode {
+                let txn = maybe_claim_txn(&self.hypothetical, txn);
+
+                let handler = self
+                    .hypothetical
                     .route(path)
-                    .ok_or_else(|| TCError::not_found(TCPath::from(&path[2..])))
+                    .ok_or_else(|| TCError::not_found(TCPath::from(&path[2..])))?;
+
+                Ok((txn, handler))
             } else {
                 Err(unauthorized!("access to {}", TCPath::from(path)))
             }
@@ -81,5 +86,14 @@ impl<FE: ThreadSafe + Clone> fs::Persist<FE> for Kernel<FE> {
 
     fn dir(&self) -> fs::Inner<FE> {
         unimplemented!("Kernel::inner")
+    }
+}
+
+#[inline]
+fn maybe_claim_txn<FE, T>(cluster: &Cluster<T>, txn: Txn<FE>) -> Txn<FE> {
+    if txn.owner().is_none() || txn.leader(cluster.path()).is_none() {
+        txn.claim(cluster.public_key(), cluster.path())
+    } else {
+        txn
     }
 }

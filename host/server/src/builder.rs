@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use aes_gcm_siv::{Aes256GcmSiv, Key};
@@ -16,6 +17,7 @@ use tc_transact::Transaction;
 use tc_value::Link;
 use tcgeneric::{NetworkTime, ThreadSafe};
 
+use crate::gateway::Gateway;
 use crate::kernel::Kernel;
 use crate::server::Server;
 use crate::txn::TxnServer;
@@ -80,7 +82,8 @@ impl<FE> ServerBuilder<FE> {
             }
         }
 
-        let txn_server = TxnServer::create(self.workspace, self.request_ttl);
+        let gateway = Arc::new(Gateway::new());
+        let txn_server = TxnServer::create(self.workspace, gateway, self.request_ttl);
         let txn = txn_server.new_txn(NetworkTime::now());
         let txn_id = *txn.id();
 

@@ -57,18 +57,18 @@ impl<FE> Server<FE> {
         }
     }
 
-    pub fn authorize_and_route<'a, State>(
+    pub fn authorize_claim_and_route<'a, State>(
         &'a self,
         request_type: RequestType,
         path: &'a [PathSegment],
-        txn: &Txn<FE>,
-    ) -> TCResult<Box<dyn Handler<'a, State> + 'a>>
+        txn: Txn<FE>,
+    ) -> TCResult<(Txn<FE>, Box<dyn Handler<'a, State> + 'a>)>
     where
         FE: ThreadSafe + Clone,
         State: StateInstance<FE = FE, Txn = Txn<FE>>,
     {
         self.kernel
-            .authorize_and_route(request_type.into(), path, txn)
+            .authorize_claim_and_route(request_type.into(), path, txn)
     }
 }
 

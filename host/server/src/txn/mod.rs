@@ -4,6 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use freqfs::DirLock;
 use futures::Future;
+use rjwt::{Token, VerifyingKey};
 use safecast::CastInto;
 use umask::Mode;
 use uuid::Uuid;
@@ -12,9 +13,11 @@ use tc_error::*;
 use tc_transact::public::StateInstance;
 use tc_transact::{RPCClient, Transaction, TxnId};
 use tc_value::{Link, ToUrl, Value};
-use tcgeneric::{Id, PathSegment, ThreadSafe};
+use tcgeneric::{Id, NetworkTime, PathSegment, ThreadSafe};
 
-use crate::SignedToken;
+use crate::claim::Claim;
+use crate::gateway::Gateway;
+use crate::{Actor, SignedToken};
 
 pub use hypothetical::Hypothetical;
 pub use server::TxnServer;
@@ -22,10 +25,18 @@ pub use server::TxnServer;
 mod hypothetical;
 mod server;
 
-#[derive(Clone)]
 pub(super) enum LazyDir<FE> {
     Workspace(DirLock<FE>),
     Lazy(Arc<Self>, Id),
+}
+
+impl<FE> Clone for LazyDir<FE> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Workspace(workspace) => Self::Workspace(workspace.clone()),
+            Self::Lazy(parent, id) => Self::Lazy(parent.clone(), id.clone()),
+        }
+    }
 }
 
 impl<FE: Send + Sync> LazyDir<FE> {
@@ -69,28 +80,73 @@ impl<FE> From<DirLock<FE>> for LazyDir<FE> {
     }
 }
 
-#[derive(Clone)]
 pub struct Txn<FE> {
     id: TxnId,
+    expires: NetworkTime,
     workspace: LazyDir<FE>,
-    token: Option<SignedToken>,
+    gateway: Arc<Gateway>,
+    token: Option<Arc<SignedToken>>,
+}
+
+impl<FE> Clone for Txn<FE> {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            expires: self.expires,
+            workspace: self.workspace.clone(),
+            gateway: self.gateway.clone(),
+            token: self.token.clone(),
+        }
+    }
 }
 
 impl<FE> Txn<FE> {
-    pub(super) fn new(workspace: LazyDir<FE>, id: TxnId, token: Option<SignedToken>) -> Self {
+    pub(super) fn new(
+        id: TxnId,
+        expires: NetworkTime,
+        workspace: LazyDir<FE>,
+        gateway: Arc<Gateway>,
+        token: Option<SignedToken>,
+    ) -> Self {
         Self {
             id,
+            expires,
             workspace,
-            token,
+            gateway,
+            token: token.map(Arc::new),
         }
     }
 
-    pub fn mode(&self, actor: &Link, path: &[PathSegment]) -> Mode {
+    pub fn grant(&self, link: Link, actor: &Actor, mode: Mode) -> TCResult<Self> {
+        let now = self.gateway.now();
+        let claim = Claim::new(link.clone(), mode);
+
+        let token = if let Some(token) = &self.token {
+            actor.consume_and_sign((**token).clone(), link, claim, now.into())
+        } else {
+            let ttl = self.expires - now;
+            let token = Token::new(link, now.into(), ttl, actor.id().clone(), claim);
+            actor.sign_token(token)
+        }?;
+
+        todo!("Txn::grant")
+    }
+
+    pub fn mode(&self, actor: &Link, resource: &Link) -> Option<Mode> {
         todo!("Txn::mode")
     }
 
-    pub fn is_leader(&self, path: &[PathSegment]) -> bool {
-        todo!("Txn::is_leader")
+    pub fn claim(self, public_key: &VerifyingKey, path: &[PathSegment]) -> Self {
+        debug_assert!(self.leader(path).is_none());
+        todo!("Txn::claim")
+    }
+
+    pub fn leader(&self, path: &[PathSegment]) -> Option<&VerifyingKey> {
+        todo!("Txn::leader")
+    }
+
+    pub fn owner(&self) -> Option<&VerifyingKey> {
+        todo!("Txn::owner")
     }
 }
 
@@ -107,16 +163,20 @@ impl<FE: ThreadSafe + Clone> Transaction<FE> for Txn<FE> {
 
     fn subcontext<I: Into<Id> + Send>(&self, id: I) -> Self {
         Txn {
-            workspace: self.workspace.clone().create_dir(id.into()),
             id: self.id,
+            expires: self.expires,
+            workspace: self.workspace.clone().create_dir(id.into()),
+            gateway: self.gateway.clone(),
             token: self.token.clone(),
         }
     }
 
     fn subcontext_unique(&self) -> Self {
         Txn {
-            workspace: self.workspace.clone().create_dir_unique(),
             id: self.id,
+            expires: self.expires,
+            workspace: self.workspace.clone().create_dir_unique(),
+            gateway: self.gateway.clone(),
             token: self.token.clone(),
         }
     }
