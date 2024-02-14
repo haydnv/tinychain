@@ -128,10 +128,12 @@ impl<T> Cluster<T> {
     }
 
     async fn replicate_commit(&self, _txn_id: TxnId) -> TCResult<()> {
+        // TODO: validate that the commit message came from the txn leader, send commit messages to replicas, log errors, crash if >= 50% fail
         Err(not_implemented!("Cluster::replicate_commit"))
     }
 
     async fn replicate_rollback(&self, _txn_id: TxnId) -> TCResult<()> {
+        // TODO: validate that the rollback message came from the txn leader, send rollback messages to replicas, log errors, crash if >= 50% fail
         Err(not_implemented!("Cluster::replicate_rollback"))
     }
 }

@@ -2,17 +2,17 @@ use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 use umask::Mode;
 
-use tc_value::Link;
+use tcgeneric::TCPathBuf;
 
 #[derive(Clone)]
 pub struct Claim {
-    link: Link,
+    path: TCPathBuf,
     mode: Mode,
 }
 
 impl Claim {
-    pub fn new(link: Link, mode: Mode) -> Self {
-        Self { link, mode }
+    pub fn new(path: TCPathBuf, mode: Mode) -> Self {
+        Self { path, mode }
     }
 }
 
@@ -21,9 +21,11 @@ impl<'de> Deserialize<'de> for Claim {
     where
         D: Deserializer<'de>,
     {
-        <(Link, u32) as Deserialize<'de>>::deserialize(deserializer).map(|(link, mode)| Claim {
-            link,
-            mode: mode.into(),
+        <(TCPathBuf, u32) as Deserialize<'de>>::deserialize(deserializer).map(|(path, mode)| {
+            Claim {
+                path,
+                mode: mode.into(),
+            }
         })
     }
 }
@@ -33,6 +35,6 @@ impl Serialize for Claim {
     where
         S: Serializer,
     {
-        (&self.link, u32::from(self.mode)).serialize(serializer)
+        (&self.path, u32::from(self.mode)).serialize(serializer)
     }
 }

@@ -13,7 +13,7 @@ use tc_error::*;
 use tc_transact::public::StateInstance;
 use tc_transact::{RPCClient, Transaction, TxnId};
 use tc_value::{Link, ToUrl, Value};
-use tcgeneric::{Id, NetworkTime, PathSegment, ThreadSafe};
+use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf, ThreadSafe};
 
 use crate::claim::Claim;
 use crate::gateway::Gateway;
@@ -117,9 +117,11 @@ impl<FE> Txn<FE> {
         }
     }
 
-    pub fn grant(&self, link: Link, actor: &Actor, mode: Mode) -> TCResult<Self> {
+    /// Grant `mode` permissions on the resource at `path` to the bearer of this [`Txn`]'s token.
+    /// `path` is relative to the cluster at `link` whose `actor` will sign the token.
+    pub fn grant(&self, actor: &Actor, link: Link, path: TCPathBuf, mode: Mode) -> TCResult<Self> {
         let now = self.gateway.now();
-        let claim = Claim::new(link.clone(), mode);
+        let claim = Claim::new(path, mode);
 
         let token = if let Some(token) = &self.token {
             actor.consume_and_sign((**token).clone(), link, claim, now.into())
@@ -129,7 +131,13 @@ impl<FE> Txn<FE> {
             actor.sign_token(token)
         }?;
 
-        todo!("Txn::grant")
+        Ok(Self {
+            id: self.id,
+            expires: self.expires,
+            workspace: self.workspace.clone(),
+            gateway: self.gateway.clone(),
+            token: Some(Arc::new(token)),
+        })
     }
 
     pub fn mode(&self, actor: &Link, resource: &Link) -> Option<Mode> {

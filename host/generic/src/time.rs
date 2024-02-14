@@ -3,7 +3,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::ops;
 use std::time;
-use std::time::Duration;
 
 use tc_error::*;
 
@@ -47,22 +46,40 @@ impl ops::Add<time::Duration> for NetworkTime {
     }
 }
 
-impl<'a> ops::Add<time::Duration> for &'a NetworkTime {
+impl ops::Add<NetworkTime> for time::Duration {
     type Output = NetworkTime;
 
-    fn add(self, other: time::Duration) -> NetworkTime {
+    fn add(self, other: NetworkTime) -> NetworkTime {
         NetworkTime {
-            nanos: self.nanos + other.as_nanos() as u64,
+            nanos: self.as_nanos() as u64 + other.nanos,
         }
     }
 }
 
-impl ops::Add<&NetworkTime> for Duration {
+impl ops::Sub<NetworkTime> for NetworkTime {
+    type Output = time::Duration;
+
+    fn sub(self, other: NetworkTime) -> time::Duration {
+        time::Duration::from_nanos(self.nanos - other.nanos)
+    }
+}
+
+impl ops::Sub<time::Duration> for NetworkTime {
+    type Output = Self;
+
+    fn sub(self, other: time::Duration) -> Self {
+        NetworkTime {
+            nanos: self.nanos - other.as_nanos() as u64,
+        }
+    }
+}
+
+impl ops::Sub<NetworkTime> for time::Duration {
     type Output = NetworkTime;
 
-    fn add(self, other: &NetworkTime) -> NetworkTime {
+    fn sub(self, other: NetworkTime) -> NetworkTime {
         NetworkTime {
-            nanos: self.as_nanos() as u64 + other.nanos,
+            nanos: self.as_nanos() as u64 - other.nanos,
         }
     }
 }
@@ -85,6 +102,6 @@ impl TryFrom<time::SystemTime> for NetworkTime {
 
 impl From<NetworkTime> for time::SystemTime {
     fn from(nt: NetworkTime) -> Self {
-        time::UNIX_EPOCH + Duration::from_nanos(nt.nanos as u64)
+        time::UNIX_EPOCH + time::Duration::from_nanos(nt.nanos)
     }
 }

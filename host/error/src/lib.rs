@@ -374,6 +374,14 @@ macro_rules! forbidden {
     }}
 }
 
+/// Error to indicate that no resource exists at the requested path or key.
+#[macro_export]
+macro_rules! not_found {
+    ($($t:tt)*) => {{
+        $crate::TCError::not_found(format!($($t)*))
+    }}
+}
+
 /// Error to indicate that a required feature is not yet implemented.
 #[macro_export]
 macro_rules! not_implemented {
