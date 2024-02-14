@@ -31,14 +31,15 @@ impl From<RequestType> for Mode {
     }
 }
 
-pub struct Server<FE> {
-    kernel: Arc<Kernel<FE>>,
+pub struct Server<State, FE> {
+    kernel: Arc<Kernel<State, FE>>,
     txn_server: TxnServer<FE>,
 }
 
-impl<FE> Server<FE> {
-    pub(crate) fn new(kernel: Arc<Kernel<FE>>, txn_server: TxnServer<FE>) -> Self
+impl<State, FE> Server<State, FE> {
+    pub(crate) fn new(kernel: Arc<Kernel<State, FE>>, txn_server: TxnServer<FE>) -> Self
     where
+        State: ThreadSafe,
         FE: for<'a> FileSave<'a>,
     {
         spawn_cleanup_thread(kernel.clone(), txn_server.clone());
@@ -56,24 +57,27 @@ impl<FE> Server<FE> {
             Ok(self.txn_server.new_txn(NetworkTime::now()))
         }
     }
+}
 
-    pub fn authorize_claim_and_route<'a, State>(
+impl<State, FE> Server<State, FE>
+where
+    State: StateInstance<FE = FE, Txn = Txn<FE>>,
+    FE: ThreadSafe + Clone,
+{
+    pub fn authorize_claim_and_route<'a>(
         &'a self,
         request_type: RequestType,
         path: &'a [PathSegment],
         txn: Txn<FE>,
-    ) -> TCResult<(Txn<FE>, Box<dyn Handler<'a, State> + 'a>)>
-    where
-        FE: ThreadSafe + Clone,
-        State: StateInstance<FE = FE, Txn = Txn<FE>>,
-    {
+    ) -> TCResult<(Txn<FE>, Box<dyn Handler<'a, State> + 'a>)> {
         self.kernel
             .authorize_claim_and_route(request_type.into(), path, txn)
     }
 }
 
-fn spawn_cleanup_thread<FE>(kernel: Arc<Kernel<FE>>, txn_server: TxnServer<FE>)
+fn spawn_cleanup_thread<State, FE>(kernel: Arc<Kernel<State, FE>>, txn_server: TxnServer<FE>)
 where
+    State: ThreadSafe,
     FE: for<'a> FileSave<'a>,
 {
     let mut interval = tokio::time::interval(GC_INTERVAL);

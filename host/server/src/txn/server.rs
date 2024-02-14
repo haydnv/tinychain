@@ -95,7 +95,7 @@ impl<FE: for<'a> FileSave<'a>> TxnServer<FE> {
         }
     }
 
-    pub(crate) async fn finalize(&self, kernel: &Kernel<FE>, now: NetworkTime) {
+    pub(crate) async fn finalize<State>(&self, kernel: &Kernel<State, FE>, now: NetworkTime) {
         let expired = {
             let mut active = self.active.write().expect("active transactions");
             let mut expired = Vec::with_capacity(active.len());

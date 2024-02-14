@@ -12,13 +12,13 @@ use tcgeneric::{PathSegment, TCPath, ThreadSafe};
 use crate::cluster::{Cluster, Schema};
 use crate::txn::{Hypothetical, Txn};
 
-pub(crate) struct Kernel<FE> {
+pub(crate) struct Kernel<State, FE> {
     hypothetical: Cluster<Hypothetical>,
-    file: PhantomData<FE>,
+    state: PhantomData<(State, FE)>,
 }
 
-impl<FE> Kernel<FE> {
-    pub fn authorize_claim_and_route<'a, State>(
+impl<State, FE> Kernel<State, FE> {
+    pub fn authorize_claim_and_route<'a>(
         &'a self,
         mode: Mode,
         path: &'a [PathSegment],
@@ -49,7 +49,7 @@ impl<FE> Kernel<FE> {
     }
 }
 
-impl<FE> Kernel<FE> {
+impl<State, FE> Kernel<State, FE> {
     pub(crate) async fn commit(&self, txn_id: TxnId) {
         self.hypothetical.rollback(&txn_id).await;
     }
@@ -60,7 +60,7 @@ impl<FE> Kernel<FE> {
 }
 
 #[async_trait]
-impl<FE: ThreadSafe + Clone> fs::Persist<FE> for Kernel<FE> {
+impl<State, FE: ThreadSafe + Clone> fs::Persist<FE> for Kernel<State, FE> {
     type Schema = (Option<Link>, Option<Link>);
     type Txn = Txn<FE>;
 
@@ -70,7 +70,7 @@ impl<FE: ThreadSafe + Clone> fs::Persist<FE> for Kernel<FE> {
 
         Ok(Self {
             hypothetical: Cluster::new(schema, Hypothetical::new()),
-            file: PhantomData,
+            state: PhantomData,
         })
     }
 
@@ -80,7 +80,7 @@ impl<FE: ThreadSafe + Clone> fs::Persist<FE> for Kernel<FE> {
 
         Ok(Self {
             hypothetical: Cluster::new(schema, Hypothetical::new()),
-            file: PhantomData,
+            state: PhantomData,
         })
     }
 

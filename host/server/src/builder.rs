@@ -70,8 +70,9 @@ impl<FE> ServerBuilder<FE> {
         }
     }
 
-    pub async fn build(mut self) -> Server<FE>
+    pub async fn build<State>(mut self) -> Server<State, FE>
     where
+        State: ThreadSafe,
         FE: ThreadSafe + Clone + for<'a> FileSave<'a>,
     {
         if self.secure {
@@ -91,7 +92,7 @@ impl<FE> ServerBuilder<FE> {
             .await
             .expect("data dir");
 
-        let kernel: Kernel<FE> =
+        let kernel: Kernel<State, FE> =
             fs::Persist::load_or_create(txn_id, (self.owner, self.group), data_dir)
                 .await
                 .expect("kernel");
