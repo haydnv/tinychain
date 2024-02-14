@@ -22,11 +22,11 @@ impl<State, FE> Kernel<State, FE> {
         &'a self,
         mode: Mode,
         path: &'a [PathSegment],
-        txn: Txn<FE>,
-    ) -> TCResult<(Txn<FE>, Box<dyn Handler<State> + 'a>)>
+        txn: Txn<State, FE>,
+    ) -> TCResult<(Txn<State, FE>, Box<dyn Handler<State> + 'a>)>
     where
         FE: ThreadSafe + Clone,
-        State: StateInstance<FE = FE, Txn = Txn<FE>>,
+        State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
     {
         if path.is_empty() {
             Err(unauthorized!("access to /"))
@@ -60,9 +60,13 @@ impl<State, FE> Kernel<State, FE> {
 }
 
 #[async_trait]
-impl<State, FE: ThreadSafe + Clone> fs::Persist<FE> for Kernel<State, FE> {
+impl<State, FE> fs::Persist<FE> for Kernel<State, FE>
+where
+    State: ThreadSafe,
+    FE: ThreadSafe + Clone,
+{
     type Schema = (Option<Link>, Option<Link>);
-    type Txn = Txn<FE>;
+    type Txn = Txn<State, FE>;
 
     async fn create(_txn_id: TxnId, schema: Self::Schema, _store: fs::Dir<FE>) -> TCResult<Self> {
         let (owner, group) = schema;
@@ -90,7 +94,7 @@ impl<State, FE: ThreadSafe + Clone> fs::Persist<FE> for Kernel<State, FE> {
 }
 
 #[inline]
-fn maybe_claim_txn<FE, T>(cluster: &Cluster<T>, txn: Txn<FE>) -> Txn<FE> {
+fn maybe_claim_txn<State, FE, T>(cluster: &Cluster<T>, txn: Txn<State, FE>) -> Txn<State, FE> {
     if txn.owner().is_none() || txn.leader(cluster.path()).is_none() {
         txn.claim(cluster.public_key(), cluster.path())
     } else {

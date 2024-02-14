@@ -16,7 +16,7 @@ impl Hypothetical {
     }
 }
 
-impl<FE, State: StateInstance<FE = FE, Txn = Txn<FE>>> Route<State> for Hypothetical {
+impl<FE, State: StateInstance<FE = FE, Txn = Txn<State, FE>>> Route<State> for Hypothetical {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         None
     }

@@ -47,7 +47,7 @@ impl<State, FE> Server<State, FE> {
         Self { kernel, txn_server }
     }
 
-    pub fn get_txn(&self, token: Option<SignedToken>) -> TCResult<Txn<FE>>
+    pub fn get_txn(&self, token: Option<SignedToken>) -> TCResult<Txn<State, FE>>
     where
         FE: Send + Sync,
     {
@@ -61,15 +61,15 @@ impl<State, FE> Server<State, FE> {
 
 impl<State, FE> Server<State, FE>
 where
-    State: StateInstance<FE = FE, Txn = Txn<FE>>,
+    State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
     FE: ThreadSafe + Clone,
 {
     pub fn authorize_claim_and_route<'a>(
         &'a self,
         request_type: RequestType,
         path: &'a [PathSegment],
-        txn: Txn<FE>,
-    ) -> TCResult<(Txn<FE>, Box<dyn Handler<'a, State> + 'a>)> {
+        txn: Txn<State, FE>,
+    ) -> TCResult<(Txn<State, FE>, Box<dyn Handler<'a, State> + 'a>)> {
         self.kernel
             .authorize_claim_and_route(request_type.into(), path, txn)
     }

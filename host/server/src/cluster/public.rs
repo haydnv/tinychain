@@ -14,10 +14,10 @@ struct ClusterHandler<'a, T> {
 
 impl<'a, FE, State, T> Handler<'a, State> for ClusterHandler<'a, T>
 where
-    State: StateInstance<FE = FE, Txn = Txn<FE>>,
+    State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
     T: Send + Sync,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn<FE>, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn<State, FE>, State>>
     where
         'b: 'a,
     {
@@ -64,7 +64,7 @@ impl<'a, State, T> ReplicaHandler<'a, State, T> {
 impl<'a, FE, State, T> Handler<'a, State> for ReplicaHandler<'a, State, T>
 where
     FE: ThreadSafe + Clone,
-    State: StateInstance<FE = FE, Txn = Txn<FE>>,
+    State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
     T: Send + Sync,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
@@ -147,7 +147,7 @@ where
 impl<FE, State, T> Route<State> for Cluster<T>
 where
     FE: ThreadSafe + Clone,
-    State: StateInstance<FE = FE, Txn = Txn<FE>>,
+    State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
     T: Route<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {

@@ -1,3 +1,4 @@
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -16,7 +17,6 @@ use tc_value::{Link, ToUrl, Value};
 use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf, ThreadSafe};
 
 use crate::claim::Claim;
-use crate::gateway::Gateway;
 use crate::{Actor, SignedToken};
 
 pub use hypothetical::Hypothetical;
@@ -80,47 +80,46 @@ impl<FE> From<DirLock<FE>> for LazyDir<FE> {
     }
 }
 
-pub struct Txn<FE> {
+pub struct Txn<State, FE> {
     id: TxnId,
     expires: NetworkTime,
     workspace: LazyDir<FE>,
-    gateway: Arc<Gateway>,
     token: Option<Arc<SignedToken>>,
+    state: PhantomData<State>,
 }
 
-impl<FE> Clone for Txn<FE> {
+impl<State, FE> Clone for Txn<State, FE> {
     fn clone(&self) -> Self {
         Self {
             id: self.id,
             expires: self.expires,
             workspace: self.workspace.clone(),
-            gateway: self.gateway.clone(),
             token: self.token.clone(),
+            state: PhantomData,
         }
     }
 }
 
-impl<FE> Txn<FE> {
+impl<State, FE> Txn<State, FE> {
     pub(super) fn new(
         id: TxnId,
         expires: NetworkTime,
         workspace: LazyDir<FE>,
-        gateway: Arc<Gateway>,
         token: Option<SignedToken>,
     ) -> Self {
         Self {
             id,
             expires,
             workspace,
-            gateway,
             token: token.map(Arc::new),
+            state: PhantomData,
         }
     }
 
     /// Grant `mode` permissions on the resource at `path` to the bearer of this [`Txn`]'s token.
     /// `path` is relative to the cluster at `link` whose `actor` will sign the token.
     pub fn grant(&self, actor: &Actor, link: Link, path: TCPathBuf, mode: Mode) -> TCResult<Self> {
-        let now = self.gateway.now();
+        let now = NetworkTime::now();
         let claim = Claim::new(path, mode);
 
         let token = if let Some(token) = &self.token {
@@ -135,8 +134,8 @@ impl<FE> Txn<FE> {
             id: self.id,
             expires: self.expires,
             workspace: self.workspace.clone(),
-            gateway: self.gateway.clone(),
             token: Some(Arc::new(token)),
+            state: self.state,
         })
     }
 
@@ -159,7 +158,11 @@ impl<FE> Txn<FE> {
 }
 
 #[async_trait]
-impl<FE: ThreadSafe + Clone> Transaction<FE> for Txn<FE> {
+impl<State, FE> Transaction<FE> for Txn<State, FE>
+where
+    State: ThreadSafe,
+    FE: ThreadSafe + Clone,
+{
     #[inline]
     fn id(&self) -> &TxnId {
         &self.id
@@ -174,8 +177,8 @@ impl<FE: ThreadSafe + Clone> Transaction<FE> for Txn<FE> {
             id: self.id,
             expires: self.expires,
             workspace: self.workspace.clone().create_dir(id.into()),
-            gateway: self.gateway.clone(),
             token: self.token.clone(),
+            state: self.state,
         }
     }
 
@@ -184,17 +187,17 @@ impl<FE: ThreadSafe + Clone> Transaction<FE> for Txn<FE> {
             id: self.id,
             expires: self.expires,
             workspace: self.workspace.clone().create_dir_unique(),
-            gateway: self.gateway.clone(),
             token: self.token.clone(),
+            state: self.state,
         }
     }
 }
 
 #[async_trait]
-impl<FE, State> RPCClient<State> for Txn<FE>
+impl<State, FE> RPCClient<State> for Txn<State, FE>
 where
-    FE: ThreadSafe + Clone,
     State: StateInstance<FE = FE, Txn = Self>,
+    FE: ThreadSafe + Clone,
 {
     async fn get<'a, L, V>(&'a self, link: L, key: V) -> TCResult<State>
     where

@@ -8,12 +8,12 @@ use freqfs::{DirLock, FileSave};
 use log::debug;
 use tokio::sync::mpsc;
 
-use crate::gateway::Gateway;
 use tc_transact::TxnId;
 use tcgeneric::NetworkTime;
 
 use crate::kernel::Kernel;
-use crate::txn::{LazyDir, Txn};
+
+use super::{LazyDir, Txn};
 
 // allow an end-user's request to time out gracefully before garbage collection
 const GRACE: Duration = Duration::from_secs(1);
@@ -61,7 +61,6 @@ impl PartialOrd for Active {
 /// Server to keep track of the transactions currently active for this host.
 pub struct TxnServer<FE> {
     workspace: DirLock<FE>,
-    gateway: Arc<Gateway>,
     active: Arc<RwLock<OrdHashSet<Active>>>,
     tx: mpsc::UnboundedSender<Active>,
     ttl: Duration,
@@ -71,7 +70,6 @@ impl<FE> Clone for TxnServer<FE> {
     fn clone(&self) -> Self {
         Self {
             workspace: self.workspace.clone(),
-            gateway: self.gateway.clone(),
             active: self.active.clone(),
             tx: self.tx.clone(),
             ttl: self.ttl,
@@ -80,7 +78,7 @@ impl<FE> Clone for TxnServer<FE> {
 }
 
 impl<FE: for<'a> FileSave<'a>> TxnServer<FE> {
-    pub fn create(workspace: DirLock<FE>, gateway: Arc<Gateway>, ttl: Duration) -> Self {
+    pub fn create(workspace: DirLock<FE>, ttl: Duration) -> Self {
         let active = Arc::new(RwLock::new(OrdHashSet::new()));
 
         let (tx, rx) = mpsc::unbounded_channel();
@@ -88,13 +86,14 @@ impl<FE: for<'a> FileSave<'a>> TxnServer<FE> {
 
         Self {
             workspace,
-            gateway,
             active,
             tx,
             ttl,
         }
     }
+}
 
+impl<FE: for<'a> FileSave<'a>> TxnServer<FE> {
     pub(crate) async fn finalize<State>(&self, kernel: &Kernel<State, FE>, now: NetworkTime) {
         let expired = {
             let mut active = self.active.write().expect("active transactions");
@@ -132,18 +131,20 @@ impl<FE: for<'a> FileSave<'a>> TxnServer<FE> {
     }
 }
 
-impl<FE: Send + Sync> TxnServer<FE> {
-    pub fn new_txn(&self, now: NetworkTime) -> Txn<FE> {
+impl<FE> TxnServer<FE>
+where
+    FE: Send + Sync,
+{
+    pub fn new_txn<State>(&self, now: NetworkTime) -> Txn<State, FE> {
         let txn_id = TxnId::new(now);
         let expiry = txn_id.time() + self.ttl;
         let workspace = LazyDir::from(self.workspace.clone()).create_dir(txn_id.to_id());
-        let gateway = self.gateway.clone();
 
         self.tx
             .send(Active::new(txn_id, expiry))
             .expect("active txn");
 
-        Txn::new(txn_id, expiry, workspace, gateway, None)
+        Txn::new(txn_id, expiry, workspace, None)
     }
 }
 

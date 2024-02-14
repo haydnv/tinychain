@@ -66,7 +66,7 @@ impl<T> Cluster<T> {
         self.actor.public_key()
     }
 
-    pub fn authorization<FE>(&self, path: &[PathSegment], txn: &Txn<FE>) -> Mode {
+    pub fn authorization<State, FE>(&self, path: &[PathSegment], txn: &Txn<State, FE>) -> Mode {
         assert!(path.is_empty(), "TODO: cluster subject umask");
 
         let mut mode = CLUSTER_MODE;
@@ -162,12 +162,13 @@ where
 }
 
 #[async_trait]
-impl<FE, T> fs::Persist<FE> for Cluster<T>
+impl<State, FE, T> fs::Persist<FE> for Cluster<T>
 where
+    State: ThreadSafe,
     FE: ThreadSafe + Clone,
-    T: fs::Persist<FE, Schema = (), Txn = Txn<FE>>,
+    T: fs::Persist<FE, Schema = (), Txn = Txn<State, FE>>,
 {
-    type Txn = Txn<FE>;
+    type Txn = Txn<State, FE>;
     type Schema = Schema;
 
     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {

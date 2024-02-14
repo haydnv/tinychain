@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use aes_gcm_siv::{Aes256GcmSiv, Key};
@@ -13,14 +12,14 @@ use mdns_sd::{ServiceDaemon, ServiceEvent};
 use rjwt::VerifyingKey;
 
 use tc_transact::fs;
+use tc_transact::public::StateInstance;
 use tc_transact::Transaction;
 use tc_value::Link;
 use tcgeneric::{NetworkTime, ThreadSafe};
 
-use crate::gateway::Gateway;
 use crate::kernel::Kernel;
 use crate::server::Server;
-use crate::txn::TxnServer;
+use crate::txn::{Txn, TxnServer};
 use crate::{DEFAULT_TTL, SERVICE_TYPE};
 
 pub type Aes256Key = Key<Aes256GcmSiv>;
@@ -72,7 +71,7 @@ impl<FE> ServerBuilder<FE> {
 
     pub async fn build<State>(mut self) -> Server<State, FE>
     where
-        State: ThreadSafe,
+        State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
         FE: ThreadSafe + Clone + for<'a> FileSave<'a>,
     {
         if self.secure {
@@ -83,9 +82,8 @@ impl<FE> ServerBuilder<FE> {
             }
         }
 
-        let gateway = Arc::new(Gateway::new());
-        let txn_server = TxnServer::create(self.workspace, gateway, self.request_ttl);
-        let txn = txn_server.new_txn(NetworkTime::now());
+        let txn_server = TxnServer::create(self.workspace, self.request_ttl);
+        let txn: Txn<State, FE> = txn_server.new_txn(NetworkTime::now());
         let txn_id = *txn.id();
 
         let data_dir = fs::Dir::load(txn_id, self.data_dir)
