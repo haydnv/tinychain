@@ -8,11 +8,18 @@ use crate::txn::Txn;
 
 use super::Cluster;
 
-struct ClusterHandler<'a, T> {
+struct ClusterHandler<'a, State, T> {
     cluster: &'a Cluster<T>,
+    handler: Option<Box<dyn Handler<'a, State> + 'a>>,
 }
 
-impl<'a, FE, State, T> Handler<'a, State> for ClusterHandler<'a, T>
+impl<'a, State, T> ClusterHandler<'a, State, T> {
+    fn new(cluster: &'a Cluster<T>, handler: Option<Box<dyn Handler<'a, State> + 'a>>) -> Self {
+        Self { cluster, handler }
+    }
+}
+
+impl<'a, FE, State, T> Handler<'a, State> for ClusterHandler<'a, State, T>
 where
     State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
     T: Send + Sync,
@@ -33,11 +40,12 @@ where
             })
         }))
     }
-}
 
-impl<'a, T> From<&'a Cluster<T>> for ClusterHandler<'a, T> {
-    fn from(cluster: &'a Cluster<T>) -> Self {
-        Self { cluster }
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
+    where
+        'b: 'a,
+    {
+        self.handler.and_then(|handler| handler.post())
     }
 }
 
@@ -151,9 +159,11 @@ where
     T: Route<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
+        let subject_handler = self.subject().route(path);
+
         if path.is_empty() {
-            Some(Box::new(ClusterHandler::from(self)))
-        } else if let Some(handler) = self.subject().route(path) {
+            Some(Box::new(ClusterHandler::new(self, subject_handler)))
+        } else if let Some(handler) = subject_handler {
             Some(Box::new(ReplicaHandler::new(self, path, handler)))
         } else {
             None

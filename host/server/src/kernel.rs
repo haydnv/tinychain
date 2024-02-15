@@ -5,6 +5,7 @@ use log::debug;
 use umask::Mode;
 
 use tc_error::*;
+use tc_scalar::{OpRefType, Refer, Scalar};
 use tc_transact::public::{Handler, PostFuture, Route, StateInstance};
 use tc_transact::{fs, Transact, Transaction, TxnId};
 use tc_value::Link;
@@ -25,14 +26,18 @@ impl<'a, State> Endpoint<'a, State> {
         self.mode
     }
 
-    fn post<FE>(self, txn: &'a Txn<State, FE>, params: Map<State>) -> TCResult<PostFuture<State>>
+    pub fn post<FE>(
+        self,
+        txn: &'a Txn<State, FE>,
+        params: Map<State>,
+    ) -> TCResult<PostFuture<State>>
     where
         State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
     {
         let post = self
             .handler
             .post()
-            .ok_or_else(|| TCError::method_not_allowed("POST", TCPath::from(self.path)))?;
+            .ok_or_else(|| TCError::method_not_allowed(OpRefType::Post, TCPath::from(self.path)))?;
 
         if self.mode.may_execute() {
             Ok((post)(txn, params))
@@ -55,7 +60,8 @@ impl<State, FE> Kernel<State, FE> {
     ) -> TCResult<(Txn<State, FE>, Endpoint<'a, State>)>
     where
         FE: ThreadSafe + Clone,
-        State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
+        State: StateInstance<FE = FE, Txn = Txn<State, FE>> + Refer<State> + From<Scalar>,
+        Scalar: TryFrom<State, Error = TCError>,
     {
         if path.is_empty() {
             Err(unauthorized!("access to /"))
@@ -117,9 +123,10 @@ fn auth_claim_route<'a, State, FE, T>(
     txn: Txn<State, FE>,
 ) -> TCResult<(Txn<State, FE>, Endpoint<'a, State>)>
 where
-    State: StateInstance,
+    State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
     FE: ThreadSafe + Clone,
     Cluster<T>: Route<State>,
+    Scalar: TryFrom<State, Error = TCError>,
 {
     let keyring = cluster.keyring(*txn.id())?;
     let resource_mode = cluster.umask(path);

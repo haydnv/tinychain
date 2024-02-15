@@ -1,15 +1,44 @@
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use destream::en;
-use tc_error::{not_implemented, TCResult};
+use safecast::{TryCastFrom, TryCastInto};
 
-use tc_value::{Number, ToUrl, Value};
-
+use tc_error::*;
+use tc_scalar::{OpDef, Refer, Scalar, Scope};
 use tc_server::{RPCClient, Txn};
-use tc_transact::public::{ClosureInstance, Handler, Route, StateInstance};
-use tcgeneric::{path_label, Class, Instance, Map, NativeClass, PathSegment, TCPathBuf, Tuple};
+use tc_transact::public::{ClosureInstance, Handler, Public, Route, StateInstance, ToState};
+use tc_value::{Number, ToUrl, Value};
+use tcgeneric::{path_label, Class, Id, Instance, Map, NativeClass, PathSegment, TCPathBuf, Tuple};
 
-#[derive(Clone, Debug, Default)]
-pub struct Closure {}
+#[derive(Clone, Debug)]
+pub struct Closure {
+    scope: Map<State>,
+    op: OpDef,
+}
+
+impl From<(Map<State>, OpDef)> for Closure {
+    fn from(closure: (Map<State>, OpDef)) -> Self {
+        let (scope, op) = closure;
+        Self { scope, op }
+    }
+}
+
+impl TryCastFrom<State> for Closure {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Closure(_) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Closure(closure) => Some(closure),
+            _ => None,
+        }
+    }
+}
 
 #[async_trait]
 impl ClosureInstance<State> for Closure {
@@ -44,12 +73,12 @@ pub enum State {
     Closure(Closure),
     Map(Map<State>),
     Tuple(Tuple<State>),
-    Value(Value),
+    Scalar(Scalar),
 }
 
 impl Default for State {
     fn default() -> Self {
-        Self::Value(Value::default())
+        Self::Scalar(Scalar::default())
     }
 }
 
@@ -81,6 +110,154 @@ impl StateInstance for State {
     }
 }
 
+#[async_trait]
+impl Refer<State> for State {
+    fn dereference_self(self, path: &TCPathBuf) -> Self {
+        todo!()
+    }
+
+    fn is_conditional(&self) -> bool {
+        todo!()
+    }
+
+    fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
+        todo!()
+    }
+
+    fn is_ref(&self) -> bool {
+        match self {
+            Self::Closure(_) => true,
+            Self::Map(map) => map.values().any(Self::is_ref),
+            Self::Scalar(scalar) => Refer::<State>::is_ref(scalar),
+            Self::Tuple(tuple) => tuple.into_iter().any(Self::is_ref),
+        }
+    }
+
+    fn reference_self(self, path: &TCPathBuf) -> Self {
+        todo!()
+    }
+
+    fn requires(&self, deps: &mut HashSet<Id>) {
+        todo!()
+    }
+
+    async fn resolve<'a, T>(
+        self,
+        scope: &'a Scope<'a, State, T>,
+        txn: &'a Txn<State, CacheBlock>,
+    ) -> TCResult<State>
+    where
+        T: ToState<State> + Public<State> + Instance,
+    {
+        match self {
+            Self::Map(map) => {
+                let mut resolved = Map::new();
+                for (id, state) in map {
+                    resolved.insert(id, state.resolve(scope, txn).await?);
+                }
+                Ok(resolved.into())
+            }
+            Self::Scalar(scalar) => scalar.resolve(scope, txn).await,
+            Self::Tuple(tuple) => {
+                let mut resolved = Tuple::with_capacity(tuple.len());
+                for state in tuple {
+                    resolved.push(state.resolve(scope, txn).await?);
+                }
+                Ok(resolved.into())
+            }
+            other => Ok(other),
+        }
+    }
+}
+
+impl PartialEq<Scalar> for State {
+    fn eq(&self, other: &Scalar) -> bool {
+        match self {
+            Self::Scalar(scalar) => scalar.eq(other),
+            _ => false,
+        }
+    }
+}
+
+impl TryFrom<State> for Map<State> {
+    type Error = TCError;
+
+    fn try_from(state: State) -> Result<Self, Self::Error> {
+        match state {
+            State::Map(map) => Ok(map),
+            other => Err(TCError::unexpected(other, "a Map")),
+        }
+    }
+}
+
+impl TryFrom<State> for Scalar {
+    type Error = TCError;
+
+    fn try_from(state: State) -> Result<Self, Self::Error> {
+        match state {
+            State::Scalar(scalar) => Ok(scalar),
+            State::Tuple(tuple) => tuple
+                .into_iter()
+                .map(Scalar::try_from)
+                .collect::<TCResult<_>>()
+                .map(Scalar::Tuple),
+
+            other => Err(TCError::unexpected(other, "a Scalar")),
+        }
+    }
+}
+
+impl TryFrom<State> for Value {
+    type Error = TCError;
+
+    fn try_from(state: State) -> Result<Self, Self::Error> {
+        state
+            .opt_cast_into()
+            .ok_or_else(|| bad_request!("not a Value"))
+    }
+}
+
+impl TryCastFrom<State> for Value {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            State::Tuple(tuple) => tuple.into_iter().all(Self::can_cast_from),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Scalar(scalar) => scalar.opt_cast_into(),
+            State::Tuple(tuple) => {
+                let tuple = tuple
+                    .into_iter()
+                    .map(Self::opt_cast_from)
+                    .collect::<Option<_>>()?;
+
+                Some(Value::Tuple(tuple))
+            }
+            _ => None,
+        }
+    }
+}
+
+impl TryCastFrom<State> for bool {
+    fn can_cast_from(state: &State) -> bool {
+        match state {
+            State::Scalar(scalar) => Self::can_cast_from(scalar),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State) -> Option<Self> {
+        match state {
+            State::Scalar(scalar) => Self::opt_cast_from(scalar),
+            _ => None,
+        }
+    }
+}
+
 impl Route<Self> for State {
     fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, Self> + 'a>> {
         None
@@ -89,7 +266,7 @@ impl Route<Self> for State {
 
 impl From<bool> for State {
     fn from(value: bool) -> Self {
-        Self::Value(value.into())
+        Self::Scalar(value.into())
     }
 }
 
@@ -101,7 +278,7 @@ impl From<Closure> for State {
 
 impl From<Number> for State {
     fn from(n: Number) -> Self {
-        Self::Value(n.into())
+        Self::Scalar(n.into())
     }
 }
 
@@ -117,15 +294,21 @@ impl From<Tuple<State>> for State {
     }
 }
 
+impl From<Scalar> for State {
+    fn from(scalar: Scalar) -> Self {
+        Self::Scalar(scalar)
+    }
+}
+
 impl From<Value> for State {
     fn from(value: Value) -> Self {
-        Self::Value(value)
+        Self::Scalar(value.into())
     }
 }
 
 impl From<StateType> for State {
     fn from(class: StateType) -> Self {
-        Self::Value(class.path().into())
+        Self::Scalar(Value::Link(class.path().into()).into())
     }
 }
 

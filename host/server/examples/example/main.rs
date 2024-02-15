@@ -35,11 +35,11 @@ use freqfs::Cache;
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use rjwt::Actor;
 
-use tc_value::{Link, Value};
-
+use tc_scalar::{OpDef, Scalar};
 use tc_server::aes256::{Aes256GcmSiv, Key, KeyInit, OsRng};
 use tc_server::{Authorize, Server, ServerBuilder, SERVICE_TYPE};
-use tcgeneric::{path_label, PathLabel, TCPathBuf};
+use tc_value::{Link, Value};
+use tcgeneric::{label, path_label, Id, PathLabel, TCPathBuf};
 
 use crate::mock::{CacheBlock, Client, State};
 
@@ -127,6 +127,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "insufficient permissions: {}",
         endpoint.umask()
     );
+
+    let hello_world = Scalar::Value("Hello, World!".to_string().into());
+
+    let op_def = [(Id::from(label("_return")), hello_world.clone())]
+        .into_iter()
+        .collect();
+
+    let params = [(
+        label("op").into(),
+        State::Scalar(OpDef::Post(op_def).into()),
+    )]
+    .into_iter()
+    .collect();
+
+    let response = endpoint.post(&txn, params)?.await?;
+
+    assert_eq!(response, hello_world);
 
     Ok(())
 }

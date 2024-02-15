@@ -3,7 +3,8 @@ use std::sync::Arc;
 use freqfs::FileSave;
 use tokio::time::{Duration, MissedTickBehavior};
 
-use tc_error::TCResult;
+use tc_error::{TCError, TCResult};
+use tc_scalar::{Refer, Scalar};
 use tc_transact::public::StateInstance;
 use tcgeneric::{NetworkTime, PathSegment, ThreadSafe};
 
@@ -43,8 +44,9 @@ impl<State, FE> Server<State, FE> {
 
 impl<State, FE> Server<State, FE>
 where
-    State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
+    State: StateInstance<FE = FE, Txn = Txn<State, FE>> + Refer<State> + From<Scalar>,
     FE: ThreadSafe + Clone,
+    Scalar: TryFrom<State, Error = TCError>,
 {
     pub fn authorize_claim_and_route<'a>(
         &'a self,
