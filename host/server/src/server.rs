@@ -5,12 +5,12 @@ use tokio::time::{Duration, MissedTickBehavior};
 use umask::Mode;
 
 use tc_error::TCResult;
-use tc_transact::public::{Handler, StateInstance};
+use tc_transact::public::StateInstance;
 use tcgeneric::{NetworkTime, PathSegment, ThreadSafe};
 
 use crate::kernel::Kernel;
 use crate::txn::{Txn, TxnServer};
-use crate::SignedToken;
+use crate::{Endpoint, SignedToken};
 
 const GC_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -66,12 +66,10 @@ where
 {
     pub fn authorize_claim_and_route<'a>(
         &'a self,
-        request_type: RequestType,
         path: &'a [PathSegment],
         txn: Txn<State, FE>,
-    ) -> TCResult<(Txn<State, FE>, Box<dyn Handler<'a, State> + 'a>)> {
-        self.kernel
-            .authorize_claim_and_route(request_type.into(), path, txn)
+    ) -> TCResult<(Txn<State, FE>, Endpoint<'a, State>)> {
+        self.kernel.authorize_claim_and_route(path, txn)
     }
 }
 

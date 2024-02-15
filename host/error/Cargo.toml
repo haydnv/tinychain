@@ -19,4 +19,4 @@ pathlink = "0.2"
 rjwt = { path = "../../../rjwt/rust" }
 serde = "1.0"
 txfs = "0.3"
-txn_lock = "0.9"
+txn_lock = { path = "../../../txn_lock" }

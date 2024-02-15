@@ -1,15 +1,19 @@
 //! State replication management
 
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use rjwt::VerifyingKey;
+use umask::Mode;
 
-use tc_value::{Link, ToUrl, Value};
+use tc_value::{Host, Link, ToUrl, Value};
 
-use tc_error::TCResult;
+use tc_error::*;
 use tcgeneric::Map;
 
 pub use builder::ServerBuilder;
+pub use kernel::Endpoint;
 pub use server::Server;
 pub use txn::Txn;
 
@@ -32,6 +36,54 @@ pub const SERVICE_TYPE: &'static str = "_tinychain._tcp.local.";
 
 type Actor = rjwt::Actor<Value>;
 type SignedToken = rjwt::SignedToken<Link, Value, claim::Claim>;
+
+trait Authorize {
+    fn has_any<const N: usize>(&self, modes: [Mode; N]) -> bool;
+
+    fn is_none(self) -> bool;
+
+    fn may_read(self) -> bool;
+
+    fn may_write(self) -> bool;
+
+    fn may_execute(self) -> bool;
+}
+
+impl Authorize for Mode {
+    #[inline]
+    fn has_any<const N: usize>(&self, modes: [Mode; N]) -> bool {
+        for mode in modes {
+            if self.has(mode) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    #[inline]
+    fn is_none(self) -> bool {
+        self == Mode::new()
+    }
+
+    #[inline]
+    fn may_read(self) -> bool {
+        const ALLOW: [Mode; 3] = [umask::USER_READ, umask::GROUP_READ, umask::OTHERS_READ];
+        self.has_any(ALLOW)
+    }
+
+    #[inline]
+    fn may_write(self) -> bool {
+        const ALLOW: [Mode; 3] = [umask::USER_WRITE, umask::GROUP_WRITE, umask::OTHERS_WRITE];
+        self.has_any(ALLOW)
+    }
+
+    #[inline]
+    fn may_execute(self) -> bool {
+        const ALLOW: [Mode; 3] = [umask::USER_EXEC, umask::GROUP_EXEC, umask::OTHERS_EXEC];
+        self.has_any(ALLOW)
+    }
+}
 
 #[async_trait]
 pub trait RPCClient<State> {

@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use umask::Mode;
 use uuid::Uuid;
 
 use tc_error::*;
+use tc_transact::lock::TxnSetLockIter;
 use tc_transact::public::StateInstance;
 use tc_transact::{Gateway, Transaction, TxnId};
 use tc_value::{Link, ToUrl, Value};
@@ -139,8 +141,16 @@ impl<State, FE> Txn<State, FE> {
         })
     }
 
-    pub fn mode(&self, actor: &Link, resource: &Link) -> Option<Mode> {
-        todo!("Txn::mode")
+    /// Get the set of permissions authorized by hosts in the [`Keyring`] for the given `resource`.
+    pub fn mode<K>(&self, keyring: TxnSetLockIter<K>, resource: &[PathSegment]) -> Mode
+    where
+        K: Deref<Target = Actor>,
+    {
+        let mut mode = umask::Mode::new().with_class_perm(umask::OTHERS, umask::ALL);
+
+        // TODO: add user & group permissions
+
+        mode
     }
 
     pub fn claim(self, public_key: &VerifyingKey, path: &[PathSegment]) -> Self {

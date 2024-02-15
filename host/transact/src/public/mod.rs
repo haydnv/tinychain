@@ -153,7 +153,6 @@ impl<State: StateInstance, T: Route<State> + fmt::Debug> Public<State> for T {
         } else {
             Err(TCError::method_not_allowed(
                 HandlerType::Get,
-                self,
                 TCPath::from(path),
             ))
         }
@@ -175,7 +174,6 @@ impl<State: StateInstance, T: Route<State> + fmt::Debug> Public<State> for T {
         } else {
             Err(TCError::method_not_allowed(
                 HandlerType::Put,
-                self,
                 TCPath::from(path),
             ))
         }
@@ -196,7 +194,6 @@ impl<State: StateInstance, T: Route<State> + fmt::Debug> Public<State> for T {
         } else {
             Err(TCError::method_not_allowed(
                 HandlerType::Post,
-                self,
                 TCPath::from(path),
             ))
         }
@@ -212,7 +209,6 @@ impl<State: StateInstance, T: Route<State> + fmt::Debug> Public<State> for T {
         } else {
             Err(TCError::method_not_allowed(
                 HandlerType::Delete,
-                self,
                 TCPath::from(path),
             ))
         }

@@ -10,7 +10,7 @@ use tc_chain::{ChainBlock, ChainView};
 use tc_collection::{BTreeNode, CollectionView, DenseCacheFile, TensorNode};
 use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
-use tc_transact::{fs, IntoView, Gateway, Transaction};
+use tc_transact::{fs, Gateway, IntoView, Transaction};
 use tcgeneric::{Id, NativeClass};
 
 use super::object::ObjectView;

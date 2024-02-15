@@ -48,8 +48,11 @@ pub mod lock {
     /// A transactional read-write lock on a set of values
     pub type TxnSetLock<T> = txn_lock::set::TxnSetLock<TxnId, T>;
 
+    /// A read guard on a version of a set of values
+    pub type TxnSetLockIter<T> = txn_lock::set::Iter<T>;
+
     /// A read guard on a committed transactional version of a set
-    pub type TxnSetLockVersionGuard<T> = HashSet<T>;
+    pub type TxnSetLockVersion<T> = HashSet<T>;
 
     /// A transactional task queue.
     pub type TxnTaskQueue<I, O> = txn_lock::queue::task::TaskQueue<TxnId, I, O>;

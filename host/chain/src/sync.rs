@@ -21,7 +21,7 @@ use tc_scalar::Scalar;
 use tc_transact::fs;
 use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Route, StateInstance};
-use tc_transact::{AsyncHash, IntoView, Gateway, Transact, Transaction, TxnId};
+use tc_transact::{AsyncHash, Gateway, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Label};
 

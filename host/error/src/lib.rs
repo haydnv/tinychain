@@ -186,15 +186,8 @@ impl TCError {
     }
 
     /// Error to indicate that the requested resource exists but does not support the request method
-    pub fn method_not_allowed<M: fmt::Debug, S: fmt::Debug, P: fmt::Display>(
-        method: M,
-        subject: S,
-        path: P,
-    ) -> Self {
-        let message = format!(
-            "{:?} endpoint {} does not support {:?}",
-            subject, path, method
-        );
+    pub fn method_not_allowed<M: fmt::Debug, P: fmt::Display>(method: M, path: P) -> Self {
+        let message = format!("endpoint {} does not support {:?}", path, method);
 
         Self::new(ErrorKind::MethodNotAllowed, message)
     }

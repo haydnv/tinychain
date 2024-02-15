@@ -1,4 +1,7 @@
+use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
+use std::ops::Deref;
 
 use async_trait::async_trait;
 use futures::future::{Future, TryFutureExt};
@@ -9,7 +12,7 @@ use umask::Mode;
 
 use tc_error::*;
 use tc_transact::fs;
-use tc_transact::lock::TxnLock;
+use tc_transact::lock::{TxnLock, TxnSetLock, TxnSetLockIter};
 use tc_transact::{Transact, TxnId};
 use tc_value::{Host, Link};
 use tcgeneric::{PathSegment, TCPathBuf, ThreadSafe};
@@ -23,6 +26,46 @@ pub const CLUSTER_MODE: Mode = Mode::new()
     .with_class_perm(umask::OTHERS, umask::READ);
 
 mod public;
+
+#[derive(Debug)]
+pub(crate) struct Key(Actor);
+
+impl Deref for Key {
+    type Target = Actor;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Eq for Key {}
+
+impl PartialEq for Key {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.id() == other.0.id()
+    }
+}
+
+impl Hash for Key {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.id().hash(state)
+    }
+}
+
+impl Ord for Key {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0
+            .public_key()
+            .as_bytes()
+            .cmp(other.0.public_key().as_bytes())
+    }
+}
+
+impl PartialOrd for Key {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 #[derive(Clone)]
 pub struct Schema {
@@ -45,15 +88,20 @@ pub struct Cluster<T> {
     actor: Actor,
     schema: Schema,
     subject: T,
+    keyring: TxnSetLock<Key>,
     replicas: TxnLock<HashSet<Host>>,
 }
 
 impl<T> Cluster<T> {
-    pub fn new(schema: Schema, subject: T) -> Self {
+    pub fn new(schema: Schema, subject: T, txn_id: TxnId) -> Self {
+        let actor = Actor::new(TCPathBuf::default().into());
+        let keyring = [Key(actor.clone())];
+
         Self {
-            actor: Actor::new(TCPathBuf::default().into()),
+            actor,
             schema,
             subject,
+            keyring: TxnSetLock::new(txn_id, keyring),
             replicas: TxnLock::new(HashSet::new()),
         }
     }
@@ -66,24 +114,13 @@ impl<T> Cluster<T> {
         self.actor.public_key()
     }
 
-    pub fn authorization<State, FE>(&self, path: &[PathSegment], txn: &Txn<State, FE>) -> Mode {
+    pub fn authorization(&self, path: &[PathSegment]) -> Mode {
         assert!(path.is_empty(), "TODO: cluster subject umask");
+        CLUSTER_MODE
+    }
 
-        let mut mode = CLUSTER_MODE;
-
-        if let Some(actor) = &self.schema.owner {
-            if let Some(grant) = txn.mode(actor, &self.schema.lead) {
-                mode &= grant;
-            }
-        }
-
-        if let Some(actor) = &self.schema.group {
-            if let Some(grant) = txn.mode(actor, &self.schema.lead) {
-                mode &= grant;
-            }
-        }
-
-        mode
+    pub fn keyring(&self, txn_id: TxnId) -> TCResult<TxnSetLockIter<Key>> {
+        self.keyring.try_iter(txn_id).map_err(TCError::from)
     }
 
     pub(crate) fn subject(&self) -> &T {
@@ -173,13 +210,13 @@ where
 
     async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
         <T as fs::Persist<FE>>::create(txn_id, (), store)
-            .map_ok(|subject| Self::new(schema, subject))
+            .map_ok(|subject| Self::new(schema, subject, txn_id))
             .await
     }
 
     async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
         <T as fs::Persist<FE>>::load(txn_id, (), store)
-            .map_ok(|subject| Self::new(schema, subject))
+            .map_ok(|subject| Self::new(schema, subject, txn_id))
             .await
     }
 

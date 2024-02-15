@@ -19,7 +19,7 @@ use tc_error::*;
 use tc_scalar::{Executor, OpDef, OpDefType, OpRef, Scalar, SELF};
 use tc_transact::fs::FileSave;
 use tc_transact::public::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler};
-use tc_transact::{fs, AsyncHash, IntoView, Gateway, Transaction, TxnId};
+use tc_transact::{fs, AsyncHash, Gateway, IntoView, Transaction, TxnId};
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf};
 
 use super::view::StateView;

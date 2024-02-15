@@ -12,7 +12,7 @@ use tc_collection::{BTreeNode, DenseCacheFile, TensorNode};
 
 use tc_error::*;
 use tc_scalar::Scalar;
-use tc_transact::{fs, AsyncHash, IntoView, Gateway, Transaction, TxnId};
+use tc_transact::{fs, AsyncHash, Gateway, IntoView, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, path_label, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
