@@ -18,7 +18,7 @@ use tc_transact::public::helpers::{AttributeHandler, SelfHandlerOwned};
 use tc_transact::public::{GetHandler, Handler, PostHandler, PutHandler, Route, StateInstance};
 use tc_transact::{Transaction, TxnId};
 use tc_value::{FloatType, Number, NumberClass, NumberInstance, NumberType, Value, ValueType};
-use tcgeneric::{label, Id, Label, PathSegment, TCBoxTryFuture, ThreadSafe, Tuple};
+use tcgeneric::{PathSegment, TCBoxTryFuture, ThreadSafe, Tuple};
 
 use super::{
     broadcast, broadcast_shape, Axes, AxisRange, Coord, Dense, DenseBase, DenseCacheFile,
@@ -28,13 +28,6 @@ use super::{
     TensorRead, TensorReduce, TensorTransform, TensorTrig, TensorType, TensorUnary,
     TensorUnaryBoolean, TensorWrite, TensorWriteDual,
 };
-
-const AXES: Label = label("axes");
-const AXIS: Label = label("axis");
-const KEEPDIMS: Label = label("keepdims");
-const RIGHT: Label = label("r");
-const TENSOR: Label = label("tensor");
-const TENSORS: Label = label("tensors");
 
 const MEAN: f64 = 0.0;
 const STD: f64 = 0.0;
@@ -205,8 +198,8 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let tensors: Vec<Tensor<_, _>> = params.require(&TENSORS.into())?;
-                let axis: Value = params.or_default(&label("axis").into())?;
+                let tensors: Vec<Tensor<_, _>> = params.require("tensors")?;
+                let axis: Value = params.or_default("axis")?;
                 params.expect_empty()?;
 
                 if tensors.is_empty() {
@@ -280,7 +273,7 @@ where
             use fs::CopyFrom;
 
             Box::pin(async move {
-                let source: Tensor<_, _> = params.require(&TENSOR.into())?;
+                let source: Tensor<_, _> = params.require("tensor")?;
                 params.expect_empty()?;
 
                 source.shape().validate()?;
@@ -319,7 +312,7 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let schema: Value = params.require(&label("schema").into())?;
+                let schema: Value = params.require("schema")?;
                 let schema =
                     Schema::try_cast_from(schema, |v| TCError::unexpected(v, "a Tensor schema"))?;
 
@@ -346,7 +339,7 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let schema: Value = params.require(&label("schema").into())?;
+                let schema: Value = params.require("schema")?;
                 let schema: Schema =
                     schema.try_cast_into(|v| TCError::unexpected(v, "invalid Tensor schema"))?;
 
@@ -649,12 +642,12 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let shape: Value = params.require(&label("shape").into())?;
+                let shape: Value = params.require("shape")?;
                 let shape: Shape =
                     shape.try_cast_into(|v| TCError::unexpected(v, "a Tensor shape"))?;
 
-                let mean: Number = params.option(&label("mean").into(), || MEAN.into())?;
-                let std: Number = params.option(&label("std").into(), || STD.into())?;
+                let mean: Number = params.option("mean", || MEAN.into())?;
+                let std: Number = params.option("std", || STD.into())?;
                 params.expect_empty()?;
 
                 let store = create_dir(txn).await?;
@@ -873,8 +866,8 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let then: Tensor<_, _> = params.require(&label("then").into())?;
-                let or_else: Tensor<_, _> = params.require(&label("or_else").into())?;
+                let then: Tensor<_, _> = params.require("then")?;
+                let or_else: Tensor<_, _> = params.require("or_else")?;
                 params.expect_empty()?;
 
                 let shape = broadcast_shape(self.tensor.shape(), then.shape())?;
@@ -948,7 +941,7 @@ where
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
                 let l = self.tensor;
-                let r = params.remove::<Id>(&RIGHT.into()).ok_or_else(|| {
+                let r = params.remove("r").ok_or_else(|| {
                     TCError::unexpected(&params, "missing right-hand-side parameter r")
                 })?;
 
@@ -1028,7 +1021,7 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let r: State = params.or_default(&RIGHT.into())?;
+                let r: State = params.or_default("r")?;
                 params.expect_empty()?;
 
                 let l = self.tensor;
@@ -1074,7 +1067,7 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let right: Tensor<_, _> = params.require(&RIGHT.into())?;
+                let right: Tensor<_, _> = params.require("r")?;
                 params.expect_empty()?;
 
                 let ndim = Ord::max(self.tensor.ndim(), right.ndim());
@@ -1185,14 +1178,14 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let axis = if params.contains_key::<Id>(&AXIS.into()) {
-                    let axis = params.require(&AXIS.into())?;
+                let axis = if params.contains_key("axis") {
+                    let axis = params.require("axis")?;
                     cast_axis(axis, self.tensor.ndim()).map(Some)?
                 } else {
                     None
                 };
 
-                let keepdims = params.or_default(&KEEPDIMS.into())?;
+                let keepdims = params.or_default("keepdims")?;
 
                 params.expect_empty()?;
 
@@ -1303,14 +1296,14 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let axis = if params.contains_key::<Id>(&AXES.into()) {
-                    let axes = params.require(&AXES.into())?;
+                let axis = if params.contains_key("axes") {
+                    let axes = params.require("axes")?;
                     cast_axes(axes, self.tensor.ndim()).map(Some)?
                 } else {
                     None
                 };
 
-                let keepdims = params.or_default(&KEEPDIMS.into())?;
+                let keepdims = params.or_default("keepdims")?;
                 params.expect_empty()?;
 
                 self.call(*txn.id(), axis, keepdims).await

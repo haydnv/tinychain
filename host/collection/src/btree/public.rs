@@ -15,7 +15,7 @@ use tc_transact::public::{
 };
 use tc_transact::{fs, Transaction};
 use tc_value::Value;
-use tcgeneric::{label, Map, PathSegment, TCPath, Tuple};
+use tcgeneric::{Map, PathSegment, TCPath, Tuple};
 
 use crate::Collection;
 
@@ -52,11 +52,11 @@ where
     {
         Some(Box::new(|_txn, _params| {
             Box::pin(async move {
-                // let schema: Value = params.require(&label("schema").into())?;
+                // let schema: Value = params.require("schema")?;
                 // let schema = cast_into_schema(schema)?;
                 //
                 // let source: Collection<State::Txn, State::FE> =
-                //     params.require(&label("source").into())?;
+                //     params.require("source")?;
                 //
                 // params.expect_empty()?;
                 //
@@ -174,8 +174,8 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let reverse = params.or_default(&label("reverse").into())?;
-                let range = params.or_default(&label("range").into())?;
+                let reverse = params.or_default("reverse")?;
+                let range = params.or_default("range")?;
                 let range = cast_into_range(range)?;
                 let slice = self.btree.clone().slice(range, reverse)?;
                 Ok(Collection::BTree(slice.into()).into())

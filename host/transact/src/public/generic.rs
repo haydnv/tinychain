@@ -12,7 +12,7 @@ use safecast::*;
 
 use tc_error::*;
 use tc_value::{Number, UInt, Value};
-use tcgeneric::{label, path_label, Id, Instance, Map, PathLabel, PathSegment, TCPathBuf, Tuple};
+use tcgeneric::{path_label, Id, Instance, Map, PathLabel, PathSegment, TCPathBuf, Tuple};
 
 use super::helpers::AttributeHandler;
 use super::{ClosureInstance, GetHandler, Handler, PostHandler, Public, Route, StateInstance};
@@ -109,7 +109,7 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let op: State = params.require(&label("op").into())?;
+                let op: State = params.require("op")?;
                 params.expect_empty()?;
 
                 let mut for_each = stream::iter(self.source)
@@ -200,7 +200,7 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let other: Map<State> = params.require(&label("eq").into())?;
+                let other: Map<State> = params.require("eq")?;
                 params.expect_empty()?;
 
                 if self.map.len() != other.len() {
@@ -259,7 +259,7 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let other: Tuple<State> = params.require(&label("eq").into())?;
+                let other: Tuple<State> = params.require("eq")?;
                 params.expect_empty()?;
 
                 if self.tuple.len() != other.len() {
@@ -422,9 +422,9 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let item_name: Id = params.require(&label("item_name").into())?;
-                let op: State = params.require(&label("op").into())?;
-                let mut state: State = params.require(&label("value").into())?;
+                let item_name: Id = params.require("item_name")?;
+                let op: State = params.require("op")?;
+                let mut state: State = params.require("value")?;
                 params.expect_empty()?;
 
                 for item in self.tuple.iter().cloned() {
@@ -468,7 +468,7 @@ where
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let op: State = params.require(&label("op").into())?;
+                let op: State = params.require("op")?;
 
                 let mut tuple = Vec::with_capacity(self.len);
                 let mut mapped = stream::iter(self.items)
@@ -745,8 +745,8 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let l: Tuple<State> = params.require(&label("l").into())?;
-                let r: Tuple<State> = params.require(&label("r").into())?;
+                let l: Tuple<State> = params.require("l")?;
+                let r: Tuple<State> = params.require("r")?;
                 params.expect_empty()?;
 
                 let mut concat = l.into_inner();

@@ -5,7 +5,7 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_value::TCString;
-use tcgeneric::{label, Id, TCPath, Tuple};
+use tcgeneric::{Id, TCPath, Tuple};
 
 use super::{
     DeleteHandler, GetHandler, Handler, HandlerType, PostHandler, PutHandler, StateInstance,
@@ -61,8 +61,8 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let message: TCString = params.require(&label("message").into())?;
-                let stack: Tuple<TCString> = params.require(&label("stack").into())?;
+                let message: TCString = params.require("message")?;
+                let stack: Tuple<TCString> = params.require("stack")?;
                 params.expect_empty()?;
 
                 if let Some(err_type) = error_type(self.code) {

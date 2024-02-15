@@ -18,7 +18,7 @@ use tc_transact::public::{
 };
 use tc_transact::Transaction;
 use tc_value::{Value, ValueCollator};
-use tcgeneric::{label, Id, Map, PathSegment, ThreadSafe, Tuple};
+use tcgeneric::{Id, Map, PathSegment, ThreadSafe, Tuple};
 
 use crate::btree::{BTreeSchema, Node};
 use crate::table::TableUpdate;
@@ -57,10 +57,10 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let schema: Value = params.require(&label("schema").into())?;
+                let schema: Value = params.require("schema")?;
                 let _schema = TableSchema::try_cast_from_value(schema)?;
 
-                // let _source = params.require(&label("source").into())?;
+                // let _source = params.require("source")?;
                 // params.expect_empty()?;
                 //
                 // let _store = {
