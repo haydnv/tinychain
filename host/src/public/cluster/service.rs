@@ -8,7 +8,7 @@ use tc_state::object::public::method::route_attr;
 use tc_state::object::InstanceClass;
 use tc_transact::public::helpers::MethodNotAllowedHandler;
 use tc_transact::public::{Handler, Public, Route};
-use tc_transact::{RPCClient, Transaction};
+use tc_transact::{Gateway, Transaction};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{Id, Map, PathSegment, TCPath, TCPathBuf, Tuple};
 

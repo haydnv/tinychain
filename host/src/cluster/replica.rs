@@ -10,7 +10,7 @@ use tc_scalar::Scalar;
 use tc_state::object::InstanceClass;
 use tc_transact::fs::{Persist, Restore};
 use tc_transact::public::{Public, Route, ToState};
-use tc_transact::{RPCClient, Transact, Transaction, TxnId};
+use tc_transact::{Gateway, Transact, Transaction, TxnId};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{label, Label, Map};
 

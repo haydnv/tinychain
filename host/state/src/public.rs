@@ -10,7 +10,7 @@ use tc_collection::{BTreeNode, Collection, DenseCacheFile, TensorNode};
 use tc_error::*;
 use tc_transact::public::helpers::{AttributeHandler, EchoHandler, SelfHandler};
 use tc_transact::public::{GetHandler, Handler, PostHandler, Route};
-use tc_transact::{fs, AsyncHash, RPCClient, Transaction};
+use tc_transact::{fs, AsyncHash, Gateway, Transaction};
 use tc_value::{Link, Number, Value};
 use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, PathSegment, TCPath};
 
@@ -25,7 +25,7 @@ struct ClassHandler {
 
 impl<'a, Txn, FE> Handler<'a, State<Txn, FE>> for ClassHandler
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -70,7 +70,7 @@ struct HashHandler<Txn, FE> {
 
 impl<'a, Txn, FE> Handler<'a, State<Txn, FE>> for HashHandler<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -111,7 +111,7 @@ impl From<StateType> for ClassHandler {
 
 impl<Txn, FE> Route<State<Txn, FE>> for StateType
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -145,7 +145,7 @@ where
 
 impl<Txn, FE> Route<State<Txn, FE>> for State<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<Self>,
+    Txn: Transaction<FE> + Gateway<Self>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -211,7 +211,7 @@ impl<Txn, FE> Default for Static<Txn, FE> {
 
 impl<Txn, FE> Route<State<Txn, FE>> for Static<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>

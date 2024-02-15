@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use aes_gcm_siv::{Aes256GcmSiv, Key};
@@ -20,15 +21,16 @@ use tcgeneric::{NetworkTime, ThreadSafe};
 use crate::kernel::Kernel;
 use crate::server::Server;
 use crate::txn::{Txn, TxnServer};
-use crate::{DEFAULT_TTL, SERVICE_TYPE};
+use crate::{RPCClient, DEFAULT_TTL, SERVICE_TYPE};
 
 pub type Aes256Key = Key<Aes256GcmSiv>;
 
-pub struct ServerBuilder<FE> {
+pub struct ServerBuilder<State, FE> {
     peers: HashMap<VerifyingKey, HashSet<IpAddr>>,
-    address: IpAddr,
+    address: Option<IpAddr>,
     port: u16,
     request_ttl: Duration,
+    rpc_client: Arc<dyn RPCClient<State>>,
     keys: Vec<Aes256Key>,
     data_dir: DirLock<FE>,
     workspace: DirLock<FE>,
@@ -37,8 +39,13 @@ pub struct ServerBuilder<FE> {
     secure: bool,
 }
 
-impl<FE> ServerBuilder<FE> {
-    pub fn load(cache_size: usize, data_dir: PathBuf, workspace: PathBuf) -> Self
+impl<State, FE> ServerBuilder<State, FE> {
+    pub fn load(
+        cache_size: usize,
+        data_dir: PathBuf,
+        workspace: PathBuf,
+        rpc_client: Arc<dyn RPCClient<State>>,
+    ) -> Self
     where
         FE: for<'a> FileSave<'a>,
     {
@@ -56,11 +63,12 @@ impl<FE> ServerBuilder<FE> {
         let workspace = cache.clone().load(workspace).expect("workspace");
 
         Self {
-            address: Ipv4Addr::UNSPECIFIED.into(),
+            address: None,
             port: 0,
             peers: HashMap::new(),
             keys: vec![],
             request_ttl: DEFAULT_TTL,
+            rpc_client,
             data_dir,
             workspace,
             owner: None,
@@ -69,7 +77,7 @@ impl<FE> ServerBuilder<FE> {
         }
     }
 
-    pub async fn build<State>(mut self) -> Server<State, FE>
+    pub async fn build(mut self) -> Server<State, FE>
     where
         State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
         FE: ThreadSafe + Clone + for<'a> FileSave<'a>,
@@ -101,9 +109,34 @@ impl<FE> ServerBuilder<FE> {
     }
 }
 
-impl<FE> ServerBuilder<FE> {
+impl<State, FE> ServerBuilder<State, FE> {
+    pub fn address(&mut self) -> IpAddr {
+        if self.address.is_none() {
+            let ifaces = local_ip_address::list_afinet_netifas().expect("network interface list");
+
+            self.address = ifaces
+                .into_iter()
+                .inspect(|(name, address)| {
+                    assert!(
+                        !address.is_unspecified() && !address.is_multicast(),
+                        "invalid network interface {name}: {address}"
+                    );
+                })
+                .filter_map(|(_name, address)| {
+                    if address.is_loopback() {
+                        None
+                    } else {
+                        Some(address)
+                    }
+                })
+                .next();
+        }
+
+        self.address.expect("IP address")
+    }
+
     pub fn bind_address(mut self, address: IpAddr) -> Self {
-        self.address = address;
+        self.address = Some(address);
         self
     }
 

@@ -1,6 +1,6 @@
 use tc_error::*;
 use tc_transact::public::*;
-use tc_transact::{RPCClient, Transaction};
+use tc_transact::{Gateway, Transaction};
 use tc_value::Value;
 use tcgeneric::{PathSegment, ThreadSafe};
 
@@ -91,7 +91,7 @@ where
                 if txn.leader(cluster.path()) == Some(cluster.public_key()) {
                     cluster
                         .replicate_write(*txn.id(), path, |link| {
-                            RPCClient::<State>::put(&txn, link, key.clone(), value.clone())
+                            Gateway::<State>::put(&txn, link, key.clone(), value.clone())
                         })
                         .await?;
                 }
@@ -129,7 +129,7 @@ where
                 if txn.leader(cluster.path()).expect("leader") == cluster.public_key() {
                     cluster
                         .replicate_write(*txn.id(), path, |link| {
-                            RPCClient::<State>::delete(&txn, link, key.clone())
+                            Gateway::<State>::delete(&txn, link, key.clone())
                         })
                         .await?;
                 }

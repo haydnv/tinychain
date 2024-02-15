@@ -111,7 +111,7 @@ pub trait Transaction<FE>: Clone + Sized + Send + Sync + 'static {
 
 /// A transactional remote procedure call client
 #[async_trait]
-pub trait RPCClient<State: StateInstance<Txn = Self>>: Transaction<State::FE> {
+pub trait Gateway<State: StateInstance<Txn = Self>>: Transaction<State::FE> {
     /// Resolve a GET op within this transaction context.
     async fn get<'a, L, V>(&'a self, link: L, key: V) -> TCResult<State>
     where

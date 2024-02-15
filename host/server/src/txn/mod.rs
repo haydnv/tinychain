@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use tc_error::*;
 use tc_transact::public::StateInstance;
-use tc_transact::{RPCClient, Transaction, TxnId};
+use tc_transact::{Gateway, Transaction, TxnId};
 use tc_value::{Link, ToUrl, Value};
 use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf, ThreadSafe};
 
@@ -194,7 +194,7 @@ where
 }
 
 #[async_trait]
-impl<State, FE> RPCClient<State> for Txn<State, FE>
+impl<State, FE> Gateway<State> for Txn<State, FE>
 where
     State: StateInstance<FE = FE, Txn = Self>,
     FE: ThreadSafe + Clone,

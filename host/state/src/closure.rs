@@ -19,7 +19,7 @@ use tc_error::*;
 use tc_scalar::{Executor, OpDef, OpDefType, OpRef, Scalar, SELF};
 use tc_transact::fs::FileSave;
 use tc_transact::public::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler};
-use tc_transact::{fs, AsyncHash, IntoView, RPCClient, Transaction, TxnId};
+use tc_transact::{fs, AsyncHash, IntoView, Gateway, Transaction, TxnId};
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf};
 
 use super::view::StateView;
@@ -49,7 +49,7 @@ impl<Txn, FE> Closure<Txn, FE> {
 
 impl<Txn, FE> Closure<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -152,7 +152,7 @@ where
 #[async_trait]
 impl<Txn, FE> tc_transact::public::ClosureInstance<State<Txn, FE>> for Closure<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -175,7 +175,7 @@ impl<Txn, FE> From<(Map<State<Txn, FE>>, OpDef)> for Closure<Txn, FE> {
 
 impl<'a, Txn, FE> Handler<'a, State<Txn, FE>> for Closure<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -237,7 +237,7 @@ where
 #[async_trait]
 impl<Txn, FE> AsyncHash for Closure<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<TensorNode>
@@ -258,7 +258,7 @@ where
 #[async_trait]
 impl<'en, Txn, FE> IntoView<'en, FE> for Closure<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -288,7 +288,7 @@ where
 #[async_trait]
 impl<Txn, FE> de::FromStream for Closure<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: AsType<BTreeNode>
         + AsType<TensorNode>
         + AsType<ChainBlock>
@@ -350,7 +350,7 @@ struct ClosureVisitor<Txn, FE> {
 #[async_trait]
 impl<Txn, FE> de::Visitor for ClosureVisitor<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: AsType<BTreeNode>
         + AsType<TensorNode>
         + AsType<ChainBlock>

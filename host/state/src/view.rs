@@ -10,7 +10,7 @@ use tc_chain::{ChainBlock, ChainView};
 use tc_collection::{BTreeNode, CollectionView, DenseCacheFile, TensorNode};
 use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
-use tc_transact::{fs, IntoView, RPCClient, Transaction};
+use tc_transact::{fs, IntoView, Gateway, Transaction};
 use tcgeneric::{Id, NativeClass};
 
 use super::object::ObjectView;
@@ -32,7 +32,7 @@ pub enum StateView<'en> {
 #[async_trait]
 impl<'en, Txn, FE> IntoView<'en, FE> for State<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>

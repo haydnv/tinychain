@@ -24,22 +24,52 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use async_trait::async_trait;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
 use destream::en;
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use rjwt::Actor;
+use tc_error::{not_implemented, TCResult};
 
-use tc_value::{Link, Value};
+use tc_value::{Link, ToUrl, Value};
 
-use tc_server::{ServerBuilder, SERVICE_TYPE};
+use tc_server::{RPCClient, ServerBuilder, SERVICE_TYPE};
+use tcgeneric::Map;
 
 const CACHE_SIZE: usize = 1_000_000;
 const DATA_DIR: &'static str = "/tmp/tc/example/";
 const WORKSPACE: &'static str = "/tmp/tc/example/_workspace";
 
+enum State {
+    Value(Value),
+}
+
 enum CacheBlock {}
+
+#[derive(Default)]
+struct Client {}
+
+#[async_trait]
+impl RPCClient<State> for Client {
+    async fn get(&self, _link: ToUrl<'_>, _key: Value) -> TCResult<State> {
+        Err(not_implemented!("mock RPCClient::get"))
+    }
+
+    async fn put(&self, _link: ToUrl<'_>, _key: Value, _value: State) -> TCResult<()> {
+        Err(not_implemented!("mock RPCClient::get"))
+    }
+
+    async fn post(&self, _link: ToUrl<'_>, _params: Map<State>) -> TCResult<State> {
+        Err(not_implemented!("mock RPCClient::get"))
+    }
+
+    async fn delete(&self, _link: ToUrl<'_>, _key: Value) -> TCResult<State> {
+        Err(not_implemented!("mock RPCClient::get"))
+    }
+}
 
 impl<'en> en::ToStream<'en> for CacheBlock {
     fn to_stream<En: en::Encoder<'en>>(&self, encoder: En) -> Result<En::Ok, En::Error> {
@@ -93,10 +123,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_dir: PathBuf = DATA_DIR.parse()?;
     std::fs::create_dir_all(&data_dir)?;
 
-    let builder = ServerBuilder::<CacheBlock>::load(
+    let builder = ServerBuilder::<State, CacheBlock>::load(
         CACHE_SIZE,
         data_dir.clone(),
         WORKSPACE.parse().expect("workspace"),
+        Arc::new(Client::default()),
     )
     .set_secure(false);
 

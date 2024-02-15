@@ -12,7 +12,7 @@ use tc_scalar::Scalar;
 use tc_transact::public::{
     DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route, ToState,
 };
-use tc_transact::{fs, RPCClient, Transaction};
+use tc_transact::{fs, Gateway, Transaction};
 use tc_value::Value;
 use tcgeneric::{Id, Instance, Map, PathSegment};
 
@@ -38,7 +38,7 @@ impl<'a, Txn, FE, T: Instance> GetMethod<'a, Txn, FE, T> {
 
 impl<'a, Txn, FE, T> GetMethod<'a, Txn, FE, T>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -64,7 +64,7 @@ where
 
 impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for GetMethod<'a, Txn, FE, T>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -101,7 +101,7 @@ impl<'a, Txn, FE, T: Instance> PutMethod<'a, Txn, FE, T> {
 
 impl<'a, Txn, FE, T> PutMethod<'a, Txn, FE, T>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -128,7 +128,7 @@ where
 
 impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for PutMethod<'a, Txn, FE, T>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -167,7 +167,7 @@ impl<'a, Txn, FE, T: Instance> PostMethod<'a, Txn, FE, T> {
 
 impl<'a, Txn, FE, T> PostMethod<'a, Txn, FE, T>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -188,7 +188,7 @@ where
 
 impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for PostMethod<'a, Txn, FE, T>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -227,7 +227,7 @@ impl<'a, Txn, FE, T: Instance> DeleteMethod<'a, Txn, FE, T> {
 
 impl<'a, Txn, FE, T> DeleteMethod<'a, Txn, FE, T>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -254,7 +254,7 @@ where
 
 impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for DeleteMethod<'a, Txn, FE, T>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -279,7 +279,7 @@ pub fn route_attr<'a, Txn, FE, T>(
     path: &'a [PathSegment],
 ) -> Option<Box<dyn Handler<'a, State<Txn, FE>> + 'a>>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -324,7 +324,7 @@ async fn call_method<Txn, FE, T>(
     form: Vec<(Id, Scalar)>,
 ) -> TCResult<State<Txn, FE>>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>

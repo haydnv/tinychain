@@ -11,7 +11,7 @@ use tc_collection::{BTreeNode, DenseCacheFile, TensorNode};
 
 use tc_scalar::Scalar;
 use tc_transact::public::ToState;
-use tc_transact::{fs, RPCClient, Transaction};
+use tc_transact::{fs, Gateway, Transaction};
 use tc_value::Value;
 use tcgeneric::Map;
 
@@ -147,7 +147,7 @@ where
 
 impl<Txn, FE, T> ToState<State<Txn, FE>> for InstanceExt<Txn, FE, T>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>

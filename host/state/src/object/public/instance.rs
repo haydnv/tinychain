@@ -9,7 +9,7 @@ use tc_collection::{BTreeNode, DenseCacheFile, TensorNode};
 use tc_error::*;
 use tc_transact::public::generic::COPY;
 use tc_transact::public::{GetHandler, Handler, Route, ToState};
-use tc_transact::{fs, RPCClient, Transaction};
+use tc_transact::{fs, Gateway, Transaction};
 use tcgeneric::{Instance, PathSegment, TCPath};
 
 use crate::object::InstanceExt;
@@ -23,7 +23,7 @@ struct CopyHandler<'a, T> {
 
 impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for CopyHandler<'a, T>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -53,7 +53,7 @@ impl<'a, T> From<&'a T> for CopyHandler<'a, T> {
 
 impl<Txn, FE, T> Route<State<Txn, FE>> for InstanceExt<Txn, FE, T>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>

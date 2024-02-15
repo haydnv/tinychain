@@ -17,7 +17,7 @@ use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::public::{Public, StateInstance, ToState};
-use tc_transact::RPCClient;
+use tc_transact::Gateway;
 use tc_value::Value;
 use tcgeneric::*;
 

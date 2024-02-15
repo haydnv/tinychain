@@ -4,7 +4,7 @@ use tc_collection::{BTreeNode, DenseCacheFile, TensorNode};
 use tc_transact::public::generic::COPY;
 use tc_transact::public::helpers::AttributeHandler;
 use tc_transact::public::{GetHandler, Handler, PostHandler, Route};
-use tc_transact::{fs, RPCClient, Transaction};
+use tc_transact::{fs, Gateway, Transaction};
 use tcgeneric::PathSegment;
 
 use crate::object::{InstanceClass, InstanceExt, Object, ObjectType};
@@ -28,7 +28,7 @@ struct ClassHandler<'a> {
 
 impl<'a, Txn, FE> Handler<'a, State<Txn, FE>> for ClassHandler<'a>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -66,7 +66,7 @@ where
 
 impl<Txn, FE> Route<State<Txn, FE>> for InstanceClass
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -96,7 +96,7 @@ where
 
 impl<Txn, FE> Route<State<Txn, FE>> for Object<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>

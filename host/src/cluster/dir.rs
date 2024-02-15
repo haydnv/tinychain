@@ -20,7 +20,7 @@ use tc_state::object::InstanceClass;
 use tc_transact::fs::Persist;
 use tc_transact::lock::TxnMapLock;
 use tc_transact::public::Route;
-use tc_transact::{RPCClient, Transact, Transaction, TxnId};
+use tc_transact::{Gateway, Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{label, Id, Label, Map, PathSegment, ThreadSafe};
 

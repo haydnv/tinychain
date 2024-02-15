@@ -12,7 +12,7 @@ use tc_collection::{BTreeNode, DenseCacheFile, TensorNode};
 
 use tc_error::*;
 use tc_scalar::Scalar;
-use tc_transact::{fs, AsyncHash, IntoView, RPCClient, Transaction, TxnId};
+use tc_transact::{fs, AsyncHash, IntoView, Gateway, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, path_label, NativeClass, PathLabel, PathSegment, TCPathBuf};
 
@@ -101,7 +101,7 @@ where
 #[async_trait]
 impl<Txn, FE> AsyncHash for Object<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<TensorNode>
@@ -164,7 +164,7 @@ impl<Txn, FE> TryCastFrom<Object<Txn, FE>> for Value {
 #[async_trait]
 impl<'en, Txn, FE> IntoView<'en, FE> for Object<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>

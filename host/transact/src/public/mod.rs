@@ -8,7 +8,7 @@ use tc_error::*;
 use tc_value::{Number, Value};
 use tcgeneric::{Instance, Map, PathSegment, TCPath, ThreadSafe, Tuple};
 
-use super::{RPCClient, Transaction};
+use super::{Gateway, Transaction};
 
 pub mod generic;
 pub mod helpers;
@@ -63,7 +63,7 @@ pub trait StateInstance:
     + 'static
 {
     type FE: ThreadSafe + Clone;
-    type Txn: Transaction<Self::FE> + RPCClient<Self>;
+    type Txn: Transaction<Self::FE> + Gateway<Self>;
     type Closure: ClosureInstance<Self>;
 
     /// Return `true` if this is a `Map` of states.

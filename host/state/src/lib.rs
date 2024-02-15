@@ -24,7 +24,7 @@ use tc_collection::{CollectionType, CollectionVisitor};
 use tc_error::*;
 use tc_scalar::*;
 use tc_transact::public::{ClosureInstance, Public, StateInstance, ToState};
-use tc_transact::{fs, AsyncHash, RPCClient, Transaction, TxnId};
+use tc_transact::{fs, AsyncHash, Gateway, Transaction, TxnId};
 use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::{
     path_label, Class, Id, Instance, Map, NativeClass, PathSegment, TCPath, TCPathBuf, Tuple,
@@ -252,7 +252,7 @@ impl<Txn, FE> State<Txn, FE> {
 
 impl<Txn, FE> State<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<Self>,
+    Txn: Transaction<FE> + Gateway<Self>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -273,7 +273,7 @@ where
 
 impl<Txn, FE> StateInstance for State<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<Self>,
+    Txn: Transaction<FE> + Gateway<Self>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -305,7 +305,7 @@ where
 #[async_trait]
 impl<Txn, FE> Refer<Self> for State<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<Self>,
+    Txn: Transaction<FE> + Gateway<Self>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -481,7 +481,7 @@ where
 #[async_trait]
 impl<Txn, FE> AsyncHash for State<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<Self>,
+    Txn: Transaction<FE> + Gateway<Self>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<TensorNode>
@@ -1042,7 +1042,7 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Closure<Txn, FE> {
 
 impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Box<dyn ClosureInstance<State<Txn, FE>>>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: DenseCacheFile
         + AsType<BTreeNode>
         + AsType<ChainBlock>
@@ -1460,7 +1460,7 @@ struct StateVisitor<Txn, FE> {
 
 impl<Txn, FE> StateVisitor<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: AsType<BTreeNode>
         + AsType<TensorNode>
         + AsType<ChainBlock>
@@ -1519,7 +1519,7 @@ where
 #[async_trait]
 impl<'a, Txn, FE> de::Visitor for StateVisitor<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: AsType<BTreeNode>
         + AsType<TensorNode>
         + AsType<ChainBlock>
@@ -1664,7 +1664,7 @@ where
 #[async_trait]
 impl<Txn, FE> de::FromStream for State<Txn, FE>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
+    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
     FE: AsType<BTreeNode>
         + AsType<TensorNode>
         + AsType<ChainBlock>
