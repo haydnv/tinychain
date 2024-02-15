@@ -1,13 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aes_gcm_siv::{Aes256GcmSiv, Key};
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
-use freqfs::{Cache, DirLock, FileSave};
+use freqfs::{DirLock, FileSave};
 use log::{debug, info, warn};
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use rjwt::VerifyingKey;
@@ -18,12 +16,11 @@ use tc_transact::Transaction;
 use tc_value::Link;
 use tcgeneric::{NetworkTime, ThreadSafe};
 
+use crate::aes256::Key as Aes256Key;
 use crate::kernel::Kernel;
 use crate::server::Server;
 use crate::txn::{Txn, TxnServer};
 use crate::{RPCClient, DEFAULT_TTL, SERVICE_TYPE};
-
-pub type Aes256Key = Key<Aes256GcmSiv>;
 
 pub struct ServerBuilder<State, FE> {
     peers: HashMap<VerifyingKey, HashSet<IpAddr>>,
@@ -41,27 +38,13 @@ pub struct ServerBuilder<State, FE> {
 
 impl<State, FE> ServerBuilder<State, FE> {
     pub fn load(
-        cache_size: usize,
-        data_dir: PathBuf,
-        workspace: PathBuf,
+        data_dir: DirLock<FE>,
+        workspace: DirLock<FE>,
         rpc_client: Arc<dyn RPCClient<State>>,
     ) -> Self
     where
         FE: for<'a> FileSave<'a>,
     {
-        if !data_dir.exists() {
-            panic!("there is no directory at {data_dir:?}");
-        }
-
-        if !workspace.exists() {
-            std::fs::create_dir_all(&workspace).expect("workspace");
-        }
-
-        let cache = Cache::new(cache_size.into(), None);
-
-        let data_dir = cache.clone().load(data_dir).expect("data directory");
-        let workspace = cache.clone().load(workspace).expect("workspace");
-
         Self {
             address: None,
             port: 0,

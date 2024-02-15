@@ -23,58 +23,47 @@
 //  The list of peers and replicas is updated such that both hosts receive every write operation.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
-use destream::en;
+use freqfs::Cache;
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use rjwt::Actor;
-use tc_error::{not_implemented, TCResult};
 
-use tc_value::{Link, ToUrl, Value};
+use tc_value::{Link, Value};
 
-use tc_server::{RPCClient, ServerBuilder, SERVICE_TYPE};
-use tcgeneric::Map;
+use tc_server::aes256::{Aes256GcmSiv, Key, KeyInit, OsRng};
+use tc_server::{Server, ServerBuilder, SERVICE_TYPE};
+
+use crate::mock::{CacheBlock, Client, State};
+
+mod mock;
 
 const CACHE_SIZE: usize = 1_000_000;
-const DATA_DIR: &'static str = "/tmp/tc/example/";
-const WORKSPACE: &'static str = "/tmp/tc/example/_workspace";
+const DATA_DIR: &'static str = "/tmp/tc/example_server/data";
+const WORKSPACE: &'static str = "/tmp/tc/example_server/workspace";
 
-enum State {
-    Value(Value),
-}
+async fn create_server(name: String, key: Key) -> Server<State, CacheBlock> {
+    let data_dir = format!("{DATA_DIR}/{name}").parse().unwrap();
+    let workspace = format!("{WORKSPACE}/{name}").parse().unwrap();
 
-enum CacheBlock {}
+    std::fs::create_dir_all(&data_dir).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
 
-#[derive(Default)]
-struct Client {}
+    let cache = Cache::new(CACHE_SIZE, None);
+    let data_dir = cache.clone().load(data_dir).unwrap();
+    let workspace = cache.clone().load(workspace).unwrap();
 
-#[async_trait]
-impl RPCClient<State> for Client {
-    async fn get(&self, _link: ToUrl<'_>, _key: Value) -> TCResult<State> {
-        Err(not_implemented!("mock RPCClient::get"))
-    }
+    let rpc_client = Arc::new(Client::default());
 
-    async fn put(&self, _link: ToUrl<'_>, _key: Value, _value: State) -> TCResult<()> {
-        Err(not_implemented!("mock RPCClient::get"))
-    }
+    let builder = ServerBuilder::load(data_dir, workspace, rpc_client)
+        .with_keys(vec![key])
+        .set_secure(false);
 
-    async fn post(&self, _link: ToUrl<'_>, _params: Map<State>) -> TCResult<State> {
-        Err(not_implemented!("mock RPCClient::get"))
-    }
+    let builder = builder.discover().await;
 
-    async fn delete(&self, _link: ToUrl<'_>, _key: Value) -> TCResult<State> {
-        Err(not_implemented!("mock RPCClient::get"))
-    }
-}
-
-impl<'en> en::ToStream<'en> for CacheBlock {
-    fn to_stream<En: en::Encoder<'en>>(&self, encoder: En) -> Result<En::Ok, En::Error> {
-        en::IntoStream::into_stream((), encoder)
-    }
+    builder.build().await
 }
 
 #[tokio::main]
@@ -120,20 +109,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     mdns.register(my_service).expect("register mDNS service");
 
-    let data_dir: PathBuf = DATA_DIR.parse()?;
-    std::fs::create_dir_all(&data_dir)?;
+    let key = Aes256GcmSiv::generate_key(&mut OsRng);
+    create_server("one".to_string(), key).await;
 
-    let builder = ServerBuilder::<State, CacheBlock>::load(
-        CACHE_SIZE,
-        data_dir.clone(),
-        WORKSPACE.parse().expect("workspace"),
-        Arc::new(Client::default()),
-    )
-    .set_secure(false);
-
-    builder.discover().await;
-
-    std::fs::remove_dir_all(data_dir)?;
+    // TODO: make a test request to /txn/hypothetical
 
     Ok(())
 }
