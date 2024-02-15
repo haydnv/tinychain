@@ -1,5 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::hash::Hash;
 use std::iter::FromIterator;
 use std::mem::size_of;
 use std::ops::{Bound, Deref};
@@ -7,7 +8,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use async_hash::generic_array::GenericArray;
-use async_hash::{Digest, Hash, Output};
+use async_hash::{Digest, Hash as Sha256Hash, Output};
 use async_trait::async_trait;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
@@ -35,7 +36,7 @@ const EMPTY_SEQ: [u8; 0] = [];
 const EXPECTING: &'static str = "a TinyChain value, e.g. 1 or \"two\" or [3]";
 
 /// A generic value enum
-#[derive(Clone)]
+#[derive(Clone, Hash)]
 pub enum Value {
     Bytes(Arc<[u8]>),
     Email(Arc<EmailAddress>),
@@ -212,24 +213,40 @@ impl Instance for Value {
     }
 }
 
-impl<D: Digest> Hash<D> for Value {
+// impl Hash for Value {
+//     fn hash<H: Hasher>(&self, state: &mut H) {
+//         match self {
+//             Self::Bytes(bytes) => bytes.hash(state),
+//             Self::Email(email) => email.hash(state),
+//             Self::Id(id) => id.hash(state),
+//             Self::Link(link) => link.hash(state),
+//             Self::None => ().hash(state),
+//             Self::Number(n) => n.hash(state),
+//             Self::String(string) => string.hash(state),
+//             Self::Tuple(tuple) => tuple.hash(state),
+//             Self::Version(version) => version.hash(state),
+//         }
+//     }
+// }
+
+impl<D: Digest> Sha256Hash<D> for Value {
     fn hash(self) -> Output<D> {
-        Hash::<D>::hash(&self)
+        Sha256Hash::<D>::hash(&self)
     }
 }
 
-impl<'a, D: Digest> Hash<D> for &'a Value {
+impl<'a, D: Digest> Sha256Hash<D> for &'a Value {
     fn hash(self) -> Output<D> {
         match self {
             Value::Bytes(bytes) => D::digest(bytes),
-            Value::Email(email) => Hash::<D>::hash(email.to_string()),
-            Value::Id(id) => Hash::<D>::hash(id),
-            Value::Link(link) => Hash::<D>::hash(link),
+            Value::Email(email) => Sha256Hash::<D>::hash(email.to_string()),
+            Value::Id(id) => Sha256Hash::<D>::hash(id),
+            Value::Link(link) => Sha256Hash::<D>::hash(link),
             Value::None => GenericArray::default(),
-            Value::Number(n) => Hash::<D>::hash(*n),
-            Value::String(s) => Hash::<D>::hash(s.as_str()),
-            Value::Tuple(tuple) => Hash::<D>::hash(tuple.deref()),
-            Value::Version(v) => Hash::<D>::hash(*v),
+            Value::Number(n) => Sha256Hash::<D>::hash(*n),
+            Value::String(s) => Sha256Hash::<D>::hash(s.as_str()),
+            Value::Tuple(tuple) => Sha256Hash::<D>::hash(tuple.deref()),
+            Value::Version(v) => Sha256Hash::<D>::hash(*v),
         }
     }
 }

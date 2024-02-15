@@ -24,7 +24,7 @@ use tcgeneric::Id;
 use super::{Link, Number};
 
 /// A TinyChain String
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct TCString(Arc<str>);
 
 impl GetSize for TCString {

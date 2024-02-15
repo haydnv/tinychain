@@ -18,7 +18,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use smallvec::SmallVec;
 
 /// A generic tuple type, based on [`Vec`]
-#[derive(Clone, Default, Eq, PartialEq, GetSize)]
+#[derive(Clone, Default, Eq, PartialEq, GetSize, Hash)]
 pub struct Tuple<T> {
     inner: Vec<T>,
 }
