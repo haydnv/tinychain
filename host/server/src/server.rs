@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use freqfs::FileSave;
 use tokio::time::{Duration, MissedTickBehavior};
-use umask::Mode;
 
 use tc_error::TCResult;
 use tc_transact::public::StateInstance;
@@ -13,23 +12,6 @@ use crate::txn::{Txn, TxnServer};
 use crate::{Endpoint, SignedToken};
 
 const GC_INTERVAL: Duration = Duration::from_millis(100);
-
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub enum RequestType {
-    Read,
-    Write,
-    Execute,
-}
-
-impl From<RequestType> for Mode {
-    fn from(rtype: RequestType) -> Self {
-        match rtype {
-            RequestType::Read => umask::USER_READ,
-            RequestType::Write => umask::USER_WRITE,
-            RequestType::Execute => umask::USER_EXEC,
-        }
-    }
-}
 
 pub struct Server<State, FE> {
     kernel: Arc<Kernel<State, FE>>,

@@ -112,15 +112,9 @@ impl<T> From<T> for AttributeHandler<T> {
     }
 }
 
-pub struct MethodNotAllowedHandler<'a, T> {
-    subject: &'a T,
-}
+pub struct MethodNotAllowedHandler;
 
-impl<'a, State, T> Handler<'a, State> for MethodNotAllowedHandler<'a, T>
-where
-    State: StateInstance,
-    T: Clone + Send + Sync + fmt::Debug,
-{
+impl<'a, State: StateInstance> Handler<'a, State> for MethodNotAllowedHandler {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
@@ -167,12 +161,6 @@ where
                 TCPath::default(),
             ))))
         }))
-    }
-}
-
-impl<'a, T> From<&'a T> for MethodNotAllowedHandler<'a, T> {
-    fn from(subject: &'a T) -> Self {
-        Self { subject }
     }
 }
 

@@ -24,8 +24,8 @@ where
         Some(Box::new(|_txn, key: Value| {
             Box::pin(async move {
                 if key.is_none() {
-                    let public_key = self.cluster.public_key().as_bytes();
-                    let public_key = Value::Bytes((*public_key).into());
+                    let public_key = self.cluster.public_key();
+                    let public_key = Value::Bytes((*public_key.as_bytes()).into());
                     Ok(public_key.into())
                 } else {
                     Err(TCError::not_found(key))

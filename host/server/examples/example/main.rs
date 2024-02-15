@@ -1,23 +1,27 @@
 // use cases to consider:
 //
 //  1.
+//  A malicious user sends a token signed with their private key which grants group write access
+//  to a cluster. The cluster rejects the request as unauthorized.
+//
+//  2.
 //  The first host in a cluster starts.
 //  It leaves a TCP server open on a random port for later hosts on the local network to discover,
 //  only if a shared symmetric key is configured.
 //
-//  2.
+//  3.
 //  A host stays running for months without restarting. It maintains an accurate list of peers.
 //
-//  3.
+//  4.
 //  A transaction causes a random, irregularly distributed set of 51% of all hosts
 //  in a cluster to fail.
 //
-//  4.
+//  5.
 //  A single cluster manages xx TBs of data spread across many shards. All the shards
 //  operated by one public cloud provider go offline simultaneously but users experience
 //  no interruption in service and no data is lost.
 //
-//  5.
+//  6.
 //  One host is running on a public cloud provider.
 //  A second host joins from an on-premises datacenter.
 //  The list of peers and replicas is updated such that both hosts receive every write operation.
@@ -34,7 +38,8 @@ use rjwt::Actor;
 use tc_value::{Link, Value};
 
 use tc_server::aes256::{Aes256GcmSiv, Key, KeyInit, OsRng};
-use tc_server::{Server, ServerBuilder, SERVICE_TYPE};
+use tc_server::{Authorize, Server, ServerBuilder, SERVICE_TYPE};
+use tcgeneric::{path_label, PathLabel, TCPathBuf};
 
 use crate::mock::{CacheBlock, Client, State};
 
@@ -43,6 +48,7 @@ mod mock;
 const CACHE_SIZE: usize = 1_000_000;
 const DATA_DIR: &'static str = "/tmp/tc/example_server/data";
 const WORKSPACE: &'static str = "/tmp/tc/example_server/workspace";
+const HYPOTHETICAL: PathLabel = path_label(&["txn", "hypothetical"]);
 
 async fn create_server(name: String, key: Key) -> Server<State, CacheBlock> {
     let data_dir = format!("{DATA_DIR}/{name}").parse().unwrap();
@@ -110,9 +116,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     mdns.register(my_service).expect("register mDNS service");
 
     let key = Aes256GcmSiv::generate_key(&mut OsRng);
-    create_server("one".to_string(), key).await;
+    let server = create_server("one".to_string(), key).await;
 
-    // TODO: make a test request to /txn/hypothetical
+    let path = TCPathBuf::from(HYPOTHETICAL);
+    let txn = server.get_txn(None)?;
+    let (txn, endpoint) = server.authorize_claim_and_route(&path, txn)?;
+
+    assert!(
+        endpoint.umask().may_execute(),
+        "insufficient permissions: {}",
+        endpoint.umask()
+    );
 
     Ok(())
 }

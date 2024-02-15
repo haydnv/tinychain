@@ -16,7 +16,7 @@ use tc_transact::lock::TxnSetLockIter;
 use tc_transact::public::StateInstance;
 use tc_transact::{Gateway, Transaction, TxnId};
 use tc_value::{Link, ToUrl, Value};
-use tcgeneric::{Id, NetworkTime, PathSegment, TCPathBuf, ThreadSafe};
+use tcgeneric::{label, Id, NetworkTime, PathSegment, TCPathBuf, ThreadSafe};
 
 use crate::claim::Claim;
 use crate::{Actor, SignedToken};
@@ -146,24 +146,41 @@ impl<State, FE> Txn<State, FE> {
     where
         K: Deref<Target = Actor>,
     {
-        let mut mode = umask::Mode::new().with_class_perm(umask::OTHERS, umask::ALL);
+        let mut mode = Mode::new().with_class_perm(umask::OTHERS, umask::ALL);
 
         // TODO: add user & group permissions
 
         mode
     }
 
-    pub fn claim(self, public_key: &VerifyingKey, path: &[PathSegment]) -> Self {
+    pub fn claim(self, actor: &Actor, path: &[PathSegment]) -> TCResult<Self> {
         debug_assert!(self.leader(path).is_none());
-        todo!("Txn::claim")
+
+        self.grant(
+            actor,
+            TCPathBuf::from_slice(path).into(),
+            self.txn_path(),
+            umask::USER_EXEC,
+        )
     }
 
-    pub fn leader(&self, path: &[PathSegment]) -> Option<&VerifyingKey> {
-        todo!("Txn::leader")
+    pub fn leader(&self, path: &[PathSegment]) -> Option<VerifyingKey> {
+        if let Some(token) = &self.token {
+            for (host, actor_id, path) in token.claims() {
+                todo!("Txn::leader")
+            }
+        }
+
+        None
     }
 
-    pub fn owner(&self) -> Option<&VerifyingKey> {
+    pub fn owner(&self) -> Option<VerifyingKey> {
         todo!("Txn::owner")
+    }
+
+    #[inline]
+    fn txn_path(&self) -> TCPathBuf {
+        [label("txn").into(), self.id.to_id()].into()
     }
 }
 

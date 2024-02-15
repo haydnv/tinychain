@@ -11,8 +11,11 @@ pub struct Claim {
 }
 
 impl Claim {
-    pub fn new(path: TCPathBuf, mode: Mode) -> Self {
-        Self { path, mode }
+    pub fn new<Path: Into<TCPathBuf>>(path: Path, mode: Mode) -> Self {
+        Self {
+            path: path.into(),
+            mode,
+        }
     }
 }
 

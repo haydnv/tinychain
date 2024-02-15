@@ -2,25 +2,26 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{Future, TryFutureExt};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use rjwt::VerifyingKey;
+use rjwt::{OsRng, SigningKey, VerifyingKey};
 use umask::Mode;
 
 use tc_error::*;
 use tc_transact::fs;
 use tc_transact::lock::{TxnLock, TxnSetLock, TxnSetLockIter};
 use tc_transact::{Transact, TxnId};
-use tc_value::{Host, Link};
+use tc_value::{Host, Link, Value};
 use tcgeneric::{PathSegment, TCPathBuf, ThreadSafe};
 
 use crate::txn::Txn;
 use crate::Actor;
 
-pub const CLUSTER_MODE: Mode = Mode::new()
+pub const DEFAULT_UMASK: Mode = Mode::new()
     .with_class_perm(umask::USER, umask::ALL)
     .with_class_perm(umask::GROUP, umask::ALL)
     .with_class_perm(umask::OTHERS, umask::READ);
@@ -85,8 +86,9 @@ impl Schema {
 }
 
 pub struct Cluster<T> {
-    actor: Actor,
     schema: Schema,
+    actor: Actor,
+    mode: Mode,
     subject: T,
     keyring: TxnSetLock<Key>,
     replicas: TxnLock<HashSet<Host>>,
@@ -94,12 +96,22 @@ pub struct Cluster<T> {
 
 impl<T> Cluster<T> {
     pub fn new(schema: Schema, subject: T, txn_id: TxnId) -> Self {
-        let actor = Actor::new(TCPathBuf::default().into());
+        let keypair = SigningKey::generate(&mut OsRng);
+        let public_key = keypair.verifying_key();
+        let actor_id = Value::Bytes(Arc::from(*public_key.as_bytes()));
+        let actor = Actor::with_keypair(actor_id, keypair);
         let keyring = [Key(actor.clone())];
 
+        let mode = if schema.owner.is_some() || schema.group.is_some() {
+            DEFAULT_UMASK
+        } else {
+            Mode::all()
+        };
+
         Self {
-            actor,
             schema,
+            actor,
+            mode,
             subject,
             keyring: TxnSetLock::new(txn_id, keyring),
             replicas: TxnLock::new(HashSet::new()),
@@ -110,17 +122,27 @@ impl<T> Cluster<T> {
         self.schema.lead.path()
     }
 
-    pub fn public_key(&self) -> &VerifyingKey {
-        self.actor.public_key()
+    pub fn umask(&self, path: &[PathSegment]) -> Mode {
+        assert!(path.is_empty(), "TODO: cluster subject umask");
+        self.mode
     }
 
-    pub fn authorization(&self, path: &[PathSegment]) -> Mode {
-        assert!(path.is_empty(), "TODO: cluster subject umask");
-        CLUSTER_MODE
+    #[inline]
+    pub fn claim<State, FE>(&self, txn: Txn<State, FE>) -> TCResult<Txn<State, FE>> {
+        if txn.leader(self.path()).is_none() {
+            txn.claim(&self.actor, self.path())
+        } else {
+            Ok(txn)
+        }
     }
 
     pub fn keyring(&self, txn_id: TxnId) -> TCResult<TxnSetLockIter<Key>> {
         self.keyring.try_iter(txn_id).map_err(TCError::from)
+    }
+
+    #[inline]
+    pub fn public_key(&self) -> VerifyingKey {
+        self.actor.public_key()
     }
 
     pub(crate) fn subject(&self) -> &T {

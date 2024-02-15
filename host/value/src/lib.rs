@@ -13,15 +13,11 @@ pub use class::*;
 pub use link::*;
 pub use number::*;
 pub use string::*;
+pub use tcgeneric::link;
 pub use value::*;
 pub use version::*;
 
 mod class;
-
-mod link {
-    pub use pathlink::{Address, Host, Link, Protocol, ToUrl};
-}
-
 mod number {
     pub use number_general::{
         Boolean, BooleanType, Complex, ComplexType, DType, Float, FloatInstance, FloatType, Int,

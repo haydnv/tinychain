@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
+use log::debug;
 use umask::Mode;
 
 use tc_error::*;
@@ -20,6 +21,10 @@ pub struct Endpoint<'a, State> {
 }
 
 impl<'a, State> Endpoint<'a, State> {
+    pub fn umask(&self) -> Mode {
+        self.mode
+    }
+
     fn post<FE>(self, txn: &'a Txn<State, FE>, params: Map<State>) -> TCResult<PostFuture<State>>
     where
         State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
@@ -55,7 +60,7 @@ impl<State, FE> Kernel<State, FE> {
         if path.is_empty() {
             Err(unauthorized!("access to /"))
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
-            auth_claim_route(&self.hypothetical, path.into(), txn)
+            auth_claim_route(&self.hypothetical, &path[2..], txn)
         } else {
             Err(not_found!("{}", TCPath::from(path)))
         }
@@ -117,15 +122,17 @@ where
     Cluster<T>: Route<State>,
 {
     let keyring = cluster.keyring(*txn.id())?;
-    let resource_mode = cluster.authorization(path);
+    let resource_mode = cluster.umask(path);
     let request_mode = txn.mode(keyring, path);
     let mode = resource_mode & request_mode;
 
     if mode == Mode::new() {
         return Err(unauthorized!("access to {}", TCPath::from(path)));
+    } else {
+        debug!("request permissions are {mode}");
     }
 
-    let txn = maybe_claim_txn(cluster, txn);
+    let txn = cluster.claim(txn)?;
 
     let handler = cluster
         .route(&*path)
@@ -138,13 +145,4 @@ where
     };
 
     Ok((txn, endpoint))
-}
-
-#[inline]
-fn maybe_claim_txn<State, FE, T>(cluster: &Cluster<T>, txn: Txn<State, FE>) -> Txn<State, FE> {
-    if txn.owner().is_none() || txn.leader(cluster.path()).is_none() {
-        txn.claim(cluster.public_key(), cluster.path())
-    } else {
-        txn
-    }
 }

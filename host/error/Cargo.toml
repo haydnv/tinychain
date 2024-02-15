@@ -15,7 +15,7 @@ categories = ["rust-patterns"]
 destream = "0.7"
 ha-ndarray = "0.3"
 log = { version = "0.4", features = ["release_max_level_info"] }
-pathlink = "0.2"
+pathlink = { path = "../../../pathlink" }
 rjwt = { path = "../../../rjwt/rust" }
 serde = "1.0"
 txfs = "0.3"

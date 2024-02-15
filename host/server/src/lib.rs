@@ -1,13 +1,11 @@
 //! State replication management
 
-use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use rjwt::VerifyingKey;
 use umask::Mode;
 
-use tc_value::{Host, Link, ToUrl, Value};
+use tc_value::{Link, ToUrl, Value};
 
 use tc_error::*;
 use tcgeneric::Map;
@@ -37,7 +35,7 @@ pub const SERVICE_TYPE: &'static str = "_tinychain._tcp.local.";
 type Actor = rjwt::Actor<Value>;
 type SignedToken = rjwt::SignedToken<Link, Value, claim::Claim>;
 
-trait Authorize {
+pub trait Authorize {
     fn has_any<const N: usize>(&self, modes: [Mode; N]) -> bool;
 
     fn is_none(self) -> bool;
