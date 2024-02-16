@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
@@ -26,6 +27,7 @@ pub const DEFAULT_UMASK: Mode = Mode::new()
     .with_class_perm(umask::GROUP, umask::ALL)
     .with_class_perm(umask::OTHERS, umask::READ);
 
+mod dir;
 mod public;
 
 #[derive(Debug)]
@@ -68,7 +70,7 @@ impl PartialOrd for Key {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Schema {
     lead: Link,
     owner: Option<Link>,
@@ -85,11 +87,12 @@ impl Schema {
     }
 }
 
+#[derive(Clone)]
 pub struct Cluster<T> {
     schema: Schema,
     actor: Actor,
     mode: Mode,
-    subject: T,
+    state: T,
     keyring: TxnSetLock<Key>,
     replicas: TxnLock<HashSet<Host>>,
 }
@@ -112,7 +115,7 @@ impl<T> Cluster<T> {
             schema,
             actor,
             mode,
-            subject,
+            state: subject,
             keyring: TxnSetLock::new(txn_id, keyring),
             replicas: TxnLock::new(HashSet::new()),
         }
@@ -145,8 +148,8 @@ impl<T> Cluster<T> {
         self.actor.public_key()
     }
 
-    pub(crate) fn subject(&self) -> &T {
-        &self.subject
+    pub(crate) fn state(&self) -> &T {
+        &self.state
     }
 
     async fn replicate_write<Write, Fut>(
@@ -197,6 +200,22 @@ impl<T> Cluster<T> {
     }
 }
 
+impl<T> Cluster<dir::Dir<T>>
+where
+    T: Clone + fmt::Debug,
+{
+    pub fn lookup<'a>(
+        &self,
+        txn_id: TxnId,
+        path: &'a [PathSegment],
+    ) -> TCResult<(&'a [PathSegment], dir::DirEntry<T>)> {
+        match self.state().lookup(txn_id, path)? {
+            Some((path, entry)) => Ok((path, entry)),
+            None => Ok((path, dir::DirEntry::Dir(self.clone()))),
+        }
+    }
+}
+
 #[async_trait]
 impl<T> Transact for Cluster<T>
 where
@@ -206,17 +225,17 @@ where
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
         self.replicas.commit(txn_id);
-        self.subject.commit(txn_id).await
+        self.state.commit(txn_id).await
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
         self.replicas.rollback(txn_id);
-        self.subject.rollback(txn_id).await
+        self.state.rollback(txn_id).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.replicas.finalize(*txn_id);
-        self.subject.finalize(txn_id).await
+        self.state.finalize(txn_id).await
     }
 }
 
@@ -249,6 +268,12 @@ where
     }
 
     fn dir(&self) -> fs::Inner<CacheBlock> {
-        <T as fs::Persist<CacheBlock>>::dir(&self.subject)
+        <T as fs::Persist<CacheBlock>>::dir(&self.state)
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Cluster<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?} cluster", self.state)
     }
 }

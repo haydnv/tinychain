@@ -155,7 +155,7 @@ where
     T: Route<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
-        let subject_handler = self.subject().route(path);
+        let subject_handler = self.state().route(path);
 
         if path.is_empty() {
             Some(Box::new(ClusterHandler::new(self, subject_handler)))
