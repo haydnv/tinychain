@@ -9,6 +9,9 @@ use crate::State;
 
 use super::Cluster;
 
+mod class;
+mod dir;
+
 struct ClusterHandler<'a, T> {
     cluster: &'a Cluster<T>,
     handler: Option<Box<dyn Handler<'a, State> + 'a>>,

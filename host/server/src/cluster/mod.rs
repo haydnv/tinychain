@@ -22,6 +22,9 @@ use tcgeneric::{PathSegment, TCPathBuf};
 use crate::txn::Txn;
 use crate::{Actor, CacheBlock};
 
+pub use class::Class;
+pub use dir::Dir;
+
 pub const DEFAULT_UMASK: Mode = Mode::new()
     .with_class_perm(umask::USER, umask::ALL)
     .with_class_perm(umask::GROUP, umask::ALL)
@@ -73,17 +76,29 @@ impl PartialOrd for Key {
 
 #[derive(Clone, Debug)]
 pub struct Schema {
-    lead: Link,
+    path: TCPathBuf,
     owner: Option<Link>,
     group: Option<Link>,
 }
 
 impl Schema {
-    pub fn new<Lead: Into<Link>>(lead: Lead, owner: Option<Link>, group: Option<Link>) -> Self {
+    pub fn new<Path: Into<TCPathBuf>>(
+        path: Path,
+        owner: Option<Link>,
+        group: Option<Link>,
+    ) -> Self {
         Self {
-            lead: lead.into(),
+            path: path.into(),
             owner,
             group,
+        }
+    }
+
+    pub fn append(self, suffix: PathSegment) -> Self {
+        Self {
+            path: self.path.append(suffix),
+            owner: self.owner,
+            group: self.group,
         }
     }
 }
@@ -123,7 +138,7 @@ impl<T> Cluster<T> {
     }
 
     pub fn path(&self) -> &TCPathBuf {
-        self.schema.lead.path()
+        &self.schema.path
     }
 
     pub fn umask(&self, path: &[PathSegment]) -> Mode {
@@ -241,10 +256,7 @@ where
 }
 
 #[async_trait]
-impl<T> fs::Persist<CacheBlock> for Cluster<T>
-where
-    T: fs::Persist<CacheBlock, Schema = (), Txn = Txn>,
-{
+impl fs::Persist<CacheBlock> for Cluster<Class> {
     type Txn = Txn;
     type Schema = Schema;
 
@@ -253,7 +265,7 @@ where
         schema: Self::Schema,
         store: fs::Dir<CacheBlock>,
     ) -> TCResult<Self> {
-        <T as fs::Persist<CacheBlock>>::create(txn_id, (), store)
+        <Class as fs::Persist<CacheBlock>>::create(txn_id, (), store)
             .map_ok(|subject| Self::new(schema, subject, txn_id))
             .await
     }
@@ -263,13 +275,43 @@ where
         schema: Self::Schema,
         store: fs::Dir<CacheBlock>,
     ) -> TCResult<Self> {
-        <T as fs::Persist<CacheBlock>>::load(txn_id, (), store)
+        <Class as fs::Persist<CacheBlock>>::load(txn_id, (), store)
             .map_ok(|subject| Self::new(schema, subject, txn_id))
             .await
     }
 
     fn dir(&self) -> fs::Inner<CacheBlock> {
-        <T as fs::Persist<CacheBlock>>::dir(&self.state)
+        <Class as fs::Persist<CacheBlock>>::dir(&self.state)
+    }
+}
+
+#[async_trait]
+impl fs::Persist<CacheBlock> for Cluster<Dir<Class>> {
+    type Txn = Txn;
+    type Schema = Schema;
+
+    async fn create(
+        txn_id: TxnId,
+        schema: Self::Schema,
+        store: fs::Dir<CacheBlock>,
+    ) -> TCResult<Self> {
+        <Dir<Class> as fs::Persist<CacheBlock>>::create(txn_id, schema.clone(), store)
+            .map_ok(|subject| Self::new(schema, subject, txn_id))
+            .await
+    }
+
+    async fn load(
+        txn_id: TxnId,
+        schema: Self::Schema,
+        store: fs::Dir<CacheBlock>,
+    ) -> TCResult<Self> {
+        <Dir<Class> as fs::Persist<CacheBlock>>::load(txn_id, schema.clone(), store)
+            .map_ok(|subject| Self::new(schema, subject, txn_id))
+            .await
+    }
+
+    fn dir(&self) -> fs::Inner<CacheBlock> {
+        <Dir<Class> as fs::Persist<CacheBlock>>::dir(&self.state)
     }
 }
 

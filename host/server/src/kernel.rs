@@ -8,11 +8,13 @@ use tc_state::CacheBlock;
 use tc_transact::public::{Handler, PostFuture, Route};
 use tc_transact::{fs, Transact, Transaction, TxnId};
 use tc_value::Link;
-use tcgeneric::{Map, PathSegment, TCPath};
+use tcgeneric::{label, Label, Map, PathSegment, TCPath};
 
-use crate::cluster::{Cluster, Schema};
+use crate::cluster::{Class, Cluster, Dir, Schema};
 use crate::txn::{Hypothetical, Txn};
 use crate::{Authorize, State};
+
+const CLASS: Label = label("class");
 
 pub struct Endpoint<'a> {
     mode: Mode,
@@ -40,6 +42,7 @@ impl<'a> Endpoint<'a> {
 }
 
 pub(crate) struct Kernel {
+    class: Cluster<Dir<Class>>,
     hypothetical: Cluster<Hypothetical>,
 }
 
@@ -51,6 +54,8 @@ impl Kernel {
     ) -> TCResult<(Txn, Endpoint<'a>)> {
         if path.is_empty() {
             Err(unauthorized!("access to /"))
+        } else if path[0] == CLASS {
+            auth_claim_route(&self.class, &path[1..], txn)
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
             auth_claim_route(&self.hypothetical, &path[2..], txn)
         } else {
@@ -77,26 +82,40 @@ impl fs::Persist<CacheBlock> for Kernel {
     async fn create(
         txn_id: TxnId,
         schema: Self::Schema,
-        _store: fs::Dir<CacheBlock>,
+        store: fs::Dir<CacheBlock>,
     ) -> TCResult<Self> {
         let (owner, group) = schema;
+
+        let class_dir: fs::Dir<CacheBlock> = store.create_dir(txn_id, CLASS.into()).await?;
+        let schema = Schema::new(CLASS, owner.clone(), group.clone());
+        let class = fs::Persist::<CacheBlock>::create(txn_id, schema, class_dir).await?;
+
         let schema = Schema::new(Hypothetical::PATH, owner, group);
+        let hypothetical = Cluster::new(schema, Hypothetical::new(), txn_id);
 
         Ok(Self {
-            hypothetical: Cluster::new(schema, Hypothetical::new(), txn_id),
+            class,
+            hypothetical,
         })
     }
 
     async fn load(
         txn_id: TxnId,
         schema: Self::Schema,
-        _store: fs::Dir<CacheBlock>,
+        store: fs::Dir<CacheBlock>,
     ) -> TCResult<Self> {
         let (owner, group) = schema;
+
+        let class_dir: fs::Dir<CacheBlock> = store.create_dir(txn_id, CLASS.into()).await?;
+        let schema = Schema::new(CLASS, owner.clone(), group.clone());
+        let class = fs::Persist::<CacheBlock>::load(txn_id, schema, class_dir).await?;
+
         let schema = Schema::new(Hypothetical::PATH, owner, group);
+        let hypothetical = Cluster::new(schema, Hypothetical::new(), txn_id);
 
         Ok(Self {
-            hypothetical: Cluster::new(schema, Hypothetical::new(), txn_id),
+            class,
+            hypothetical,
         })
     }
 

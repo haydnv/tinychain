@@ -1,25 +1,29 @@
 //! A directory of [`Cluster`]s
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
 use futures::future::{join_all, FutureExt, TryFutureExt};
 use futures::join;
+use futures::stream::TryStreamExt;
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::*;
+use safecast::TryCastFrom;
 
 use tc_error::*;
+use tc_state::object::InstanceClass;
 use tc_transact::fs;
 use tc_transact::lock::{TxnMapLock, TxnMapLockEntry};
 use tc_transact::public::Route;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
-use tcgeneric::{label, Label, PathSegment, ThreadSafe};
+use tcgeneric::{label, Id, Label, PathSegment, ThreadSafe};
 
 use crate::{CacheBlock, State, Txn};
 
-use super::{Cluster, Schema};
+use super::{Class, Cluster, Schema};
 
 /// The name of the endpoint which lists the names of each entry in a [`Dir`]
 pub const ENTRIES: Label = label("entries");
@@ -176,8 +180,9 @@ where
 impl<T: Send + Sync + fmt::Debug> DirCreate for Dir<T>
 where
     DirEntry<T>: Clone,
-    Cluster<Self>: Clone,
-    Self: fs::Persist<CacheBlock, Txn = Txn, Schema = ()> + Route<State> + fmt::Debug,
+    Cluster<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
+    Cluster<Self>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema> + Clone,
+    Self: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema> + Route<State> + fmt::Debug,
 {
     /// Create a new subdirectory in this [`Dir`].
     async fn create_dir(
@@ -208,6 +213,7 @@ where
 impl<T> DirCreateItem<T> for Dir<T>
 where
     T: DirItem + Route<State> + fmt::Debug,
+    Cluster<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
     DirEntry<T>: Clone,
 {
     /// Create a new item in this [`Dir`].
@@ -274,6 +280,61 @@ where
         }
 
         self.dir.finalize(*txn_id).await;
+    }
+}
+
+#[async_trait]
+impl fs::Persist<CacheBlock> for Dir<Class> {
+    type Txn = Txn;
+    type Schema = Schema;
+
+    async fn create(txn_id: TxnId, _schema: Schema, store: fs::Dir<CacheBlock>) -> TCResult<Self> {
+        if store.is_empty(txn_id).await? {
+            Self::new(txn_id, store)
+        } else {
+            Err(bad_request!(
+                "cannot create an empty cluster dir from a non-empty filesystem dir"
+            ))
+        }
+    }
+
+    async fn load(txn_id: TxnId, schema: Schema, dir: fs::Dir<CacheBlock>) -> TCResult<Self> {
+        let mut loaded = BTreeMap::new();
+
+        let mut entries = dir.entries::<InstanceClass>(txn_id).await?;
+        while let Some((name, entry)) = entries.try_next().await? {
+            let entry = match entry {
+                fs::DirEntry::Dir(dir) => {
+                    let is_class = {
+                        let mut names = dir.entry_names(txn_id).await?;
+                        names.any(|name| VersionNumber::can_cast_from(&name.as_str()))
+                    };
+
+                    let schema = schema.clone().append(Id::clone(&*name));
+
+                    if is_class {
+                        Cluster::load(txn_id, schema, dir)
+                            .map_ok(DirEntry::Item)
+                            .await
+                    } else {
+                        Cluster::load(txn_id, schema, dir)
+                            .map_ok(DirEntry::Dir)
+                            .await
+                    }
+                }
+                fs::DirEntry::File(file) => Err(internal!("invalid Class dir entry: {:?}", file)),
+            }?;
+
+            loaded.insert((*name).clone(), entry);
+        }
+
+        std::mem::drop(entries); // needed because `entries` borrows `dir`
+
+        Self::with_contents(txn_id, dir, loaded)
+    }
+
+    fn dir(&self) -> fs::Inner<CacheBlock> {
+        self.dir.clone().into_inner()
     }
 }
 

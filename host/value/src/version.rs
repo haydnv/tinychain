@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use destream::{de, en};
 use get_size::GetSize;
 use get_size_derive::*;
+use safecast::TryCastFrom;
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 
@@ -117,6 +118,16 @@ impl FromStr for Version {
             minor,
             patch: patch,
         })
+    }
+}
+
+impl TryCastFrom<&str> for Version {
+    fn can_cast_from(value: &&str) -> bool {
+        Self::from_str(value).is_ok()
+    }
+
+    fn opt_cast_from(value: &str) -> Option<Self> {
+        Self::from_str(value).ok()
     }
 }
 
