@@ -22,6 +22,7 @@ get-size-derive = "0.1"
 log = "0.4"
 num_cpus = "1.16"
 safecast = "0.2"
+tbon = "0.5"
 tc-chain = { path = "../chain" }
 tc-collection = { path = "../collection" }
 tc-error = { path = "../error" }
@@ -29,3 +30,5 @@ tc-scalar = { path = "../scalar" }
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }
 tcgeneric = { path = "../generic" }
+tokio = { version = "1.36", features = ["fs"] }
+tokio-util = "0.7"

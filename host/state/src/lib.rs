@@ -3,7 +3,6 @@
 use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::marker::PhantomData;
 use std::str::FromStr;
 
 use async_hash::{Digest, Hash, Output, Sha256};
@@ -17,32 +16,52 @@ use log::debug;
 use safecast::*;
 
 use tc_chain::{ChainType, ChainVisitor};
-use tc_collection::btree::BTreeType;
-use tc_collection::table::TableType;
-use tc_collection::tensor::TensorType;
 use tc_collection::{CollectionType, CollectionVisitor};
 use tc_error::*;
 use tc_scalar::*;
 use tc_transact::public::{ClosureInstance, Public, StateInstance, ToState};
-use tc_transact::{fs, AsyncHash, Gateway, Transaction, TxnId};
+use tc_transact::{AsyncHash, Gateway, Transaction, TxnId};
 use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::{
     path_label, Class, Id, Instance, Map, NativeClass, PathSegment, TCPath, TCPathBuf, Tuple,
 };
 
-use chain::*;
 use closure::*;
-use collection::*;
 use object::{InstanceClass, Object, ObjectType, ObjectVisitor};
 
-pub use tc_chain as chain;
-pub use tc_collection as collection;
-use tc_transact::fs::FileSave;
+pub use block::CacheBlock;
+pub use chain::*;
+pub use collection::*;
 
+mod block;
 pub mod closure;
 pub mod object;
 pub mod public;
 pub mod view;
+
+pub mod chain {
+    use crate::{CacheBlock, State};
+
+    pub type Chain<Txn, T> = tc_chain::Chain<State<Txn>, Txn, CacheBlock, T>;
+    pub type BlockChain<Txn, T> = tc_chain::BlockChain<State<Txn>, Txn, CacheBlock, T>;
+    pub type SyncChain<Txn, T> = tc_chain::SyncChain<State<Txn>, Txn, CacheBlock, T>;
+}
+
+pub mod collection {
+    use crate::CacheBlock;
+
+    pub use tc_collection::btree::{BTreeSchema, BTreeType};
+    pub use tc_collection::table::{TableSchema, TableType};
+    pub use tc_collection::tensor::TensorType;
+
+    pub type Collection<Txn> = tc_collection::Collection<Txn, CacheBlock>;
+    pub type CollectionBase<Txn> = tc_collection::CollectionBase<Txn, CacheBlock>;
+    pub type BTree<Txn> = tc_collection::BTree<Txn, CacheBlock>;
+    pub type BTreeFile<Txn> = tc_collection::BTreeFile<Txn, CacheBlock>;
+    pub type Table<Txn> = tc_collection::Table<Txn, CacheBlock>;
+    pub type TableFile<Txn> = tc_collection::TableFile<Txn, CacheBlock>;
+    pub type Tensor<Txn> = tc_collection::Tensor<Txn, CacheBlock>;
+}
 
 /// The [`Class`] of a [`State`].
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -181,17 +200,17 @@ impl fmt::Debug for StateType {
 }
 
 /// An addressable state with a discrete value per-transaction.
-pub enum State<Txn, FE> {
-    Collection(Collection<Txn, FE>),
-    Chain(Chain<Self, Txn, FE, CollectionBase<Txn, FE>>),
-    Closure(Closure<Txn, FE>),
+pub enum State<Txn> {
+    Collection(Collection<Txn>),
+    Chain(Chain<Txn, CollectionBase<Txn>>),
+    Closure(Closure<Txn>),
     Map(Map<Self>),
-    Object(Object<Txn, FE>),
+    Object(Object<Txn>),
     Scalar(Scalar),
     Tuple(Tuple<Self>),
 }
 
-impl<Txn, FE> Clone for State<Txn, FE> {
+impl<Txn> Clone for State<Txn> {
     fn clone(&self) -> Self {
         match self {
             Self::Collection(collection) => Self::Collection(collection.clone()),
@@ -205,7 +224,7 @@ impl<Txn, FE> Clone for State<Txn, FE> {
     }
 }
 
-impl<Txn, FE> State<Txn, FE> {
+impl<Txn> State<Txn> {
     /// Return true if this `State` is an empty [`Tuple`] or [`Map`], default [`Link`], or `Value::None`
     pub fn is_none(&self) -> bool {
         match self {
@@ -250,15 +269,9 @@ impl<Txn, FE> State<Txn, FE> {
     }
 }
 
-impl<Txn, FE> State<Txn, FE>
+impl<Txn> State<Txn>
 where
-    Txn: Transaction<FE> + Gateway<Self>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<Self>,
 {
     /// Return true if this `State` is a reference that needs to be resolved.
     pub fn is_ref(&self) -> bool {
@@ -271,19 +284,13 @@ where
     }
 }
 
-impl<Txn, FE> StateInstance for State<Txn, FE>
+impl<Txn> StateInstance for State<Txn>
 where
-    Txn: Transaction<FE> + Gateway<Self>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<Self>,
 {
-    type FE = FE;
+    type FE = CacheBlock;
     type Txn = Txn;
-    type Closure = Closure<Txn, FE>;
+    type Closure = Closure<Txn>;
 
     fn is_map(&self) -> bool {
         match self {
@@ -303,15 +310,9 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE> Refer<Self> for State<Txn, FE>
+impl<Txn> Refer<Self> for State<Txn>
 where
-    Txn: Transaction<FE> + Gateway<Self>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<Self>,
 {
     fn dereference_self(self, path: &TCPathBuf) -> Self {
         match self {
@@ -452,16 +453,15 @@ where
     }
 }
 
-impl<Txn, FE> Default for State<Txn, FE> {
+impl<Txn> Default for State<Txn> {
     fn default() -> Self {
         Self::Scalar(Scalar::default())
     }
 }
 
-impl<Txn, FE> Instance for State<Txn, FE>
+impl<Txn> Instance for State<Txn>
 where
     Txn: Send + Sync,
-    FE: Send + Sync,
 {
     type Class = StateType;
 
@@ -479,15 +479,9 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE> AsyncHash for State<Txn, FE>
+impl<Txn> AsyncHash for State<Txn>
 where
-    Txn: Transaction<FE> + Gateway<Self>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<TensorNode>
-        + AsType<ChainBlock>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<Self>,
 {
     async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         match self {
@@ -533,73 +527,73 @@ where
     }
 }
 
-impl<Txn, FE> From<()> for State<Txn, FE> {
+impl<Txn> From<()> for State<Txn> {
     fn from(_: ()) -> Self {
         State::Scalar(Scalar::Value(Value::None))
     }
 }
 
-impl<Txn, FE> From<BTree<Txn, FE>> for State<Txn, FE> {
-    fn from(btree: BTree<Txn, FE>) -> Self {
+impl<Txn> From<BTree<Txn>> for State<Txn> {
+    fn from(btree: BTree<Txn>) -> Self {
         Self::Collection(btree.into())
     }
 }
 
-impl<Txn, FE> From<Chain<Self, Txn, FE, CollectionBase<Txn, FE>>> for State<Txn, FE> {
-    fn from(chain: Chain<Self, Txn, FE, CollectionBase<Txn, FE>>) -> Self {
+impl<Txn> From<Chain<Txn, CollectionBase<Txn>>> for State<Txn> {
+    fn from(chain: Chain<Txn, CollectionBase<Txn>>) -> Self {
         Self::Chain(chain)
     }
 }
 
-impl<Txn, FE> From<BlockChain<Self, Txn, FE, CollectionBase<Txn, FE>>> for State<Txn, FE> {
-    fn from(chain: BlockChain<Self, Txn, FE, CollectionBase<Txn, FE>>) -> Self {
+impl<Txn> From<BlockChain<Txn, CollectionBase<Txn>>> for State<Txn> {
+    fn from(chain: BlockChain<Txn, CollectionBase<Txn>>) -> Self {
         Self::Chain(chain.into())
     }
 }
 
-impl<Txn, FE> From<Closure<Txn, FE>> for State<Txn, FE> {
-    fn from(closure: Closure<Txn, FE>) -> Self {
+impl<Txn> From<Closure<Txn>> for State<Txn> {
+    fn from(closure: Closure<Txn>) -> Self {
         Self::Closure(closure)
     }
 }
 
-impl<Txn, FE> From<Collection<Txn, FE>> for State<Txn, FE> {
-    fn from(collection: Collection<Txn, FE>) -> Self {
+impl<Txn> From<Collection<Txn>> for State<Txn> {
+    fn from(collection: Collection<Txn>) -> Self {
         Self::Collection(collection)
     }
 }
 
-impl<Txn, FE> From<CollectionBase<Txn, FE>> for State<Txn, FE> {
-    fn from(collection: CollectionBase<Txn, FE>) -> Self {
+impl<Txn> From<CollectionBase<Txn>> for State<Txn> {
+    fn from(collection: CollectionBase<Txn>) -> Self {
         Self::Collection(collection.into())
     }
 }
 
-impl<Txn, FE> From<Id> for State<Txn, FE> {
+impl<Txn> From<Id> for State<Txn> {
     fn from(id: Id) -> Self {
         Self::Scalar(id.into())
     }
 }
 
-impl<Txn, FE> From<InstanceClass> for State<Txn, FE> {
+impl<Txn> From<InstanceClass> for State<Txn> {
     fn from(class: InstanceClass) -> Self {
         Self::Object(class.into())
     }
 }
 
-impl<Txn, FE> From<Host> for State<Txn, FE> {
+impl<Txn> From<Host> for State<Txn> {
     fn from(host: Host) -> Self {
         Self::Scalar(Scalar::from(host))
     }
 }
 
-impl<Txn, FE> From<Link> for State<Txn, FE> {
+impl<Txn> From<Link> for State<Txn> {
     fn from(link: Link) -> Self {
         Self::Scalar(Scalar::from(link))
     }
 }
 
-impl<Txn, FE> From<Map<InstanceClass>> for State<Txn, FE> {
+impl<Txn> From<Map<InstanceClass>> for State<Txn> {
     fn from(map: Map<InstanceClass>) -> Self {
         Self::Map(
             map.into_iter()
@@ -609,45 +603,45 @@ impl<Txn, FE> From<Map<InstanceClass>> for State<Txn, FE> {
     }
 }
 
-impl<Txn, FE> From<Map<State<Txn, FE>>> for State<Txn, FE> {
-    fn from(map: Map<State<Txn, FE>>) -> Self {
+impl<Txn> From<Map<State<Txn>>> for State<Txn> {
+    fn from(map: Map<State<Txn>>) -> Self {
         State::Map(map)
     }
 }
 
-impl<Txn, FE> From<Map<Scalar>> for State<Txn, FE> {
+impl<Txn> From<Map<Scalar>> for State<Txn> {
     fn from(map: Map<Scalar>) -> Self {
         State::Scalar(map.into())
     }
 }
 
-impl<Txn, FE> From<Number> for State<Txn, FE> {
+impl<Txn> From<Number> for State<Txn> {
     fn from(n: Number) -> Self {
         Self::Scalar(n.into())
     }
 }
 
-impl<Txn, FE> From<Object<Txn, FE>> for State<Txn, FE> {
-    fn from(object: Object<Txn, FE>) -> Self {
+impl<Txn> From<Object<Txn>> for State<Txn> {
+    fn from(object: Object<Txn>) -> Self {
         State::Object(object)
     }
 }
 
-impl<Txn, FE> From<OpDef> for State<Txn, FE> {
+impl<Txn> From<OpDef> for State<Txn> {
     fn from(op_def: OpDef) -> Self {
         State::Scalar(Scalar::Op(op_def))
     }
 }
 
-impl<Txn, FE> From<OpRef> for State<Txn, FE> {
+impl<Txn> From<OpRef> for State<Txn> {
     fn from(op_ref: OpRef) -> Self {
         TCRef::Op(op_ref).into()
     }
 }
 
-impl<Txn, FE, T> From<Option<T>> for State<Txn, FE>
+impl<Txn, T> From<Option<T>> for State<Txn>
 where
-    State<Txn, FE>: From<T>,
+    State<Txn>: From<T>,
 {
     fn from(state: Option<T>) -> Self {
         if let Some(state) = state {
@@ -658,91 +652,91 @@ where
     }
 }
 
-impl<Txn, FE> From<Scalar> for State<Txn, FE> {
+impl<Txn> From<Scalar> for State<Txn> {
     fn from(scalar: Scalar) -> Self {
         State::Scalar(scalar)
     }
 }
 
-impl<Txn, FE> From<StateType> for State<Txn, FE> {
+impl<Txn> From<StateType> for State<Txn> {
     fn from(class: StateType) -> Self {
         Self::Object(InstanceClass::from(class).into())
     }
 }
 
-impl<Txn, FE> From<Table<Txn, FE>> for State<Txn, FE> {
-    fn from(table: Table<Txn, FE>) -> Self {
+impl<Txn> From<Table<Txn>> for State<Txn> {
+    fn from(table: Table<Txn>) -> Self {
         Self::Collection(table.into())
     }
 }
 
-impl<Txn, FE> From<Tensor<Txn, FE>> for State<Txn, FE> {
-    fn from(tensor: Tensor<Txn, FE>) -> Self {
+impl<Txn> From<Tensor<Txn>> for State<Txn> {
+    fn from(tensor: Tensor<Txn>) -> Self {
         Self::Collection(tensor.into())
     }
 }
 
-impl<Txn, FE> From<Tuple<State<Txn, FE>>> for State<Txn, FE> {
-    fn from(tuple: Tuple<State<Txn, FE>>) -> Self {
+impl<Txn> From<Tuple<State<Txn>>> for State<Txn> {
+    fn from(tuple: Tuple<State<Txn>>) -> Self {
         Self::Tuple(tuple)
     }
 }
 
-impl<Txn, FE> From<Tuple<Scalar>> for State<Txn, FE> {
+impl<Txn> From<Tuple<Scalar>> for State<Txn> {
     fn from(tuple: Tuple<Scalar>) -> Self {
         Self::Scalar(tuple.into())
     }
 }
 
-impl<Txn, FE> From<Tuple<Value>> for State<Txn, FE> {
+impl<Txn> From<Tuple<Value>> for State<Txn> {
     fn from(tuple: Tuple<Value>) -> Self {
         Self::Scalar(tuple.into())
     }
 }
 
-impl<Txn, FE> From<TCRef> for State<Txn, FE> {
+impl<Txn> From<TCRef> for State<Txn> {
     fn from(tc_ref: TCRef) -> Self {
         Box::new(tc_ref).into()
     }
 }
 
-impl<Txn, FE> From<Box<TCRef>> for State<Txn, FE> {
+impl<Txn> From<Box<TCRef>> for State<Txn> {
     fn from(tc_ref: Box<TCRef>) -> Self {
         Self::Scalar(Scalar::Ref(tc_ref))
     }
 }
 
-impl<Txn, FE> From<Value> for State<Txn, FE> {
+impl<Txn> From<Value> for State<Txn> {
     fn from(value: Value) -> Self {
         Self::Scalar(value.into())
     }
 }
 
-impl<Txn, FE> From<bool> for State<Txn, FE> {
+impl<Txn> From<bool> for State<Txn> {
     fn from(b: bool) -> Self {
         Self::Scalar(b.into())
     }
 }
 
-impl<Txn, FE> From<i64> for State<Txn, FE> {
+impl<Txn> From<i64> for State<Txn> {
     fn from(n: i64) -> Self {
         Self::Scalar(n.into())
     }
 }
 
-impl<Txn, FE> From<usize> for State<Txn, FE> {
+impl<Txn> From<usize> for State<Txn> {
     fn from(n: usize) -> Self {
         Self::Scalar(n.into())
     }
 }
 
-impl<Txn, FE> From<u64> for State<Txn, FE> {
+impl<Txn> From<u64> for State<Txn> {
     fn from(n: u64) -> Self {
         Self::Scalar(n.into())
     }
 }
 
-impl<Txn, FE, T1> CastFrom<(T1,)> for State<Txn, FE>
+impl<Txn, T1> CastFrom<(T1,)> for State<Txn>
 where
     Self: CastFrom<T1>,
 {
@@ -751,7 +745,7 @@ where
     }
 }
 
-impl<Txn, FE, T1, T2> CastFrom<(T1, T2)> for State<Txn, FE>
+impl<Txn, T1, T2> CastFrom<(T1, T2)> for State<Txn>
 where
     Self: CastFrom<T1>,
     Self: CastFrom<T2>,
@@ -761,7 +755,7 @@ where
     }
 }
 
-impl<Txn, FE, T1, T2, T3> CastFrom<(T1, T2, T3)> for State<Txn, FE>
+impl<Txn, T1, T2, T3> CastFrom<(T1, T2, T3)> for State<Txn>
 where
     Self: CastFrom<T1>,
     Self: CastFrom<T2>,
@@ -779,7 +773,7 @@ where
     }
 }
 
-impl<Txn, FE, T1, T2, T3, T4> CastFrom<(T1, T2, T3, T4)> for State<Txn, FE>
+impl<Txn, T1, T2, T3, T4> CastFrom<(T1, T2, T3, T4)> for State<Txn>
 where
     Self: CastFrom<T1>,
     Self: CastFrom<T2>,
@@ -799,10 +793,10 @@ where
     }
 }
 
-impl<Txn, FE> TryFrom<State<Txn, FE>> for bool {
+impl<Txn> TryFrom<State<Txn>> for bool {
     type Error = TCError;
 
-    fn try_from(state: State<Txn, FE>) -> Result<Self, Self::Error> {
+    fn try_from(state: State<Txn>) -> Result<Self, Self::Error> {
         match state {
             State::Scalar(scalar) => scalar.try_into(),
             other => Err(TCError::unexpected(other, "a boolean")),
@@ -810,10 +804,10 @@ impl<Txn, FE> TryFrom<State<Txn, FE>> for bool {
     }
 }
 
-impl<Txn, FE> TryFrom<State<Txn, FE>> for Id {
+impl<Txn> TryFrom<State<Txn>> for Id {
     type Error = TCError;
 
-    fn try_from(state: State<Txn, FE>) -> TCResult<Id> {
+    fn try_from(state: State<Txn>) -> TCResult<Id> {
         match state {
             State::Scalar(scalar) => scalar.try_into(),
             other => Err(TCError::unexpected(other, "an Id")),
@@ -821,10 +815,10 @@ impl<Txn, FE> TryFrom<State<Txn, FE>> for Id {
     }
 }
 
-impl<Txn, FE> TryFrom<State<Txn, FE>> for Collection<Txn, FE> {
+impl<Txn> TryFrom<State<Txn>> for Collection<Txn> {
     type Error = TCError;
 
-    fn try_from(state: State<Txn, FE>) -> TCResult<Collection<Txn, FE>> {
+    fn try_from(state: State<Txn>) -> TCResult<Collection<Txn>> {
         match state {
             State::Collection(collection) => Ok(collection),
             other => Err(TCError::unexpected(other, "a Collection")),
@@ -832,10 +826,10 @@ impl<Txn, FE> TryFrom<State<Txn, FE>> for Collection<Txn, FE> {
     }
 }
 
-impl<Txn, FE> TryFrom<State<Txn, FE>> for Scalar {
+impl<Txn> TryFrom<State<Txn>> for Scalar {
     type Error = TCError;
 
-    fn try_from(state: State<Txn, FE>) -> TCResult<Self> {
+    fn try_from(state: State<Txn>) -> TCResult<Self> {
         match state {
             State::Map(map) => map
                 .into_iter()
@@ -856,10 +850,10 @@ impl<Txn, FE> TryFrom<State<Txn, FE>> for Scalar {
     }
 }
 
-impl<Txn, FE> TryFrom<State<Txn, FE>> for Map<Scalar> {
+impl<Txn> TryFrom<State<Txn>> for Map<Scalar> {
     type Error = TCError;
 
-    fn try_from(state: State<Txn, FE>) -> TCResult<Map<Scalar>> {
+    fn try_from(state: State<Txn>) -> TCResult<Map<Scalar>> {
         match state {
             State::Map(map) => map
                 .into_iter()
@@ -878,10 +872,10 @@ impl<Txn, FE> TryFrom<State<Txn, FE>> for Map<Scalar> {
     }
 }
 
-impl<Txn, FE> TryFrom<State<Txn, FE>> for Map<State<Txn, FE>> {
+impl<Txn> TryFrom<State<Txn>> for Map<State<Txn>> {
     type Error = TCError;
 
-    fn try_from(state: State<Txn, FE>) -> TCResult<Map<State<Txn, FE>>> {
+    fn try_from(state: State<Txn>) -> TCResult<Map<State<Txn>>> {
         match state {
             State::Map(map) => Ok(map),
 
@@ -892,7 +886,7 @@ impl<Txn, FE> TryFrom<State<Txn, FE>> for Map<State<Txn, FE>> {
 
             State::Tuple(tuple) => tuple
                 .into_iter()
-                .map(|item| -> TCResult<(Id, State<Txn, FE>)> { item.try_into() })
+                .map(|item| -> TCResult<(Id, State<Txn>)> { item.try_into() })
                 .collect(),
 
             other => Err(TCError::unexpected(other, "a Map")),
@@ -900,10 +894,10 @@ impl<Txn, FE> TryFrom<State<Txn, FE>> for Map<State<Txn, FE>> {
     }
 }
 
-impl<Txn, FE> TryFrom<State<Txn, FE>> for Map<Value> {
+impl<Txn> TryFrom<State<Txn>> for Map<Value> {
     type Error = TCError;
 
-    fn try_from(state: State<Txn, FE>) -> TCResult<Map<Value>> {
+    fn try_from(state: State<Txn>) -> TCResult<Map<Value>> {
         match state {
             State::Map(map) => map
                 .into_iter()
@@ -922,14 +916,13 @@ impl<Txn, FE> TryFrom<State<Txn, FE>> for Map<Value> {
     }
 }
 
-impl<Txn, FE> TryFrom<State<Txn, FE>> for Tuple<State<Txn, FE>>
+impl<Txn> TryFrom<State<Txn>> for Tuple<State<Txn>>
 where
     Txn: Send + Sync,
-    FE: Send + Sync,
 {
     type Error = TCError;
 
-    fn try_from(state: State<Txn, FE>) -> Result<Self, Self::Error> {
+    fn try_from(state: State<Txn>) -> Result<Self, Self::Error> {
         match state {
             State::Map(map) => Ok(map
                 .into_iter()
@@ -948,14 +941,14 @@ where
     }
 }
 
-impl<Txn, FE, T> TryFrom<State<Txn, FE>> for (Id, T)
+impl<Txn, T> TryFrom<State<Txn>> for (Id, T)
 where
-    T: TryFrom<State<Txn, FE>> + TryFrom<Scalar>,
-    TCError: From<<T as TryFrom<State<Txn, FE>>>::Error> + From<<T as TryFrom<Scalar>>::Error>,
+    T: TryFrom<State<Txn>> + TryFrom<Scalar>,
+    TCError: From<<T as TryFrom<State<Txn>>>::Error> + From<<T as TryFrom<Scalar>>::Error>,
 {
     type Error = TCError;
 
-    fn try_from(state: State<Txn, FE>) -> TCResult<Self> {
+    fn try_from(state: State<Txn>) -> TCResult<Self> {
         match state {
             State::Scalar(scalar) => scalar.try_into().map_err(TCError::from),
             State::Tuple(mut tuple) if tuple.len() == 2 => {
@@ -968,10 +961,10 @@ where
     }
 }
 
-impl<Txn, FE> TryFrom<State<Txn, FE>> for Value {
+impl<Txn> TryFrom<State<Txn>> for Value {
     type Error = TCError;
 
-    fn try_from(state: State<Txn, FE>) -> TCResult<Value> {
+    fn try_from(state: State<Txn>) -> TCResult<Value> {
         match state {
             State::Scalar(scalar) => scalar.try_into(),
 
@@ -986,17 +979,15 @@ impl<Txn, FE> TryFrom<State<Txn, FE>> for Value {
     }
 }
 
-impl<Txn, FE> TryCastFrom<State<Txn, FE>>
-    for Chain<State<Txn, FE>, Txn, FE, CollectionBase<Txn, FE>>
-{
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for Chain<Txn, CollectionBase<Txn>> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Chain(_) => true,
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Chain(chain) => Some(chain),
             _ => None,
@@ -1004,17 +995,15 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>>
     }
 }
 
-impl<Txn, FE> TryCastFrom<State<Txn, FE>>
-    for BlockChain<State<Txn, FE>, Txn, FE, CollectionBase<Txn, FE>>
-{
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for BlockChain<Txn, CollectionBase<Txn>> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Chain(Chain::Block(_)) => true,
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Chain(Chain::Block(chain)) => Some(chain),
             _ => None,
@@ -1022,8 +1011,8 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>>
     }
 }
 
-impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Closure<Txn, FE> {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for Closure<Txn> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Closure(_) => true,
             State::Scalar(scalar) => Self::can_cast_from(scalar),
@@ -1031,7 +1020,7 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Closure<Txn, FE> {
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Closure(closure) => Some(closure),
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
@@ -1040,30 +1029,24 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Closure<Txn, FE> {
     }
 }
 
-impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Box<dyn ClosureInstance<State<Txn, FE>>>
+impl<Txn> TryCastFrom<State<Txn>> for Box<dyn ClosureInstance<State<Txn>>>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Closure(_) => true,
-            State::Scalar(scalar) => Closure::<Txn, FE>::can_cast_from(scalar),
+            State::Scalar(scalar) => Closure::<Txn>::can_cast_from(scalar),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Closure(closure) => Some(Box::new(closure)),
             State::Scalar(scalar) => {
-                if let Some(closure) = Closure::<Txn, FE>::opt_cast_from(scalar) {
-                    let closure: Box<dyn ClosureInstance<State<Txn, FE>>> = Box::new(closure);
+                if let Some(closure) = Closure::<Txn>::opt_cast_from(scalar) {
+                    let closure: Box<dyn ClosureInstance<State<Txn>>> = Box::new(closure);
                     Some(closure)
                 } else {
                     None
@@ -1074,15 +1057,15 @@ where
     }
 }
 
-impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Collection<Txn, FE> {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for Collection<Txn> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Collection(_) => true,
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Collection(collection) => Some(collection),
             _ => None,
@@ -1090,15 +1073,15 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Collection<Txn, FE> {
     }
 }
 
-impl<Txn, FE> TryCastFrom<State<Txn, FE>> for CollectionBase<Txn, FE> {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for CollectionBase<Txn> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Collection(collection) => CollectionBase::can_cast_from(collection),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Collection(collection) => CollectionBase::opt_cast_from(collection),
             _ => None,
@@ -1106,15 +1089,15 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for CollectionBase<Txn, FE> {
     }
 }
 
-impl<Txn, FE> TryCastFrom<State<Txn, FE>> for BTree<Txn, FE> {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for BTree<Txn> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Collection(collection) => BTree::can_cast_from(collection),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Collection(collection) => BTree::opt_cast_from(collection),
             _ => None,
@@ -1122,15 +1105,15 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for BTree<Txn, FE> {
     }
 }
 
-impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Table<Txn, FE> {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for Table<Txn> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Collection(collection) => Table::can_cast_from(collection),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Collection(collection) => Table::opt_cast_from(collection),
             _ => None,
@@ -1138,15 +1121,15 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Table<Txn, FE> {
     }
 }
 
-impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Tensor<Txn, FE> {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for Tensor<Txn> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Collection(collection) => Tensor::can_cast_from(collection),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Collection(collection) => Tensor::opt_cast_from(collection),
             _ => None,
@@ -1154,18 +1137,18 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Tensor<Txn, FE> {
     }
 }
 
-impl<Txn, FE, T> TryCastFrom<State<Txn, FE>> for (T,)
+impl<Txn, T> TryCastFrom<State<Txn>> for (T,)
 where
-    T: TryCastFrom<State<Txn, FE>>,
+    T: TryCastFrom<State<Txn>>,
 {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Tuple(tuple) => Self::can_cast_from(tuple),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,
@@ -1173,19 +1156,19 @@ where
     }
 }
 
-impl<Txn, FE, T1, T2> TryCastFrom<State<Txn, FE>> for (T1, T2)
+impl<Txn, T1, T2> TryCastFrom<State<Txn>> for (T1, T2)
 where
-    T1: TryCastFrom<State<Txn, FE>>,
-    T2: TryCastFrom<State<Txn, FE>>,
+    T1: TryCastFrom<State<Txn>>,
+    T2: TryCastFrom<State<Txn>>,
 {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Tuple(tuple) => Self::can_cast_from(tuple),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,
@@ -1193,20 +1176,20 @@ where
     }
 }
 
-impl<Txn, FE, T1, T2, T3> TryCastFrom<State<Txn, FE>> for (T1, T2, T3)
+impl<Txn, T1, T2, T3> TryCastFrom<State<Txn>> for (T1, T2, T3)
 where
-    T1: TryCastFrom<State<Txn, FE>>,
-    T2: TryCastFrom<State<Txn, FE>>,
-    T3: TryCastFrom<State<Txn, FE>>,
+    T1: TryCastFrom<State<Txn>>,
+    T2: TryCastFrom<State<Txn>>,
+    T3: TryCastFrom<State<Txn>>,
 {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Tuple(tuple) => Self::can_cast_from(tuple),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,
@@ -1215,15 +1198,15 @@ where
 }
 
 // TODO: delete
-impl<Txn, FE, T: TryCastFrom<State<Txn, FE>>> TryCastFrom<State<Txn, FE>> for Vec<T> {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+impl<Txn, T: TryCastFrom<State<Txn>>> TryCastFrom<State<Txn>> for Vec<T> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Tuple(tuple) => Self::can_cast_from(tuple),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Tuple(source) => Self::opt_cast_from(source),
             _ => None,
@@ -1232,18 +1215,18 @@ impl<Txn, FE, T: TryCastFrom<State<Txn, FE>>> TryCastFrom<State<Txn, FE>> for Ve
 }
 
 // TODO: delete
-impl<Txn, FE, T> TryCastFrom<State<Txn, FE>> for Tuple<T>
+impl<Txn, T> TryCastFrom<State<Txn>> for Tuple<T>
 where
-    T: TryCastFrom<State<Txn, FE>>,
+    T: TryCastFrom<State<Txn>>,
 {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Tuple(tuple) => Vec::<T>::can_cast_from(tuple),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Tuple(tuple) => Vec::<T>::opt_cast_from(tuple).map(Tuple::from),
             _ => None,
@@ -1251,8 +1234,8 @@ where
     }
 }
 
-impl<Txn, FE> TryCastFrom<State<Txn, FE>> for InstanceClass {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for InstanceClass {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Object(Object::Class(_)) => true,
             State::Scalar(scalar) => Self::can_cast_from(scalar),
@@ -1261,7 +1244,7 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for InstanceClass {
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<InstanceClass> {
+    fn opt_cast_from(state: State<Txn>) -> Option<InstanceClass> {
         match state {
             State::Object(Object::Class(class)) => Some(class),
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
@@ -1274,21 +1257,19 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for InstanceClass {
     }
 }
 
-impl<Txn, FE, T> TryCastFrom<State<Txn, FE>> for Map<T>
+impl<Txn, T> TryCastFrom<State<Txn>> for Map<T>
 where
-    T: TryCastFrom<State<Txn, FE>>,
+    T: TryCastFrom<State<Txn>>,
 {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Map(map) => map.values().all(T::can_cast_from),
-            State::Tuple(tuple) => tuple
-                .iter()
-                .all(|item| item.matches::<(Id, State<Txn, FE>)>()),
+            State::Tuple(tuple) => tuple.iter().all(|item| item.matches::<(Id, State<Txn>)>()),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Map(map) => {
                 let mut dest = Map::new();
@@ -1315,8 +1296,8 @@ where
     }
 }
 
-impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Scalar {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for Scalar {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Map(map) => map.values().all(Scalar::can_cast_from),
             State::Object(object) => Self::can_cast_from(object),
@@ -1326,7 +1307,7 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Scalar {
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Map(map) => {
                 let mut dest = Map::new();
@@ -1356,8 +1337,8 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Scalar {
     }
 }
 
-impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Value {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for Value {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Object(object) => Self::can_cast_from(object),
             State::Scalar(scalar) => Self::can_cast_from(scalar),
@@ -1366,7 +1347,7 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Value {
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Object(object) => Self::opt_cast_from(object),
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
@@ -1386,8 +1367,8 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Value {
     }
 }
 
-impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Link {
-    fn can_cast_from(state: &State<Txn, FE>) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for Link {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Object(Object::Class(class)) => Self::can_cast_from(class),
             State::Scalar(scalar) => Self::can_cast_from(scalar),
@@ -1395,7 +1376,7 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Link {
         }
     }
 
-    fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Object(Object::Class(class)) => Self::opt_cast_from(class).map(Self::from),
             State::Scalar(scalar) => Self::opt_cast_from(scalar).map(Self::from),
@@ -1406,15 +1387,15 @@ impl<Txn, FE> TryCastFrom<State<Txn, FE>> for Link {
 
 macro_rules! from_scalar {
     ($t:ty) => {
-        impl<Txn, FE> TryCastFrom<State<Txn, FE>> for $t {
-            fn can_cast_from(state: &State<Txn, FE>) -> bool {
+        impl<Txn> TryCastFrom<State<Txn>> for $t {
+            fn can_cast_from(state: &State<Txn>) -> bool {
                 match state {
                     State::Scalar(scalar) => Self::can_cast_from(scalar),
                     _ => false,
                 }
             }
 
-            fn opt_cast_from(state: State<Txn, FE>) -> Option<Self> {
+            fn opt_cast_from(state: State<Txn>) -> Option<Self> {
                 match state {
                     State::Scalar(scalar) => Self::opt_cast_from(scalar),
                     _ => None,
@@ -1438,7 +1419,7 @@ from_scalar!(bool);
 from_scalar!(usize);
 from_scalar!(u64);
 
-impl<Txn, FE> fmt::Debug for State<Txn, FE> {
+impl<Txn> fmt::Debug for State<Txn> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Chain(chain) => fmt::Debug::fmt(chain, f),
@@ -1452,27 +1433,20 @@ impl<Txn, FE> fmt::Debug for State<Txn, FE> {
     }
 }
 
-struct StateVisitor<Txn, FE> {
+struct StateVisitor<Txn> {
     txn: Txn,
     scalar: ScalarVisitor,
-    phantom: PhantomData<FE>,
 }
 
-impl<Txn, FE> StateVisitor<Txn, FE>
+impl<Txn> StateVisitor<Txn>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: AsType<BTreeNode>
-        + AsType<TensorNode>
-        + AsType<ChainBlock>
-        + DenseCacheFile
-        + for<'a> FileSave<'a>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
     async fn visit_map_value<A: de::MapAccess>(
         &self,
         class: StateType,
         access: &mut A,
-    ) -> Result<State<Txn, FE>, A::Error> {
+    ) -> Result<State<Txn>, A::Error> {
         debug!("decode instance of {:?}", class);
 
         match class {
@@ -1515,19 +1489,12 @@ where
     }
 }
 
-// TODO: guard against a DoS attack using an infinite request stream
 #[async_trait]
-impl<'a, Txn, FE> de::Visitor for StateVisitor<Txn, FE>
+impl<'a, Txn> de::Visitor for StateVisitor<Txn>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: AsType<BTreeNode>
-        + AsType<TensorNode>
-        + AsType<ChainBlock>
-        + DenseCacheFile
-        + for<'b> FileSave<'b>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
-    type Value = State<Txn, FE>;
+    type Value = State<Txn>;
 
     fn expecting() -> &'static str {
         "a State, e.g. 1 or [2] or \"three\" or {\"/state/scalar/value/number/complex\": [3.14, -1.414]"
@@ -1662,26 +1629,14 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE> de::FromStream for State<Txn, FE>
+impl<Txn> de::FromStream for State<Txn>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: AsType<BTreeNode>
-        + AsType<TensorNode>
-        + AsType<ChainBlock>
-        + DenseCacheFile
-        + for<'b> FileSave<'b>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
     type Context = Txn;
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {
         let scalar = ScalarVisitor::default();
-        decoder
-            .decode_any(StateVisitor {
-                txn,
-                scalar,
-                phantom: PhantomData,
-            })
-            .await
+        decoder.decode_any(StateVisitor { txn, scalar }).await
     }
 }

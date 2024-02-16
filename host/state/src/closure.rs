@@ -11,27 +11,24 @@ use destream::de;
 use futures::future::TryFutureExt;
 use futures::stream::{FuturesUnordered, TryStreamExt};
 use log::debug;
-use safecast::{AsType, CastInto, TryCastFrom, TryCastInto};
+use safecast::{CastInto, TryCastFrom, TryCastInto};
 
-use tc_chain::ChainBlock;
-use tc_collection::{BTreeNode, DenseCacheFile, TensorNode};
 use tc_error::*;
 use tc_scalar::{Executor, OpDef, OpDefType, OpRef, Scalar, SELF};
-use tc_transact::fs::FileSave;
 use tc_transact::public::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler};
-use tc_transact::{fs, AsyncHash, Gateway, IntoView, Transaction, TxnId};
+use tc_transact::{AsyncHash, Gateway, IntoView, Transaction, TxnId};
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf};
 
 use super::view::StateView;
-use super::State;
+use super::{CacheBlock, State};
 
 /// An [`OpDef`] which closes over zero or more [`State`]s
-pub struct Closure<Txn, FE> {
-    context: Map<State<Txn, FE>>,
+pub struct Closure<Txn> {
+    context: Map<State<Txn>>,
     op: OpDef,
 }
 
-impl<Txn, FE> Clone for Closure<Txn, FE> {
+impl<Txn> Clone for Closure<Txn> {
     fn clone(&self) -> Self {
         Self {
             context: self.context.clone(),
@@ -40,43 +37,36 @@ impl<Txn, FE> Clone for Closure<Txn, FE> {
     }
 }
 
-impl<Txn, FE> Closure<Txn, FE> {
+impl<Txn> Closure<Txn> {
     /// Return the context and [`OpDef`] which define this `Closure`.
-    pub fn into_inner(self) -> (Map<State<Txn, FE>>, OpDef) {
+    pub fn into_inner(self) -> (Map<State<Txn>>, OpDef) {
         (self.context, self.op)
     }
 }
 
-impl<Txn, FE> Closure<Txn, FE>
+impl<Txn> Closure<Txn>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
     /// Replace references to `$self` with the given `path`.
     pub fn dereference_self(self, path: &TCPathBuf) -> Self {
         let mut context = self.context;
         context.remove::<Id>(&SELF.into());
 
-        let op = self.op.dereference_self::<State<Txn, FE>>(path);
+        let op = self.op.dereference_self::<State<Txn>>(path);
 
         Self { context, op }
     }
 
     /// Return `true` if this `Closure` may write to service other than where it's defined
     pub fn is_inter_service_write(&self, cluster_path: &[PathSegment]) -> bool {
-        self.op
-            .is_inter_service_write::<State<Txn, FE>>(cluster_path)
+        self.op.is_inter_service_write::<State<Txn>>(cluster_path)
     }
 
     /// Replace references to the given `path` with `$self`
     pub fn reference_self(self, path: &TCPathBuf) -> Self {
         let before = self.op.clone();
-        let op = self.op.reference_self::<State<Txn, FE>>(path);
+        let op = self.op.reference_self::<State<Txn>>(path);
 
         let context = if op == before {
             self.context
@@ -91,7 +81,7 @@ where
     }
 
     /// Execute this `Closure` with the given `args`
-    pub async fn call(self, txn: &Txn, args: State<Txn, FE>) -> TCResult<State<Txn, FE>> {
+    pub async fn call(self, txn: &Txn, args: State<Txn>) -> TCResult<State<Txn>> {
         let capture = if let Some(capture) = self.op.last().cloned() {
             capture
         } else {
@@ -125,7 +115,7 @@ where
                     .await
             }
             OpDef::Post(op_def) => {
-                let params: Map<State<Txn, FE>> = args.try_into()?;
+                let params: Map<State<Txn>> = args.try_into()?;
                 context.extend(params);
 
                 Executor::with_context(txn, subject.as_ref(), context, op_def)
@@ -144,46 +134,34 @@ where
     }
 
     /// Execute this `Closure` with an owned [`Txn`] and the given `args`.
-    pub async fn call_owned(self, txn: Txn, args: State<Txn, FE>) -> TCResult<State<Txn, FE>> {
+    pub async fn call_owned(self, txn: Txn, args: State<Txn>) -> TCResult<State<Txn>> {
         self.call(&txn, args).await
     }
 }
 
 #[async_trait]
-impl<Txn, FE> tc_transact::public::ClosureInstance<State<Txn, FE>> for Closure<Txn, FE>
+impl<Txn> tc_transact::public::ClosureInstance<State<Txn>> for Closure<Txn>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
-    async fn call(self: Box<Self>, txn: Txn, args: State<Txn, FE>) -> TCResult<State<Txn, FE>> {
+    async fn call(self: Box<Self>, txn: Txn, args: State<Txn>) -> TCResult<State<Txn>> {
         self.call_owned(txn, args).await
     }
 }
 
-impl<Txn, FE> From<(Map<State<Txn, FE>>, OpDef)> for Closure<Txn, FE> {
-    fn from(tuple: (Map<State<Txn, FE>>, OpDef)) -> Self {
+impl<Txn> From<(Map<State<Txn>>, OpDef)> for Closure<Txn> {
+    fn from(tuple: (Map<State<Txn>>, OpDef)) -> Self {
         let (context, op) = tuple;
 
         Self { context, op }
     }
 }
 
-impl<'a, Txn, FE> Handler<'a, State<Txn, FE>> for Closure<Txn, FE>
+impl<'a, Txn> Handler<'a, State<Txn>> for Closure<Txn>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'b> fs::FileSave<'b>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn, FE>>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -194,7 +172,7 @@ where
         }
     }
 
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State<Txn, FE>>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -207,7 +185,7 @@ where
         }
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State<Txn, FE>>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -235,15 +213,9 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE> AsyncHash for Closure<Txn, FE>
+impl<Txn> AsyncHash for Closure<Txn>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<TensorNode>
-        + AsType<ChainBlock>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
     async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         let context = State::Map(self.context).hash(txn_id).await?;
@@ -256,15 +228,9 @@ where
 }
 
 #[async_trait]
-impl<'en, Txn, FE> IntoView<'en, FE> for Closure<Txn, FE>
+impl<'en, Txn> IntoView<'en, CacheBlock> for Closure<Txn>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
     type Txn = Txn;
     type View = (HashMap<Id, StateView<'en>>, OpDef);
@@ -286,15 +252,9 @@ where
 }
 
 #[async_trait]
-impl<Txn, FE> de::FromStream for Closure<Txn, FE>
+impl<Txn> de::FromStream for Closure<Txn>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: AsType<BTreeNode>
-        + AsType<TensorNode>
-        + AsType<ChainBlock>
-        + DenseCacheFile
-        + for<'b> FileSave<'b>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
     type Context = Txn;
 
@@ -308,7 +268,7 @@ where
     }
 }
 
-impl<Txn, FE> From<OpDef> for Closure<Txn, FE> {
+impl<Txn> From<OpDef> for Closure<Txn> {
     fn from(op: OpDef) -> Self {
         Self {
             context: Map::default(),
@@ -317,7 +277,7 @@ impl<Txn, FE> From<OpDef> for Closure<Txn, FE> {
     }
 }
 
-impl<Txn, FE> TryCastFrom<Scalar> for Closure<Txn, FE> {
+impl<Txn> TryCastFrom<Scalar> for Closure<Txn> {
     fn can_cast_from(scalar: &Scalar) -> bool {
         match scalar {
             Scalar::Op(_) => true,
@@ -336,29 +296,23 @@ impl<Txn, FE> TryCastFrom<Scalar> for Closure<Txn, FE> {
     }
 }
 
-impl<Txn, FE> fmt::Debug for Closure<Txn, FE> {
+impl<Txn> fmt::Debug for Closure<Txn> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "closure over {:?}: {:?}", self.context, self.op)
     }
 }
 
-struct ClosureVisitor<Txn, FE> {
+struct ClosureVisitor<Txn> {
     txn: Txn,
-    phantom: PhantomData<FE>,
+    phantom: PhantomData<CacheBlock>,
 }
 
 #[async_trait]
-impl<Txn, FE> de::Visitor for ClosureVisitor<Txn, FE>
+impl<Txn> de::Visitor for ClosureVisitor<Txn>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: AsType<BTreeNode>
-        + AsType<TensorNode>
-        + AsType<ChainBlock>
-        + DenseCacheFile
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
-    type Value = Closure<Txn, FE>;
+    type Value = Closure<Txn>;
 
     fn expecting() -> &'static str {
         "a Closure"

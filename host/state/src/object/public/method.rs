@@ -2,9 +2,6 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use log::debug;
-use safecast::AsType;
-use tc_chain::ChainBlock;
-use tc_collection::{BTreeNode, DenseCacheFile, TensorNode};
 
 use tc_error::*;
 use tc_scalar::op::*;
@@ -12,20 +9,20 @@ use tc_scalar::Scalar;
 use tc_transact::public::{
     DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route, ToState,
 };
-use tc_transact::{fs, Gateway, Transaction};
+use tc_transact::{Gateway, Transaction};
 use tc_value::Value;
 use tcgeneric::{Id, Instance, Map, PathSegment};
 
-use crate::State;
+use crate::{CacheBlock, State};
 
-struct GetMethod<'a, Txn, FE, T: Instance> {
+struct GetMethod<'a, Txn, T: Instance> {
     subject: &'a T,
     name: &'a Id,
     method: GetOp,
-    phantom: PhantomData<(Txn, FE)>,
+    phantom: PhantomData<Txn>,
 }
 
-impl<'a, Txn, FE, T: Instance> GetMethod<'a, Txn, FE, T> {
+impl<'a, Txn, T: Instance> GetMethod<'a, Txn, T> {
     pub fn new(subject: &'a T, name: &'a Id, method: GetOp) -> Self {
         Self {
             subject,
@@ -36,18 +33,12 @@ impl<'a, Txn, FE, T: Instance> GetMethod<'a, Txn, FE, T> {
     }
 }
 
-impl<'a, Txn, FE, T> GetMethod<'a, Txn, FE, T>
+impl<'a, Txn, T> GetMethod<'a, Txn, T>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'b> fs::FileSave<'b>
-        + Clone,
-    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
 {
-    async fn call(self, txn: &Txn, key: Value) -> TCResult<State<Txn, FE>> {
+    async fn call(self, txn: &Txn, key: Value) -> TCResult<State<Txn>> {
         let (key_name, op_def) = self.method;
 
         let mut context = Map::new();
@@ -62,18 +53,12 @@ where
     }
 }
 
-impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for GetMethod<'a, Txn, FE, T>
+impl<'a, Txn, T> Handler<'a, State<Txn>> for GetMethod<'a, Txn, T>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'b> fs::FileSave<'b>
-        + Clone,
-    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn, FE>>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -81,14 +66,14 @@ where
     }
 }
 
-struct PutMethod<'a, Txn, FE, T: Instance> {
+struct PutMethod<'a, Txn, T: Instance> {
     subject: &'a T,
     name: &'a Id,
     method: PutOp,
-    phantom: PhantomData<(Txn, FE)>,
+    phantom: PhantomData<Txn>,
 }
 
-impl<'a, Txn, FE, T: Instance> PutMethod<'a, Txn, FE, T> {
+impl<'a, Txn, T: Instance> PutMethod<'a, Txn, T> {
     pub fn new(subject: &'a T, name: &'a Id, method: PutOp) -> Self {
         Self {
             subject,
@@ -99,18 +84,12 @@ impl<'a, Txn, FE, T: Instance> PutMethod<'a, Txn, FE, T> {
     }
 }
 
-impl<'a, Txn, FE, T> PutMethod<'a, Txn, FE, T>
+impl<'a, Txn, T> PutMethod<'a, Txn, T>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'b> fs::FileSave<'b>
-        + Clone,
-    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
 {
-    async fn call(self, txn: &Txn, key: Value, value: State<Txn, FE>) -> TCResult<()> {
+    async fn call(self, txn: &Txn, key: Value, value: State<Txn>) -> TCResult<()> {
         let (key_name, value_name, op_def) = self.method;
 
         let mut context = Map::new();
@@ -126,18 +105,12 @@ where
     }
 }
 
-impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for PutMethod<'a, Txn, FE, T>
+impl<'a, Txn, T> Handler<'a, State<Txn>> for PutMethod<'a, Txn, T>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'b> fs::FileSave<'b>
-        + Clone,
-    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
 {
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State<Txn, FE>>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -147,14 +120,14 @@ where
     }
 }
 
-struct PostMethod<'a, Txn, FE, T: Instance> {
+struct PostMethod<'a, Txn, T: Instance> {
     subject: &'a T,
     name: &'a Id,
     method: PostOp,
-    phantom: PhantomData<(Txn, FE)>,
+    phantom: PhantomData<Txn>,
 }
 
-impl<'a, Txn, FE, T: Instance> PostMethod<'a, Txn, FE, T> {
+impl<'a, Txn, T: Instance> PostMethod<'a, Txn, T> {
     pub fn new(subject: &'a T, name: &'a Id, method: PostOp) -> Self {
         Self {
             subject,
@@ -165,18 +138,12 @@ impl<'a, Txn, FE, T: Instance> PostMethod<'a, Txn, FE, T> {
     }
 }
 
-impl<'a, Txn, FE, T> PostMethod<'a, Txn, FE, T>
+impl<'a, Txn, T> PostMethod<'a, Txn, T>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'b> fs::FileSave<'b>
-        + Clone,
-    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
 {
-    async fn call(self, txn: &Txn, params: Map<State<Txn, FE>>) -> TCResult<State<Txn, FE>> {
+    async fn call(self, txn: &Txn, params: Map<State<Txn>>) -> TCResult<State<Txn>> {
         match call_method(txn, self.subject, params, self.method).await {
             Ok(state) => Ok(state),
             Err(cause) => {
@@ -186,18 +153,12 @@ where
     }
 }
 
-impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for PostMethod<'a, Txn, FE, T>
+impl<'a, Txn, T> Handler<'a, State<Txn>> for PostMethod<'a, Txn, T>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'b> fs::FileSave<'b>
-        + Clone,
-    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
 {
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State<Txn, FE>>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -207,14 +168,14 @@ where
     }
 }
 
-struct DeleteMethod<'a, Txn, FE, T: Instance> {
+struct DeleteMethod<'a, Txn, T: Instance> {
     subject: &'a T,
     name: &'a Id,
     method: DeleteOp,
-    phantom: PhantomData<(Txn, FE)>,
+    phantom: PhantomData<Txn>,
 }
 
-impl<'a, Txn, FE, T: Instance> DeleteMethod<'a, Txn, FE, T> {
+impl<'a, Txn, T: Instance> DeleteMethod<'a, Txn, T> {
     pub fn new(subject: &'a T, name: &'a Id, method: DeleteOp) -> Self {
         Self {
             subject,
@@ -225,16 +186,10 @@ impl<'a, Txn, FE, T: Instance> DeleteMethod<'a, Txn, FE, T> {
     }
 }
 
-impl<'a, Txn, FE, T> DeleteMethod<'a, Txn, FE, T>
+impl<'a, Txn, T> DeleteMethod<'a, Txn, T>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'b> fs::FileSave<'b>
-        + Clone,
-    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
 {
     async fn call(self, txn: &Txn, key: Value) -> TCResult<()> {
         let (key_name, op_def) = self.method;
@@ -252,16 +207,10 @@ where
     }
 }
 
-impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for DeleteMethod<'a, Txn, FE, T>
+impl<'a, Txn, T> Handler<'a, State<Txn>> for DeleteMethod<'a, Txn, T>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'b> fs::FileSave<'b>
-        + Clone,
-    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
 {
     fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
     where
@@ -272,21 +221,15 @@ where
 }
 
 #[inline]
-pub fn route_attr<'a, Txn, FE, T>(
+pub fn route_attr<'a, Txn, T>(
     subject: &'a T,
     name: &'a Id,
     attr: &'a Scalar,
     path: &'a [PathSegment],
-) -> Option<Box<dyn Handler<'a, State<Txn, FE>> + 'a>>
+) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'b> fs::FileSave<'b>
-        + Clone,
-    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug + 'a,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
 {
     match attr {
         Scalar::Op(OpDef::Get(get_op)) if path.is_empty() => {
@@ -317,21 +260,15 @@ where
     }
 }
 
-async fn call_method<Txn, FE, T>(
+async fn call_method<Txn, T>(
     txn: &Txn,
     subject: &T,
-    context: Map<State<Txn, FE>>,
+    context: Map<State<Txn>>,
     form: Vec<(Id, Scalar)>,
-) -> TCResult<State<Txn, FE>>
+) -> TCResult<State<Txn>>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
-    T: ToState<State<Txn, FE>> + Route<State<Txn, FE>> + Instance + fmt::Debug,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Route<State<Txn>> + Instance + fmt::Debug,
 {
     debug!(
         "call method with form {}",

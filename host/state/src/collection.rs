@@ -1,4 +1,4 @@
-pub use
+
 /// A collection such as a [`Table`] or [`Tensor`]
 pub type Collection = tc_collection::Collection<Txn>;
 

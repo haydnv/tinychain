@@ -4,17 +4,16 @@ use async_trait::async_trait;
 use destream::{en, EncodeMap};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::TryFutureExt;
-use safecast::AsType;
 
-use tc_chain::{ChainBlock, ChainView};
-use tc_collection::{BTreeNode, CollectionView, DenseCacheFile, TensorNode};
+use tc_chain::ChainView;
+use tc_collection::CollectionView;
 use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
-use tc_transact::{fs, Gateway, IntoView, Transaction};
+use tc_transact::{Gateway, IntoView, Transaction};
 use tcgeneric::{Id, NativeClass};
 
 use super::object::ObjectView;
-use super::StateType;
+use super::{CacheBlock, StateType};
 
 use super::State;
 
@@ -30,15 +29,9 @@ pub enum StateView<'en> {
 }
 
 #[async_trait]
-impl<'en, Txn, FE> IntoView<'en, FE> for State<Txn, FE>
+impl<'en, Txn> IntoView<'en, CacheBlock> for State<Txn>
 where
-    Txn: Transaction<FE> + Gateway<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
     type Txn = Txn;
     type View = StateView<'en>;
