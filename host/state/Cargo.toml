@@ -11,6 +11,10 @@ repository = "https://github.com/haydnv/tinychain.git"
 keywords = ["chain", "collection", "object", "scalar", "generic"]
 categories = ["data-structures"]
 
+[features]
+chain = ["tc-chain", "collection"]
+collection = ["tc-collection"]
+
 [dependencies]
 async-hash = "0.5"
 async-trait = "0.1"
@@ -23,8 +27,8 @@ log = "0.4"
 num_cpus = "1.16"
 safecast = "0.2"
 tbon = "0.5"
-tc-chain = { path = "../chain" }
-tc-collection = { path = "../collection" }
+tc-chain = { path = "../chain", optional = true }
+tc-collection = { path = "../collection", optional = true }
 tc-error = { path = "../error" }
 tc-scalar = { path = "../scalar" }
 tc-transact = { path = "../transact" }

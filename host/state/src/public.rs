@@ -1,15 +1,19 @@
+use std::marker::PhantomData;
+
 use futures::TryFutureExt;
 use log::debug;
 use safecast::TryCastInto;
-use std::marker::PhantomData;
 
 use tc_error::*;
+#[cfg(feature = "collection")]
+use tc_transact::fs;
 use tc_transact::public::helpers::{AttributeHandler, EchoHandler, SelfHandler};
 use tc_transact::public::{GetHandler, Handler, PostHandler, Route};
-use tc_transact::{fs, AsyncHash, Gateway, Transaction};
+use tc_transact::{AsyncHash, Gateway, Transaction};
 use tc_value::{Link, Number, Value};
 use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, PathSegment, TCPath};
 
+#[cfg(feature = "collection")]
 use crate::collection::{BTreeFile, BTreeSchema, Collection, TableFile, TableSchema};
 use crate::object::{InstanceClass, Object};
 use crate::{CacheBlock, State, StateType};
@@ -103,7 +107,9 @@ where
         path: &'a [PathSegment],
     ) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>> {
         let child_handler = match self {
+            #[cfg(feature = "chain")]
             Self::Chain(ct) => ct.route(path),
+            #[cfg(feature = "collection")]
             Self::Collection(ct) => ct.route(path),
             Self::Object(ot) => ot.route(path),
             Self::Scalar(st) => st.route(path),
@@ -137,11 +143,13 @@ where
         );
 
         if let Some(handler) = match self {
+            #[cfg(feature = "chain")]
             Self::Chain(chain) => chain.route(path),
             Self::Closure(closure) if path.is_empty() => {
                 let handler: Box<dyn Handler<'a, State<Txn>> + 'a> = Box::new(closure.clone());
                 Some(handler)
             }
+            #[cfg(feature = "collection")]
             Self::Collection(collection) => collection.route(path),
             Self::Map(map) => map.route(path),
             Self::Object(object) => object.route(path),
@@ -182,6 +190,7 @@ impl<Txn> Default for Static<Txn> {
     }
 }
 
+#[cfg(feature = "collection")]
 impl<Txn> Route<State<Txn>> for Static<Txn>
 where
     Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
@@ -199,6 +208,28 @@ where
 
         match path[0].as_str() {
             "collection" => tc_collection::public::Static.route(&path[1..]),
+            "scalar" => tc_scalar::public::Static.route(&path[1..]),
+            "map" => tc_transact::public::generic::MapStatic.route(&path[1..]),
+            "tuple" => tc_transact::public::generic::TupleStatic.route(&path[1..]),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(not(feature = "collection"))]
+impl<Txn> Route<State<Txn>> for Static<Txn>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+{
+    fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>> {
+        if path.is_empty() {
+            return Some(Box::new(EchoHandler));
+        }
+
+        match path[0].as_str() {
             "scalar" => tc_scalar::public::Static.route(&path[1..]),
             "map" => tc_transact::public::generic::MapStatic.route(&path[1..]),
             "tuple" => tc_transact::public::generic::TupleStatic.route(&path[1..]),

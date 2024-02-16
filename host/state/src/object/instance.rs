@@ -2,6 +2,7 @@
 
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::marker::PhantomData;
 use std::ops::Deref;
 
 use log::debug;
@@ -22,6 +23,7 @@ pub struct InstanceExt<Txn, T> {
     parent: Box<T>,
     class: InstanceClass,
     members: Map<State<Txn>>,
+    txn: PhantomData<Txn>, // needed to compile when the collection feature flag is off
 }
 
 impl<Txn, T> Clone for InstanceExt<Txn, T>
@@ -33,6 +35,7 @@ where
             parent: self.parent.clone(),
             class: self.class.clone(),
             members: self.members.clone(),
+            txn: self.txn,
         }
     }
 }
@@ -47,6 +50,7 @@ where
             parent: Box::new(parent),
             class,
             members: Map::default(),
+            txn: PhantomData,
         }
     }
 
@@ -56,6 +60,7 @@ where
             parent: Box::new(parent),
             class,
             members,
+            txn: PhantomData,
         }
     }
 
@@ -85,6 +90,7 @@ where
             parent: Box::new(parent),
             class,
             members: self.members,
+            txn: self.txn,
         })
     }
 }
@@ -148,13 +154,11 @@ where
     T: tcgeneric::Instance + ToState<State<Txn>>,
 {
     fn to_state(&self) -> State<Txn> {
-        let parent = Box::new(self.parent.to_state());
-        let class = self.class.clone();
-        let members = self.members.clone();
         let instance = InstanceExt {
-            parent,
-            class,
-            members,
+            parent: Box::new(self.parent.to_state()),
+            class: self.class.clone(),
+            members: self.members.clone(),
+            txn: self.txn,
         };
 
         State::Object(Object::Instance(instance))

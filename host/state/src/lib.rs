@@ -15,7 +15,9 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use log::debug;
 use safecast::*;
 
+#[cfg(feature = "chain")]
 use tc_chain::{ChainType, ChainVisitor};
+#[cfg(feature = "collection")]
 use tc_collection::{CollectionType, CollectionVisitor};
 use tc_error::*;
 use tc_scalar::*;
@@ -30,7 +32,9 @@ use closure::*;
 use object::{InstanceClass, Object, ObjectType, ObjectVisitor};
 
 pub use block::CacheBlock;
+#[cfg(feature = "chain")]
 pub use chain::*;
+#[cfg(feature = "collection")]
 pub use collection::*;
 
 mod block;
@@ -39,6 +43,7 @@ pub mod object;
 pub mod public;
 pub mod view;
 
+#[cfg(feature = "chain")]
 pub mod chain {
     use crate::{CacheBlock, State};
 
@@ -47,6 +52,7 @@ pub mod chain {
     pub type SyncChain<Txn, T> = tc_chain::SyncChain<State<Txn>, Txn, CacheBlock, T>;
 }
 
+#[cfg(feature = "collection")]
 pub mod collection {
     use crate::CacheBlock;
 
@@ -66,7 +72,9 @@ pub mod collection {
 /// The [`Class`] of a [`State`].
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum StateType {
+    #[cfg(feature = "chain")]
     Chain(ChainType),
+    #[cfg(feature = "collection")]
     Collection(CollectionType),
     Closure,
     Map,
@@ -93,8 +101,10 @@ impl NativeClass for StateType {
                 }
             } else if path.len() > 2 {
                 match path[1].as_str() {
-                    "collection" => CollectionType::from_path(path).map(Self::Collection),
+                    #[cfg(feature = "chain")]
                     "chain" => ChainType::from_path(path).map(Self::Chain),
+                    #[cfg(feature = "collection")]
+                    "collection" => CollectionType::from_path(path).map(Self::Collection),
                     "object" => ObjectType::from_path(path).map(Self::Object),
                     "scalar" => ScalarType::from_path(path).map(Self::Scalar),
                     _ => None,
@@ -109,8 +119,10 @@ impl NativeClass for StateType {
 
     fn path(&self) -> TCPathBuf {
         match self {
-            Self::Collection(ct) => ct.path(),
+            #[cfg(feature = "chain")]
             Self::Chain(ct) => ct.path(),
+            #[cfg(feature = "collection")]
+            Self::Collection(ct) => ct.path(),
             Self::Closure => path_label(&["state", "closure"]).into(),
             Self::Map => path_label(&["state", "map"]).into(),
             Self::Object(ot) => ot.path(),
@@ -120,12 +132,14 @@ impl NativeClass for StateType {
     }
 }
 
+#[cfg(feature = "collection")]
 impl From<BTreeType> for StateType {
     fn from(btt: BTreeType) -> Self {
         CollectionType::BTree(btt).into()
     }
 }
 
+#[cfg(feature = "collection")]
 impl From<CollectionType> for StateType {
     fn from(ct: CollectionType) -> Self {
         Self::Collection(ct)
@@ -138,6 +152,7 @@ impl From<NumberType> for StateType {
     }
 }
 
+#[cfg(feature = "chain")]
 impl From<ChainType> for StateType {
     fn from(ct: ChainType) -> Self {
         Self::Chain(ct)
@@ -156,12 +171,14 @@ impl From<ScalarType> for StateType {
     }
 }
 
+#[cfg(feature = "collection")]
 impl From<TableType> for StateType {
     fn from(tt: TableType) -> Self {
         Self::Collection(tt.into())
     }
 }
 
+#[cfg(feature = "collection")]
 impl From<TensorType> for StateType {
     fn from(tt: TensorType) -> Self {
         Self::Collection(tt.into())
@@ -188,7 +205,9 @@ impl TryFrom<StateType> for ScalarType {
 impl fmt::Debug for StateType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            #[cfg(feature = "chain")]
             Self::Chain(ct) => fmt::Debug::fmt(ct, f),
+            #[cfg(feature = "collection")]
             Self::Collection(ct) => fmt::Debug::fmt(ct, f),
             Self::Closure => f.write_str("closure"),
             Self::Map => f.write_str("Map<State>"),
@@ -201,8 +220,10 @@ impl fmt::Debug for StateType {
 
 /// An addressable state with a discrete value per-transaction.
 pub enum State<Txn> {
-    Collection(Collection<Txn>),
+    #[cfg(feature = "chain")]
     Chain(Chain<Txn, CollectionBase<Txn>>),
+    #[cfg(feature = "collection")]
+    Collection(Collection<Txn>),
     Closure(Closure<Txn>),
     Map(Map<Self>),
     Object(Object<Txn>),
@@ -213,8 +234,10 @@ pub enum State<Txn> {
 impl<Txn> Clone for State<Txn> {
     fn clone(&self) -> Self {
         match self {
-            Self::Collection(collection) => Self::Collection(collection.clone()),
+            #[cfg(feature = "chain")]
             Self::Chain(chain) => Self::Chain(chain.clone()),
+            #[cfg(feature = "collection")]
+            Self::Collection(collection) => Self::Collection(collection.clone()),
             Self::Closure(closure) => Self::Closure(closure.clone()),
             Self::Map(map) => Self::Map(map.clone()),
             Self::Object(obj) => Self::Object(obj.clone()),
@@ -467,8 +490,10 @@ where
 
     fn class(&self) -> StateType {
         match self {
+            #[cfg(feature = "chain")]
             Self::Chain(chain) => StateType::Chain(chain.class()),
             Self::Closure(_) => StateType::Closure,
+            #[cfg(feature = "collection")]
             Self::Collection(collection) => StateType::Collection(collection.class()),
             Self::Map(_) => StateType::Map,
             Self::Object(object) => StateType::Object(object.class()),
@@ -485,9 +510,11 @@ where
 {
     async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         match self {
-            Self::Collection(collection) => collection.hash(txn_id).await,
+            #[cfg(feature = "chain")]
             Self::Chain(chain) => chain.hash(txn_id).await,
             Self::Closure(closure) => closure.hash(txn_id).await,
+            #[cfg(feature = "collection")]
+            Self::Collection(collection) => collection.hash(txn_id).await,
             Self::Map(map) => {
                 let mut hashes = stream::iter(map)
                     .map(|(id, state)| {
@@ -533,18 +560,21 @@ impl<Txn> From<()> for State<Txn> {
     }
 }
 
+#[cfg(feature = "collection")]
 impl<Txn> From<BTree<Txn>> for State<Txn> {
     fn from(btree: BTree<Txn>) -> Self {
         Self::Collection(btree.into())
     }
 }
 
+#[cfg(feature = "chain")]
 impl<Txn> From<Chain<Txn, CollectionBase<Txn>>> for State<Txn> {
     fn from(chain: Chain<Txn, CollectionBase<Txn>>) -> Self {
         Self::Chain(chain)
     }
 }
 
+#[cfg(feature = "chain")]
 impl<Txn> From<BlockChain<Txn, CollectionBase<Txn>>> for State<Txn> {
     fn from(chain: BlockChain<Txn, CollectionBase<Txn>>) -> Self {
         Self::Chain(chain.into())
@@ -557,12 +587,14 @@ impl<Txn> From<Closure<Txn>> for State<Txn> {
     }
 }
 
+#[cfg(feature = "collection")]
 impl<Txn> From<Collection<Txn>> for State<Txn> {
     fn from(collection: Collection<Txn>) -> Self {
         Self::Collection(collection)
     }
 }
 
+#[cfg(feature = "collection")]
 impl<Txn> From<CollectionBase<Txn>> for State<Txn> {
     fn from(collection: CollectionBase<Txn>) -> Self {
         Self::Collection(collection.into())
@@ -664,12 +696,14 @@ impl<Txn> From<StateType> for State<Txn> {
     }
 }
 
+#[cfg(feature = "collection")]
 impl<Txn> From<Table<Txn>> for State<Txn> {
     fn from(table: Table<Txn>) -> Self {
         Self::Collection(table.into())
     }
 }
 
+#[cfg(feature = "collection")]
 impl<Txn> From<Tensor<Txn>> for State<Txn> {
     fn from(tensor: Tensor<Txn>) -> Self {
         Self::Collection(tensor.into())
@@ -815,6 +849,7 @@ impl<Txn> TryFrom<State<Txn>> for Id {
     }
 }
 
+#[cfg(feature = "collection")]
 impl<Txn> TryFrom<State<Txn>> for Collection<Txn> {
     type Error = TCError;
 
@@ -979,6 +1014,7 @@ impl<Txn> TryFrom<State<Txn>> for Value {
     }
 }
 
+#[cfg(feature = "chain")]
 impl<Txn> TryCastFrom<State<Txn>> for Chain<Txn, CollectionBase<Txn>> {
     fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
@@ -995,6 +1031,7 @@ impl<Txn> TryCastFrom<State<Txn>> for Chain<Txn, CollectionBase<Txn>> {
     }
 }
 
+#[cfg(feature = "chain")]
 impl<Txn> TryCastFrom<State<Txn>> for BlockChain<Txn, CollectionBase<Txn>> {
     fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
@@ -1057,6 +1094,7 @@ where
     }
 }
 
+#[cfg(feature = "collection")]
 impl<Txn> TryCastFrom<State<Txn>> for Collection<Txn> {
     fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
@@ -1073,6 +1111,7 @@ impl<Txn> TryCastFrom<State<Txn>> for Collection<Txn> {
     }
 }
 
+#[cfg(feature = "collection")]
 impl<Txn> TryCastFrom<State<Txn>> for CollectionBase<Txn> {
     fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
@@ -1089,6 +1128,7 @@ impl<Txn> TryCastFrom<State<Txn>> for CollectionBase<Txn> {
     }
 }
 
+#[cfg(feature = "collection")]
 impl<Txn> TryCastFrom<State<Txn>> for BTree<Txn> {
     fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
@@ -1105,6 +1145,7 @@ impl<Txn> TryCastFrom<State<Txn>> for BTree<Txn> {
     }
 }
 
+#[cfg(feature = "collection")]
 impl<Txn> TryCastFrom<State<Txn>> for Table<Txn> {
     fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
@@ -1121,6 +1162,7 @@ impl<Txn> TryCastFrom<State<Txn>> for Table<Txn> {
     }
 }
 
+#[cfg(feature = "collection")]
 impl<Txn> TryCastFrom<State<Txn>> for Tensor<Txn> {
     fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
@@ -1422,8 +1464,10 @@ from_scalar!(u64);
 impl<Txn> fmt::Debug for State<Txn> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            #[cfg(feature = "chain")]
             Self::Chain(chain) => fmt::Debug::fmt(chain, f),
             Self::Closure(closure) => fmt::Debug::fmt(closure, f),
+            #[cfg(feature = "collection")]
             Self::Collection(collection) => fmt::Debug::fmt(collection, f),
             Self::Map(map) => fmt::Debug::fmt(map, f),
             Self::Object(object) => fmt::Debug::fmt(object, f),
@@ -1450,6 +1494,7 @@ where
         debug!("decode instance of {:?}", class);
 
         match class {
+            #[cfg(feature = "chain")]
             StateType::Chain(ct) => {
                 ChainVisitor::new(self.txn.clone())
                     .visit_map_value(ct, access)
@@ -1462,6 +1507,7 @@ where
                     .map_ok(State::Closure)
                     .await
             }
+            #[cfg(feature = "collection")]
             StateType::Collection(ct) => {
                 CollectionVisitor::new(self.txn.clone())
                     .visit_map_value(ct, access)

@@ -158,11 +158,11 @@ where
     Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
     type Txn = Txn;
-    type View = ObjectView;
+    type View = ObjectView<'en>;
 
-    async fn into_view(self, _txn: Txn) -> TCResult<ObjectView> {
+    async fn into_view(self, _txn: Txn) -> TCResult<ObjectView<'en>> {
         match self {
-            Self::Class(class) => Ok(ObjectView::Class(class)),
+            Self::Class(class) => Ok(ObjectView::Class(class, PhantomData)),
             Self::Instance(_instance) => Err(not_implemented!("view of user-defined instance")),
         }
     }
@@ -179,18 +179,19 @@ impl<Txn> fmt::Debug for Object<Txn> {
 }
 
 /// A view of an [`Object`] at a specific [`Txn`], used for serialization.
-pub enum ObjectView {
-    Class(InstanceClass),
+pub enum ObjectView<'en> {
+    // the 'en lifetime is needed to compile when the collection feature flag is off
+    Class(InstanceClass, PhantomData<&'en ()>),
 }
 
-impl<'en> en::IntoStream<'en> for ObjectView {
+impl<'en> en::IntoStream<'en> for ObjectView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         use destream::en::EncodeMap;
 
         let mut map = encoder.encode_map(Some(1))?;
 
         match self {
-            Self::Class(class) => map.encode_entry(ObjectType::Class.path().to_string(), class),
+            Self::Class(class, _) => map.encode_entry(ObjectType::Class.path().to_string(), class),
         }?;
 
         map.end()

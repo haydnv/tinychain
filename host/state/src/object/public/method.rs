@@ -281,7 +281,7 @@ where
     let capture = if let Some((capture, _)) = form.last() {
         capture.clone()
     } else {
-        return Ok(State::default());
+        return Ok(State::<Txn>::default());
     };
 
     Executor::with_context(txn, Some(subject), context.into(), form)
