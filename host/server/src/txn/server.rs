@@ -4,8 +4,9 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use ds_ext::OrdHashSet;
-use freqfs::{DirLock, FileSave};
+use freqfs::DirLock;
 use log::debug;
+use tc_state::CacheBlock;
 use tokio::sync::mpsc;
 
 use tc_transact::TxnId;
@@ -59,14 +60,14 @@ impl PartialOrd for Active {
 }
 
 /// Server to keep track of the transactions currently active for this host.
-pub struct TxnServer<FE> {
-    workspace: DirLock<FE>,
+pub struct TxnServer {
+    workspace: DirLock<CacheBlock>,
     active: Arc<RwLock<OrdHashSet<Active>>>,
     tx: mpsc::UnboundedSender<Active>,
     ttl: Duration,
 }
 
-impl<FE> Clone for TxnServer<FE> {
+impl Clone for TxnServer {
     fn clone(&self) -> Self {
         Self {
             workspace: self.workspace.clone(),
@@ -77,8 +78,8 @@ impl<FE> Clone for TxnServer<FE> {
     }
 }
 
-impl<FE: for<'a> FileSave<'a>> TxnServer<FE> {
-    pub fn create(workspace: DirLock<FE>, ttl: Duration) -> Self {
+impl TxnServer {
+    pub fn create(workspace: DirLock<CacheBlock>, ttl: Duration) -> Self {
         let active = Arc::new(RwLock::new(OrdHashSet::new()));
 
         let (tx, rx) = mpsc::unbounded_channel();
@@ -93,8 +94,8 @@ impl<FE: for<'a> FileSave<'a>> TxnServer<FE> {
     }
 }
 
-impl<FE: for<'a> FileSave<'a>> TxnServer<FE> {
-    pub(crate) async fn finalize<State>(&self, kernel: &Kernel<State, FE>, now: NetworkTime) {
+impl TxnServer {
+    pub(crate) async fn finalize(&self, kernel: &Kernel, now: NetworkTime) {
         let expired = {
             let mut active = self.active.write().expect("active transactions");
             let mut expired = Vec::with_capacity(active.len());
@@ -131,11 +132,8 @@ impl<FE: for<'a> FileSave<'a>> TxnServer<FE> {
     }
 }
 
-impl<FE> TxnServer<FE>
-where
-    FE: Send + Sync,
-{
-    pub fn new_txn<State>(&self, now: NetworkTime) -> Txn<State, FE> {
+impl TxnServer {
+    pub fn new_txn(&self, now: NetworkTime) -> Txn {
         let txn_id = TxnId::new(now);
         let expiry = txn_id.time() + self.ttl;
         let workspace = LazyDir::from(self.workspace.clone()).create_dir(txn_id.to_id());

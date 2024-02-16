@@ -19,7 +19,7 @@ use tensor::TensorType;
 pub use base::{CollectionBase, CollectionVisitor};
 pub use btree::{BTree, BTreeFile, Node as BTreeNode};
 pub use schema::Schema;
-pub use table::Table;
+pub use table::{Table, TableFile};
 pub use tensor::{
     Dense, DenseBase, DenseCacheFile, DenseView, Node as TensorNode, Sparse, SparseBase,
     SparseView, Tensor, TensorBase, TensorInstance, TensorView,

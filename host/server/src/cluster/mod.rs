@@ -16,10 +16,10 @@ use tc_transact::fs;
 use tc_transact::lock::{TxnLock, TxnSetLock, TxnSetLockIter};
 use tc_transact::{Transact, TxnId};
 use tc_value::{Host, Link, Value};
-use tcgeneric::{PathSegment, TCPathBuf, ThreadSafe};
+use tcgeneric::{PathSegment, TCPathBuf};
 
 use crate::txn::Txn;
-use crate::Actor;
+use crate::{Actor, CacheBlock};
 
 pub const DEFAULT_UMASK: Mode = Mode::new()
     .with_class_perm(umask::USER, umask::ALL)
@@ -128,7 +128,7 @@ impl<T> Cluster<T> {
     }
 
     #[inline]
-    pub fn claim<State, FE>(&self, txn: Txn<State, FE>) -> TCResult<Txn<State, FE>> {
+    pub fn claim(&self, txn: Txn) -> TCResult<Txn> {
         if txn.leader(self.path()).is_none() {
             txn.claim(&self.actor, self.path())
         } else {
@@ -221,28 +221,34 @@ where
 }
 
 #[async_trait]
-impl<State, FE, T> fs::Persist<FE> for Cluster<T>
+impl<T> fs::Persist<CacheBlock> for Cluster<T>
 where
-    State: ThreadSafe,
-    FE: ThreadSafe + Clone,
-    T: fs::Persist<FE, Schema = (), Txn = Txn<State, FE>>,
+    T: fs::Persist<CacheBlock, Schema = (), Txn = Txn>,
 {
-    type Txn = Txn<State, FE>;
+    type Txn = Txn;
     type Schema = Schema;
 
-    async fn create(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
-        <T as fs::Persist<FE>>::create(txn_id, (), store)
+    async fn create(
+        txn_id: TxnId,
+        schema: Self::Schema,
+        store: fs::Dir<CacheBlock>,
+    ) -> TCResult<Self> {
+        <T as fs::Persist<CacheBlock>>::create(txn_id, (), store)
             .map_ok(|subject| Self::new(schema, subject, txn_id))
             .await
     }
 
-    async fn load(txn_id: TxnId, schema: Self::Schema, store: fs::Dir<FE>) -> TCResult<Self> {
-        <T as fs::Persist<FE>>::load(txn_id, (), store)
+    async fn load(
+        txn_id: TxnId,
+        schema: Self::Schema,
+        store: fs::Dir<CacheBlock>,
+    ) -> TCResult<Self> {
+        <T as fs::Persist<CacheBlock>>::load(txn_id, (), store)
             .map_ok(|subject| Self::new(schema, subject, txn_id))
             .await
     }
 
-    fn dir(&self) -> fs::Inner<FE> {
-        <T as fs::Persist<FE>>::dir(&self.subject)
+    fn dir(&self) -> fs::Inner<CacheBlock> {
+        <T as fs::Persist<CacheBlock>>::dir(&self.subject)
     }
 }

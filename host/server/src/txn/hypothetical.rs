@@ -1,10 +1,12 @@
 use async_trait::async_trait;
 
-use tc_error::TCError;
-use tc_scalar::{Executor, OpDef, Refer, Scalar, Scope};
-use tc_transact::public::{Handler, PostHandler, Route, StateInstance};
+use tc_error::*;
+use tc_scalar::{Executor, OpDef};
+use tc_transact::public::{Handler, PostHandler, Route};
 use tc_transact::{Transact, TxnId};
 use tcgeneric::{path_label, PathLabel, PathSegment};
+
+use crate::State;
 
 use super::Txn;
 
@@ -20,24 +22,18 @@ impl Hypothetical {
 
 struct OpHandler;
 
-impl<'a, State, FE> Handler<'a, State> for OpHandler
-where
-    State: StateInstance<FE = FE, Txn = Txn<State, FE>> + Refer<State> + From<Scalar>,
-    FE: Send + Sync,
-    Scalar: TryFrom<State, Error = TCError>,
-{
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
+impl<'a> Handler<'a, State> for OpHandler {
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let op_def: State = params.require("op")?;
+                let op_def: OpDef = params.require("op")?;
                 params.expect_empty()?;
 
-                let op_def = Scalar::try_from(op_def)?;
                 let op_def = match op_def {
-                    Scalar::Op(OpDef::Post(op_def)) => Ok(op_def),
+                    OpDef::Post(op_def) => Ok(op_def),
                     other => Err(TCError::unexpected(other, "a POST Op")),
                 }?;
 
@@ -54,12 +50,7 @@ where
     }
 }
 
-impl<FE, State> Route<State> for Hypothetical
-where
-    FE: Send + Sync,
-    State: StateInstance<FE = FE, Txn = Txn<State, FE>> + Refer<State> + From<Scalar>,
-    Scalar: TryFrom<State, Error = TCError>,
-{
+impl Route<State> for Hypothetical {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         if path.is_empty() {
             Some(Box::new(OpHandler))

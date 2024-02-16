@@ -27,6 +27,7 @@ safecast = "0.2"
 serde = "1.0"
 tc-error = { path = "../error" }
 tc-scalar = { path = "../scalar" }
+tc-state = { path = "../state" }
 tc-value = { path = "../value" }
 tc-transact = { path = "../transact" }
 tcgeneric = { path = "../generic" }

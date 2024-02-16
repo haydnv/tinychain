@@ -2,29 +2,29 @@ use tc_error::*;
 use tc_transact::public::*;
 use tc_transact::{Gateway, Transaction};
 use tc_value::Value;
-use tcgeneric::{PathSegment, ThreadSafe};
+use tcgeneric::PathSegment;
 
 use crate::txn::Txn;
+use crate::State;
 
 use super::Cluster;
 
-struct ClusterHandler<'a, State, T> {
+struct ClusterHandler<'a, T> {
     cluster: &'a Cluster<T>,
     handler: Option<Box<dyn Handler<'a, State> + 'a>>,
 }
 
-impl<'a, State, T> ClusterHandler<'a, State, T> {
+impl<'a, T> ClusterHandler<'a, T> {
     fn new(cluster: &'a Cluster<T>, handler: Option<Box<dyn Handler<'a, State> + 'a>>) -> Self {
         Self { cluster, handler }
     }
 }
 
-impl<'a, FE, State, T> Handler<'a, State> for ClusterHandler<'a, State, T>
+impl<'a, T> Handler<'a, State> for ClusterHandler<'a, T>
 where
-    State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
     T: Send + Sync,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn<State, FE>, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -41,7 +41,7 @@ where
         }))
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -49,13 +49,13 @@ where
     }
 }
 
-struct ReplicaHandler<'a, State, T> {
+struct ReplicaHandler<'a, T> {
     path: &'a [PathSegment],
     cluster: &'a Cluster<T>,
     handler: Box<dyn Handler<'a, State> + 'a>,
 }
 
-impl<'a, State, T> ReplicaHandler<'a, State, T> {
+impl<'a, T> ReplicaHandler<'a, T> {
     fn new(
         cluster: &'a Cluster<T>,
         path: &'a [PathSegment],
@@ -69,20 +69,18 @@ impl<'a, State, T> ReplicaHandler<'a, State, T> {
     }
 }
 
-impl<'a, FE, State, T> Handler<'a, State> for ReplicaHandler<'a, State, T>
+impl<'a, T> Handler<'a, State> for ReplicaHandler<'a, T>
 where
-    FE: ThreadSafe + Clone,
-    State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
     T: Send + Sync,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
         self.handler.get()
     }
 
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, State::Txn, State>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
@@ -113,14 +111,14 @@ where
         }))
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, State::Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
         self.handler.post()
     }
 
-    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, State::Txn>>
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
     where
         'b: 'a,
     {
@@ -152,10 +150,8 @@ where
     }
 }
 
-impl<FE, State, T> Route<State> for Cluster<T>
+impl<T> Route<State> for Cluster<T>
 where
-    FE: ThreadSafe + Clone,
-    State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
     T: Route<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {

@@ -13,6 +13,7 @@ use tcgeneric::Map;
 pub use builder::ServerBuilder;
 pub use kernel::Endpoint;
 pub use server::Server;
+pub use tc_state::CacheBlock;
 pub use txn::Txn;
 
 mod builder;
@@ -34,6 +35,8 @@ pub const SERVICE_TYPE: &'static str = "_tinychain._tcp.local.";
 
 type Actor = rjwt::Actor<Value>;
 type SignedToken = rjwt::SignedToken<Link, Value, claim::Claim>;
+
+pub type State = tc_state::State<Txn>;
 
 pub trait Authorize {
     fn has_any<const N: usize>(&self, modes: [Mode; N]) -> bool;

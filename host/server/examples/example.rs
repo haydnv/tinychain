@@ -26,6 +26,7 @@
 //  A second host joins from an on-premises datacenter.
 //  The list of peers and replicas is updated such that both hosts receive every write operation.
 
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -34,23 +35,42 @@ use base64::Engine;
 use freqfs::Cache;
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use rjwt::Actor;
+use tc_error::TCResult;
 
 use tc_scalar::{OpDef, Scalar};
 use tc_server::aes256::{Aes256GcmSiv, Key, KeyInit, OsRng};
-use tc_server::{Authorize, Server, ServerBuilder, SERVICE_TYPE};
-use tc_value::{Link, Value};
-use tcgeneric::{label, path_label, Id, PathLabel, TCPathBuf};
-
-use crate::mock::{CacheBlock, Client, State};
-
-mod mock;
+use tc_server::{Authorize, RPCClient, Server, ServerBuilder, State, SERVICE_TYPE};
+use tc_value::{Link, ToUrl, Value};
+use tcgeneric::{label, path_label, Id, Map, PathLabel, TCPathBuf};
 
 const CACHE_SIZE: usize = 1_000_000;
 const DATA_DIR: &'static str = "/tmp/tc/example_server/data";
 const WORKSPACE: &'static str = "/tmp/tc/example_server/workspace";
 const HYPOTHETICAL: PathLabel = path_label(&["txn", "hypothetical"]);
 
-async fn create_server(name: String, key: Key) -> Server<State, CacheBlock> {
+#[derive(Default)]
+struct Client {}
+
+#[async_trait]
+impl RPCClient<State> for Client {
+    async fn get(&self, link: ToUrl<'_>, key: Value) -> TCResult<State> {
+        todo!()
+    }
+
+    async fn put(&self, link: ToUrl<'_>, key: Value, value: State) -> TCResult<()> {
+        todo!()
+    }
+
+    async fn post(&self, link: ToUrl<'_>, params: Map<State>) -> TCResult<State> {
+        todo!()
+    }
+
+    async fn delete(&self, link: ToUrl<'_>, key: Value) -> TCResult<State> {
+        todo!()
+    }
+}
+
+async fn create_server(name: String, key: Key) -> Server {
     let data_dir = format!("{DATA_DIR}/{name}").parse().unwrap();
     let workspace = format!("{WORKSPACE}/{name}").parse().unwrap();
 
@@ -143,7 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let response = endpoint.post(&txn, params)?.await?;
 
-    assert_eq!(response, hello_world);
+    assert_eq!(Scalar::try_from(response).unwrap(), hello_world);
 
     Ok(())
 }

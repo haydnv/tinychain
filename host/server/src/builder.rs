@@ -5,46 +5,43 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
-use freqfs::{DirLock, FileSave};
+use freqfs::DirLock;
 use log::{debug, info, warn};
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use rjwt::VerifyingKey;
+use tc_state::CacheBlock;
 
 use tc_transact::fs;
-use tc_transact::public::StateInstance;
 use tc_transact::Transaction;
 use tc_value::Link;
-use tcgeneric::{NetworkTime, ThreadSafe};
+use tcgeneric::NetworkTime;
 
 use crate::aes256::Key as Aes256Key;
 use crate::kernel::Kernel;
 use crate::server::Server;
 use crate::txn::{Txn, TxnServer};
-use crate::{RPCClient, DEFAULT_TTL, SERVICE_TYPE};
+use crate::{RPCClient, State, DEFAULT_TTL, SERVICE_TYPE};
 
-pub struct ServerBuilder<State, FE> {
+pub struct ServerBuilder {
     peers: HashMap<VerifyingKey, HashSet<IpAddr>>,
     address: Option<IpAddr>,
     port: u16,
     request_ttl: Duration,
     rpc_client: Arc<dyn RPCClient<State>>,
     keys: Vec<Aes256Key>,
-    data_dir: DirLock<FE>,
-    workspace: DirLock<FE>,
+    data_dir: DirLock<CacheBlock>,
+    workspace: DirLock<CacheBlock>,
     owner: Option<Link>,
     group: Option<Link>,
     secure: bool,
 }
 
-impl<State, FE> ServerBuilder<State, FE> {
+impl ServerBuilder {
     pub fn load(
-        data_dir: DirLock<FE>,
-        workspace: DirLock<FE>,
+        data_dir: DirLock<CacheBlock>,
+        workspace: DirLock<CacheBlock>,
         rpc_client: Arc<dyn RPCClient<State>>,
-    ) -> Self
-    where
-        FE: for<'a> FileSave<'a>,
-    {
+    ) -> Self {
         Self {
             address: None,
             port: 0,
@@ -60,11 +57,7 @@ impl<State, FE> ServerBuilder<State, FE> {
         }
     }
 
-    pub async fn build(mut self) -> Server<State, FE>
-    where
-        State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
-        FE: ThreadSafe + Clone + for<'a> FileSave<'a>,
-    {
+    pub async fn build(mut self) -> Server {
         if self.secure {
             if self.owner.is_none() {
                 panic!("a server without an owner cannot be secure--specify an owner or disable security");
@@ -74,14 +67,14 @@ impl<State, FE> ServerBuilder<State, FE> {
         }
 
         let txn_server = TxnServer::create(self.workspace, self.request_ttl);
-        let txn: Txn<State, FE> = txn_server.new_txn(NetworkTime::now());
+        let txn: Txn = txn_server.new_txn(NetworkTime::now());
         let txn_id = *txn.id();
 
         let data_dir = fs::Dir::load(txn_id, self.data_dir)
             .await
             .expect("data dir");
 
-        let kernel: Kernel<State, FE> =
+        let kernel: Kernel =
             fs::Persist::load_or_create(txn_id, (self.owner, self.group), data_dir)
                 .await
                 .expect("kernel");
@@ -92,7 +85,7 @@ impl<State, FE> ServerBuilder<State, FE> {
     }
 }
 
-impl<State, FE> ServerBuilder<State, FE> {
+impl ServerBuilder {
     pub fn address(&mut self) -> IpAddr {
         if self.address.is_none() {
             let ifaces = local_ip_address::list_afinet_netifas().expect("network interface list");

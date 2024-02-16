@@ -1,4 +1,3 @@
-use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -12,14 +11,14 @@ use umask::Mode;
 use uuid::Uuid;
 
 use tc_error::*;
+use tc_state::CacheBlock;
 use tc_transact::lock::TxnSetLockIter;
-use tc_transact::public::StateInstance;
 use tc_transact::{Gateway, Transaction, TxnId};
 use tc_value::{Link, ToUrl, Value};
-use tcgeneric::{label, Id, NetworkTime, PathSegment, TCPathBuf, ThreadSafe};
+use tcgeneric::{label, Id, NetworkTime, PathSegment, TCPathBuf};
 
 use crate::claim::Claim;
-use crate::{Actor, SignedToken};
+use crate::{Actor, SignedToken, State};
 
 pub use hypothetical::Hypothetical;
 pub use server::TxnServer;
@@ -27,12 +26,12 @@ pub use server::TxnServer;
 mod hypothetical;
 mod server;
 
-pub(super) enum LazyDir<FE> {
-    Workspace(DirLock<FE>),
+pub(super) enum LazyDir {
+    Workspace(DirLock<CacheBlock>),
     Lazy(Arc<Self>, Id),
 }
 
-impl<FE> Clone for LazyDir<FE> {
+impl Clone for LazyDir {
     fn clone(&self) -> Self {
         match self {
             Self::Workspace(workspace) => Self::Workspace(workspace.clone()),
@@ -41,11 +40,11 @@ impl<FE> Clone for LazyDir<FE> {
     }
 }
 
-impl<FE: Send + Sync> LazyDir<FE> {
+impl LazyDir {
     fn get_or_create<'a>(
         &'a self,
         txn_id: &'a TxnId,
-    ) -> Pin<Box<dyn Future<Output = TCResult<DirLock<FE>>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = TCResult<DirLock<CacheBlock>>> + Send + 'a>> {
         Box::pin(async move {
             match self {
                 Self::Workspace(workspace) => {
@@ -76,37 +75,35 @@ impl<FE: Send + Sync> LazyDir<FE> {
     }
 }
 
-impl<FE> From<DirLock<FE>> for LazyDir<FE> {
-    fn from(dir: DirLock<FE>) -> Self {
+impl From<DirLock<CacheBlock>> for LazyDir {
+    fn from(dir: DirLock<CacheBlock>) -> Self {
         Self::Workspace(dir)
     }
 }
 
-pub struct Txn<State, FE> {
+pub struct Txn {
     id: TxnId,
     expires: NetworkTime,
-    workspace: LazyDir<FE>,
+    workspace: LazyDir,
     token: Option<Arc<SignedToken>>,
-    state: PhantomData<State>,
 }
 
-impl<State, FE> Clone for Txn<State, FE> {
+impl Clone for Txn {
     fn clone(&self) -> Self {
         Self {
             id: self.id,
             expires: self.expires,
             workspace: self.workspace.clone(),
             token: self.token.clone(),
-            state: PhantomData,
         }
     }
 }
 
-impl<State, FE> Txn<State, FE> {
+impl Txn {
     pub(super) fn new(
         id: TxnId,
         expires: NetworkTime,
-        workspace: LazyDir<FE>,
+        workspace: LazyDir,
         token: Option<SignedToken>,
     ) -> Self {
         Self {
@@ -114,7 +111,6 @@ impl<State, FE> Txn<State, FE> {
             expires,
             workspace,
             token: token.map(Arc::new),
-            state: PhantomData,
         }
     }
 
@@ -137,7 +133,6 @@ impl<State, FE> Txn<State, FE> {
             expires: self.expires,
             workspace: self.workspace.clone(),
             token: Some(Arc::new(token)),
-            state: self.state,
         })
     }
 
@@ -185,17 +180,13 @@ impl<State, FE> Txn<State, FE> {
 }
 
 #[async_trait]
-impl<State, FE> Transaction<FE> for Txn<State, FE>
-where
-    State: ThreadSafe,
-    FE: ThreadSafe + Clone,
-{
+impl Transaction<CacheBlock> for Txn {
     #[inline]
     fn id(&self) -> &TxnId {
         &self.id
     }
 
-    async fn context(&self) -> TCResult<DirLock<FE>> {
+    async fn context(&self) -> TCResult<DirLock<CacheBlock>> {
         self.workspace.get_or_create(&self.id).await
     }
 
@@ -205,7 +196,6 @@ where
             expires: self.expires,
             workspace: self.workspace.clone().create_dir(id.into()),
             token: self.token.clone(),
-            state: self.state,
         }
     }
 
@@ -215,17 +205,12 @@ where
             expires: self.expires,
             workspace: self.workspace.clone().create_dir_unique(),
             token: self.token.clone(),
-            state: self.state,
         }
     }
 }
 
 #[async_trait]
-impl<State, FE> Gateway<State> for Txn<State, FE>
-where
-    State: StateInstance<FE = FE, Txn = Self>,
-    FE: ThreadSafe + Clone,
-{
+impl Gateway<State> for Txn {
     async fn get<'a, L, V>(&'a self, link: L, key: V) -> TCResult<State>
     where
         L: Into<ToUrl<'a>> + Send,

@@ -1,39 +1,31 @@
-use std::marker::PhantomData;
-
 use async_trait::async_trait;
 use log::debug;
 use umask::Mode;
 
 use tc_error::*;
-use tc_scalar::{OpRefType, Refer, Scalar};
-use tc_transact::public::{Handler, PostFuture, Route, StateInstance};
+use tc_scalar::OpRefType;
+use tc_state::CacheBlock;
+use tc_transact::public::{Handler, PostFuture, Route};
 use tc_transact::{fs, Transact, Transaction, TxnId};
 use tc_value::Link;
-use tcgeneric::{Map, PathSegment, TCPath, ThreadSafe};
+use tcgeneric::{Map, PathSegment, TCPath};
 
 use crate::cluster::{Cluster, Schema};
 use crate::txn::{Hypothetical, Txn};
-use crate::Authorize;
+use crate::{Authorize, State};
 
-pub struct Endpoint<'a, State> {
+pub struct Endpoint<'a> {
     mode: Mode,
     path: &'a [PathSegment],
     handler: Box<dyn Handler<'a, State> + 'a>,
 }
 
-impl<'a, State> Endpoint<'a, State> {
+impl<'a> Endpoint<'a> {
     pub fn umask(&self) -> Mode {
         self.mode
     }
 
-    pub fn post<FE>(
-        self,
-        txn: &'a Txn<State, FE>,
-        params: Map<State>,
-    ) -> TCResult<PostFuture<State>>
-    where
-        State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
-    {
+    pub fn post(self, txn: &'a Txn, params: Map<State>) -> TCResult<PostFuture<State>> {
         let post = self
             .handler
             .post()
@@ -47,22 +39,16 @@ impl<'a, State> Endpoint<'a, State> {
     }
 }
 
-pub(crate) struct Kernel<State, FE> {
+pub(crate) struct Kernel {
     hypothetical: Cluster<Hypothetical>,
-    state: PhantomData<(State, FE)>,
 }
 
-impl<State, FE> Kernel<State, FE> {
+impl Kernel {
     pub(crate) fn authorize_claim_and_route<'a>(
         &'a self,
         path: &'a [PathSegment],
-        txn: Txn<State, FE>,
-    ) -> TCResult<(Txn<State, FE>, Endpoint<'a, State>)>
-    where
-        FE: ThreadSafe + Clone,
-        State: StateInstance<FE = FE, Txn = Txn<State, FE>> + Refer<State> + From<Scalar>,
-        Scalar: TryFrom<State, Error = TCError>,
-    {
+        txn: Txn,
+    ) -> TCResult<(Txn, Endpoint<'a>)> {
         if path.is_empty() {
             Err(unauthorized!("access to /"))
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
@@ -73,7 +59,7 @@ impl<State, FE> Kernel<State, FE> {
     }
 }
 
-impl<State, FE> Kernel<State, FE> {
+impl Kernel {
     pub(crate) async fn commit(&self, txn_id: TxnId) {
         self.hypothetical.rollback(&txn_id).await;
     }
@@ -84,49 +70,48 @@ impl<State, FE> Kernel<State, FE> {
 }
 
 #[async_trait]
-impl<State, FE> fs::Persist<FE> for Kernel<State, FE>
-where
-    State: ThreadSafe,
-    FE: ThreadSafe + Clone,
-{
+impl fs::Persist<CacheBlock> for Kernel {
     type Schema = (Option<Link>, Option<Link>);
-    type Txn = Txn<State, FE>;
+    type Txn = Txn;
 
-    async fn create(txn_id: TxnId, schema: Self::Schema, _store: fs::Dir<FE>) -> TCResult<Self> {
+    async fn create(
+        txn_id: TxnId,
+        schema: Self::Schema,
+        _store: fs::Dir<CacheBlock>,
+    ) -> TCResult<Self> {
         let (owner, group) = schema;
         let schema = Schema::new(Hypothetical::PATH, owner, group);
 
         Ok(Self {
             hypothetical: Cluster::new(schema, Hypothetical::new(), txn_id),
-            state: PhantomData,
         })
     }
 
-    async fn load(txn_id: TxnId, schema: Self::Schema, _store: fs::Dir<FE>) -> TCResult<Self> {
+    async fn load(
+        txn_id: TxnId,
+        schema: Self::Schema,
+        _store: fs::Dir<CacheBlock>,
+    ) -> TCResult<Self> {
         let (owner, group) = schema;
         let schema = Schema::new(Hypothetical::PATH, owner, group);
 
         Ok(Self {
             hypothetical: Cluster::new(schema, Hypothetical::new(), txn_id),
-            state: PhantomData,
         })
     }
 
-    fn dir(&self) -> fs::Inner<FE> {
+    fn dir(&self) -> fs::Inner<CacheBlock> {
         unimplemented!("Kernel::inner")
     }
 }
 
-fn auth_claim_route<'a, State, FE, T>(
+fn auth_claim_route<'a, T>(
     cluster: &'a Cluster<T>,
     path: &'a [PathSegment],
-    txn: Txn<State, FE>,
-) -> TCResult<(Txn<State, FE>, Endpoint<'a, State>)>
+    txn: Txn,
+) -> TCResult<(Txn, Endpoint<'a>)>
 where
-    State: StateInstance<FE = FE, Txn = Txn<State, FE>>,
-    FE: ThreadSafe + Clone,
     Cluster<T>: Route<State>,
-    Scalar: TryFrom<State, Error = TCError>,
 {
     let keyring = cluster.keyring(*txn.id())?;
     let resource_mode = cluster.umask(path);
