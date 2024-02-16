@@ -27,6 +27,7 @@ pub const DEFAULT_UMASK: Mode = Mode::new()
     .with_class_perm(umask::GROUP, umask::ALL)
     .with_class_perm(umask::OTHERS, umask::READ);
 
+mod class;
 mod dir;
 mod public;
 

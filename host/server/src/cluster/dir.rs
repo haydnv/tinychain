@@ -14,7 +14,7 @@ use tc_transact::fs;
 use tc_transact::lock::{TxnMapLock, TxnMapLockEntry};
 use tc_transact::public::Route;
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Version as VersionNumber};
+use tc_value::Version as VersionNumber;
 use tcgeneric::{label, Label, PathSegment, ThreadSafe};
 
 use crate::{CacheBlock, State, Txn};
