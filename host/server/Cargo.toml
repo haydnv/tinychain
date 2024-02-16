@@ -25,7 +25,7 @@ mdns-sd = "0.10"
 rjwt = { path = "../../../rjwt/rust" }
 safecast = "0.2"
 serde = "1.0"
-tc-error = { path = "../error" }
+tc-error = { path = "../error", features = ["rjwt"] }
 tc-scalar = { path = "../scalar" }
 tc-state = { path = "../state" }
 tc-value = { path = "../value" }

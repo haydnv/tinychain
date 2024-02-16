@@ -13,10 +13,10 @@ categories = ["rust-patterns"]
 
 [dependencies]
 destream = "0.7"
-ha-ndarray = "0.3"
+ha-ndarray = { version = "0.3", optional = true }
 log = { version = "0.4", features = ["release_max_level_info"] }
 pathlink = { path = "../../../pathlink" }
-rjwt = { path = "../../../rjwt/rust" }
+rjwt = { path = "../../../rjwt/rust", optional = true }
 serde = "1.0"
-txfs = "0.3"
-txn_lock = { path = "../../../txn_lock" }
+txfs = { path = "../../../txfs", optional = true }
+txn_lock = { path = "../../../txn_lock", optional = true }

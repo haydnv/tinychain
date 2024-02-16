@@ -237,12 +237,14 @@ impl From<pathlink::ParseError> for TCError {
     }
 }
 
+#[cfg(feature = "ha-ndarray")]
 impl From<ha_ndarray::Error> for TCError {
     fn from(err: ha_ndarray::Error) -> Self {
         Self::new(ErrorKind::Internal, err)
     }
 }
 
+#[cfg(feature = "rjwt")]
 impl From<rjwt::Error> for TCError {
     fn from(err: rjwt::Error) -> Self {
         match err.into_inner() {
@@ -255,12 +257,14 @@ impl From<rjwt::Error> for TCError {
     }
 }
 
+#[cfg(feature = "txn_lock")]
 impl From<txn_lock::Error> for TCError {
     fn from(err: txn_lock::Error) -> Self {
         Self::new(ErrorKind::Conflict, err)
     }
 }
 
+#[cfg(feature = "txfs")]
 impl From<txfs::Error> for TCError {
     fn from(cause: txfs::Error) -> Self {
         match cause.into_inner() {
