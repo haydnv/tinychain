@@ -111,7 +111,7 @@ pub trait Transaction<FE>: Clone + Sized + Send + Sync + 'static {
     /// Create a new transaction context with the given `id`.
     fn subcontext<I: Into<Id> + Send>(&self, id: I) -> Self;
 
-    /// Create a new transaction subcontext with its own unique [`Dir`].
+    /// Create a new transaction subcontext with its own unique workspace directory.
     fn subcontext_unique(&self) -> Self;
 }
 

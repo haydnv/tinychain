@@ -144,7 +144,7 @@ impl TCError {
         }
     }
 
-    /// Reconstruct a [`TCError`] from its [`ErrorType`] and data.
+    /// Reconstruct a [`TCError`] from its [`ErrorKind`] and data.
     pub fn with_stack<I, S, SI>(code: ErrorKind, message: I, stack: S) -> Self
     where
         I: fmt::Display,

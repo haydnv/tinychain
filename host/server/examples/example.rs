@@ -39,7 +39,7 @@ use tc_error::TCResult;
 
 use tc_scalar::{OpDef, Scalar};
 use tc_server::aes256::{Aes256GcmSiv, Key, KeyInit, OsRng};
-use tc_server::{Authorize, RPCClient, Server, ServerBuilder, State, SERVICE_TYPE};
+use tc_server::{Authorize, Builder, RPCClient, Server, State, SERVICE_TYPE};
 use tc_value::{Link, ToUrl, Value};
 use tcgeneric::{label, path_label, Id, Map, PathLabel, TCPathBuf};
 
@@ -83,7 +83,7 @@ async fn create_server(name: String, key: Key) -> Server {
 
     let rpc_client = Arc::new(Client::default());
 
-    let builder = ServerBuilder::load(data_dir, workspace, rpc_client)
+    let builder = Builder::load(data_dir, workspace, rpc_client)
         .with_keys(vec![key])
         .set_secure(false);
 
@@ -139,12 +139,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let key = Aes256GcmSiv::generate_key(&mut OsRng);
 
     // start the first server
-    let server = create_server("one".to_string(), key).await;
+    let server1 = create_server("one".to_string(), key).await;
 
     // check that it's working
     let path = TCPathBuf::from(HYPOTHETICAL);
-    let txn = server.get_txn(None)?;
-    let (txn, endpoint) = server.authorize_claim_and_route(&path, txn)?;
+    let txn = server1.get_txn(None)?;
+    let (txn, endpoint) = server1.authorize_claim_and_route(&path, txn)?;
     assert!(endpoint.umask().may_execute());
 
     let hello_world = Scalar::Value("Hello, World!".to_string().into());
@@ -167,13 +167,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // try creating a cluster directory
     let dir_name: Id = "test".parse().unwrap();
     let path = TCPathBuf::from([label("class").into()]);
-    let txn = server.get_txn(None)?;
-    let (txn, endpoint) = server.authorize_claim_and_route(&path, txn)?;
+    let txn = server1.get_txn(None)?;
+    let (txn, endpoint) = server1.authorize_claim_and_route(&path, txn)?;
     assert!(endpoint.umask().may_write());
 
-    let response = endpoint
+    endpoint
         .put(&txn, Value::Id(dir_name.into()), Map::<State>::new().into())?
         .await?;
+
+    // start a second server and replicate the state of the first
+    let server2 = create_server("two".to_string(), key).await;
 
     Ok(())
 }

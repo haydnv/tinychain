@@ -65,7 +65,7 @@ where
     State: StateInstance + Refer<State>,
     T: ToState<State> + Public<State> + Instance,
 {
-    /// Construct a new `Executor` with the given [`Txn`] context and initial state.
+    /// Construct a new `Executor` with the given transaction context and initial state.
     pub fn new<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
         txn: &'a State::Txn,
         subject: Option<&'a T>,
@@ -75,7 +75,7 @@ where
         Self { txn, scope }
     }
 
-    /// Construct a new `Executor` with the given [`Txn`] context, subject, and initial state.
+    /// Construct a new `Executor` with the given transaction context, subject, and initial state.
     pub fn with_context<S: Into<State>, I: IntoIterator<Item = (Id, S)>>(
         txn: &'a State::Txn,
         subject: Option<&'a T>,
@@ -86,7 +86,7 @@ where
         Self { txn, scope }
     }
 
-    /// Construct a new `Executor` with the given [`Txn`] context and [`Scope`].
+    /// Construct a new `Executor` with the given transaction context and [`Scope`].
     pub fn from_scope(txn: &'a State::Txn, scope: Scope<'a, State, T>) -> Self {
         Self { txn, scope }
     }

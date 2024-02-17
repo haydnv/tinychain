@@ -18,7 +18,7 @@ use tc_error::*;
 
 use super::{Id, Tuple};
 
-/// A generic map whose keys are [`Id`]s, based on [`OrdHashMap`]
+/// A generic map whose keys are [`Id`]s, based on [`BTreeMap`]
 #[derive(Clone, GetSize)]
 pub struct Map<T> {
     inner: BTreeMap<Id, T>,

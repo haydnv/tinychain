@@ -10,7 +10,7 @@ use tc_value::{Link, ToUrl, Value};
 use tc_error::*;
 use tcgeneric::Map;
 
-pub use builder::ServerBuilder;
+pub use builder::Builder;
 pub use kernel::Endpoint;
 pub use server::Server;
 pub use tc_state::CacheBlock;

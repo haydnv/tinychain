@@ -15,7 +15,7 @@ use super::{CacheBlock, StateType};
 
 use super::State;
 
-/// A view of a [`State`] within a single [`Txn`], used for serialization.
+/// A view of a [`State`] within a single transaction, used for serialization.
 pub enum StateView<'en> {
     #[cfg(feature = "chain")]
     Chain(tc_chain::ChainView<'en, tc_collection::CollectionView<'en>>),

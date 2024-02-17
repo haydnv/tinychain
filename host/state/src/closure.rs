@@ -133,7 +133,7 @@ where
         }
     }
 
-    /// Execute this `Closure` with an owned [`Txn`] and the given `args`.
+    /// Execute this `Closure` with an owned `txn` and the given `args`.
     pub async fn call_owned(self, txn: Txn, args: State<Txn>) -> TCResult<State<Txn>> {
         self.call(&txn, args).await
     }

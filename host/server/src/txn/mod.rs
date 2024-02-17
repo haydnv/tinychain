@@ -136,7 +136,7 @@ impl Txn {
         })
     }
 
-    /// Get the set of permissions authorized by hosts in the [`Keyring`] for the given `resource`.
+    /// Get the set of permissions authorized by hosts in the `keyring` for the given `resource`.
     pub fn mode<K>(&self, keyring: TxnSetLockIter<K>, resource: &[PathSegment]) -> Mode
     where
         K: Deref<Target = Actor>,

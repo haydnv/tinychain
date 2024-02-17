@@ -22,10 +22,30 @@ use crate::server::Server;
 use crate::txn::{Txn, TxnServer};
 use crate::{RPCClient, State, DEFAULT_TTL, SERVICE_TYPE};
 
-pub struct ServerBuilder {
+/// A builder struct for a [`Server`].
+///
+/// The expected sequence of events to bootstrap a server is:
+///  1. Initialize a [`freqfs::Cache`]
+///  2. Load the data directory and transactional workspace into the cache
+///  3. Initialize an implementation of [`RPCClient`]
+///  4. Create a new [`Builder`] with the data directory, workspace, and RPC client
+///  5. Register one or more [`crate::aes256::Key`]s to use for symmetric encryption
+///  6. For a secure server, provide links to the user and group authorized to administer the server
+///  7. Load the kernel
+///  8. Discover peers via mDNS
+///  9. Start the public interface for the server (e.g. HTTP or HTTPS)
+///  10. Replicate from the first peer to respond using one of the provided encryption keys
+///    10.1 For each dir, replicate the entries in the dir (not their state, i.e. not recursively)
+///    10.2 Repeat step 9.1 until all directory entries are replicated
+///    10.3 Replicate each chain in each service
+///  11. Send requests to join the replica set authenticated using the hash of the present replica state, all in a single transaction
+///  12. Repeat steps 10-11 until successful
+///  13. Mark the server ready to receive requests from a load balancer
+///  14. Broadcast the server's availability via mDNS
+///
+/// See the `examples` dir for usage examples.
+pub struct Builder {
     peers: HashMap<VerifyingKey, HashSet<IpAddr>>,
-    address: Option<IpAddr>,
-    port: u16,
     request_ttl: Duration,
     rpc_client: Arc<dyn RPCClient<State>>,
     keys: Vec<Aes256Key>,
@@ -36,15 +56,13 @@ pub struct ServerBuilder {
     secure: bool,
 }
 
-impl ServerBuilder {
+impl Builder {
     pub fn load(
         data_dir: DirLock<CacheBlock>,
         workspace: DirLock<CacheBlock>,
         rpc_client: Arc<dyn RPCClient<State>>,
     ) -> Self {
         Self {
-            address: None,
-            port: 0,
             peers: HashMap::new(),
             keys: vec![],
             request_ttl: DEFAULT_TTL,
@@ -85,36 +103,31 @@ impl ServerBuilder {
     }
 }
 
-impl ServerBuilder {
-    pub fn address(&mut self) -> IpAddr {
-        if self.address.is_none() {
-            let ifaces = local_ip_address::list_afinet_netifas().expect("network interface list");
-
-            self.address = ifaces
-                .into_iter()
-                .inspect(|(name, address)| {
-                    assert!(
-                        !address.is_unspecified() && !address.is_multicast(),
-                        "invalid network interface {name}: {address}"
-                    );
-                })
-                .filter_map(|(_name, address)| {
-                    if address.is_loopback() {
-                        None
-                    } else {
-                        Some(address)
-                    }
-                })
-                .next();
-        }
-
-        self.address.expect("IP address")
-    }
-
-    pub fn bind_address(mut self, address: IpAddr) -> Self {
-        self.address = Some(address);
-        self
-    }
+impl Builder {
+    // pub fn address(&mut self) -> IpAddr {
+    //     if self.address.is_none() {
+    //         let ifaces = local_ip_address::list_afinet_netifas().expect("network interface list");
+    //
+    //         self.address = ifaces
+    //             .into_iter()
+    //             .inspect(|(name, address)| {
+    //                 assert!(
+    //                     !address.is_unspecified() && !address.is_multicast(),
+    //                     "invalid network interface {name}: {address}"
+    //                 );
+    //             })
+    //             .filter_map(|(_name, address)| {
+    //                 if address.is_loopback() {
+    //                     None
+    //                 } else {
+    //                     Some(address)
+    //                 }
+    //             })
+    //             .next();
+    //     }
+    //
+    //     self.address.expect("IP address")
+    // }
 
     pub async fn discover(mut self) -> Self {
         let mdns = ServiceDaemon::new().expect("Failed to create daemon");
@@ -146,11 +159,6 @@ impl ServerBuilder {
             }
         }
 
-        self
-    }
-
-    pub fn set_port(mut self, port: u16) -> Self {
-        self.port = port;
         self
     }
 

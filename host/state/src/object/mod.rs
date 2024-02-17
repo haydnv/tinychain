@@ -178,7 +178,7 @@ impl<Txn> fmt::Debug for Object<Txn> {
     }
 }
 
-/// A view of an [`Object`] at a specific [`Txn`], used for serialization.
+/// A view of an [`Object`] at a specific transaction, used for serialization.
 pub enum ObjectView<'en> {
     // the 'en lifetime is needed to compile when the collection feature flag is off
     Class(InstanceClass, PhantomData<&'en ()>),
