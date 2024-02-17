@@ -135,18 +135,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     mdns.register(my_service).expect("register mDNS service");
 
+    // generate a shared symmetric encryption key
     let key = Aes256GcmSiv::generate_key(&mut OsRng);
+
+    // start the first server
     let server = create_server("one".to_string(), key).await;
 
+    // check that it's working
     let path = TCPathBuf::from(HYPOTHETICAL);
     let txn = server.get_txn(None)?;
     let (txn, endpoint) = server.authorize_claim_and_route(&path, txn)?;
-
-    assert!(
-        endpoint.umask().may_execute(),
-        "insufficient permissions: {}",
-        endpoint.umask()
-    );
+    assert!(endpoint.umask().may_execute());
 
     let hello_world = Scalar::Value("Hello, World!".to_string().into());
 
@@ -164,6 +163,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let response = endpoint.post(&txn, params)?.await?;
 
     assert_eq!(Scalar::try_from(response).unwrap(), hello_world);
+
+    // try creating a cluster directory
+    let dir_name: Id = "test".parse().unwrap();
+    let path = TCPathBuf::from([label("class").into()]);
+    let txn = server.get_txn(None)?;
+    let (txn, endpoint) = server.authorize_claim_and_route(&path, txn)?;
+    assert!(endpoint.umask().may_write());
+
+    let response = endpoint
+        .put(&txn, Value::Id(dir_name.into()), Map::<State>::new().into())?
+        .await?;
 
     Ok(())
 }

@@ -30,22 +30,12 @@ pub const ENTRIES: Label = label("entries");
 
 #[async_trait]
 pub trait DirCreate: Sized {
-    async fn create_dir(
-        &self,
-        txn: &Txn,
-        name: PathSegment,
-        schema: Schema,
-    ) -> TCResult<Cluster<Self>>;
+    async fn create_dir(&self, txn: &Txn, name: PathSegment) -> TCResult<Cluster<Self>>;
 }
 
 #[async_trait]
 pub trait DirCreateItem<T: DirItem> {
-    async fn create_item(
-        &self,
-        txn: &Txn,
-        name: PathSegment,
-        schema: Schema,
-    ) -> TCResult<Cluster<T>>;
+    async fn create_item(&self, txn: &Txn, name: PathSegment) -> TCResult<Cluster<T>>;
 }
 
 /// Defines methods common to any item in a [`Dir`].
@@ -121,25 +111,35 @@ impl<T: fmt::Debug> fmt::Debug for DirEntry<T> {
 
 #[derive(Clone)]
 pub struct Dir<T> {
+    schema: Schema,
     dir: fs::Dir<CacheBlock>,
     contents: TxnMapLock<PathSegment, DirEntry<T>>,
 }
 
 impl<T: Clone + fmt::Debug> Dir<T> {
-    fn new(txn_id: TxnId, dir: fs::Dir<CacheBlock>) -> TCResult<Self> {
+    fn new(txn_id: TxnId, schema: Schema, dir: fs::Dir<CacheBlock>) -> TCResult<Self> {
         let contents = TxnMapLock::new(txn_id);
 
-        Ok(Self { dir, contents })
+        Ok(Self {
+            schema,
+            dir,
+            contents,
+        })
     }
 
     fn with_contents<C: IntoIterator<Item = (PathSegment, DirEntry<T>)>>(
         txn_id: TxnId,
+        schema: Schema,
         dir: fs::Dir<CacheBlock>,
         contents: C,
     ) -> TCResult<Self> {
         let contents = TxnMapLock::with_contents(txn_id, contents);
 
-        Ok(Self { dir, contents })
+        Ok(Self {
+            schema,
+            dir,
+            contents,
+        })
     }
 
     /// Recursive synchronous [`Dir`] entry lookup
@@ -185,17 +185,13 @@ where
     Self: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema> + Route<State> + fmt::Debug,
 {
     /// Create a new subdirectory in this [`Dir`].
-    async fn create_dir(
-        &self,
-        txn: &Txn,
-        name: PathSegment,
-        schema: Schema,
-    ) -> TCResult<Cluster<Self>> {
+    async fn create_dir(&self, txn: &Txn, name: PathSegment) -> TCResult<Cluster<Self>> {
         let txn_id = *txn.id();
 
         match self.contents.entry(txn_id, name.clone()).await? {
             TxnMapLockEntry::Vacant(entry) => {
-                let dir = self.dir.create_dir(txn_id, name).await?;
+                let dir = self.dir.create_dir(txn_id, name.clone()).await?;
+                let schema = self.schema.clone().append(name);
                 let cluster: Cluster<Dir<T>> = fs::Persist::create(txn_id, schema, dir).await?;
                 entry.insert(DirEntry::Dir(cluster.clone()));
                 Ok(cluster)
@@ -217,19 +213,15 @@ where
     DirEntry<T>: Clone,
 {
     /// Create a new item in this [`Dir`].
-    async fn create_item(
-        &self,
-        txn: &Txn,
-        name: PathSegment,
-        schema: Schema,
-    ) -> TCResult<Cluster<T>> {
-        debug!("cluster::Dir::create_item {name} with schema {schema:?}");
+    async fn create_item(&self, txn: &Txn, name: PathSegment) -> TCResult<Cluster<T>> {
+        debug!("cluster::Dir::create_item {name}");
 
         let txn_id = *txn.id();
 
         match self.contents.entry(txn_id, name.clone()).await? {
             TxnMapLockEntry::Vacant(entry) => {
-                let dir = self.dir.create_dir(txn_id, name).await?;
+                let dir = self.dir.create_dir(txn_id, name.clone()).await?;
+                let schema = self.schema.clone().append(name);
                 let item: Cluster<T> = fs::Persist::create(txn_id, schema, dir).await?;
                 entry.insert(DirEntry::Item(item.clone()));
                 Ok(item)
@@ -288,9 +280,9 @@ impl fs::Persist<CacheBlock> for Dir<Class> {
     type Txn = Txn;
     type Schema = Schema;
 
-    async fn create(txn_id: TxnId, _schema: Schema, store: fs::Dir<CacheBlock>) -> TCResult<Self> {
+    async fn create(txn_id: TxnId, schema: Schema, store: fs::Dir<CacheBlock>) -> TCResult<Self> {
         if store.is_empty(txn_id).await? {
-            Self::new(txn_id, store)
+            Self::new(txn_id, schema, store)
         } else {
             Err(bad_request!(
                 "cannot create an empty cluster dir from a non-empty filesystem dir"
@@ -330,7 +322,7 @@ impl fs::Persist<CacheBlock> for Dir<Class> {
 
         std::mem::drop(entries); // needed because `entries` borrows `dir`
 
-        Self::with_contents(txn_id, dir, loaded)
+        Self::with_contents(txn_id, schema, dir, loaded)
     }
 
     fn dir(&self) -> fs::Inner<CacheBlock> {

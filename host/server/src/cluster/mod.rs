@@ -141,7 +141,7 @@ impl<T> Cluster<T> {
         &self.schema.path
     }
 
-    pub fn umask(&self, path: &[PathSegment]) -> Mode {
+    pub fn umask(&self, _txn_id: TxnId, path: &[PathSegment]) -> Mode {
         assert!(path.is_empty(), "TODO: cluster subject umask");
         self.mode
     }

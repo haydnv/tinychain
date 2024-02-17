@@ -44,11 +44,25 @@ where
         }))
     }
 
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
+    where
+        'b: 'a,
+    {
+        self.handler.and_then(|handler| handler.put())
+    }
+
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
         self.handler.and_then(|handler| handler.post())
+    }
+
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
+    where
+        'b: 'a,
+    {
+        self.handler.and_then(|handler| handler.delete())
     }
 }
 

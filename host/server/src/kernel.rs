@@ -5,9 +5,9 @@ use umask::Mode;
 use tc_error::*;
 use tc_scalar::OpRefType;
 use tc_state::CacheBlock;
-use tc_transact::public::{Handler, PostFuture, Route};
+use tc_transact::public::*;
 use tc_transact::{fs, Transact, Transaction, TxnId};
-use tc_value::Link;
+use tc_value::{Link, Value};
 use tcgeneric::{label, Label, Map, PathSegment, TCPath};
 
 use crate::cluster::{Class, Cluster, Dir, Schema};
@@ -27,6 +27,32 @@ impl<'a> Endpoint<'a> {
         self.mode
     }
 
+    pub fn get(self, txn: &'a Txn, key: Value) -> TCResult<GetFuture<State>> {
+        let get = self
+            .handler
+            .get()
+            .ok_or_else(|| TCError::method_not_allowed(OpRefType::Get, TCPath::from(self.path)))?;
+
+        if self.mode.may_read() {
+            Ok((get)(txn, key))
+        } else {
+            Err(unauthorized!("read {}", TCPath::from(self.path)))
+        }
+    }
+
+    pub fn put(self, txn: &'a Txn, key: Value, value: State) -> TCResult<PutFuture> {
+        let put = self
+            .handler
+            .put()
+            .ok_or_else(|| TCError::method_not_allowed(OpRefType::Put, TCPath::from(self.path)))?;
+
+        if self.mode.may_write() {
+            Ok((put)(txn, key, value))
+        } else {
+            Err(unauthorized!("read {}", TCPath::from(self.path)))
+        }
+    }
+
     pub fn post(self, txn: &'a Txn, params: Map<State>) -> TCResult<PostFuture<State>> {
         let post = self
             .handler
@@ -37,6 +63,18 @@ impl<'a> Endpoint<'a> {
             Ok((post)(txn, params))
         } else {
             Err(unauthorized!("execute {}", TCPath::from(self.path)))
+        }
+    }
+
+    pub fn delete(self, txn: &'a Txn, key: Value) -> TCResult<DeleteFuture> {
+        let delete = self.handler.delete().ok_or_else(|| {
+            TCError::method_not_allowed(OpRefType::Delete, TCPath::from(self.path))
+        })?;
+
+        if self.mode.may_write() {
+            Ok((delete)(txn, key))
+        } else {
+            Err(unauthorized!("read {}", TCPath::from(self.path)))
         }
     }
 }
@@ -132,8 +170,9 @@ fn auth_claim_route<'a, T>(
 where
     Cluster<T>: Route<State>,
 {
-    let keyring = cluster.keyring(*txn.id())?;
-    let resource_mode = cluster.umask(path);
+    let txn_id = *txn.id();
+    let keyring = cluster.keyring(txn_id)?;
+    let resource_mode = cluster.umask(txn_id, path);
     let request_mode = txn.mode(keyring, path);
     let mode = resource_mode & request_mode;
 
@@ -147,7 +186,7 @@ where
 
     let handler = cluster
         .route(&*path)
-        .ok_or_else(|| TCError::not_found(TCPath::from(&path[2..])))?;
+        .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
 
     let endpoint = Endpoint {
         mode,
