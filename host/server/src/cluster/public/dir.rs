@@ -5,7 +5,8 @@ use safecast::TryCastInto;
 use tc_error::*;
 use tc_state::CacheBlock;
 use tc_transact::fs;
-use tc_transact::public::{Handler, PutHandler, Route, StateInstance};
+use tc_transact::public::*;
+use tc_transact::Transaction;
 use tcgeneric::{PathSegment, TCPath};
 
 use crate::cluster::dir::{Dir, DirCreate, DirEntry};
@@ -24,6 +25,31 @@ where
     Cluster<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
     Cluster<Dir<T>>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema> + Clone,
 {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                if key.is_none() {
+                    let entries = self.dir.entries(*txn.id()).await?;
+                    let entries = entries
+                        .map(|(name, entry)| ((*name).clone(), State::from(entry.is_dir())))
+                        .collect();
+
+                    Ok(State::Map(entries))
+                } else {
+                    let name =
+                        key.try_cast_into(|v| TCError::unexpected(v, "a directory entry name"))?;
+
+                    let entry = self.dir.entry(*txn.id(), &name).await?;
+                    let entry = entry.ok_or_else(|| not_found!("dir entry {name}"))?;
+                    Ok(entry.is_dir().into())
+                }
+            })
+        }))
+    }
+
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,

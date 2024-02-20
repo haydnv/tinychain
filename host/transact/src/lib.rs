@@ -45,6 +45,9 @@ pub mod lock {
     /// An entry in a transactional key-value map
     pub type TxnMapLockEntry<K, V> = txn_lock::map::Entry<TxnId, K, V>;
 
+    /// An iterator over the contents of a transactional key-value map
+    pub type TxnMapLockIter<K, V> = txn_lock::map::Iter<TxnId, K, V>;
+
     /// A read guard on a committed transactional version of a set
     pub type TxnMapLockVersionGuard<K, V> = HashMap<K, V>;
 

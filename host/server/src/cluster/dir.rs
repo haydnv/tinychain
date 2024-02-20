@@ -15,7 +15,7 @@ use safecast::TryCastFrom;
 use tc_error::*;
 use tc_state::object::InstanceClass;
 use tc_transact::fs;
-use tc_transact::lock::{TxnMapLock, TxnMapLockEntry};
+use tc_transact::lock::{TxnMapLock, TxnMapLockEntry, TxnMapLockIter};
 use tc_transact::public::Route;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::Version as VersionNumber;
@@ -60,6 +60,15 @@ pub trait DirItem:
 pub enum DirEntry<T> {
     Dir(Cluster<Dir<T>>),
     Item(Cluster<T>),
+}
+
+impl<T> DirEntry<T> {
+    pub fn is_dir(&self) -> bool {
+        match self {
+            Self::Dir(_) => true,
+            _ => false,
+        }
+    }
 }
 
 /// A commit guard for a [`DirEntry`]
@@ -166,6 +175,13 @@ impl<T: fmt::Debug> Dir<T>
 where
     DirEntry<T>: Clone,
 {
+    pub(super) async fn entries(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<T>>> {
+        self.contents.iter(txn_id).map_err(TCError::from).await
+    }
+
     pub async fn entry(
         &self,
         txn_id: TxnId,
