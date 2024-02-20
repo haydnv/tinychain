@@ -147,11 +147,12 @@ impl<T> Cluster<T> {
     }
 
     #[inline]
-    pub fn claim(&self, txn: Txn) -> TCResult<Txn> {
+    pub fn claim(&self, txn: Txn) -> Txn {
         if txn.leader(self.path()).is_none() {
-            txn.claim(&self.actor, self.path())
+            // assume any given Cluster always has a private key
+            txn.claim(&self.actor, self.path()).expect("claim txn")
         } else {
-            Ok(txn)
+            txn
         }
     }
 

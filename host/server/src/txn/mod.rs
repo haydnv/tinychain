@@ -159,6 +159,10 @@ impl Txn {
         )
     }
 
+    pub fn has_claims(&self) -> bool {
+        self.token.is_some()
+    }
+
     pub fn leader(&self, path: &[PathSegment]) -> Option<VerifyingKey> {
         if let Some(token) = &self.token {
             for (host, actor_id, path) in token.claims() {

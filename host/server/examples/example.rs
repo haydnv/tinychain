@@ -144,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // check that it's working
     let path = TCPathBuf::from(HYPOTHETICAL);
     let txn = server1.get_txn(None)?;
-    let (txn, endpoint) = server1.authorize_claim_and_route(&path, txn)?;
+    let endpoint = server1.authorize_claim_and_route(&path, &txn)?;
     assert!(endpoint.umask().may_execute());
 
     let hello_world = Scalar::Value("Hello, World!".to_string().into());
@@ -160,7 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .into_iter()
     .collect();
 
-    let response = endpoint.post(&txn, params)?.await?;
+    let response = endpoint.post(params)?.await?;
 
     assert_eq!(Scalar::try_from(response).unwrap(), hello_world);
 
@@ -168,11 +168,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir_name: Id = "test".parse().unwrap();
     let path = TCPathBuf::from([label("class").into()]);
     let txn = server1.get_txn(None)?;
-    let (txn, endpoint) = server1.authorize_claim_and_route(&path, txn)?;
+    let endpoint = server1.authorize_claim_and_route(&path, &txn)?;
     assert!(endpoint.umask().may_write());
 
     endpoint
-        .put(&txn, Value::Id(dir_name.into()), Map::<State>::new().into())?
+        .put(Value::Id(dir_name.into()), Map::<State>::new().into())?
         .await?;
 
     // start a second server and replicate the state of the first

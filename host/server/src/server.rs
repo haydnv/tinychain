@@ -36,8 +36,8 @@ impl Server {
     pub fn authorize_claim_and_route<'a>(
         &'a self,
         path: &'a [PathSegment],
-        txn: Txn,
-    ) -> TCResult<(Txn, Endpoint<'a>)> {
+        txn: &'a Txn,
+    ) -> TCResult<Endpoint<'a>> {
         self.kernel.authorize_claim_and_route(path, txn)
     }
 }

@@ -10,6 +10,7 @@ use crate::State;
 
 use super::Txn;
 
+#[derive(Debug)]
 pub struct Hypothetical {}
 
 impl Hypothetical {

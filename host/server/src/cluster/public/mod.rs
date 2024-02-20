@@ -1,3 +1,5 @@
+use std::fmt;
+
 use tc_error::*;
 use tc_transact::public::*;
 use tc_transact::{Gateway, Transaction};
@@ -14,33 +16,35 @@ mod dir;
 
 struct ClusterHandler<'a, T> {
     cluster: &'a Cluster<T>,
-    handler: Option<Box<dyn Handler<'a, State> + 'a>>,
-}
-
-impl<'a, T> ClusterHandler<'a, T> {
-    fn new(cluster: &'a Cluster<T>, handler: Option<Box<dyn Handler<'a, State> + 'a>>) -> Self {
-        Self { cluster, handler }
-    }
 }
 
 impl<'a, T> Handler<'a, State> for ClusterHandler<'a, T>
 where
-    T: Send + Sync,
+    T: Public<State> + Send + Sync,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
-        Some(Box::new(|_txn, key: Value| {
-            Box::pin(async move {
-                if key.is_none() {
-                    let public_key = self.cluster.public_key();
-                    let public_key = Value::Bytes((*public_key.as_bytes()).into());
-                    Ok(public_key.into())
-                } else {
-                    Err(TCError::not_found(key))
-                }
-            })
+        Some(Box::new(|txn, key: Value| {
+            if txn.has_claims() {
+                self.cluster.state().get(txn, &[], key)
+            } else {
+                Box::pin(async move {
+                    if key.is_none() {
+                        let keyring = self.cluster.keyring(*txn.id())?;
+
+                        let keyring = keyring
+                            .map(|actor| Value::Bytes((*actor.public_key().as_bytes()).into()))
+                            .map(State::from)
+                            .collect();
+
+                        Ok(State::Tuple(keyring))
+                    } else {
+                        Err(TCError::not_found(key))
+                    }
+                })
+            }
         }))
     }
 
@@ -48,21 +52,37 @@ where
     where
         'b: 'a,
     {
-        self.handler.and_then(|handler| handler.put())
+        Some(Box::new(|txn, key, value| {
+            let txn = self.cluster.claim(txn.clone());
+
+            Box::pin(async move { self.cluster.state.put(&txn, &[], key, value).await })
+        }))
     }
 
     fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
-        self.handler.and_then(|handler| handler.post())
+        Some(Box::new(|txn, params| {
+            self.cluster.state.post(txn, &[], params)
+        }))
     }
 
     fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
     where
         'b: 'a,
     {
-        self.handler.and_then(|handler| handler.delete())
+        Some(Box::new(|txn, key| {
+            let txn = self.cluster.claim(txn.clone());
+
+            Box::pin(async move { self.cluster.state.delete(&txn, &[], key).await })
+        }))
+    }
+}
+
+impl<'a, T> From<&'a Cluster<T>> for ClusterHandler<'a, T> {
+    fn from(cluster: &'a Cluster<T>) -> Self {
+        Self { cluster }
     }
 }
 
@@ -169,14 +189,12 @@ where
 
 impl<T> Route<State> for Cluster<T>
 where
-    T: Route<State>,
+    T: Route<State> + Send + Sync + fmt::Debug,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
-        let subject_handler = self.state().route(path);
-
         if path.is_empty() {
-            Some(Box::new(ClusterHandler::new(self, subject_handler)))
-        } else if let Some(handler) = subject_handler {
+            Some(Box::new(ClusterHandler::from(self)))
+        } else if let Some(handler) = self.state().route(path) {
             Some(Box::new(ReplicaHandler::new(self, path, handler)))
         } else {
             None

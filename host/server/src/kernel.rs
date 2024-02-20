@@ -18,6 +18,7 @@ const CLASS: Label = label("class");
 
 pub struct Endpoint<'a> {
     mode: Mode,
+    txn: &'a Txn,
     path: &'a [PathSegment],
     handler: Box<dyn Handler<'a, State> + 'a>,
 }
@@ -27,52 +28,52 @@ impl<'a> Endpoint<'a> {
         self.mode
     }
 
-    pub fn get(self, txn: &'a Txn, key: Value) -> TCResult<GetFuture<State>> {
+    pub fn get(self, key: Value) -> TCResult<GetFuture<'a, State>> {
         let get = self
             .handler
             .get()
             .ok_or_else(|| TCError::method_not_allowed(OpRefType::Get, TCPath::from(self.path)))?;
 
         if self.mode.may_read() {
-            Ok((get)(txn, key))
+            Ok((get)(self.txn, key))
         } else {
             Err(unauthorized!("read {}", TCPath::from(self.path)))
         }
     }
 
-    pub fn put(self, txn: &'a Txn, key: Value, value: State) -> TCResult<PutFuture> {
+    pub fn put(self, key: Value, value: State) -> TCResult<PutFuture<'a>> {
         let put = self
             .handler
             .put()
             .ok_or_else(|| TCError::method_not_allowed(OpRefType::Put, TCPath::from(self.path)))?;
 
         if self.mode.may_write() {
-            Ok((put)(txn, key, value))
+            Ok((put)(self.txn, key, value))
         } else {
             Err(unauthorized!("read {}", TCPath::from(self.path)))
         }
     }
 
-    pub fn post(self, txn: &'a Txn, params: Map<State>) -> TCResult<PostFuture<State>> {
+    pub fn post(self, params: Map<State>) -> TCResult<PostFuture<'a, State>> {
         let post = self
             .handler
             .post()
             .ok_or_else(|| TCError::method_not_allowed(OpRefType::Post, TCPath::from(self.path)))?;
 
         if self.mode.may_execute() {
-            Ok((post)(txn, params))
+            Ok((post)(self.txn, params))
         } else {
             Err(unauthorized!("execute {}", TCPath::from(self.path)))
         }
     }
 
-    pub fn delete(self, txn: &'a Txn, key: Value) -> TCResult<DeleteFuture> {
+    pub fn delete(self, key: Value) -> TCResult<DeleteFuture<'a>> {
         let delete = self.handler.delete().ok_or_else(|| {
             TCError::method_not_allowed(OpRefType::Delete, TCPath::from(self.path))
         })?;
 
         if self.mode.may_write() {
-            Ok((delete)(txn, key))
+            Ok((delete)(self.txn, key))
         } else {
             Err(unauthorized!("read {}", TCPath::from(self.path)))
         }
@@ -88,8 +89,8 @@ impl Kernel {
     pub(crate) fn authorize_claim_and_route<'a>(
         &'a self,
         path: &'a [PathSegment],
-        txn: Txn,
-    ) -> TCResult<(Txn, Endpoint<'a>)> {
+        txn: &'a Txn,
+    ) -> TCResult<Endpoint<'a>> {
         if path.is_empty() {
             Err(unauthorized!("access to /"))
         } else if path[0] == CLASS {
@@ -165,8 +166,8 @@ impl fs::Persist<CacheBlock> for Kernel {
 fn auth_claim_route<'a, T>(
     cluster: &'a Cluster<T>,
     path: &'a [PathSegment],
-    txn: Txn,
-) -> TCResult<(Txn, Endpoint<'a>)>
+    txn: &'a Txn,
+) -> TCResult<Endpoint<'a>>
 where
     Cluster<T>: Route<State>,
 {
@@ -182,17 +183,16 @@ where
         debug!("request permissions are {mode}");
     }
 
-    let txn = cluster.claim(txn)?;
-
     let handler = cluster
         .route(&*path)
         .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
 
     let endpoint = Endpoint {
         mode,
+        txn,
         path,
         handler,
     };
 
-    Ok((txn, endpoint))
+    Ok(endpoint)
 }
