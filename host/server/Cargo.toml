@@ -18,7 +18,6 @@ ds-ext = { path = "../../../ds-ext" }
 futures = "0.3"
 freqfs = "0.9"
 gethostname = "0.4"
-base64 = "0.21"
 log = "0.4"
 mdns-sd = "0.10"
 rjwt = { path = "../../../rjwt/rust" }

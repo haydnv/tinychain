@@ -36,7 +36,7 @@ use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
-use tc_server::aes256::{Aes256GcmSiv, Key, KeyInit, OsRng};
+use tc_server::aes256::{Aes256GcmSiv, KeyInit, OsRng};
 use tc_server::{Builder, RPCClient, Server, SignedToken, State};
 use tc_value::{Address, Link, ToUrl, Value};
 use tcgeneric::{label, path_label, Id, Map, PathLabel, TCPath, TCPathBuf};
@@ -138,7 +138,7 @@ impl RPCClient<State> for Client {
     }
 }
 
-async fn create_server(rpc_client: Arc<Client>, name: String, key: Key) -> Server {
+fn builder(rpc_client: Arc<Client>, name: String) -> Builder {
     let data_dir = format!("{DATA_DIR}/{name}").parse().unwrap();
     let workspace = format!("{WORKSPACE}/{name}").parse().unwrap();
 
@@ -149,13 +149,7 @@ async fn create_server(rpc_client: Arc<Client>, name: String, key: Key) -> Serve
     let data_dir = cache.clone().load(data_dir).unwrap();
     let workspace = cache.clone().load(workspace).unwrap();
 
-    let builder = Builder::load(data_dir, workspace, rpc_client)
-        .with_keys(vec![key])
-        .set_secure(false);
-
-    let builder = builder.discover().await;
-
-    builder.build().await
+    Builder::load(data_dir, workspace, rpc_client).set_secure(false)
 }
 
 #[tokio::main]
@@ -167,7 +161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let key = Aes256GcmSiv::generate_key(&mut OsRng);
 
     // start the first server
-    let server1 = create_server(client.clone(), "one".to_string(), key).await;
+    let server1 = builder(client.clone(), "one".to_string()).build().await;
 
     server1
         .make_discoverable(Ipv4Addr::LOCALHOST.into(), PORT)
@@ -215,7 +209,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     // start a second server and replicate the state of the first
-    let server2 = create_server(client.clone(), "two".to_string(), key).await;
+    let server2 = builder(client.clone(), "two".to_string()).build().await;
     client.add(PORT + 1, server2);
 
     Ok(())
