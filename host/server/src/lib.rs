@@ -33,8 +33,8 @@ pub mod aes256 {
 pub const DEFAULT_TTL: Duration = Duration::from_secs(3);
 pub const SERVICE_TYPE: &'static str = "_tinychain._tcp.local.";
 
-type Actor = rjwt::Actor<Value>;
-type SignedToken = rjwt::SignedToken<Link, Value, claim::Claim>;
+pub type Actor = rjwt::Actor<Value>;
+pub type SignedToken = rjwt::SignedToken<Link, Value, claim::Claim>;
 
 pub type State = tc_state::State<Txn>;
 
@@ -88,11 +88,24 @@ impl Authorize for Mode {
 
 #[async_trait]
 pub trait RPCClient<State> {
-    async fn get(&self, link: ToUrl<'_>, key: Value) -> TCResult<State>;
+    async fn get(&self, link: ToUrl<'_>, key: Value, token: Option<SignedToken>)
+        -> TCResult<State>;
 
-    async fn put(&self, link: ToUrl<'_>, key: Value, value: State) -> TCResult<()>;
+    async fn put(
+        &self,
+        link: ToUrl<'_>,
+        key: Value,
+        value: State,
+        token: Option<SignedToken>,
+    ) -> TCResult<()>;
 
-    async fn post(&self, link: ToUrl<'_>, params: Map<State>) -> TCResult<State>;
+    async fn post(
+        &self,
+        link: ToUrl<'_>,
+        params: Map<State>,
+        token: Option<SignedToken>,
+    ) -> TCResult<State>;
 
-    async fn delete(&self, link: ToUrl<'_>, key: Value) -> TCResult<State>;
+    async fn delete(&self, link: ToUrl<'_>, key: Value, token: Option<SignedToken>)
+        -> TCResult<()>;
 }

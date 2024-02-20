@@ -26,51 +26,119 @@
 //  A second host joins from an on-premises datacenter.
 //  The list of peers and replicas is updated such that both hosts receive every write operation.
 
-use async_trait::async_trait;
 use std::collections::HashMap;
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 
-use base64::engine::general_purpose::STANDARD_NO_PAD;
-use base64::Engine;
+use async_trait::async_trait;
 use freqfs::Cache;
-use mdns_sd::{ServiceDaemon, ServiceInfo};
-use rjwt::Actor;
-use tc_error::TCResult;
+use tokio::sync::RwLock;
 
+use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
 use tc_server::aes256::{Aes256GcmSiv, Key, KeyInit, OsRng};
-use tc_server::{Authorize, Builder, RPCClient, Server, State, SERVICE_TYPE};
-use tc_value::{Link, ToUrl, Value};
-use tcgeneric::{label, path_label, Id, Map, PathLabel, TCPathBuf};
+use tc_server::{Builder, RPCClient, Server, SignedToken, State};
+use tc_value::{Address, Link, ToUrl, Value};
+use tcgeneric::{label, path_label, Id, Map, PathLabel, TCPath, TCPathBuf};
 
 const CACHE_SIZE: usize = 1_000_000;
 const DATA_DIR: &'static str = "/tmp/tc/example_server/data";
 const WORKSPACE: &'static str = "/tmp/tc/example_server/workspace";
 const HYPOTHETICAL: PathLabel = path_label(&["txn", "hypothetical"]);
+const PORT: u16 = 8702;
 
 #[derive(Default)]
-struct Client {}
+struct Client {
+    servers: RwLock<HashMap<u16, Server>>,
+}
 
-#[async_trait]
-impl RPCClient<State> for Client {
-    async fn get(&self, link: ToUrl<'_>, key: Value) -> TCResult<State> {
-        todo!()
+impl Client {
+    fn add(&self, port: u16, server: Server) {
+        let mut servers = self.servers.try_write().unwrap();
+        assert!(servers.insert(port, server).is_none());
     }
 
-    async fn put(&self, link: ToUrl<'_>, key: Value, value: State) -> TCResult<()> {
-        todo!()
-    }
+    fn get_server_for<'a>(
+        servers: &'a HashMap<u16, Server>,
+        link: &ToUrl<'a>,
+    ) -> TCResult<&'a Server> {
+        let host = link.host().ok_or_else(|| {
+            bad_request!("RPC to {} is missing a host", TCPath::from(link.path()))
+        })?;
 
-    async fn post(&self, link: ToUrl<'_>, params: Map<State>) -> TCResult<State> {
-        todo!()
-    }
+        assert_eq!(host.address(), &Address::IPv4(Ipv4Addr::LOCALHOST));
 
-    async fn delete(&self, link: ToUrl<'_>, key: Value) -> TCResult<State> {
-        todo!()
+        let port = host.port().ok_or_else(|| {
+            bad_request!("RPC to {} is missing a port", TCPath::from(link.path()))
+        })?;
+
+        servers
+            .get(&port)
+            .ok_or_else(|| not_found!("server at {port}"))
     }
 }
 
-async fn create_server(name: String, key: Key) -> Server {
+#[async_trait]
+impl RPCClient<State> for Client {
+    async fn get(
+        &self,
+        link: ToUrl<'_>,
+        key: Value,
+        token: Option<SignedToken>,
+    ) -> TCResult<State> {
+        let servers = self.servers.read().await;
+        let server = Self::get_server_for(&*servers, &link)?;
+        let txn = server.get_txn(token)?;
+        let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
+        let handler = endpoint.get(key)?;
+        handler.await
+    }
+
+    async fn put(
+        &self,
+        link: ToUrl<'_>,
+        key: Value,
+        value: State,
+        token: Option<SignedToken>,
+    ) -> TCResult<()> {
+        let servers = self.servers.read().await;
+        let server = Self::get_server_for(&*servers, &link)?;
+        let txn = server.get_txn(token)?;
+        let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
+        let handler = endpoint.put(key, value)?;
+        handler.await
+    }
+
+    async fn post(
+        &self,
+        link: ToUrl<'_>,
+        params: Map<State>,
+        token: Option<SignedToken>,
+    ) -> TCResult<State> {
+        let servers = self.servers.read().await;
+        let server = Self::get_server_for(&*servers, &link)?;
+        let txn = server.get_txn(token)?;
+        let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
+        let handler = endpoint.post(params)?;
+        handler.await
+    }
+
+    async fn delete(
+        &self,
+        link: ToUrl<'_>,
+        key: Value,
+        token: Option<SignedToken>,
+    ) -> TCResult<()> {
+        let servers = self.servers.read().await;
+        let server = Self::get_server_for(&*servers, &link)?;
+        let txn = server.get_txn(token)?;
+        let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
+        let handler = endpoint.delete(key)?;
+        handler.await
+    }
+}
+
+async fn create_server(rpc_client: Arc<Client>, name: String, key: Key) -> Server {
     let data_dir = format!("{DATA_DIR}/{name}").parse().unwrap();
     let workspace = format!("{WORKSPACE}/{name}").parse().unwrap();
 
@@ -80,8 +148,6 @@ async fn create_server(name: String, key: Key) -> Server {
     let cache = Cache::new(CACHE_SIZE, None);
     let data_dir = cache.clone().load(data_dir).unwrap();
     let workspace = cache.clone().load(workspace).unwrap();
-
-    let rpc_client = Arc::new(Client::default());
 
     let builder = Builder::load(data_dir, workspace, rpc_client)
         .with_keys(vec![key])
@@ -94,58 +160,26 @@ async fn create_server(name: String, key: Key) -> Server {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // generate a keypair
-    let actor = Actor::<Value>::new(Link::default().into());
-    let public_key_encoded = STANDARD_NO_PAD.encode(actor.public_key());
-
-    // characterize local network interfaces
-    let hostname = gethostname::gethostname().into_string().expect("hostname");
-    println!("hostname: {hostname}");
-
-    let ifaces = local_ip_address::list_afinet_netifas().expect("network interface list");
-    let mut ip_addrs = Vec::with_capacity(ifaces.len());
-
-    let mdns = ServiceDaemon::new().expect("Failed to create daemon");
-
-    let port = 80;
-
-    for (name, ip) in ifaces {
-        assert!(
-            !ip.is_unspecified() && !ip.is_multicast(),
-            "invalid network interface {name}: {ip}"
-        );
-
-        if ip.is_loopback() {
-            println!("not advertising local network interface {name}: {ip}");
-        } else {
-            println!("will advertise network interface {name}: {ip}");
-            ip_addrs.push(ip);
-        }
-    }
-
-    let my_service = ServiceInfo::new(
-        SERVICE_TYPE,
-        &public_key_encoded,
-        &hostname,
-        &ip_addrs[..],
-        port,
-        HashMap::<String, String>::default(),
-    )
-    .expect("mDNS service definition");
-
-    mdns.register(my_service).expect("register mDNS service");
+    // create an RPC client
+    let client = Arc::new(Client::default());
 
     // generate a shared symmetric encryption key
     let key = Aes256GcmSiv::generate_key(&mut OsRng);
 
     // start the first server
-    let server1 = create_server("one".to_string(), key).await;
+    let server1 = create_server(client.clone(), "one".to_string(), key).await;
+
+    server1
+        .make_discoverable(Ipv4Addr::LOCALHOST.into(), PORT)
+        .await?;
+
+    client.add(PORT, server1);
 
     // check that it's working
-    let path = TCPathBuf::from(HYPOTHETICAL);
-    let txn = server1.get_txn(None)?;
-    let endpoint = server1.authorize_claim_and_route(&path, &txn)?;
-    assert!(endpoint.umask().may_execute());
+    let link = Link::new(
+        (Ipv4Addr::LOCALHOST.into(), PORT).into(),
+        TCPathBuf::from(HYPOTHETICAL),
+    );
 
     let hello_world = Scalar::Value("Hello, World!".to_string().into());
 
@@ -160,23 +194,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .into_iter()
     .collect();
 
-    let response = endpoint.post(params)?.await?;
+    let response = client.post(link.into(), params, None).await?;
 
     assert_eq!(Scalar::try_from(response).unwrap(), hello_world);
 
     // try creating a cluster directory
     let dir_name: Id = "test".parse().unwrap();
-    let path = TCPathBuf::from([label("class").into()]);
-    let txn = server1.get_txn(None)?;
-    let endpoint = server1.authorize_claim_and_route(&path, &txn)?;
-    assert!(endpoint.umask().may_write());
+    let link = Link::new(
+        (Ipv4Addr::LOCALHOST.into(), PORT).into(),
+        [label("class").into()].into(),
+    );
 
-    endpoint
-        .put(Value::Id(dir_name.into()), Map::<State>::new().into())?
+    client
+        .put(
+            link.into(),
+            dir_name.into(),
+            Map::<State>::new().into(),
+            None,
+        )
         .await?;
 
     // start a second server and replicate the state of the first
-    let server2 = create_server("two".to_string(), key).await;
+    let server2 = create_server(client.clone(), "two".to_string(), key).await;
+    client.add(PORT + 1, server2);
 
     Ok(())
 }

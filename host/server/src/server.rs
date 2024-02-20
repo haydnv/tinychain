@@ -1,5 +1,8 @@
+use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::Arc;
 
+use mdns_sd::{ServiceDaemon, ServiceInfo};
 use tokio::time::{Duration, MissedTickBehavior};
 
 use tc_error::*;
@@ -7,7 +10,7 @@ use tcgeneric::{NetworkTime, PathSegment};
 
 use crate::kernel::Kernel;
 use crate::txn::{Txn, TxnServer};
-use crate::{Endpoint, SignedToken};
+use crate::{Endpoint, SignedToken, SERVICE_TYPE};
 
 const GC_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -29,6 +32,27 @@ impl Server {
         } else {
             Ok(self.txn_server.new_txn(NetworkTime::now()))
         }
+    }
+
+    pub async fn make_discoverable(&self, address: IpAddr, port: u16) -> mdns_sd::Result<()> {
+        let hostname = gethostname::gethostname().into_string().expect("hostname");
+
+        let mdns = ServiceDaemon::new()?;
+
+        let my_service = ServiceInfo::new(
+            SERVICE_TYPE,
+            &hostname,
+            &hostname,
+            &address,
+            port,
+            HashMap::<String, String>::default(),
+        )?;
+
+        mdns.register(my_service)
+    }
+
+    pub async fn replicate_and_join(&mut self) -> TCResult<()> {
+        Err(not_implemented!("Server::replicate_and_join"))
     }
 }
 
