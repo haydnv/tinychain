@@ -1,5 +1,7 @@
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+
 use async_trait::async_trait;
-use log::debug;
+use log::{debug, warn};
 use umask::Mode;
 
 use tc_error::*;
@@ -7,14 +9,16 @@ use tc_scalar::OpRefType;
 use tc_state::CacheBlock;
 use tc_transact::public::*;
 use tc_transact::{fs, Transact, Transaction, TxnId};
-use tc_value::{Link, Value};
-use tcgeneric::{label, Label, Map, PathSegment, TCPath};
+use tc_value::{Host, Link, Value};
+use tcgeneric::{label, Label, Map, NetworkTime, PathSegment, TCPath, TCPathBuf};
 
-use crate::cluster::{Class, Cluster, Dir, Schema};
-use crate::txn::{Hypothetical, Txn};
-use crate::{Authorize, State};
+use crate::cluster::{Class, Cluster, Dir, DirEntry, ReplicateAndJoin, Schema};
+use crate::txn::{Hypothetical, Txn, TxnServer};
+use crate::{aes256, Authorize, SignedToken, State};
 
 const CLASS: Label = label("class");
+
+pub type ReplicaJoinResult = Result<(), (bool, TCError)>;
 
 pub struct Endpoint<'a> {
     mode: Mode,
@@ -83,10 +87,11 @@ impl<'a> Endpoint<'a> {
 pub(crate) struct Kernel {
     class: Cluster<Dir<Class>>,
     hypothetical: Cluster<Hypothetical>,
+    keys: HashSet<aes256::Key>,
 }
 
 impl Kernel {
-    pub(crate) fn authorize_claim_and_route<'a>(
+    pub fn authorize_claim_and_route<'a>(
         &'a self,
         path: &'a [PathSegment],
         txn: &'a Txn,
@@ -101,21 +106,68 @@ impl Kernel {
             Err(not_found!("{}", TCPath::from(path)))
         }
     }
+
+    pub async fn replicate_and_join(
+        &self,
+        txn_server: TxnServer,
+        peers: BTreeSet<Host>,
+    ) -> Result<(), bool> {
+        let mut progress = false;
+        let mut tokens = HashMap::<TCPathBuf, SignedToken>::new();
+        let mut unvisited = VecDeque::new();
+        unvisited.push_back(Box::new(self.class.clone()));
+
+        while let Some(cluster) = unvisited.pop_front() {
+            if !tokens.contains_key(cluster.path()) {
+                let txn = txn_server.new_txn(NetworkTime::now(), None);
+
+                // TODO: fetch token
+            }
+
+            let mut joined = false;
+            let token = tokens.get(cluster.path()).cloned();
+            let txn = txn_server.new_txn(NetworkTime::now(), token);
+            for peer in &peers {
+                match cluster.replicate_and_join(&txn, peer.clone()).await {
+                    Ok(entries) => {
+                        joined = true;
+                        progress = true;
+
+                        for (_name, entry) in entries {
+                            match &*entry {
+                                DirEntry::Dir(dir) => unvisited.push_back(Box::new(dir.clone())),
+                                DirEntry::Item(_) => {}
+                            }
+                        }
+                    }
+                    Err(cause) => warn!("failed to replicate from {peer}: {cause}"),
+                }
+            }
+
+            if !joined {
+                return Err(progress);
+            }
+        }
+
+        // TODO: replicate services in the /services dir
+
+        Ok(())
+    }
 }
 
 impl Kernel {
-    pub(crate) async fn commit(&self, txn_id: TxnId) {
+    pub async fn commit(&self, txn_id: TxnId) {
         self.hypothetical.rollback(&txn_id).await;
     }
 
-    pub(crate) async fn finalize(&self, txn_id: TxnId) {
+    pub async fn finalize(&self, txn_id: TxnId) {
         self.hypothetical.finalize(&txn_id).await;
     }
 }
 
 #[async_trait]
 impl fs::Persist<CacheBlock> for Kernel {
-    type Schema = (Option<Link>, Option<Link>);
+    type Schema = (Option<Link>, Option<Link>, HashSet<aes256::Key>);
     type Txn = Txn;
 
     async fn create(
@@ -123,7 +175,7 @@ impl fs::Persist<CacheBlock> for Kernel {
         schema: Self::Schema,
         store: fs::Dir<CacheBlock>,
     ) -> TCResult<Self> {
-        let (owner, group) = schema;
+        let (owner, group, keys) = schema;
 
         let class_dir: fs::Dir<CacheBlock> = store.create_dir(txn_id, CLASS.into()).await?;
         let schema = Schema::new(CLASS, owner.clone(), group.clone());
@@ -135,6 +187,7 @@ impl fs::Persist<CacheBlock> for Kernel {
         Ok(Self {
             class,
             hypothetical,
+            keys,
         })
     }
 
@@ -143,7 +196,7 @@ impl fs::Persist<CacheBlock> for Kernel {
         schema: Self::Schema,
         store: fs::Dir<CacheBlock>,
     ) -> TCResult<Self> {
-        let (owner, group) = schema;
+        let (owner, group, keys) = schema;
 
         let class_dir: fs::Dir<CacheBlock> = store.create_dir(txn_id, CLASS.into()).await?;
         let schema = Schema::new(CLASS, owner.clone(), group.clone());
@@ -155,6 +208,7 @@ impl fs::Persist<CacheBlock> for Kernel {
         Ok(Self {
             class,
             hypothetical,
+            keys,
         })
     }
 

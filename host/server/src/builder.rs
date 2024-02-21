@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,22 +10,24 @@ use mdns_sd::{ServiceDaemon, ServiceEvent};
 use tc_state::CacheBlock;
 use tc_transact::fs;
 use tc_transact::Transaction;
-use tc_value::Link;
+use tc_value::{Address, Host, Link, Protocol};
 use tcgeneric::NetworkTime;
 
 use crate::aes256::Key as Aes256Key;
 use crate::kernel::Kernel;
 use crate::server::Server;
 use crate::txn::{Txn, TxnServer};
-use crate::{RPCClient, State, DEFAULT_TTL, SERVICE_TYPE};
+use crate::{RPCClient, State, DEFAULT_MAX_RETRIES, DEFAULT_TTL, SERVICE_TYPE};
 
 struct Config {
     request_ttl: Duration,
     rpc_client: Arc<dyn RPCClient<State>>,
     data_dir: DirLock<CacheBlock>,
     workspace: DirLock<CacheBlock>,
+    max_retries: u8,
     owner: Option<Link>,
     group: Option<Link>,
+    keys: HashSet<Aes256Key>,
     secure: bool,
 }
 
@@ -40,17 +42,18 @@ impl Config {
         }
 
         let txn_server = TxnServer::create(self.workspace, self.request_ttl);
-        let txn: Txn = txn_server.new_txn(NetworkTime::now());
+        let txn: Txn = txn_server.new_txn(NetworkTime::now(), None);
         let txn_id = *txn.id();
 
         let data_dir = fs::Dir::load(txn_id, self.data_dir)
             .await
             .expect("data dir");
 
-        let kernel: Kernel =
-            fs::Persist::load_or_create(txn_id, (self.owner, self.group), data_dir)
-                .await
-                .expect("kernel");
+        let schema = (self.owner, self.group, self.keys);
+
+        let kernel: Kernel = fs::Persist::load_or_create(txn_id, schema, data_dir)
+            .await
+            .expect("kernel");
 
         kernel.commit(txn_id).await;
 
@@ -59,9 +62,9 @@ impl Config {
 }
 
 struct Replicate {
-    keys: Vec<Aes256Key>,
     peers: HashMap<String, HashSet<IpAddr>>,
     server: Server,
+    max_retries: u8,
 }
 
 impl Replicate {
@@ -108,8 +111,10 @@ impl Builder {
             rpc_client,
             data_dir,
             workspace,
+            max_retries: DEFAULT_MAX_RETRIES,
             owner: None,
             group: None,
+            keys: HashSet::new(),
             secure: true,
         })
     }
@@ -121,19 +126,24 @@ impl Builder {
         }
     }
 
-    pub async fn discover(self) -> Self {
-        let mut config = match self {
+    async fn start(self) -> Replicate {
+        match self {
             Self::Replicate(config) => config,
             Self::Start(config) => {
+                let max_retries = config.max_retries;
                 let server = config.build().await;
 
                 Replicate {
-                    keys: Vec::new(),
                     peers: HashMap::new(),
                     server,
+                    max_retries,
                 }
             }
-        };
+        }
+    }
+
+    pub async fn discover(self) -> Self {
+        let mut config = self.start().await;
 
         let mdns = ServiceDaemon::new().expect("Failed to create daemon");
         let receiver = mdns.browse(SERVICE_TYPE).expect("browse mDNS peers");
@@ -168,6 +178,59 @@ impl Builder {
         Self::Replicate(config)
     }
 
+    pub async fn replicate_and_join(self, protocol: Protocol) -> Server {
+        let config = self.start().await;
+        let peers: BTreeSet<Host> = config
+            .peers
+            .into_values()
+            .filter_map(|peers| {
+                if peers.is_empty() {
+                    None
+                } else {
+                    peers
+                        .into_iter()
+                        .next()
+                        .map(Address::from)
+                        .map(|addr| (protocol, addr))
+                        .map(Host::from)
+                }
+            })
+            .collect();
+
+        let mut i = 0;
+        let joined = loop {
+            match config.server.replicate_and_join(peers.clone()).await {
+                Ok(()) => {
+                    break true;
+                }
+                Err(progress) => {
+                    if progress {
+                        i = 0
+                    } else if i < config.max_retries {
+                        i += 1
+                    } else {
+                        break false;
+                    }
+                }
+            }
+        };
+
+        if joined {
+            config.server
+        } else {
+            panic!("failed to join replica set")
+        }
+    }
+
+    pub fn set_max_retries(mut self, max_retries: u8) -> Self {
+        match &mut self {
+            Self::Start(config) => config.max_retries = max_retries,
+            Self::Replicate(config) => config.max_retries = max_retries,
+        };
+
+        self
+    }
+
     pub fn set_group(mut self, group: Link) -> Self {
         if let Self::Start(config) = &mut self {
             config.group = Some(group);
@@ -199,10 +262,9 @@ impl Builder {
     }
 
     pub fn with_keys<Keys: IntoIterator<Item = Aes256Key>>(mut self, keys: Keys) -> Self {
-        if let Self::Replicate(config) = &mut self {
-            config.keys.extend(keys);
-        } else {
-            panic!("server is not yet built (call .build() first)");
+        match &mut self {
+            Self::Start(config) => config.keys.extend(keys),
+            _ => panic!("cannot add keys to a running server"),
         }
 
         self

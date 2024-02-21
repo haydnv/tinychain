@@ -30,6 +30,7 @@ pub mod aes256 {
     pub type Key = aes_gcm_siv::Key<Aes256GcmSiv>;
 }
 
+pub const DEFAULT_MAX_RETRIES: u8 = 3;
 pub const DEFAULT_TTL: Duration = Duration::from_secs(3);
 pub const SERVICE_TYPE: &'static str = "_tinychain._tcp.local.";
 

@@ -36,7 +36,7 @@ use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
-use tc_server::aes256::{Aes256GcmSiv, KeyInit, OsRng};
+use tc_server::aes256::{Aes256GcmSiv, Key, KeyInit, OsRng};
 use tc_server::{Builder, RPCClient, Server, SignedToken, State};
 use tc_value::{Address, Link, ToUrl, Value};
 use tcgeneric::{label, path_label, Id, Map, PathLabel, TCPath, TCPathBuf};
@@ -88,7 +88,7 @@ impl RPCClient<State> for Client {
     ) -> TCResult<State> {
         let servers = self.servers.read().await;
         let server = Self::get_server_for(&*servers, &link)?;
-        let txn = server.get_txn(token)?;
+        let txn = server.get_txn(token);
         let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
         let handler = endpoint.get(key)?;
         handler.await
@@ -103,7 +103,7 @@ impl RPCClient<State> for Client {
     ) -> TCResult<()> {
         let servers = self.servers.read().await;
         let server = Self::get_server_for(&*servers, &link)?;
-        let txn = server.get_txn(token)?;
+        let txn = server.get_txn(token);
         let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
         let handler = endpoint.put(key, value)?;
         handler.await
@@ -117,7 +117,7 @@ impl RPCClient<State> for Client {
     ) -> TCResult<State> {
         let servers = self.servers.read().await;
         let server = Self::get_server_for(&*servers, &link)?;
-        let txn = server.get_txn(token)?;
+        let txn = server.get_txn(token);
         let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
         let handler = endpoint.post(params)?;
         handler.await
@@ -131,14 +131,14 @@ impl RPCClient<State> for Client {
     ) -> TCResult<()> {
         let servers = self.servers.read().await;
         let server = Self::get_server_for(&*servers, &link)?;
-        let txn = server.get_txn(token)?;
+        let txn = server.get_txn(token);
         let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
         let handler = endpoint.delete(key)?;
         handler.await
     }
 }
 
-fn builder(rpc_client: Arc<Client>, name: String) -> Builder {
+fn builder(rpc_client: Arc<Client>, name: String, key: Key) -> Builder {
     let data_dir = format!("{DATA_DIR}/{name}").parse().unwrap();
     let workspace = format!("{WORKSPACE}/{name}").parse().unwrap();
 
@@ -149,7 +149,9 @@ fn builder(rpc_client: Arc<Client>, name: String) -> Builder {
     let data_dir = cache.clone().load(data_dir).unwrap();
     let workspace = cache.clone().load(workspace).unwrap();
 
-    Builder::load(data_dir, workspace, rpc_client).set_secure(false)
+    Builder::load(data_dir, workspace, rpc_client)
+        .with_keys([key])
+        .set_secure(false)
 }
 
 #[tokio::main]
@@ -161,7 +163,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let key = Aes256GcmSiv::generate_key(&mut OsRng);
 
     // start the first server
-    let server1 = builder(client.clone(), "one".to_string()).build().await;
+    let server1 = builder(client.clone(), "one".to_string(), key)
+        .build()
+        .await;
 
     server1
         .make_discoverable(Ipv4Addr::LOCALHOST.into(), PORT)
@@ -209,7 +213,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     // start a second server and replicate the state of the first
-    let server2 = builder(client.clone(), "two".to_string()).build().await;
+    let server2 = builder(client.clone(), "two".to_string(), key)
+        .build()
+        .await;
+
     client.add(PORT + 1, server2);
 
     Ok(())

@@ -13,6 +13,7 @@ use tc_transact::TxnId;
 use tcgeneric::NetworkTime;
 
 use crate::kernel::Kernel;
+use crate::SignedToken;
 
 use super::{LazyDir, Txn};
 
@@ -133,7 +134,7 @@ impl TxnServer {
 }
 
 impl TxnServer {
-    pub fn new_txn(&self, now: NetworkTime) -> Txn {
+    pub fn new_txn(&self, now: NetworkTime, token: Option<SignedToken>) -> Txn {
         let txn_id = TxnId::new(now);
         let expiry = txn_id.time() + self.ttl;
         let workspace = LazyDir::from(self.workspace.clone()).create_dir(txn_id.to_id());
@@ -142,7 +143,7 @@ impl TxnServer {
             .send(Active::new(txn_id, expiry))
             .expect("active txn");
 
-        Txn::new(txn_id, expiry, workspace, None)
+        Txn::new(txn_id, expiry, workspace, token)
     }
 }
 

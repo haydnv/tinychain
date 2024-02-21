@@ -14,7 +14,7 @@ use umask::Mode;
 
 use tc_error::*;
 use tc_transact::fs;
-use tc_transact::lock::{TxnLock, TxnSetLock, TxnSetLockIter};
+use tc_transact::lock::{TxnLock, TxnMapLockIter, TxnSetLock, TxnSetLockIter};
 use tc_transact::{Transact, TxnId};
 use tc_value::{Host, Link, Value};
 use tcgeneric::{PathSegment, TCPathBuf};
@@ -23,7 +23,7 @@ use crate::txn::Txn;
 use crate::{Actor, CacheBlock};
 
 pub use class::Class;
-pub use dir::Dir;
+pub use dir::{Dir, DirEntry};
 
 pub const DEFAULT_UMASK: Mode = Mode::new()
     .with_class_perm(umask::USER, umask::ALL)
@@ -101,6 +101,15 @@ impl Schema {
             group: self.group,
         }
     }
+}
+
+#[async_trait]
+pub trait Replicate: Send + Sync {
+    async fn replicate(
+        &self,
+        txn: &Txn,
+        peer: Host,
+    ) -> TCResult<async_hash::Output<async_hash::Sha256>>;
 }
 
 #[derive(Clone)]
@@ -214,6 +223,30 @@ impl<T> Cluster<T> {
     async fn replicate_rollback(&self, _txn_id: TxnId) -> TCResult<()> {
         // TODO: validate that the rollback message came from the txn leader, send rollback messages to replicas, log errors, crash if >= 50% fail
         Err(not_implemented!("Cluster::replicate_rollback"))
+    }
+}
+
+#[async_trait]
+pub(crate) trait ReplicateAndJoin {
+    type State;
+
+    async fn replicate_and_join(
+        &self,
+        txn: &Txn,
+        peer: Host,
+    ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<Self::State>>>;
+}
+
+#[async_trait]
+impl<T: Send + Sync> ReplicateAndJoin for Cluster<Dir<T>> {
+    type State = T;
+
+    async fn replicate_and_join(
+        &self,
+        txn: &Txn,
+        peer: Host,
+    ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<T>>> {
+        Err(not_implemented!("Cluster::replicate_and_join"))
     }
 }
 

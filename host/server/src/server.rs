@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -6,6 +6,7 @@ use mdns_sd::{ServiceDaemon, ServiceInfo};
 use tokio::time::{Duration, MissedTickBehavior};
 
 use tc_error::*;
+use tc_value::Host;
 use tcgeneric::{NetworkTime, PathSegment};
 
 use crate::kernel::Kernel;
@@ -26,12 +27,8 @@ impl Server {
         Self { kernel, txn_server }
     }
 
-    pub fn get_txn(&self, token: Option<SignedToken>) -> TCResult<Txn> {
-        if let Some(token) = token {
-            todo!("construct Txn from existing token")
-        } else {
-            Ok(self.txn_server.new_txn(NetworkTime::now()))
-        }
+    pub fn get_txn(&self, token: Option<SignedToken>) -> Txn {
+        self.txn_server.new_txn(NetworkTime::now(), token)
     }
 
     pub async fn make_discoverable(&self, address: IpAddr, port: u16) -> mdns_sd::Result<()> {
@@ -51,8 +48,10 @@ impl Server {
         mdns.register(my_service)
     }
 
-    pub async fn replicate_and_join(&mut self) -> TCResult<()> {
-        Err(not_implemented!("Server::replicate_and_join"))
+    pub async fn replicate_and_join(&self, peers: BTreeSet<Host>) -> Result<(), bool> {
+        self.kernel
+            .replicate_and_join(self.txn_server.clone(), peers)
+            .await
     }
 }
 

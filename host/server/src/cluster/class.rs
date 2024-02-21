@@ -9,9 +9,10 @@ use tc_scalar::Scalar;
 use tc_state::object::InstanceClass;
 use tc_transact::fs;
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Link, Version as VersionNumber};
+use tc_value::{Host, Link, Version as VersionNumber};
 use tcgeneric::{Id, Map};
 
+use crate::cluster::Replicate;
 use crate::{CacheBlock, State, Txn};
 
 use super::dir::DirItem;
@@ -144,6 +145,17 @@ impl Transact for Class {
 
     async fn finalize(&self, txn_id: &TxnId) {
         self.dir.finalize(*txn_id).await
+    }
+}
+
+#[async_trait]
+impl Replicate for Class {
+    async fn replicate(
+        &self,
+        txn: &Txn,
+        peer: Host,
+    ) -> TCResult<async_hash::Output<async_hash::Sha256>> {
+        Err(not_implemented!("Class::replicate"))
     }
 }
 

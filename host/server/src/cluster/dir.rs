@@ -18,12 +18,12 @@ use tc_transact::fs;
 use tc_transact::lock::{TxnMapLock, TxnMapLockEntry, TxnMapLockIter};
 use tc_transact::public::Route;
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::Version as VersionNumber;
+use tc_value::{Host, Version as VersionNumber};
 use tcgeneric::{label, Id, Label, PathSegment, ThreadSafe};
 
 use crate::{CacheBlock, State, Txn};
 
-use super::{Class, Cluster, Schema};
+use super::{Class, Cluster, Replicate, Schema};
 
 /// The name of the endpoint which lists the names of each entry in a [`Dir`]
 pub const ENTRIES: Label = label("entries");
@@ -288,6 +288,17 @@ where
         }
 
         self.dir.finalize(*txn_id).await;
+    }
+}
+
+#[async_trait]
+impl<T: Send + Sync> Replicate for Dir<T> {
+    async fn replicate(
+        &self,
+        txn: &Txn,
+        peer: Host,
+    ) -> TCResult<async_hash::Output<async_hash::Sha256>> {
+        Err(not_implemented!("Dir::replicate"))
     }
 }
 
