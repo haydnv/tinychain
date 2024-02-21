@@ -37,7 +37,7 @@ use tokio::sync::RwLock;
 use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
 use tc_server::aes256::{Aes256GcmSiv, Key, KeyInit, OsRng};
-use tc_server::{Builder, RPCClient, Server, SignedToken, State};
+use tc_server::{Builder, RPCClient, Server, SignedToken, State, DEFAULT_PORT};
 use tc_value::{Address, Link, ToUrl, Value};
 use tcgeneric::{label, path_label, Id, Map, PathLabel, TCPath, TCPathBuf};
 
@@ -45,7 +45,6 @@ const CACHE_SIZE: usize = 1_000_000;
 const DATA_DIR: &'static str = "/tmp/tc/example_server/data";
 const WORKSPACE: &'static str = "/tmp/tc/example_server/workspace";
 const HYPOTHETICAL: PathLabel = path_label(&["txn", "hypothetical"]);
-const PORT: u16 = 8702;
 
 #[derive(Default)]
 struct Client {
@@ -79,7 +78,7 @@ impl Client {
 }
 
 #[async_trait]
-impl RPCClient<State> for Client {
+impl RPCClient for Client {
     async fn get(
         &self,
         link: ToUrl<'_>,
@@ -136,6 +135,10 @@ impl RPCClient<State> for Client {
         let handler = endpoint.delete(key)?;
         handler.await
     }
+
+    async fn verify(&self, _token: String) -> TCResult<SignedToken> {
+        todo!()
+    }
 }
 
 fn builder(rpc_client: Arc<Client>, name: String, key: Key) -> Builder {
@@ -164,18 +167,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // start the first server
     let server1 = builder(client.clone(), "one".to_string(), key)
-        .build()
+        .set_port(DEFAULT_PORT)
+        .start()
         .await;
 
-    server1
-        .make_discoverable(Ipv4Addr::LOCALHOST.into(), PORT)
-        .await?;
+    server1.make_discoverable().await?;
 
-    client.add(PORT, server1);
+    client.add(DEFAULT_PORT, server1.ready());
 
     // check that it's working
     let link = Link::new(
-        (Ipv4Addr::LOCALHOST.into(), PORT).into(),
+        (Ipv4Addr::LOCALHOST.into(), DEFAULT_PORT).into(),
         TCPathBuf::from(HYPOTHETICAL),
     );
 
@@ -199,7 +201,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // try creating a cluster directory
     let dir_name: Id = "test".parse().unwrap();
     let link = Link::new(
-        (Ipv4Addr::LOCALHOST.into(), PORT).into(),
+        (Ipv4Addr::LOCALHOST.into(), DEFAULT_PORT).into(),
         [label("class").into()].into(),
     );
 
@@ -214,10 +216,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // start a second server and replicate the state of the first
     let server2 = builder(client.clone(), "two".to_string(), key)
-        .build()
+        .start()
         .await;
 
-    client.add(PORT + 1, server2);
+    server2.make_discoverable().await?;
+
+    client.add(DEFAULT_PORT + 1, server2.ready());
 
     Ok(())
 }

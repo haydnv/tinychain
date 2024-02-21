@@ -4,12 +4,13 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use futures::future::{Future, TryFutureExt};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use rjwt::{OsRng, SigningKey, VerifyingKey};
+use rjwt::{OsRng, SigningKey, Token, VerifyingKey};
 use umask::Mode;
 
 use tc_error::*;
@@ -19,8 +20,9 @@ use tc_transact::{Transact, TxnId};
 use tc_value::{Host, Link, Value};
 use tcgeneric::{PathSegment, TCPathBuf};
 
+use crate::claim::Claim;
 use crate::txn::Txn;
-use crate::{Actor, CacheBlock};
+use crate::{Actor, CacheBlock, SignedToken};
 
 pub use class::Class;
 pub use dir::{Dir, DirEntry};
@@ -76,27 +78,19 @@ impl PartialOrd for Key {
 
 #[derive(Clone, Debug)]
 pub struct Schema {
-    path: TCPathBuf,
+    link: Link,
     owner: Option<Link>,
     group: Option<Link>,
 }
 
 impl Schema {
-    pub fn new<Path: Into<TCPathBuf>>(
-        path: Path,
-        owner: Option<Link>,
-        group: Option<Link>,
-    ) -> Self {
-        Self {
-            path: path.into(),
-            owner,
-            group,
-        }
+    pub fn new(link: Link, owner: Option<Link>, group: Option<Link>) -> Self {
+        Self { link, owner, group }
     }
 
     pub fn append(self, suffix: PathSegment) -> Self {
         Self {
-            path: self.path.append(suffix),
+            link: self.link.append(suffix),
             owner: self.owner,
             group: self.group,
         }
@@ -146,8 +140,11 @@ impl<T> Cluster<T> {
         }
     }
 
+    pub fn link(&self) -> &Link {
+        &self.schema.link
+    }
     pub fn path(&self) -> &TCPathBuf {
-        &self.schema.path
+        self.schema.link.path()
     }
 
     pub fn umask(&self, _txn_id: TxnId, path: &[PathSegment]) -> Mode {
@@ -163,6 +160,14 @@ impl<T> Cluster<T> {
         } else {
             txn
         }
+    }
+
+    pub(crate) fn issue_token(&self, mode: Mode, ttl: Duration) -> TCResult<SignedToken> {
+        let link = self.link().clone();
+        let actor_id = self.actor.id().clone();
+        let claim = Claim::new(self.path().clone(), mode);
+        let token = Token::new(link, SystemTime::now(), ttl, actor_id, claim);
+        self.actor.sign_token(token).map_err(TCError::from)
     }
 
     pub fn keyring(&self, txn_id: TxnId) -> TCResult<TxnSetLockIter<Key>> {

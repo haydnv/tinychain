@@ -18,7 +18,7 @@ use tc_value::{Link, ToUrl, Value};
 use tcgeneric::{label, Id, NetworkTime, PathSegment, TCPathBuf};
 
 use crate::claim::Claim;
-use crate::{Actor, SignedToken, State};
+use crate::{Actor, RPCClient, SignedToken, State};
 
 pub use hypothetical::Hypothetical;
 pub use server::TxnServer;
@@ -86,6 +86,7 @@ pub struct Txn {
     expires: NetworkTime,
     workspace: LazyDir,
     token: Option<Arc<SignedToken>>,
+    rpc_client: Arc<dyn RPCClient>,
 }
 
 impl Clone for Txn {
@@ -95,6 +96,7 @@ impl Clone for Txn {
             expires: self.expires,
             workspace: self.workspace.clone(),
             token: self.token.clone(),
+            rpc_client: self.rpc_client.clone(),
         }
     }
 }
@@ -104,12 +106,14 @@ impl Txn {
         id: TxnId,
         expires: NetworkTime,
         workspace: LazyDir,
+        rpc_client: Arc<dyn RPCClient>,
         token: Option<SignedToken>,
     ) -> Self {
         Self {
             id,
             expires,
             workspace,
+            rpc_client,
             token: token.map(Arc::new),
         }
     }
@@ -132,8 +136,13 @@ impl Txn {
             id: self.id,
             expires: self.expires,
             workspace: self.workspace.clone(),
+            rpc_client: self.rpc_client.clone(),
             token: Some(Arc::new(token)),
         })
+    }
+
+    pub async fn verify(&self, token: String) -> TCResult<SignedToken> {
+        self.rpc_client.verify(token).await
     }
 
     /// Get the set of permissions authorized by hosts in the `keyring` for the given `resource`.
@@ -199,6 +208,7 @@ impl Transaction<CacheBlock> for Txn {
             id: self.id,
             expires: self.expires,
             workspace: self.workspace.clone().create_dir(id.into()),
+            rpc_client: self.rpc_client.clone(),
             token: self.token.clone(),
         }
     }
@@ -208,6 +218,7 @@ impl Transaction<CacheBlock> for Txn {
             id: self.id,
             expires: self.expires,
             workspace: self.workspace.clone().create_dir_unique(),
+            rpc_client: self.rpc_client.clone(),
             token: self.token.clone(),
         }
     }

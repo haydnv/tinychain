@@ -1,8 +1,6 @@
-use std::collections::{BTreeSet, HashMap};
-use std::net::IpAddr;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use mdns_sd::{ServiceDaemon, ServiceInfo};
 use tokio::time::{Duration, MissedTickBehavior};
 
 use tc_error::*;
@@ -11,7 +9,7 @@ use tcgeneric::{NetworkTime, PathSegment};
 
 use crate::kernel::Kernel;
 use crate::txn::{Txn, TxnServer};
-use crate::{Endpoint, SignedToken, SERVICE_TYPE};
+use crate::{Endpoint, SignedToken};
 
 const GC_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -29,23 +27,6 @@ impl Server {
 
     pub fn get_txn(&self, token: Option<SignedToken>) -> Txn {
         self.txn_server.new_txn(NetworkTime::now(), token)
-    }
-
-    pub async fn make_discoverable(&self, address: IpAddr, port: u16) -> mdns_sd::Result<()> {
-        let hostname = gethostname::gethostname().into_string().expect("hostname");
-
-        let mdns = ServiceDaemon::new()?;
-
-        let my_service = ServiceInfo::new(
-            SERVICE_TYPE,
-            &hostname,
-            &hostname,
-            &address,
-            port,
-            HashMap::<String, String>::default(),
-        )?;
-
-        mdns.register(my_service)
     }
 
     pub async fn replicate_and_join(&self, peers: BTreeSet<Host>) -> Result<(), bool> {

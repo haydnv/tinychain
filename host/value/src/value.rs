@@ -412,6 +412,12 @@ impl From<Bytes> for Value {
     }
 }
 
+impl<const N: usize> From<[u8; N]> for Value {
+    fn from(bytes: [u8; N]) -> Self {
+        Self::Bytes(bytes.into())
+    }
+}
+
 impl From<Host> for Value {
     fn from(host: Host) -> Self {
         Self::Link(host.into())
@@ -483,6 +489,21 @@ impl TryFrom<Value> for bool {
             Value::String(s) if &s == "true" => Ok(true),
             Value::String(s) if &s == "false" => Ok(false),
             other => Err(TCError::unexpected(other, "a boolean")),
+        }
+    }
+}
+
+impl TryFrom<Value> for Arc<[u8]> {
+    type Error = TCError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Bytes(bytes) => Ok(bytes),
+            Value::Id(id) => Ok(id.as_str().as_bytes().into()),
+            Value::None => Ok(Arc::new([])),
+            Value::Number(_n) => Err(not_implemented!("cast a number to a bitstring")),
+            Value::String(string) => Ok(string.as_str().as_bytes().into()),
+            other => Err(TCError::unexpected(other, "a bitstring")),
         }
     }
 }

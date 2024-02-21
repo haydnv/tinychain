@@ -13,7 +13,7 @@ use tc_transact::TxnId;
 use tcgeneric::NetworkTime;
 
 use crate::kernel::Kernel;
-use crate::SignedToken;
+use crate::{RPCClient, SignedToken};
 
 use super::{LazyDir, Txn};
 
@@ -62,6 +62,7 @@ impl PartialOrd for Active {
 
 /// Server to keep track of the transactions currently active for this host.
 pub struct TxnServer {
+    rpc_client: Arc<dyn RPCClient>,
     workspace: DirLock<CacheBlock>,
     active: Arc<RwLock<OrdHashSet<Active>>>,
     tx: mpsc::UnboundedSender<Active>,
@@ -71,6 +72,7 @@ pub struct TxnServer {
 impl Clone for TxnServer {
     fn clone(&self) -> Self {
         Self {
+            rpc_client: self.rpc_client.clone(),
             workspace: self.workspace.clone(),
             active: self.active.clone(),
             tx: self.tx.clone(),
@@ -80,13 +82,18 @@ impl Clone for TxnServer {
 }
 
 impl TxnServer {
-    pub fn create(workspace: DirLock<CacheBlock>, ttl: Duration) -> Self {
+    pub fn create(
+        workspace: DirLock<CacheBlock>,
+        rpc_client: Arc<dyn RPCClient>,
+        ttl: Duration,
+    ) -> Self {
         let active = Arc::new(RwLock::new(OrdHashSet::new()));
 
         let (tx, rx) = mpsc::unbounded_channel();
         spawn_receiver_thread(active.clone(), rx);
 
         Self {
+            rpc_client,
             workspace,
             active,
             tx,
@@ -138,12 +145,13 @@ impl TxnServer {
         let txn_id = TxnId::new(now);
         let expiry = txn_id.time() + self.ttl;
         let workspace = LazyDir::from(self.workspace.clone()).create_dir(txn_id.to_id());
+        let rpc_client = self.rpc_client.clone();
 
         self.tx
             .send(Active::new(txn_id, expiry))
             .expect("active txn");
 
-        Txn::new(txn_id, expiry, workspace, token)
+        Txn::new(txn_id, expiry, workspace, rpc_client, token)
     }
 }
 

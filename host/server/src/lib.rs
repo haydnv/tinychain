@@ -31,12 +31,13 @@ pub mod aes256 {
 }
 
 pub const DEFAULT_MAX_RETRIES: u8 = 3;
+pub const DEFAULT_PORT: u16 = 8702;
 pub const DEFAULT_TTL: Duration = Duration::from_secs(3);
 pub const SERVICE_TYPE: &'static str = "_tinychain._tcp.local.";
 
 pub type Actor = rjwt::Actor<Value>;
 pub type SignedToken = rjwt::SignedToken<Link, Value, claim::Claim>;
-
+pub type Token = rjwt::Token<Link, Value, claim::Claim>;
 pub type State = tc_state::State<Txn>;
 
 pub trait Authorize {
@@ -88,7 +89,7 @@ impl Authorize for Mode {
 }
 
 #[async_trait]
-pub trait RPCClient<State> {
+pub trait RPCClient: Send + Sync {
     async fn get(&self, link: ToUrl<'_>, key: Value, token: Option<SignedToken>)
         -> TCResult<State>;
 
@@ -109,4 +110,6 @@ pub trait RPCClient<State> {
 
     async fn delete(&self, link: ToUrl<'_>, key: Value, token: Option<SignedToken>)
         -> TCResult<()>;
+
+    async fn verify(&self, token: String) -> TCResult<SignedToken>;
 }
