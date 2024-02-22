@@ -118,6 +118,10 @@ impl Txn {
         }
     }
 
+    pub(crate) fn token(&self) -> Option<&SignedToken> {
+        self.token.as_ref().map(|token| &**token)
+    }
+
     /// Grant `mode` permissions on the resource at `path` to the bearer of this [`Txn`]'s token.
     /// `path` is relative to the cluster at `link` whose `actor` will sign the token.
     pub fn grant(&self, actor: &Actor, link: Link, path: TCPathBuf, mode: Mode) -> TCResult<Self> {
@@ -139,10 +143,6 @@ impl Txn {
             rpc_client: self.rpc_client.clone(),
             token: Some(Arc::new(token)),
         })
-    }
-
-    pub async fn verify(&self, token: String) -> TCResult<SignedToken> {
-        self.rpc_client.verify(token).await
     }
 
     /// Get the set of permissions authorized by hosts in the `keyring` for the given `resource`.

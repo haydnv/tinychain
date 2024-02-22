@@ -3,7 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aes_gcm_siv::aead::rand_core::RngCore;
+use aes_gcm_siv::aead::rand_core::{OsRng, RngCore};
 use aes_gcm_siv::aead::Aead;
 use aes_gcm_siv::{Aes256GcmSiv, KeyInit, Nonce};
 use async_trait::async_trait;
@@ -149,9 +149,19 @@ impl Kernel {
             let mut joined = false;
 
             for peer in &peers {
-                let txn = txn_server.new_txn(NetworkTime::now(), None);
+                let txn = txn_server.create_txn(NetworkTime::now());
+                let txn_id = *txn.id();
                 let txn = match get_token(&txn, peer, &self.keys, cluster.path()).await {
-                    Ok(token) => txn_server.new_txn(NetworkTime::now(), Some(token)),
+                    Ok(token) => match txn_server
+                        .verify_txn(txn_id, NetworkTime::now(), token)
+                        .await
+                    {
+                        Ok(txn) => txn,
+                        Err(cause) => {
+                            warn!("failed to verify token from {peer}: {cause}");
+                            continue;
+                        }
+                    },
                     Err(cause) => {
                         warn!("failed to fetch token from {peer}: {cause}");
                         continue;
@@ -312,7 +322,7 @@ async fn get_token(
     peer: &Host,
     keys: &HashSet<aes256::Key>,
     path: &TCPathBuf,
-) -> TCResult<SignedToken> {
+) -> TCResult<String> {
     let mut nonce = [0u8; 96];
     OsRng.fill_bytes(&mut nonce);
 
@@ -335,10 +345,7 @@ async fn get_token(
         let nonce: Arc<[u8]> = nonce.try_into()?;
         let token: Arc<[u8]> = token.try_into()?;
 
-        match decrypt_token(&cipher, &nonce, &token) {
-            Ok(token) => return txn.verify(token).await,
-            Err(cause) => warn!("failed to decrypt auth token: {cause}"),
-        }
+        return decrypt_token(&cipher, &nonce, &token);
     }
 
     Err(internal!(

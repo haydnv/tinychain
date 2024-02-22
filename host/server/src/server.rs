@@ -4,12 +4,13 @@ use std::sync::Arc;
 use tokio::time::{Duration, MissedTickBehavior};
 
 use tc_error::*;
+use tc_transact::TxnId;
 use tc_value::Host;
 use tcgeneric::{NetworkTime, PathSegment};
 
 use crate::kernel::Kernel;
 use crate::txn::{Txn, TxnServer};
-use crate::{Endpoint, SignedToken};
+use crate::Endpoint;
 
 const GC_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -25,8 +26,25 @@ impl Server {
         Self { kernel, txn_server }
     }
 
-    pub fn get_txn(&self, token: Option<SignedToken>) -> Txn {
-        self.txn_server.new_txn(NetworkTime::now(), token)
+    pub fn create_txn(&self) -> Txn {
+        self.txn_server.create_txn(NetworkTime::now())
+    }
+
+    pub async fn verify_txn(&self, txn_id: TxnId, token: String) -> TCResult<Txn> {
+        self.txn_server
+            .verify_txn(txn_id, NetworkTime::now(), token)
+            .await
+    }
+
+    pub async fn get_txn(&self, txn_id: Option<TxnId>, token: Option<String>) -> TCResult<Txn> {
+        if let Some(token) = token {
+            let now = NetworkTime::now();
+            let txn_id = txn_id.unwrap_or_else(|| TxnId::new(now));
+            self.txn_server.verify_txn(txn_id, now, token).await
+        } else {
+            let txn_id = txn_id.unwrap_or_else(|| TxnId::new(NetworkTime::now()));
+            Ok(self.txn_server.get_txn(txn_id))
+        }
     }
 
     pub async fn replicate_and_join(&self, peers: BTreeSet<Host>) -> Result<(), bool> {

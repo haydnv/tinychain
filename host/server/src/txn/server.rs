@@ -6,14 +6,15 @@ use std::time::Duration;
 use ds_ext::OrdHashSet;
 use freqfs::DirLock;
 use log::debug;
-use tc_state::CacheBlock;
 use tokio::sync::mpsc;
 
+use tc_error::*;
+use tc_state::CacheBlock;
 use tc_transact::TxnId;
 use tcgeneric::NetworkTime;
 
 use crate::kernel::Kernel;
-use crate::{RPCClient, SignedToken};
+use crate::RPCClient;
 
 use super::{LazyDir, Txn};
 
@@ -141,8 +142,11 @@ impl TxnServer {
 }
 
 impl TxnServer {
-    pub fn new_txn(&self, now: NetworkTime, token: Option<SignedToken>) -> Txn {
-        let txn_id = TxnId::new(now);
+    pub fn create_txn(&self, now: NetworkTime) -> Txn {
+        self.get_txn(TxnId::new(now))
+    }
+
+    pub fn get_txn(&self, txn_id: TxnId) -> Txn {
         let expiry = txn_id.time() + self.ttl;
         let workspace = LazyDir::from(self.workspace.clone()).create_dir(txn_id.to_id());
         let rpc_client = self.rpc_client.clone();
@@ -151,7 +155,26 @@ impl TxnServer {
             .send(Active::new(txn_id, expiry))
             .expect("active txn");
 
-        Txn::new(txn_id, expiry, workspace, rpc_client, token)
+        Txn::new(txn_id, expiry, workspace, rpc_client, None)
+    }
+
+    pub async fn verify_txn(
+        &self,
+        txn_id: TxnId,
+        now: NetworkTime,
+        token: String,
+    ) -> TCResult<Txn> {
+        let token = self.rpc_client.verify(token, now.into()).await?;
+        let expiry = token.expires().try_into()?;
+
+        let workspace = LazyDir::from(self.workspace.clone()).create_dir(txn_id.to_id());
+        let rpc_client = self.rpc_client.clone();
+
+        self.tx
+            .send(Active::new(txn_id, expiry))
+            .expect("active txn");
+
+        Ok(Txn::new(txn_id, expiry, workspace, rpc_client, Some(token)))
     }
 }
 

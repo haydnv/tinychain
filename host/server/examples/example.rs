@@ -32,14 +32,16 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use freqfs::Cache;
+use rjwt::{Actor, Error, Resolve};
 use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
 use tc_server::aes256::{Aes256GcmSiv, Key, KeyInit, OsRng};
-use tc_server::{Builder, RPCClient, Server, SignedToken, State, DEFAULT_PORT};
+use tc_server::{Builder, Claim, RPCClient, Server, SignedToken, State, Txn, DEFAULT_PORT};
+use tc_transact::{Transaction, TxnId};
 use tc_value::{Address, Link, ToUrl, Value};
-use tcgeneric::{label, path_label, Id, Map, PathLabel, TCPath, TCPathBuf};
+use tcgeneric::{label, path_label, Id, Map, NetworkTime, PathLabel, TCPath, TCPathBuf};
 
 const CACHE_SIZE: usize = 1_000_000;
 const DATA_DIR: &'static str = "/tmp/tc/example_server/data";
@@ -55,6 +57,12 @@ impl Client {
     fn add(&self, port: u16, server: Server) {
         let mut servers = self.servers.try_write().unwrap();
         assert!(servers.insert(port, server).is_none());
+    }
+
+    fn get_txn(&self, port: u16) -> Txn {
+        let servers = self.servers.try_read().expect("servers");
+        let server = servers.get(&port).expect("server");
+        server.create_txn()
     }
 
     fn get_server_for<'a>(
@@ -78,16 +86,29 @@ impl Client {
 }
 
 #[async_trait]
-impl RPCClient for Client {
-    async fn get(
+impl Resolve for Client {
+    type HostId = Link;
+    type ActorId = Value;
+    type Claims = Claim;
+
+    async fn resolve(
         &self,
-        link: ToUrl<'_>,
-        key: Value,
-        token: Option<SignedToken>,
-    ) -> TCResult<State> {
+        host: &Self::HostId,
+        actor_id: &Self::ActorId,
+    ) -> Result<Actor<Self::ActorId>, Error> {
+        todo!()
+    }
+}
+
+#[async_trait]
+impl RPCClient for Client {
+    async fn get(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<State> {
         let servers = self.servers.read().await;
         let server = Self::get_server_for(&*servers, &link)?;
-        let txn = server.get_txn(token);
+
+        let txn_id = *txn.id();
+        let txn = server.get_txn(Some(txn_id), self.extract_jwt(txn)).await?;
+
         let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
         let handler = endpoint.get(key)?;
         handler.await
@@ -95,6 +116,7 @@ impl RPCClient for Client {
 
     async fn put(
         &self,
+        txn_id: TxnId,
         link: ToUrl<'_>,
         key: Value,
         value: State,
@@ -102,21 +124,23 @@ impl RPCClient for Client {
     ) -> TCResult<()> {
         let servers = self.servers.read().await;
         let server = Self::get_server_for(&*servers, &link)?;
-        let txn = server.get_txn(token);
+
+        let txn = server
+            .get_txn(Some(txn_id), token.map(|token| token.into_jwt()))
+            .await?;
+
         let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
         let handler = endpoint.put(key, value)?;
         handler.await
     }
 
-    async fn post(
-        &self,
-        link: ToUrl<'_>,
-        params: Map<State>,
-        token: Option<SignedToken>,
-    ) -> TCResult<State> {
+    async fn post(&self, txn: &Txn, link: ToUrl<'_>, params: Map<State>) -> TCResult<State> {
         let servers = self.servers.read().await;
         let server = Self::get_server_for(&*servers, &link)?;
-        let txn = server.get_txn(token);
+
+        let txn_id = *txn.id();
+        let txn = server.get_txn(Some(txn_id), self.extract_jwt(txn)).await?;
+
         let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
         let handler = endpoint.post(params)?;
         handler.await
@@ -124,20 +148,21 @@ impl RPCClient for Client {
 
     async fn delete(
         &self,
+        txn_id: TxnId,
         link: ToUrl<'_>,
         key: Value,
         token: Option<SignedToken>,
     ) -> TCResult<()> {
         let servers = self.servers.read().await;
         let server = Self::get_server_for(&*servers, &link)?;
-        let txn = server.get_txn(token);
+
+        let txn = server
+            .get_txn(Some(txn_id), token.map(|token| token.into_jwt()))
+            .await?;
+
         let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
         let handler = endpoint.delete(key)?;
         handler.await
-    }
-
-    async fn verify(&self, _token: String) -> TCResult<SignedToken> {
-        todo!()
     }
 }
 
@@ -194,7 +219,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .into_iter()
     .collect();
 
-    let response = client.post(link.into(), params, None).await?;
+    let txn = client.get_txn(DEFAULT_PORT);
+    let response = client.post(&txn, link.into(), params).await?;
 
     assert_eq!(Scalar::try_from(response).unwrap(), hello_world);
 
@@ -207,6 +233,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     client
         .put(
+            TxnId::new(NetworkTime::now()),
             link.into(),
             dir_name.into(),
             Map::<State>::new().into(),

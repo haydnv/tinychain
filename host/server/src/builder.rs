@@ -90,7 +90,7 @@ impl Builder {
         }
 
         let txn_server = TxnServer::create(self.workspace, self.rpc_client, self.request_ttl);
-        let txn: Txn = txn_server.new_txn(NetworkTime::now(), None);
+        let txn: Txn = txn_server.create_txn(NetworkTime::now());
         let txn_id = *txn.id();
 
         let data_dir = fs::Dir::load(txn_id, self.data_dir)
