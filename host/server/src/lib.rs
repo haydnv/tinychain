@@ -2,26 +2,22 @@
 
 use std::time::Duration;
 
-use async_trait::async_trait;
-use rjwt::Resolve;
 use umask::Mode;
 
-use tc_value::{Link, ToUrl, Value};
-
-use tc_error::*;
-use tc_transact::TxnId;
-use tcgeneric::Map;
+use tc_value::{Link, Value};
 
 pub use tc_state::CacheBlock;
 
 pub use builder::Builder;
 pub use claim::Claim;
+pub use client::RPCClient;
 pub use kernel::Endpoint;
 pub use server::Server;
 pub use txn::Txn;
 
 mod builder;
 mod claim;
+mod client;
 mod cluster;
 mod kernel;
 mod server;
@@ -90,32 +86,4 @@ impl Authorize for Mode {
         const ALLOW: [Mode; 3] = [umask::USER_EXEC, umask::GROUP_EXEC, umask::OTHERS_EXEC];
         self.has_any(ALLOW)
     }
-}
-
-#[async_trait]
-pub trait RPCClient: Resolve<ActorId = Value, HostId = Link, Claims = Claim> + Send + Sync {
-    fn extract_jwt(&self, txn: &Txn) -> Option<String> {
-        txn.token().map(|token| token.jwt().to_string())
-    }
-
-    async fn get(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<State>;
-
-    async fn put(
-        &self,
-        txn_id: TxnId,
-        link: ToUrl<'_>,
-        key: Value,
-        value: State,
-        token: Option<SignedToken>,
-    ) -> TCResult<()>;
-
-    async fn post(&self, txn: &Txn, link: ToUrl<'_>, params: Map<State>) -> TCResult<State>;
-
-    async fn delete(
-        &self,
-        txn_id: TxnId,
-        link: ToUrl<'_>,
-        key: Value,
-        token: Option<SignedToken>,
-    ) -> TCResult<()>;
 }

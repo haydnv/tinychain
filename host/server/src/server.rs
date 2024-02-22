@@ -60,7 +60,7 @@ impl Server {
         path: &'a [PathSegment],
         txn: &'a Txn,
     ) -> TCResult<Endpoint<'a>> {
-        self.kernel.authorize_claim_and_route(path, txn)
+        self.kernel.route(path, txn)
     }
 }
 

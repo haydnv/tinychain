@@ -115,11 +115,7 @@ impl Kernel {
         }
     }
 
-    pub fn authorize_claim_and_route<'a>(
-        &'a self,
-        path: &'a [PathSegment],
-        txn: &'a Txn,
-    ) -> TCResult<Endpoint<'a>> {
+    pub fn route<'a>(&'a self, path: &'a [PathSegment], txn: &'a Txn) -> TCResult<Endpoint<'a>> {
         if path.is_empty() {
             Ok(Endpoint {
                 mode: Mode::new().with_class_perm(umask::OTHERS, umask::READ),

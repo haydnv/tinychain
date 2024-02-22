@@ -6,6 +6,7 @@ use std::time::Duration;
 use ds_ext::OrdHashSet;
 use freqfs::DirLock;
 use log::debug;
+use rjwt::Resolve;
 use tokio::sync::mpsc;
 
 use tc_error::*;
@@ -13,8 +14,8 @@ use tc_state::CacheBlock;
 use tc_transact::TxnId;
 use tcgeneric::NetworkTime;
 
+use crate::client::Client;
 use crate::kernel::Kernel;
-use crate::RPCClient;
 
 use super::{LazyDir, Txn};
 
@@ -63,7 +64,7 @@ impl PartialOrd for Active {
 
 /// Server to keep track of the transactions currently active for this host.
 pub struct TxnServer {
-    rpc_client: Arc<dyn RPCClient>,
+    client: Client,
     workspace: DirLock<CacheBlock>,
     active: Arc<RwLock<OrdHashSet<Active>>>,
     tx: mpsc::UnboundedSender<Active>,
@@ -73,7 +74,7 @@ pub struct TxnServer {
 impl Clone for TxnServer {
     fn clone(&self) -> Self {
         Self {
-            rpc_client: self.rpc_client.clone(),
+            client: self.client.clone(),
             workspace: self.workspace.clone(),
             active: self.active.clone(),
             tx: self.tx.clone(),
@@ -83,18 +84,14 @@ impl Clone for TxnServer {
 }
 
 impl TxnServer {
-    pub fn create(
-        workspace: DirLock<CacheBlock>,
-        rpc_client: Arc<dyn RPCClient>,
-        ttl: Duration,
-    ) -> Self {
+    pub fn create(client: Client, workspace: DirLock<CacheBlock>, ttl: Duration) -> Self {
         let active = Arc::new(RwLock::new(OrdHashSet::new()));
 
         let (tx, rx) = mpsc::unbounded_channel();
         spawn_receiver_thread(active.clone(), rx);
 
         Self {
-            rpc_client,
+            client,
             workspace,
             active,
             tx,
@@ -149,13 +146,13 @@ impl TxnServer {
     pub fn get_txn(&self, txn_id: TxnId) -> Txn {
         let expiry = txn_id.time() + self.ttl;
         let workspace = LazyDir::from(self.workspace.clone()).create_dir(txn_id.to_id());
-        let rpc_client = self.rpc_client.clone();
+        let client = self.client.clone();
 
         self.tx
             .send(Active::new(txn_id, expiry))
             .expect("active txn");
 
-        Txn::new(txn_id, expiry, workspace, rpc_client, None)
+        Txn::new(txn_id, expiry, workspace, client, None)
     }
 
     pub async fn verify_txn(
@@ -164,17 +161,17 @@ impl TxnServer {
         now: NetworkTime,
         token: String,
     ) -> TCResult<Txn> {
-        let token = self.rpc_client.verify(token, now.into()).await?;
+        let token = self.client.verify(token, now.into()).await?;
         let expiry = token.expires().try_into()?;
 
         let workspace = LazyDir::from(self.workspace.clone()).create_dir(txn_id.to_id());
-        let rpc_client = self.rpc_client.clone();
+        let client = self.client.clone();
 
         self.tx
             .send(Active::new(txn_id, expiry))
             .expect("active txn");
 
-        Ok(Txn::new(txn_id, expiry, workspace, rpc_client, Some(token)))
+        Ok(Txn::new(txn_id, expiry, workspace, client, Some(token)))
     }
 }
 

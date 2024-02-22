@@ -4,19 +4,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use freqfs::DirLock;
+use futures::TryFutureExt;
 use log::{debug, info, warn};
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 
 use tc_state::CacheBlock;
-use tc_transact::fs;
-use tc_transact::Transaction;
+use tc_transact::{fs, TxnId};
 use tc_value::{Address, Host, Link, Protocol};
 use tcgeneric::NetworkTime;
 
 use crate::aes256::Key as Aes256Key;
+use crate::client::Client;
 use crate::kernel::{Kernel, Schema};
 use crate::server::Server;
-use crate::txn::{Txn, TxnServer};
+use crate::txn::TxnServer;
 use crate::{RPCClient, DEFAULT_MAX_RETRIES, DEFAULT_PORT, DEFAULT_TTL, SERVICE_TYPE};
 
 /// A builder struct for a [`Server`].
@@ -89,23 +90,26 @@ impl Builder {
             }
         }
 
-        let txn_server = TxnServer::create(self.workspace, self.rpc_client, self.request_ttl);
-        let txn: Txn = txn_server.create_txn(NetworkTime::now());
-        let txn_id = *txn.id();
+        let txn_id = TxnId::new(NetworkTime::now());
 
         let data_dir = fs::Dir::load(txn_id, self.data_dir)
             .await
             .expect("data dir");
 
-        let schema = Schema::new(host, self.owner, self.group, self.keys);
+        let schema = Schema::new(host.clone(), self.owner, self.group, self.keys);
 
-        let kernel: Kernel = fs::Persist::load_or_create(txn_id, schema, data_dir)
+        let kernel: Arc<Kernel> = fs::Persist::load_or_create(txn_id, schema, data_dir)
+            .map_ok(Arc::new)
             .await
             .expect("kernel");
 
         kernel.commit(txn_id).await;
+        kernel.finalize(txn_id).await;
 
-        Server::new(kernel.into(), txn_server)
+        let client = Client::new(host, kernel.clone(), self.rpc_client);
+        let txn_server = TxnServer::create(client, self.workspace, self.request_ttl);
+
+        Server::new(kernel, txn_server)
     }
 
     pub async fn start(self) -> Replicator {
