@@ -1,10 +1,12 @@
 use async_trait::async_trait;
+use log::trace;
 use rjwt::{Actor, Error, Resolve};
 use std::sync::Arc;
 
 use tc_error::*;
+use tc_transact::TxnId;
 use tc_value::{Host, Link, ToUrl, Value};
-use tcgeneric::Map;
+use tcgeneric::{Map, NetworkTime};
 
 use crate::kernel::Kernel;
 use crate::{Claim, State, Txn};
@@ -59,7 +61,19 @@ impl Resolve for Client {
         host: &Self::HostId,
         actor_id: &Self::ActorId,
     ) -> Result<Actor<Self::ActorId>, Error> {
-        todo!()
+        trace!("resolve actor {actor_id} on {host}");
+
+        if self.is_loopback(&host.into()) {
+            let txn_id = TxnId::new(NetworkTime::now());
+            let public_key = self
+                .kernel
+                .public_key(txn_id, host.path())
+                .map_err(Error::fetch)?;
+
+            Ok(Actor::with_public_key(actor_id.clone(), public_key))
+        } else {
+            self.client.resolve(host, actor_id).await
+        }
     }
 }
 

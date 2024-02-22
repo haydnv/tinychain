@@ -235,7 +235,7 @@ impl Replicator {
             })
             .collect();
 
-        let mut i = 0;
+        let mut i = 1;
         let joined = loop {
             match self.server.replicate_and_join(peers.clone()).await {
                 Ok(()) => {

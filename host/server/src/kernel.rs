@@ -5,10 +5,11 @@ use std::time::Duration;
 
 use aes_gcm_siv::aead::rand_core::{OsRng, RngCore};
 use aes_gcm_siv::aead::Aead;
-use aes_gcm_siv::{Aes256GcmSiv, KeyInit, Nonce};
+use aes_gcm_siv::{Aes256GcmSiv, KeyInit};
 use async_trait::async_trait;
 use log::{debug, info, trace, warn};
-use safecast::{TryCastFrom, TryCastInto};
+use rjwt::VerifyingKey;
+use safecast::TryCastInto;
 use umask::Mode;
 
 use tc_error::*;
@@ -16,8 +17,8 @@ use tc_scalar::OpRefType;
 use tc_state::CacheBlock;
 use tc_transact::public::*;
 use tc_transact::{fs, Gateway, Transact, Transaction, TxnId};
-use tc_value::{Host, Link, TCString, Value};
-use tcgeneric::{label, Label, Map, NetworkTime, PathSegment, TCPath, TCPathBuf};
+use tc_value::{Host, Link, Value};
+use tcgeneric::{label, Label, Map, NetworkTime, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::cluster::{Class, Cluster, Dir, DirEntry, ReplicateAndJoin};
 use crate::txn::{Hypothetical, Txn, TxnServer};
@@ -25,6 +26,8 @@ use crate::{aes256, cluster, Authorize, SignedToken, State};
 
 const CLASS: Label = label("class");
 const REPLICATION_TTL: Duration = Duration::from_secs(30);
+
+type Nonce = [u8; 12];
 
 pub struct Endpoint<'a> {
     mode: Mode,
@@ -104,7 +107,25 @@ impl Kernel {
                 TCPath::from(path)
             ))
         } else if path[0] == CLASS {
-            issue_token(txn_id, &self.class, path)
+            issue_token(txn_id, &self.class, &path[1..])
+        } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
+            Err(bad_request!(
+                "cannot issue a token for {}",
+                TCPath::from(path)
+            ))
+        } else {
+            Err(not_found!("{}", TCPath::from(path)))
+        }
+    }
+
+    pub fn public_key(&self, txn_id: TxnId, path: &[PathSegment]) -> TCResult<VerifyingKey> {
+        if path.is_empty() {
+            Err(bad_request!(
+                "cannot issue a token for {}",
+                TCPath::from(path)
+            ))
+        } else if path[0] == CLASS {
+            public_key(txn_id, &self.class, &path[1..])
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
             Err(bad_request!(
                 "cannot issue a token for {}",
@@ -327,7 +348,7 @@ async fn get_token(
     let mut nonce = [0u8; 12];
     OsRng.fill_bytes(&mut nonce);
 
-    let link = Link::from((peer.clone(), path.clone()));
+    let link = Link::from(peer.clone());
 
     for key in keys {
         let cipher = Aes256GcmSiv::new(key);
@@ -341,7 +362,9 @@ async fn get_token(
         let nonce_and_token = txn.get(link.clone(), nonce_and_path).await?;
 
         let (nonce, token): (Value, Value) =
-            nonce_and_token.try_cast_into(|t| TCError::unexpected(t, "an encrypted auth token"))?;
+            Tuple::<State>::try_from(nonce_and_token).and_then(|tuple| {
+                tuple.try_cast_into(|t| TCError::unexpected(t, "an encrypted auth token"))
+            })?;
 
         let nonce: Arc<[u8]> = nonce.try_into()?;
         let token: Arc<[u8]> = token.try_into()?;
@@ -368,6 +391,20 @@ fn issue_token<T: Clone + fmt::Debug>(
     }
 }
 
+fn public_key<T: Clone + fmt::Debug>(
+    txn_id: TxnId,
+    cluster: &Cluster<Dir<T>>,
+    path: &[PathSegment],
+) -> TCResult<VerifyingKey> {
+    match cluster.lookup(txn_id, path)? {
+        (suffix, entry) if suffix.is_empty() => match entry {
+            DirEntry::Dir(dir) => Ok(dir.public_key()),
+            DirEntry::Item(item) => Ok(item.public_key()),
+        },
+        (suffix, _) => Err(not_found!("cluster at {}", TCPath::from(suffix))),
+    }
+}
+
 struct KernelHandler<'a> {
     kernel: &'a Kernel,
 }
@@ -379,21 +416,23 @@ impl<'a> Handler<'a, State> for KernelHandler<'a> {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
+                trace!("GET /?key={key}");
+
                 let (nonce, path_encrypted): (Value, Value) =
                     key.try_cast_into(|v| TCError::unexpected(v, "an encrypted path"))?;
 
                 let nonce: Arc<[u8]> =
                     nonce.try_cast_into(|v| TCError::unexpected(v, "nonce bytes"))?;
 
-                let path_encrypted = TCString::try_cast_from(path_encrypted, |v| {
-                    TCError::unexpected(v, "an encrypted path")
-                })?;
+                let path_encrypted: Arc<[u8]> = path_encrypted
+                    .try_cast_into(|v| TCError::unexpected(v, "an encrypted path"))?;
 
                 for key in &self.kernel.keys {
                     let cipher = Aes256GcmSiv::new(key);
-                    match decrypt_path(&cipher, &nonce, path_encrypted.as_str().as_bytes()) {
+
+                    match decrypt_path(&cipher, &nonce, &*path_encrypted) {
                         Ok(path) => {
-                            let mut nonce = [0u8; 96];
+                            let mut nonce = [0u8; 12];
                             OsRng.fill_bytes(&mut nonce);
 
                             let signed_token = self.kernel.issue_token(*txn.id(), &path)?;
@@ -424,8 +463,9 @@ impl<'a> From<&'a Kernel> for KernelHandler<'a> {
 
 #[inline]
 fn decrypt_path(cipher: &Aes256GcmSiv, nonce: &[u8], path_encrypted: &[u8]) -> TCResult<TCPathBuf> {
-    let nonce = Nonce::from_slice(&nonce);
-    match cipher.decrypt(nonce, path_encrypted) {
+    let nonce = Nonce::try_from(nonce).map_err(|cause| bad_request!("invalid nonce: {cause}"))?;
+
+    match cipher.decrypt(&nonce.into(), path_encrypted) {
         Ok(path_decrypted) => {
             let path_decrypted = String::from_utf8(path_decrypted)
                 .map_err(|cause| bad_request!("invalid UTF8: {cause}"))?;
@@ -438,8 +478,9 @@ fn decrypt_path(cipher: &Aes256GcmSiv, nonce: &[u8], path_encrypted: &[u8]) -> T
 
 #[inline]
 fn decrypt_token(cipher: &Aes256GcmSiv, nonce: &[u8], token_encrypted: &[u8]) -> TCResult<String> {
-    let nonce = Nonce::from_slice(&nonce);
-    match cipher.decrypt(nonce, token_encrypted) {
+    let nonce = Nonce::try_from(nonce).map_err(|cause| bad_request!("invalid nonce: {cause}"))?;
+
+    match cipher.decrypt(&nonce.into(), token_encrypted) {
         Ok(token_decrypted) => String::from_utf8(token_decrypted)
             .map_err(|cause| bad_request!("invalid UTF8: {cause}")),
 
@@ -450,20 +491,20 @@ fn decrypt_token(cipher: &Aes256GcmSiv, nonce: &[u8], token_encrypted: &[u8]) ->
 #[inline]
 fn encrypt_path(cipher: &Aes256GcmSiv, nonce: &[u8], path: &TCPathBuf) -> TCResult<Arc<[u8]>> {
     let path = path.to_string();
-    let nonce = Nonce::from_slice(&nonce);
+    let nonce = Nonce::try_from(nonce).map_err(|cause| bad_request!("invalid nonce: {cause}"))?;
 
     cipher
-        .encrypt(&nonce, path.as_bytes())
+        .encrypt(&nonce.into(), path.as_bytes())
         .map(Arc::from)
         .map_err(|_| internal!("unable to encrypt path"))
 }
 
 #[inline]
 fn encrypt_token(cipher: &Aes256GcmSiv, nonce: &[u8], token: String) -> TCResult<Arc<[u8]>> {
-    let nonce = Nonce::from_slice(&nonce);
+    let nonce = Nonce::try_from(nonce).map_err(|cause| bad_request!("invalid nonce: {cause}"))?;
 
     cipher
-        .encrypt(&nonce, token.as_bytes())
+        .encrypt(&nonce.into(), token.as_bytes())
         .map(Arc::from)
         .map_err(|_| internal!("unable to encrypt token"))
 }

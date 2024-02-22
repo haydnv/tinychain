@@ -247,6 +247,10 @@ impl From<ha_ndarray::Error> for TCError {
 #[cfg(feature = "rjwt")]
 impl From<rjwt::Error> for TCError {
     fn from(err: rjwt::Error) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("rjwt error: {err}");
+
+        #[cfg(not(debug_assertions))]
         match err.into_inner() {
             (rjwt::ErrorKind::Auth | rjwt::ErrorKind::Time, msg) => Self::unauthorized(msg),
             (rjwt::ErrorKind::Base64 | rjwt::ErrorKind::Format | rjwt::ErrorKind::Json, msg) => {

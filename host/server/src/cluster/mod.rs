@@ -106,10 +106,14 @@ pub trait Replicate: Send + Sync {
     ) -> TCResult<async_hash::Output<async_hash::Sha256>>;
 }
 
-#[derive(Clone)]
-pub struct Cluster<T> {
+struct Inner {
     schema: Schema,
     actor: Actor,
+}
+
+#[derive(Clone)]
+pub struct Cluster<T> {
+    inner: Arc<Inner>,
     mode: Mode,
     state: T,
     keyring: TxnSetLock<Key>,
@@ -131,8 +135,7 @@ impl<T> Cluster<T> {
         };
 
         Self {
-            schema,
-            actor,
+            inner: Arc::new(Inner { schema, actor }),
             mode,
             state: subject,
             keyring: TxnSetLock::new(txn_id, keyring),
@@ -141,10 +144,10 @@ impl<T> Cluster<T> {
     }
 
     pub fn link(&self) -> &Link {
-        &self.schema.link
+        &self.inner.schema.link
     }
     pub fn path(&self) -> &TCPathBuf {
-        self.schema.link.path()
+        self.inner.schema.link.path()
     }
 
     pub fn umask(&self, _txn_id: TxnId, path: &[PathSegment]) -> Mode {
@@ -155,19 +158,23 @@ impl<T> Cluster<T> {
     #[inline]
     pub fn claim(&self, txn: Txn) -> Txn {
         if txn.leader(self.path()).is_none() {
-            // assume any given Cluster always has a private key
-            txn.claim(&self.actor, self.path()).expect("claim txn")
+            txn.claim(&self.inner.actor, self.path())
+                // assume any given Cluster always has a private key,
+                // and the only possible signing error is a missing private key
+                .expect("claim txn")
         } else {
             txn
         }
     }
 
     pub(crate) fn issue_token(&self, mode: Mode, ttl: Duration) -> TCResult<SignedToken> {
+        assert!(self.inner.actor.has_private_key());
+
         let link = self.link().clone();
-        let actor_id = self.actor.id().clone();
+        let actor_id = self.inner.actor.id().clone();
         let claim = Claim::new(self.path().clone(), mode);
         let token = Token::new(link, SystemTime::now(), ttl, actor_id, claim);
-        self.actor.sign_token(token).map_err(TCError::from)
+        self.inner.actor.sign_token(token).map_err(TCError::from)
     }
 
     pub fn keyring(&self, txn_id: TxnId) -> TCResult<TxnSetLockIter<Key>> {
@@ -176,7 +183,7 @@ impl<T> Cluster<T> {
 
     #[inline]
     pub fn public_key(&self) -> VerifyingKey {
-        self.actor.public_key()
+        self.inner.actor.public_key()
     }
 
     pub(crate) fn state(&self) -> &T {
