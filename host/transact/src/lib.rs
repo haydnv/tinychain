@@ -10,7 +10,7 @@ use safecast::CastInto;
 
 use tc_error::*;
 use tc_value::{ToUrl, Value};
-use tcgeneric::Id;
+use tcgeneric::{Id, Map};
 
 pub use id::{TxnId, MIN_ID};
 use public::StateInstance;
@@ -138,7 +138,7 @@ pub trait Gateway<State: StateInstance<Txn = Self>>: Transaction<State::FE> {
     async fn post<'a, L, P>(&'a self, link: L, params: P) -> TCResult<State>
     where
         L: Into<ToUrl<'a>> + Send,
-        P: CastInto<State> + Send;
+        P: CastInto<Map<State>> + Send;
 
     /// Resolve a DELETE op within this transaction context.
     async fn delete<'a, L, V>(&'a self, link: L, key: V) -> TCResult<()>

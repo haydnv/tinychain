@@ -506,6 +506,7 @@ where
             Self::Post((subject, params)) => match subject {
                 Subject::Link(link) => {
                     let params = resolve(Scalar::Map(params), context, txn).await?;
+                    let params = Map::<State>::try_from(params)?;
                     txn.post(link, params).await
                 }
                 Subject::Ref(id_ref, path) => {

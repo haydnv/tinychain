@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use mdns_sd::ServiceDaemon;
 use tokio::time::{Duration, MissedTickBehavior};
 
 use tc_error::*;
@@ -17,13 +18,24 @@ const GC_INTERVAL: Duration = Duration::from_millis(100);
 pub struct Server {
     kernel: Arc<Kernel>,
     txn_server: TxnServer,
+    mdns: ServiceDaemon,
 }
 
 impl Server {
-    pub(crate) fn new(kernel: Arc<Kernel>, txn_server: TxnServer) -> Self {
+    pub(crate) fn new(kernel: Arc<Kernel>, txn_server: TxnServer) -> mdns_sd::Result<Self> {
         spawn_cleanup_thread(kernel.clone(), txn_server.clone());
 
-        Self { kernel, txn_server }
+        let mdns = ServiceDaemon::new()?;
+
+        Ok(Self {
+            kernel,
+            txn_server,
+            mdns,
+        })
+    }
+
+    pub(crate) fn mdns(&self) -> &ServiceDaemon {
+        &self.mdns
     }
 
     pub fn create_txn(&self) -> Txn {
@@ -47,7 +59,7 @@ impl Server {
         }
     }
 
-    pub async fn replicate_and_join(&self, peers: BTreeSet<Host>) -> Result<(), bool> {
+    pub(crate) async fn replicate_and_join(&self, peers: BTreeSet<Host>) -> Result<(), bool> {
         self.kernel
             .replicate_and_join(self.txn_server.clone(), peers)
             .await

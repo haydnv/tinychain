@@ -6,7 +6,7 @@ use std::time::Duration;
 use freqfs::DirLock;
 use futures::TryFutureExt;
 use log::{debug, info, warn};
-use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use mdns_sd::{ServiceEvent, ServiceInfo};
 
 use tc_state::CacheBlock;
 use tc_transact::{fs, TxnId};
@@ -109,19 +109,22 @@ impl Builder {
         let client = Client::new(host, kernel.clone(), self.rpc_client);
         let txn_server = TxnServer::create(client, self.workspace, self.request_ttl);
 
-        Server::new(kernel, txn_server)
+        Server::new(kernel, txn_server).expect("server")
+    }
+
+    pub fn detect_address(mut self) -> Self {
+        self.address = local_ip_address::local_ip().expect("local IP address");
+        self
     }
 
     pub async fn start(self) -> Replicator {
         let max_retries = self.max_retries;
-        let address = self.address;
-        let port = self.port;
+        let host = Host::from((self.protocol, self.address.into(), self.port));
 
         let server = self.build().await;
 
         Replicator {
-            address,
-            port,
+            host,
             max_retries,
             server,
             peers: HashMap::new(),
@@ -129,7 +132,7 @@ impl Builder {
     }
 
     pub fn host(&mut self) -> Host {
-        Host::from((self.protocol, self.address.into()))
+        Host::from((self.protocol, self.address.into(), self.port))
     }
 
     pub fn set_max_retries(mut self, max_retries: u8) -> Self {
@@ -164,35 +167,45 @@ impl Builder {
 }
 
 pub struct Replicator {
-    address: IpAddr,
-    port: u16,
-    peers: HashMap<String, HashSet<IpAddr>>,
+    host: Host,
+    peers: HashMap<String, (HashSet<IpAddr>, u16)>,
     server: Server,
     max_retries: u8,
 }
 
 impl Replicator {
-    pub async fn discover(mut self) -> Self {
-        let mdns = ServiceDaemon::new().expect("Failed to create daemon");
-        let receiver = mdns.browse(SERVICE_TYPE).expect("browse mDNS peers");
-        let mut search_complete = false;
+    pub fn host(&self) -> &Host {
+        &self.host
+    }
+
+    pub fn peers(&self) -> &HashMap<String, (HashSet<IpAddr>, u16)> {
+        &self.peers
+    }
+
+    pub async fn discover(&mut self) -> mdns_sd::Result<()> {
+        let receiver = self.server.mdns().browse(SERVICE_TYPE)?;
+        let mut search_started = false;
 
         loop {
             match receiver.recv_async().await {
                 Ok(event) => match event {
-                    ServiceEvent::SearchStarted(_params) if search_complete => break,
+                    ServiceEvent::SearchStarted(_params) if search_started => {
+                        info!("mDNS discovered {} peers", self.peers.len());
+                        break Ok(());
+                    }
                     ServiceEvent::SearchStarted(params) => {
                         info!("searching for peers of {params}");
-                        search_complete = true;
+                        search_started = true;
                     }
                     ServiceEvent::ServiceFound(name, addr) => {
                         info!("discovered peer of {name} at {addr}")
                     }
                     ServiceEvent::ServiceResolved(info) => {
                         let full_name = info.get_fullname();
+                        let addresses = info.get_addresses().clone();
+                        let port = info.get_port();
 
-                        self.peers
-                            .insert(full_name.to_string(), info.get_addresses().clone());
+                        self.peers.insert(full_name.to_string(), (addresses, port));
 
                         info!("resolved peer: {full_name}")
                     }
@@ -201,15 +214,13 @@ impl Replicator {
                 Err(cause) => warn!("mDNS error: {cause}"),
             }
         }
-
-        self
     }
 
-    pub async fn replicate_and_join(self, protocol: Protocol) -> Self {
+    pub async fn replicate_and_join(&self, protocol: Protocol) -> bool {
         let peers: BTreeSet<Host> = self
             .peers
             .values()
-            .filter_map(|peers| {
+            .filter_map(|(peers, port)| {
                 if peers.is_empty() {
                     None
                 } else {
@@ -218,7 +229,7 @@ impl Replicator {
                         .next()
                         .copied()
                         .map(Address::from)
-                        .map(|addr| (protocol, addr))
+                        .map(|addr| (protocol, addr, *port))
                         .map(Host::from)
                 }
             })
@@ -242,28 +253,27 @@ impl Replicator {
             }
         };
 
-        if joined {
-            self
-        } else {
-            panic!("failed to join replica set")
-        }
+        joined
     }
 
-    pub async fn make_discoverable(&self) -> mdns_sd::Result<()> {
+    pub async fn make_discoverable(&mut self) -> mdns_sd::Result<()> {
         let hostname = gethostname::gethostname().into_string().expect("hostname");
-
-        let mdns = ServiceDaemon::new()?;
+        let address = self.host.address().as_ip().expect("IP address");
 
         let my_service = ServiceInfo::new(
             SERVICE_TYPE,
+            "one",
             &hostname,
-            &hostname,
-            &self.address,
-            self.port,
+            &address,
+            self.host.port().expect("port"),
             HashMap::<String, String>::default(),
         )?;
 
-        mdns.register(my_service)
+        info!("registering mDNS service at {}", self.host);
+
+        self.server.mdns().register(my_service)?;
+
+        Ok(())
     }
 
     pub fn ready(self) -> Server {

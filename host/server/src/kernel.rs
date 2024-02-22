@@ -7,7 +7,7 @@ use aes_gcm_siv::aead::rand_core::{OsRng, RngCore};
 use aes_gcm_siv::aead::Aead;
 use aes_gcm_siv::{Aes256GcmSiv, KeyInit, Nonce};
 use async_trait::async_trait;
-use log::{debug, trace, warn};
+use log::{debug, info, trace, warn};
 use safecast::{TryCastFrom, TryCastInto};
 use umask::Mode;
 
@@ -137,6 +137,11 @@ impl Kernel {
         txn_server: TxnServer,
         peers: BTreeSet<Host>,
     ) -> Result<(), bool> {
+        if peers.is_empty() {
+            info!("not joining replica set since no peers were provided");
+            return Ok(());
+        }
+
         let mut progress = false;
         let mut unvisited = VecDeque::new();
         unvisited.push_back(Box::new(self.class.clone()));
@@ -319,7 +324,7 @@ async fn get_token(
     keys: &HashSet<aes256::Key>,
     path: &TCPathBuf,
 ) -> TCResult<String> {
-    let mut nonce = [0u8; 96];
+    let mut nonce = [0u8; 12];
     OsRng.fill_bytes(&mut nonce);
 
     let link = Link::from((peer.clone(), path.clone()));

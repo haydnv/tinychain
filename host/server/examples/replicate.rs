@@ -27,7 +27,6 @@
 //  The list of peers and replicas is updated such that both hosts receive every write operation.
 
 use std::collections::HashMap;
-use std::net::Ipv4Addr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -39,10 +38,10 @@ use tokio::sync::RwLock;
 use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
 use tc_server::aes256::{Aes256GcmSiv, Key, KeyInit, OsRng};
-use tc_server::{Builder, Claim, RPCClient, Server, SignedToken, State, Txn, DEFAULT_PORT};
-use tc_transact::{Transaction, TxnId};
-use tc_value::{Address, Link, ToUrl, Value};
-use tcgeneric::{label, path_label, Id, Map, NetworkTime, PathLabel, TCPath, TCPathBuf};
+use tc_server::{Builder, Claim, RPCClient, Server, State, Txn, DEFAULT_PORT};
+use tc_transact::Transaction;
+use tc_value::{Host, Link, Protocol, ToUrl, Value};
+use tcgeneric::{label, path_label, Id, Map, PathLabel, TCPath, TCPathBuf};
 
 const CACHE_SIZE: usize = 1_000_000;
 const DATA_DIR: &'static str = "/tmp/tc/example_server/data";
@@ -51,38 +50,36 @@ const HYPOTHETICAL: PathLabel = path_label(&["txn", "hypothetical"]);
 
 #[derive(Default)]
 struct Client {
-    servers: RwLock<HashMap<u16, Server>>,
+    servers: RwLock<HashMap<Host, Server>>,
 }
 
 impl Client {
-    fn add(&self, port: u16, server: Server) {
+    fn add(&self, host: Host, server: Server) {
         let mut servers = self.servers.try_write().unwrap();
-        assert!(servers.insert(port, server).is_none());
+        assert!(servers.insert(host, server).is_none());
     }
 
-    fn get_txn(&self, port: u16) -> Txn {
+    fn get_txn(&self, host: &Host) -> Txn {
         let servers = self.servers.try_read().expect("servers");
-        let server = servers.get(&port).expect("server");
+        let server = servers.get(host).expect("server");
         server.create_txn()
     }
 
     fn get_server_for<'a>(
-        servers: &'a HashMap<u16, Server>,
+        servers: &'a HashMap<Host, Server>,
         link: &ToUrl<'a>,
     ) -> TCResult<&'a Server> {
         let host = link.host().ok_or_else(|| {
             bad_request!("RPC to {} is missing a host", TCPath::from(link.path()))
         })?;
 
-        assert_eq!(host.address(), &Address::IPv4(Ipv4Addr::LOCALHOST));
-
         let port = host.port().ok_or_else(|| {
             bad_request!("RPC to {} is missing a port", TCPath::from(link.path()))
         })?;
 
         servers
-            .get(&port)
-            .ok_or_else(|| not_found!("server at {port}"))
+            .get(host)
+            .ok_or_else(|| not_found!("server at {host}:{port}"))
     }
 }
 
@@ -181,12 +178,15 @@ fn builder(rpc_client: Arc<Client>, name: String, key: Key) -> Builder {
     let workspace = cache.clone().load(workspace).unwrap();
 
     Builder::load(data_dir, workspace, rpc_client)
+        .detect_address()
         .with_keys([key])
         .set_secure(false)
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
+
     // create an RPC client
     let client = Arc::new(Client::default());
 
@@ -194,20 +194,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let key = Aes256GcmSiv::generate_key(&mut OsRng);
 
     // start the first server
-    let server1 = builder(client.clone(), "one".to_string(), key)
+    let mut server1 = builder(client.clone(), "one".to_string(), key)
         .set_port(DEFAULT_PORT)
         .start()
         .await;
 
     server1.make_discoverable().await?;
 
-    client.add(DEFAULT_PORT, server1.ready());
+    let host1 = server1.host().clone();
+    client.add(host1.clone(), server1.ready());
 
     // check that it's working
-    let link = Link::new(
-        (Ipv4Addr::LOCALHOST.into(), DEFAULT_PORT).into(),
-        TCPathBuf::from(HYPOTHETICAL),
-    );
+    let link = Link::new(host1.clone(), TCPathBuf::from(HYPOTHETICAL));
 
     let hello_world = Scalar::Value("Hello, World!".to_string().into());
 
@@ -222,19 +220,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .into_iter()
     .collect();
 
-    let txn = client.get_txn(DEFAULT_PORT);
+    let txn = client.get_txn(&host1);
     let response = client.post(&txn, link.into(), params).await?;
 
     assert_eq!(Scalar::try_from(response).unwrap(), hello_world);
 
     // try creating a cluster directory
     let dir_name: Id = "test".parse().unwrap();
-    let link = Link::new(
-        (Ipv4Addr::LOCALHOST.into(), DEFAULT_PORT).into(),
-        [label("class").into()].into(),
-    );
+    let link = Link::new(host1.clone(), [label("class").into()].into());
 
-    let txn = client.get_txn(DEFAULT_PORT);
+    let txn = client.get_txn(&host1);
     client
         .put(
             &txn,
@@ -245,13 +240,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     // start a second server and replicate the state of the first
-    let server2 = builder(client.clone(), "two".to_string(), key)
+    let mut server2 = builder(client.clone(), "two".to_string(), key)
         .start()
         .await;
 
+    server2.discover().await?;
+    assert!(!server2.peers().is_empty());
+
+    assert!(server2.replicate_and_join(Protocol::HTTP).await);
     server2.make_discoverable().await?;
 
-    client.add(DEFAULT_PORT + 1, server2.ready());
+    let host2 = server2.host().clone();
+    client.add(host2.clone(), server2.ready());
 
     Ok(())
 }

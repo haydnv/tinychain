@@ -15,11 +15,11 @@ use tc_state::CacheBlock;
 use tc_transact::lock::TxnSetLockIter;
 use tc_transact::{Gateway, Transaction, TxnId};
 use tc_value::{Link, ToUrl, Value};
-use tcgeneric::{label, Id, NetworkTime, PathSegment, TCPathBuf};
+use tcgeneric::{label, Id, Map, NetworkTime, PathSegment, TCPathBuf};
 
 use crate::claim::Claim;
 use crate::client::Client;
-use crate::{Actor, SignedToken, State};
+use crate::{Actor, RPCClient, SignedToken, State};
 
 pub use hypothetical::Hypothetical;
 pub use server::TxnServer;
@@ -232,7 +232,7 @@ impl Gateway<State> for Txn {
         L: Into<ToUrl<'a>> + Send,
         V: CastInto<Value> + Send,
     {
-        todo!()
+        self.client.get(self, link.into(), key.cast_into()).await
     }
 
     async fn put<'a, L, K, V>(&'a self, link: L, key: K, value: V) -> TCResult<()>
@@ -241,15 +241,19 @@ impl Gateway<State> for Txn {
         K: CastInto<Value> + Send,
         V: CastInto<State> + Send,
     {
-        todo!()
+        self.client
+            .put(self, link.into(), key.cast_into(), value.cast_into())
+            .await
     }
 
     async fn post<'a, L, P>(&'a self, link: L, params: P) -> TCResult<State>
     where
         L: Into<ToUrl<'a>> + Send,
-        P: CastInto<State> + Send,
+        P: CastInto<Map<State>> + Send,
     {
-        todo!()
+        self.client
+            .post(self, link.into(), params.cast_into())
+            .await
     }
 
     async fn delete<'a, L, V>(&'a self, link: L, key: V) -> TCResult<()>
@@ -257,6 +261,6 @@ impl Gateway<State> for Txn {
         L: Into<ToUrl<'a>> + Send,
         V: CastInto<Value> + Send,
     {
-        todo!()
+        self.client.delete(self, link.into(), key.cast_into()).await
     }
 }
