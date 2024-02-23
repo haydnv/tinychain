@@ -171,7 +171,7 @@ impl Kernel {
             let mut joined = false;
 
             for peer in &peers {
-                let txn = txn_server.create_txn(NetworkTime::now());
+                let txn = txn_server.create_txn(NetworkTime::now()).expect("txn");
                 let txn_id = *txn.id();
                 let txn = match get_token(&txn, peer, &self.keys, cluster.path()).await {
                     Ok(token) => match txn_server

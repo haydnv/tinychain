@@ -53,15 +53,8 @@ pub trait Authorize {
 }
 
 impl Authorize for Mode {
-    #[inline]
     fn has_any<const N: usize>(&self, modes: [Mode; N]) -> bool {
-        for mode in modes {
-            if self.has(mode) {
-                return true;
-            }
-        }
-
-        false
+        modes.into_iter().any(|mode| self.has(mode))
     }
 
     #[inline]

@@ -117,6 +117,12 @@ impl PartialEq<str> for TxnId {
     }
 }
 
+impl PartialEq<Id> for TxnId {
+    fn eq(&self, other: &Id) -> bool {
+        self == other.as_str()
+    }
+}
+
 impl PartialOrd<str> for TxnId {
     fn partial_cmp(&self, other: &str) -> Option<Ordering> {
         if let Ok(other) = Self::from_str(other) {

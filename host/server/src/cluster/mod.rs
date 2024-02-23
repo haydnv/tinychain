@@ -156,15 +156,17 @@ impl<T> Cluster<T> {
     }
 
     #[inline]
-    pub fn claim(&self, txn: Txn) -> Txn {
-        if txn.leader(self.path()).is_none() {
-            txn.claim(&self.inner.actor, self.path())
-                // assume any given Cluster always has a private key,
-                // and the only possible signing error is a missing private key
-                .expect("claim txn")
+    pub fn claim(&self, txn: Txn) -> TCResult<Txn> {
+        if txn.leader(self.path())?.is_none() {
+            txn.claim(self.link().clone(), &self.inner.actor)
         } else {
-            txn
+            Ok(txn)
         }
+    }
+
+    #[inline]
+    pub fn lock(&self, txn: Txn) -> TCResult<Txn> {
+        txn.lock(&self.inner.actor)
     }
 
     pub(crate) fn issue_token(&self, mode: Mode, ttl: Duration) -> TCResult<SignedToken> {
@@ -227,12 +229,12 @@ impl<T> Cluster<T> {
         }
     }
 
-    async fn replicate_commit(&self, _txn_id: TxnId) -> TCResult<()> {
+    async fn replicate_commit(&self, txn: &Txn) -> TCResult<()> {
         // TODO: validate that the commit message came from the txn leader, send commit messages to replicas, log errors, crash if >= 50% fail
         Err(not_implemented!("Cluster::replicate_commit"))
     }
 
-    async fn replicate_rollback(&self, _txn_id: TxnId) -> TCResult<()> {
+    async fn replicate_rollback(&self, txn: &Txn) -> TCResult<()> {
         // TODO: validate that the rollback message came from the txn leader, send rollback messages to replicas, log errors, crash if >= 50% fail
         Err(not_implemented!("Cluster::replicate_rollback"))
     }

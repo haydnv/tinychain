@@ -139,11 +139,11 @@ impl TxnServer {
 }
 
 impl TxnServer {
-    pub fn create_txn(&self, now: NetworkTime) -> Txn {
+    pub fn create_txn(&self, now: NetworkTime) -> TCResult<Txn> {
         self.get_txn(TxnId::new(now))
     }
 
-    pub fn get_txn(&self, txn_id: TxnId) -> Txn {
+    pub fn get_txn(&self, txn_id: TxnId) -> TCResult<Txn> {
         let expiry = txn_id.time() + self.ttl;
         let workspace = LazyDir::from(self.workspace.clone()).create_dir(txn_id.to_id());
         let client = self.client.clone();
@@ -171,7 +171,7 @@ impl TxnServer {
             .send(Active::new(txn_id, expiry))
             .expect("active txn");
 
-        Ok(Txn::new(txn_id, expiry, workspace, client, Some(token)))
+        Txn::new(txn_id, expiry, workspace, client, Some(token))
     }
 }
 

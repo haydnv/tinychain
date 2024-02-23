@@ -17,6 +17,14 @@ impl Claim {
             mode,
         }
     }
+
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    pub fn path(&self) -> &TCPathBuf {
+        &self.path
+    }
 }
 
 impl<'de> Deserialize<'de> for Claim {

@@ -38,7 +38,7 @@ impl Server {
         &self.mdns
     }
 
-    pub fn create_txn(&self) -> Txn {
+    pub fn create_txn(&self) -> TCResult<Txn> {
         self.txn_server.create_txn(NetworkTime::now())
     }
 
@@ -55,7 +55,7 @@ impl Server {
             self.txn_server.verify_txn(txn_id, now, token).await
         } else {
             let txn_id = txn_id.unwrap_or_else(|| TxnId::new(NetworkTime::now()));
-            Ok(self.txn_server.get_txn(txn_id))
+            self.txn_server.get_txn(txn_id)
         }
     }
 

@@ -15,7 +15,7 @@ use tc_state::CacheBlock;
 use tc_transact::lock::TxnSetLockIter;
 use tc_transact::{Gateway, Transaction, TxnId};
 use tc_value::{Link, ToUrl, Value};
-use tcgeneric::{label, Id, Map, NetworkTime, PathSegment, TCPathBuf};
+use tcgeneric::{label, Id, Label, Map, NetworkTime, PathSegment, TCPathBuf};
 
 use crate::claim::Claim;
 use crate::client::Client;
@@ -26,6 +26,8 @@ pub use server::TxnServer;
 
 mod hypothetical;
 mod server;
+
+const PREFIX: Label = label("txn");
 
 pub(super) enum LazyDir {
     Workspace(DirLock<CacheBlock>),
@@ -103,20 +105,76 @@ impl Clone for Txn {
 }
 
 impl Txn {
+    #[inline]
+    fn validate_token(id: TxnId, token: &SignedToken) -> TCResult<()> {
+        let mut owner = None;
+        let mut lock = None;
+
+        for (host, actor_id, claim) in token.claims() {
+            if host.path().is_empty() {
+                return Err(bad_request!(
+                    "invalid token: cannot claim reserved path {}",
+                    claim.path()
+                ));
+            } else if claim.path()[0] == PREFIX {
+                if claim.path().len() == 2 && id == claim.path()[1] {
+                    if claim.mode().has(umask::USER_EXEC) {
+                        if owner.is_none() {
+                            owner = Some((host, actor_id));
+                        } else {
+                            return Err(bad_request!("invalid token: multiple owners"));
+                        }
+                    }
+
+                    if claim.mode().has(umask::USER_WRITE) {
+                        if lock.is_none() {
+                            lock = Some((host, actor_id));
+                        } else {
+                            return Err(bad_request!("invalid token: multiple locks"));
+                        }
+                    }
+                } else {
+                    return Err(bad_request!(
+                        "cannot initialize txn {id} with a token for {}",
+                        claim.path()[1]
+                    ));
+                }
+            }
+        }
+
+        if let Some(lock) = lock {
+            if let Some(owner) = owner {
+                if owner == lock {
+                    // pass
+                } else {
+                    return Err(bad_request!("invalid token: lock does not match owner"));
+                }
+            } else {
+                return Err(bad_request!("invalid token: lock with no owner"));
+            }
+        }
+
+        Ok(())
+    }
+
     pub(super) fn new(
         id: TxnId,
         expires: NetworkTime,
         workspace: LazyDir,
         client: Client,
         token: Option<SignedToken>,
-    ) -> Self {
-        Self {
+    ) -> TCResult<Self> {
+        if let Some(token) = &token {
+            Self::validate_token(id, token)?;
+        }
+
+        Ok(Self {
             id,
             expires,
             workspace,
             client,
             token: token.map(Arc::new),
-        }
+        })
     }
 
     pub(crate) fn token(&self) -> Option<&SignedToken> {
@@ -158,38 +216,136 @@ impl Txn {
         mode
     }
 
-    pub fn claim(self, actor: &Actor, path: &[PathSegment]) -> TCResult<Self> {
-        debug_assert!(self.leader(path).is_none());
+    pub fn is_locked(&self) -> TCResult<bool> {
+        let token = if let Some(token) = &self.token {
+            token
+        } else {
+            return Ok(false);
+        };
 
-        self.grant(
-            actor,
-            TCPathBuf::from_slice(path).into(),
-            self.txn_path(),
-            umask::USER_EXEC,
-        )
+        let mut claims = token.claims().into_iter();
+
+        let mut locked_by = None;
+        while let Some((host, actor_id, claim)) = claims.next() {
+            if self.is_txn_path(claim.path()) {
+                if claim.mode().has(umask::USER_WRITE) {
+                    locked_by = Some((host, actor_id));
+                    break;
+                }
+            }
+        }
+
+        let mut owned_by = None;
+        while let Some((host, actor_id, claim)) = claims.next() {
+            if self.is_txn_path(claim.path()) {
+                if claim.mode().has(umask::USER_EXEC) {
+                    owned_by = Some((host, actor_id));
+                }
+            }
+        }
+
+        if let Some(locked_by) = locked_by {
+            let owner = owned_by.ok_or_else(|| internal!("ownerless tranaction"))?;
+
+            if locked_by == owner {
+                Ok(true)
+            } else {
+                Err(internal!("txn locked by non-owner"))
+            }
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub fn claim(self, link: Link, actor: &Actor) -> TCResult<Self> {
+        debug_assert!(self.leader(link.path()).expect("leader").is_none());
+
+        let txn = if self.owner()?.is_none() {
+            self.grant(actor, link.clone(), self.txn_path(), umask::USER_EXEC)?
+        } else {
+            self
+        };
+
+        txn.grant(actor, link, TCPathBuf::default(), umask::USER_EXEC)
+    }
+
+    pub fn lock(self, actor: &Actor) -> TCResult<Self> {
+        let mut owner = None;
+        if let Some(token) = &self.token {
+            for (host, actor_id, claim) in token.claims() {
+                if self.is_txn_path(claim.path()) && claim.mode().has(umask::USER_EXEC) {
+                    owner = Some((host, actor_id));
+                }
+            }
+        }
+
+        let link = if let Some((link, public_key)) = owner {
+            assert_eq!(
+                *public_key,
+                Value::Bytes((*actor.public_key().as_bytes()).into())
+            );
+
+            link.clone()
+        } else {
+            panic!("tried to lock a transaction with no owner")
+        };
+
+        self.grant(actor, link, self.txn_path(), umask::USER_WRITE)
     }
 
     pub fn has_claims(&self) -> bool {
         self.token.is_some()
     }
 
-    pub fn leader(&self, path: &[PathSegment]) -> Option<VerifyingKey> {
+    pub fn leader(&self, path: &[PathSegment]) -> TCResult<Option<VerifyingKey>> {
         if let Some(token) = &self.token {
-            for (host, actor_id, path) in token.claims() {
-                todo!("Txn::leader")
+            for (host, actor_id, claim) in token.claims() {
+                if host.path() == path
+                    && claim.path().is_empty()
+                    && claim.mode().has(umask::USER_EXEC)
+                {
+                    let public_key = Arc::<[u8]>::try_from(actor_id.clone())?;
+                    let public_key = VerifyingKey::try_from(&*public_key)
+                        .map_err(|cause| bad_request!("invalid leader key: {cause}"))?;
+
+                    return Ok(Some(public_key));
+                }
             }
         }
 
-        None
+        Ok(None)
     }
 
-    pub fn owner(&self) -> Option<VerifyingKey> {
-        todo!("Txn::owner")
+    pub fn owner(&self) -> TCResult<Option<VerifyingKey>> {
+        let mut owner = None;
+
+        if let Some(token) = &self.token {
+            for (_host, actor_id, claim) in token.claims() {
+                if self.is_txn_path(claim.path()) && claim.mode().has(umask::USER_EXEC) {
+                    owner = Some(actor_id);
+                }
+            }
+        }
+
+        if let Some(owner) = owner {
+            let public_key = Arc::<[u8]>::try_from(owner.clone())?;
+            let public_key = VerifyingKey::try_from(&*public_key)
+                .map_err(|cause| bad_request!("invalid owner key: {cause}"))?;
+
+            Ok(Some(public_key))
+        } else {
+            Ok(None)
+        }
     }
 
     #[inline]
     fn txn_path(&self) -> TCPathBuf {
-        [label("txn").into(), self.id.to_id()].into()
+        [PREFIX.into(), self.id.to_id()].into()
+    }
+
+    #[inline]
+    fn is_txn_path(&self, path: &[PathSegment]) -> bool {
+        path.len() == 2 && PREFIX == path[0] && self.id == path[1]
     }
 }
 

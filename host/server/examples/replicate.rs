@@ -25,6 +25,19 @@
 //  One host is running on a public cloud provider.
 //  A second host joins from an on-premises datacenter.
 //  The list of peers and replicas is updated such that both hosts receive every write operation.
+//
+//  7.
+//  A malicious transaction participant sends a commit message downstream.
+//  The downstream participant rejects the commit.
+//
+//  8.
+//  A malicious transaction leader sends commit messages to some dependencies but not others.
+//  The messages are rejected.
+//
+//  9.
+//  A malicious transaction leader sends commit messages when it receives a rollback message,
+//  and vice versa.
+//  The messages are rejected.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -59,7 +72,7 @@ impl Client {
         assert!(servers.insert(host, server).is_none());
     }
 
-    fn get_txn(&self, host: &Host) -> Txn {
+    fn get_txn(&self, host: &Host) -> TCResult<Txn> {
         let servers = self.servers.try_read().expect("servers");
         let server = servers.get(host).expect("server");
         server.create_txn()
@@ -96,8 +109,8 @@ impl Resolve for Client {
     ) -> Result<Actor<Self::ActorId>, Error> {
         let link = ToUrl::from(host);
         let servers = self.servers.read().await;
-        let server = Self::get_server_for(&*servers, &link).map_err(|cause| Error::fetch(cause))?;
-        let txn = server.create_txn();
+        let server = Self::get_server_for(&*servers, &link).map_err(Error::fetch)?;
+        let txn = server.create_txn().map_err(Error::fetch)?;
 
         let public_key = self
             .get(&txn, link, actor_id.clone())
@@ -220,7 +233,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .into_iter()
     .collect();
 
-    let txn = client.get_txn(&host1);
+    let txn = client.get_txn(&host1)?;
     let response = client.post(&txn, link.into(), params).await?;
 
     assert_eq!(Scalar::try_from(response).unwrap(), hello_world);
@@ -229,7 +242,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir_name: Id = "test".parse().unwrap();
     let link = Link::new(host1.clone(), [label("class").into()].into());
 
-    let txn = client.get_txn(&host1);
+    let txn = client.get_txn(&host1)?;
     client
         .put(
             &txn,
