@@ -208,7 +208,7 @@ where
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let limit = key.try_cast_into(|v| {
-                    bad_request!("limit must be a positive integer, not {}", v)
+                    bad_request!("limit must be a positive integer, not {v:?}")
                 })?;
 
                 let table = self.table.limit(limit)?;
@@ -256,7 +256,7 @@ where
                     let order = key.opt_cast_into().unwrap();
                     self.table.order_by(order, false)?
                 } else {
-                    return Err(bad_request!("invalid column list to order by: {}", key));
+                    return Err(bad_request!("invalid column list to order by: {key:?}"));
                 };
 
                 Ok(Collection::Table(ordered.into()).into())

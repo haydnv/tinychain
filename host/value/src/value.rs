@@ -119,7 +119,7 @@ impl Value {
             VT::Number(nt) => Number::opt_cast_from(self)
                 .map(|n| n.into_type(nt))
                 .map(Self::Number),
-            VT::String => Some(Value::String(self.to_string().into())),
+            VT::String => self.opt_cast_into().map(Self::String),
             VT::Tuple => match self {
                 Self::Tuple(tuple) => Some(Self::Tuple(tuple)),
                 _ => None,
@@ -212,22 +212,6 @@ impl Instance for Value {
         }
     }
 }
-
-// impl Hash for Value {
-//     fn hash<H: Hasher>(&self, state: &mut H) {
-//         match self {
-//             Self::Bytes(bytes) => bytes.hash(state),
-//             Self::Email(email) => email.hash(state),
-//             Self::Id(id) => id.hash(state),
-//             Self::Link(link) => link.hash(state),
-//             Self::None => ().hash(state),
-//             Self::Number(n) => n.hash(state),
-//             Self::String(string) => string.hash(state),
-//             Self::Tuple(tuple) => tuple.hash(state),
-//             Self::Version(version) => version.hash(state),
-//         }
-//     }
-// }
 
 impl<D: Digest> Sha256Hash<D> for Value {
     fn hash(self) -> Output<D> {

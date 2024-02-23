@@ -108,7 +108,7 @@ where
                     self.n.ln()
                 } else {
                     let base: Number =
-                        base.try_cast_into(|v| bad_request!("invalid base {} for log", v))?;
+                        base.try_cast_into(|v| bad_request!("invalid base {v:?} for log"))?;
 
                     if base.class().is_complex() {
                         return Err(bad_request!("log does not support a complex base {}", base));
@@ -153,7 +153,7 @@ where
             Box::pin(async move {
                 if value.is_some() {
                     return Err(bad_request!(
-                        "{} does not have any parameters (found {})",
+                        "{} does not have any parameters (found {:?})",
                         self.name,
                         value
                     ));

@@ -41,7 +41,7 @@ where
 
                         Ok(State::Tuple(keyring))
                     } else {
-                        Err(TCError::not_found(key))
+                        Err(not_found!("{key:?}"))
                     }
                 })
             }

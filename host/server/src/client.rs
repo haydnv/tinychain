@@ -61,7 +61,7 @@ impl Resolve for Client {
         host: &Self::HostId,
         actor_id: &Self::ActorId,
     ) -> Result<Actor<Self::ActorId>, Error> {
-        trace!("resolve actor {actor_id} on {host}");
+        trace!("resolve actor {actor_id:?} on {host}");
 
         if self.is_loopback(&host.into()) {
             let txn_id = TxnId::new(NetworkTime::now());

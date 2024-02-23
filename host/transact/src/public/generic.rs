@@ -566,7 +566,7 @@ where
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let values: Tuple<Value> =
-                    key.try_cast_into(|v| bad_request!("invalid values for Tuple/zip: {}", v))?;
+                    key.try_cast_into(|v| bad_request!("invalid values for Tuple/zip: {v:?}"))?;
 
                 if self.keys.len() != values.len() {
                     return Err(bad_request!(
@@ -713,7 +713,7 @@ where
                     let stop = key.opt_cast_into().expect("range end");
                     (0, stop, 1)
                 } else {
-                    return Err(bad_request!("invalid range: {key}"));
+                    return Err(bad_request!("invalid range: {key:?}"));
                 };
 
                 let tuple = if start <= stop {

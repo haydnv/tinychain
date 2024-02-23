@@ -143,8 +143,7 @@ where
             Box::pin(async move {
                 if key.is_some() {
                     return Err(bad_request!(
-                        "BTree::insert does not support an explicit key {}",
-                        key,
+                        "BTree::insert does not support an explicit key {key:?}"
                     ));
                 }
 
@@ -247,7 +246,7 @@ impl<'a, State: StateInstance, T: BTreeInstance> Handler<'a, State> for FirstHan
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
-                    return Err(bad_request!("BTree::first does not accept a key {}", key));
+                    return Err(bad_request!("BTree::first does not accept a key {key:?}"));
                 }
 
                 let mut keys = self.btree.clone().keys(*txn.id()).await?;
@@ -288,7 +287,7 @@ where
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 if key.is_some() {
-                    return Err(bad_request!("BTree::reverse does not accept a key {}", key));
+                    return Err(bad_request!("BTree::reverse does not accept a key {key:?}"));
                 }
 
                 let reversed = self.btree.slice(Range::default(), true)?;

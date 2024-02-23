@@ -99,7 +99,7 @@ where
                 if key.is_none() {
                     Ok(self.attribute.into())
                 } else {
-                    Err(TCError::not_found(format!("attribute {}", key)))
+                    Err(TCError::not_found(format!("attribute {key:?}")))
                 }
             })
         }))
@@ -183,7 +183,7 @@ where
                     Ok(self.subject.clone().into())
                 } else {
                     Err(TCError::not_found(format!(
-                        "attribute {} of {:?}",
+                        "attribute {:?} of {:?}",
                         key, self.subject
                     )))
                 }
@@ -217,7 +217,7 @@ where
                     Ok(self.subject.into())
                 } else {
                     Err(TCError::not_found(format!(
-                        "attribute {} of {:?}",
+                        "attribute {:?} of {:?}",
                         key, self.subject
                     )))
                 }

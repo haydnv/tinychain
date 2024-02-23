@@ -416,7 +416,7 @@ impl<'a> Handler<'a, State> for KernelHandler<'a> {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                trace!("GET /?key={key}");
+                trace!("GET /?key={key:?}");
 
                 let (nonce, path_encrypted): (Value, Value) =
                     key.try_cast_into(|v| TCError::unexpected(v, "an encrypted path"))?;

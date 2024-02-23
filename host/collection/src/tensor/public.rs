@@ -420,7 +420,7 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                debug!("load a new tensor from {key}");
+                debug!("load a new tensor from {key:?}");
 
                 let (schema, elements): (Value, Value) =
                     key.try_cast_into(|v| TCError::unexpected(v, "a Tensor schema and elements"))?;
@@ -501,7 +501,7 @@ where
                         .map_ok(State::from)
                         .await
                 } else {
-                    Err(bad_request!("tensor elements must be a Tuple of Numbers or a Tuple of (Coord, Number) pairs, not {}", elements))
+                    Err(bad_request!("tensor elements must be a Tuple of Numbers or a Tuple of (Coord, Number) pairs, not {elements:?}"))
                 }
             })
         }))
@@ -1338,7 +1338,7 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                debug!("GET Tensor: {}", key);
+                debug!("GET Tensor: {key:?}");
                 let range = cast_range(self.tensor.shape(), Scalar::Value(key))?;
 
                 if range.size() == 0 {
@@ -1372,7 +1372,7 @@ where
         'b: 'a,
     {
         Some(Box::new(move |txn, key, value| {
-            debug!("PUT Tensor: {} <- {:?}", key, value);
+            debug!("PUT Tensor: {key:?} <- {value:?}");
             Box::pin(write::<State, T>(self.tensor, txn, key, value))
         }))
     }
@@ -1924,7 +1924,7 @@ where
 }
 
 fn cast_axes(axes: Value, ndim: usize) -> TCResult<Axes> {
-    debug!("cast axes {axes} with ndim {ndim}");
+    debug!("cast axes {axes:?} with ndim {ndim}");
 
     match axes {
         Value::Number(x) => cast_axis(Value::Number(x), ndim).map(|x| smallvec![x]),
@@ -2103,9 +2103,7 @@ fn cast_shape(source_shape: &Shape, value: Tuple<Value>) -> TCResult<SmallVec<[u
             shape[unknown] = size / known;
         } else {
             return Err(bad_request!(
-                "cannot reshape Tensor with size {} into shape {}",
-                size,
-                value
+                "cannot reshape Tensor with size {size} into shape {value:?}"
             ));
         }
     }
@@ -2114,9 +2112,7 @@ fn cast_shape(source_shape: &Shape, value: Tuple<Value>) -> TCResult<SmallVec<[u
         Ok(shape)
     } else {
         Err(bad_request!(
-            "cannot reshape Tensor with shape {:?} into shape {}",
-            source_shape,
-            value
+            "cannot reshape Tensor with shape {source_shape:?} into shape {value:?}"
         ))
     }
 }
