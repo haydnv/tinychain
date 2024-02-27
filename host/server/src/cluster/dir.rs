@@ -19,14 +19,11 @@ use tc_transact::public::Route;
 use tc_transact::{fs, Gateway};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Host, Link, Value, Version as VersionNumber};
-use tcgeneric::{label, Id, Label, Map, PathSegment, ThreadSafe};
+use tcgeneric::{Id, Map, PathSegment, ThreadSafe};
 
 use crate::{CacheBlock, State, Txn};
 
 use super::{Class, Cluster, Replicate, Schema};
-
-/// The name of the endpoint which lists the names of each entry in a [`Dir`]
-pub const ENTRIES: Label = label("entries");
 
 #[async_trait]
 pub trait DirCreate: Sized {

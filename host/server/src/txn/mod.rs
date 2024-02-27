@@ -105,6 +105,8 @@ impl Clone for Txn {
 }
 
 impl Txn {
+    pub const DEFAULT_MODE: Mode = Mode::new().with_class_perm(umask::OTHERS, umask::ALL);
+
     #[inline]
     fn validate_token(id: TxnId, token: &SignedToken) -> TCResult<()> {
         let mut owner = None;
@@ -207,9 +209,9 @@ impl Txn {
     /// Get the set of permissions authorized by hosts in the `keyring` for the given `resource`.
     pub fn mode<Keyring>(&self, keyring: Keyring, resource: &[PathSegment]) -> Mode
     where
-        Keyring: Deref<Target = HashMap<Host, Actor>>,
+        Keyring: Deref<Target = HashMap<Host, VerifyingKey>>,
     {
-        let mut mode = Mode::new().with_class_perm(umask::OTHERS, umask::ALL);
+        let mut mode = Self::DEFAULT_MODE;
 
         // TODO: add user & group permissions
 

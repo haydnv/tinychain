@@ -76,7 +76,10 @@ struct Client {
 impl Client {
     fn add(&self, host: Host, server: Server) {
         let mut servers = self.servers.try_write().unwrap();
-        assert!(servers.insert(host.clone(), server).is_none(), "{host} is already known");
+        assert!(
+            servers.insert(host.clone(), server).is_none(),
+            "{host} is already known"
+        );
     }
 
     fn get_txn(&self, host: &Host) -> TCResult<Txn> {

@@ -2,18 +2,20 @@ use std::fmt;
 use std::sync::Arc;
 
 use futures::Future;
+use log::{debug, trace};
 use rjwt::VerifyingKey;
+use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_transact::public::*;
 use tc_transact::{Gateway, Transact, Transaction};
-use tc_value::{Link, Value};
-use tcgeneric::PathSegment;
+use tc_value::{Host, Link, Value};
+use tcgeneric::{PathSegment, Tuple};
 
 use crate::txn::Txn;
-use crate::State;
+use crate::{Authorize, State};
 
-use super::Cluster;
+use super::{Cluster, REPLICAS};
 
 mod class;
 mod dir;
@@ -36,12 +38,10 @@ where
                     self.cluster.state().get(txn, &[], key).await
                 } else {
                     let keyring = self.cluster.keyring(*txn.id())?;
-                    let keyring: Vec<VerifyingKey> =
-                        keyring.values().map(|actor| actor.public_key()).collect();
 
                     if key.is_none() {
                         let keyring = keyring
-                            .into_iter()
+                            .values()
                             .map(|public_key| Value::Bytes((*public_key.as_bytes()).into()))
                             .map(State::from)
                             .collect();
@@ -51,12 +51,12 @@ where
                         let key = Arc::<[u8]>::try_from(key)?;
 
                         if keyring
-                            .iter()
+                            .values()
                             .any(|public_key| public_key.as_bytes() == &key[..])
                         {
                             Ok(State::from(Value::from(key)))
                         } else {
-                            Err(not_found!("{key:?} (keys are {keyring:?})"))
+                            Err(not_found!("{key:?} (of {} keys)", keyring.len()))
                         }
                     }
                 }
@@ -86,8 +86,10 @@ where
                         .put(&txn, &[], key.clone(), value.clone())
                         .await?;
 
-                    maybe_replicate(&self.cluster, &txn, |link| {
-                        txn.put(link, key.clone(), value.clone())
+                    maybe_replicate(&self.cluster, &txn, |txn, link| {
+                        let key = key.clone();
+                        let value = value.clone();
+                        async move { txn.put(link, key, value).await }
                     })
                     .await
                 }
@@ -122,7 +124,12 @@ where
                 } else {
                     let txn = self.cluster.claim(txn.clone())?;
                     self.cluster.state.delete(&txn, &[], key.clone()).await?;
-                    maybe_replicate(&self.cluster, &txn, |link| txn.delete(link, key.clone())).await
+
+                    maybe_replicate(&self.cluster, &txn, |txn, link| {
+                        let key = key.clone();
+                        async move { txn.delete(link, key).await }
+                    })
+                    .await
                 }
             })
         }))
@@ -135,18 +142,138 @@ impl<T> From<Cluster<T>> for ClusterHandler<T> {
     }
 }
 
-struct ReplicaHandler<'a, T> {
+struct ReplicaSetHandler<T> {
+    cluster: Cluster<T>,
+}
+
+impl<'a, T: Send + Sync + fmt::Debug> Handler<'a, State> for ReplicaSetHandler<T>
+where
+    T: 'a,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                debug!("GET {:?} replicas", self.cluster);
+
+                let keyring = self.cluster.keyring(*txn.id())?;
+
+                if !txn.mode(&*keyring, self.cluster.path()).may_read() {
+                    return Err(unauthorized!("read the replica set of {:?}", self.cluster));
+                }
+
+                if key.is_some() {
+                    let key = Arc::<[u8]>::try_from(key)?;
+
+                    for (host, public_key) in keyring.iter() {
+                        if public_key.as_bytes() == &key[..] {
+                            return Ok(Value::Link(host.clone().into()).into());
+                        }
+                    }
+
+                    Ok(Value::None.into())
+                } else {
+                    let keyring = keyring
+                        .iter()
+                        .map(|(host, public_key)| {
+                            (
+                                Value::from(host.clone()),
+                                Value::Bytes(Arc::new(*public_key.as_bytes())),
+                            )
+                        })
+                        .map(|(host, public_key)| {
+                            State::Tuple(vec![host.into(), public_key.into()].into())
+                        })
+                        .collect();
+
+                    Ok(State::Tuple(keyring))
+                }
+            })
+        }))
+    }
+
+    // TODO: require a correct hash of the state of the cluster in order to join
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key, value| {
+            Box::pin(async move {
+                debug!("PUT {:?} replica {key}: {value:?}", self.cluster);
+
+                let mut keyring = self.cluster.keyring_mut(*txn.id())?;
+
+                if !txn.mode(&*keyring, self.cluster.path()).may_write() {
+                    return Err(unauthorized!(
+                        "modify the replica set of {:?}",
+                        self.cluster
+                    ));
+                }
+
+                let host = Host::try_cast_from(key, |v| TCError::unexpected(v, "a host address"))?;
+                let public_key = Value::try_from(value).and_then(Arc::<[u8]>::try_from)?;
+                let public_key = VerifyingKey::try_from(&*public_key)
+                    .map_err(|cause| bad_request!("invalid public key: {cause}"))?;
+
+                keyring.insert(host, public_key);
+
+                Ok(())
+            })
+        }))
+    }
+
+    fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, key| {
+            Box::pin(async move {
+                debug!("DELETE {:?} replicas {key}", self.cluster);
+
+                let mut keyring = self.cluster.keyring_mut(*txn.id())?;
+
+                if !txn.mode(&*keyring, self.cluster.path()).may_write() {
+                    return Err(unauthorized!(
+                        "modify the replica set of {:?}",
+                        self.cluster
+                    ));
+                }
+
+                let hosts = Tuple::<Value>::try_from(key)?;
+
+                for host in hosts {
+                    let host =
+                        Host::try_cast_from(host, |v| TCError::unexpected(v, "a host address"))?;
+
+                    keyring.remove(&host);
+                }
+
+                Ok(())
+            })
+        }))
+    }
+}
+
+impl<T> From<Cluster<T>> for ReplicaSetHandler<T> {
+    fn from(cluster: Cluster<T>) -> Self {
+        Self { cluster }
+    }
+}
+
+struct ReplicationHandler<'a, T> {
     cluster: Cluster<T>,
     path: &'a [PathSegment],
 }
 
-impl<'a, T> ReplicaHandler<'a, T> {
+impl<'a, T> ReplicationHandler<'a, T> {
     fn new(cluster: Cluster<T>, path: &'a [PathSegment]) -> Self {
         Self { cluster, path }
     }
 }
 
-impl<'a, T> Handler<'a, State> for ReplicaHandler<'a, T>
+impl<'a, T> Handler<'a, State> for ReplicationHandler<'a, T>
 where
     T: Public<State> + Transact + Send + Sync + fmt::Debug + 'a,
 {
@@ -178,8 +305,10 @@ where
                     .put(&txn, path, key.clone(), value.clone())
                     .await?;
 
-                maybe_replicate(&cluster, &txn, |link| {
-                    txn.put(link, key.clone(), value.clone())
+                maybe_replicate(&cluster, &txn, |txn, link| {
+                    let key = key.clone();
+                    let value = value.clone();
+                    async move { txn.put(link, key, value).await }
                 })
                 .await
             })
@@ -209,7 +338,12 @@ where
             Box::pin(async move {
                 let txn = cluster.claim(txn.clone())?;
                 cluster.state().delete(&txn, path, key.clone()).await?;
-                maybe_replicate(&cluster, &txn, |link| txn.delete(link, key.clone())).await
+                maybe_replicate(&cluster, &txn, |txn, link| {
+                    let key = key.clone();
+
+                    async move { txn.delete(link, key).await }
+                })
+                .await
             })
         }))
     }
@@ -218,7 +352,7 @@ where
 async fn maybe_replicate<T, Op, Fut>(cluster: &Cluster<T>, txn: &Txn, op: Op) -> TCResult<()>
 where
     T: Transact + Send + Sync + fmt::Debug,
-    Op: Fn(Link) -> Fut,
+    Op: Fn(Txn, Link) -> Fut,
     Fut: Future<Output = TCResult<()>>,
 {
     let leader = txn
@@ -226,7 +360,7 @@ where
         .ok_or_else(|| internal!("leaderless transaction"))?;
 
     if leader == cluster.public_key() {
-        cluster.replicate_write(*txn.id(), &[], op).await?;
+        cluster.replicate_write(txn, &[], op).await?;
     }
 
     let owner = txn
@@ -235,7 +369,9 @@ where
 
     if owner == cluster.public_key() {
         let txn = cluster.lock(txn.clone())?;
-        cluster.replicate_commit(&txn).await
+        cluster.replicate_commit(&txn).await?;
+        trace!("committed replicated write at {}", txn.id());
+        Ok(())
     } else {
         Ok(())
     }
@@ -254,8 +390,10 @@ where
     {
         if path.is_empty() {
             Some(Box::new(ClusterHandler::from(self)))
+        } else if path == [REPLICAS] {
+            Some(Box::new(ReplicaSetHandler::from(self)))
         } else {
-            Some(Box::new(ReplicaHandler::new(self, path)))
+            Some(Box::new(ReplicationHandler::new(self, path)))
         }
     }
 }

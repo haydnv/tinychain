@@ -225,6 +225,8 @@ impl Kernel {
 
 impl Kernel {
     pub async fn commit(&self, txn_id: TxnId) {
+        debug!("Kernel::commit");
+
         join!(
             self.class.commit(txn_id),
             self.hypothetical.rollback(&txn_id)
@@ -232,9 +234,11 @@ impl Kernel {
     }
 
     pub async fn finalize(&self, txn_id: TxnId) {
+        debug!("Kernel::finalize");
+
         join!(
-            self.class.commit(txn_id),
-            self.hypothetical.rollback(&txn_id)
+            self.class.finalize(&txn_id),
+            self.hypothetical.finalize(&txn_id)
         );
     }
 }
@@ -342,11 +346,19 @@ fn auth_claim_route<'a, T>(
 where
     T: Route<State> + Transact + Send + Sync + fmt::Debug + 'a,
 {
+    debug!("auth, claim, and route request to {}", TCPath::from(path));
+
     let txn_id = *txn.id();
-    let keyring = cluster.keyring(txn_id)?;
-    let resource_mode = cluster.umask(txn_id, path);
-    let request_mode = txn.mode(keyring, path);
-    let mode = resource_mode & request_mode;
+    let mode = {
+        let resource_mode = cluster.umask(txn_id, path);
+        let request_mode = if txn.has_claims() {
+            txn.mode(cluster.keyring(txn_id)?, path)
+        } else {
+            Txn::DEFAULT_MODE
+        };
+
+        resource_mode & request_mode
+    };
 
     if mode == Mode::new() {
         return Err(unauthorized!("access to {}", TCPath::from(path)));

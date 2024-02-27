@@ -74,6 +74,16 @@ pub enum ErrorKind {
     Unavailable,
 }
 
+impl ErrorKind {
+    pub fn is_conflict(&self) -> bool {
+        *self == Self::Conflict
+    }
+
+    pub fn is_retriable(&self) -> bool {
+        [Self::Timeout, Self::Unavailable].into_iter().any(|code| *self == code)
+    }
+}
+
 impl<'en> en::IntoStream<'en> for ErrorKind {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         format!(
@@ -181,8 +191,12 @@ impl TCError {
     }
 
     /// Error to indicate that the requested resource is already locked
-    pub fn conflict<I: fmt::Display>(locator: I) -> Self {
-        Self::new(ErrorKind::Conflict, locator)
+    pub fn conflict<I: fmt::Display>(info: I) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("conflict: {info}");
+
+        #[cfg(not(debug_assertions))]
+        Self::new(ErrorKind::Conflict, info)
     }
 
     /// Error to indicate that the requested resource exists but does not support the request method
@@ -264,7 +278,7 @@ impl From<rjwt::Error> for TCError {
 #[cfg(feature = "txn_lock")]
 impl From<txn_lock::Error> for TCError {
     fn from(err: txn_lock::Error) -> Self {
-        Self::new(ErrorKind::Conflict, err)
+        Self::conflict(err)
     }
 }
 
@@ -363,7 +377,7 @@ macro_rules! bad_request {
 #[macro_export]
 macro_rules! conflict {
     ($($t:tt)*) => {{
-        $crate::TCError::new($crate::ErrorKind::Conflict, format!($($t)*))
+        $crate::TCError::conflict(format!($($t)*))
     }}
 }
 
@@ -371,7 +385,7 @@ macro_rules! conflict {
 #[macro_export]
 macro_rules! forbidden {
     ($($t:tt)*) => {{
-        $crate::TCError::new($crate::ErrorKind::Unavailable, format!($($t)*))
+        $crate::TCError::new($crate::ErrorKind::Unauthorized, format!($($t)*))
     }}
 }
 

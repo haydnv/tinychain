@@ -109,6 +109,8 @@ impl Builder {
         kernel.commit(txn_id).await;
         kernel.finalize(txn_id).await;
 
+        info!("committed kernel");
+
         let client = Client::new(host, kernel.clone(), self.rpc_client);
         let txn_server = TxnServer::create(client, self.workspace, self.request_ttl);
 
