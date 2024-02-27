@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
-use log::{debug, error};
+use log::debug;
 use rjwt::{OsRng, SigningKey, Token, VerifyingKey};
 use umask::Mode;
 
@@ -16,7 +16,7 @@ use tc_transact::lock::{TxnLock, TxnMapLockIter};
 use tc_transact::{fs, Gateway};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Host, Link, Value};
-use tcgeneric::{PathSegment, TCPathBuf};
+use tcgeneric::{PathSegment, TCPath, TCPathBuf};
 
 use crate::claim::Claim;
 use crate::txn::Txn;
@@ -64,11 +64,7 @@ impl Schema {
 
 #[async_trait]
 pub trait Replicate: Send + Sync {
-    async fn replicate(
-        &self,
-        txn: &Txn,
-        peer: Host,
-    ) -> TCResult<async_hash::Output<async_hash::Sha256>>;
+    async fn replicate(&self, txn: &Txn, peer: Host) -> TCResult<()>;
 }
 
 struct Inner {
@@ -122,7 +118,11 @@ impl<T> Cluster<T> {
     }
 
     pub fn umask(&self, _txn_id: TxnId, path: &[PathSegment]) -> Mode {
-        assert!(path.is_empty(), "TODO: cluster subject umask");
+        assert!(
+            path.is_empty(),
+            "TODO: cluster subject umask for {}",
+            TCPath::from(path)
+        );
         self.mode
     }
 
@@ -224,9 +224,7 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
     }
 
     async fn replicate_commit_inner(&self, txn: &Txn) -> TCResult<()> {
-        // TODO: validate that the commit message came from the txn leader, send commit messages to replicas, log errors, crash if >= 50% fail
-
-        let mut replicas = self.replicas.read(*txn.id()).await?;
+        let replicas = self.replicas.read(*txn.id()).await?;
 
         let this_host = self.link().host().cloned().unwrap_or_else(default_host);
 
@@ -273,7 +271,13 @@ pub(crate) trait ReplicateAndJoin {
 }
 
 #[async_trait]
-impl<T: Send + Sync> ReplicateAndJoin for Cluster<Dir<T>> {
+impl<T: Send + Sync + fmt::Debug> ReplicateAndJoin for Cluster<Dir<T>>
+where
+    T: Send + Sync + fmt::Debug,
+    Cluster<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
+    Cluster<Dir<T>>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
+    DirEntry<T>: Clone,
+{
     type State = T;
 
     async fn replicate_and_join(
@@ -281,11 +285,12 @@ impl<T: Send + Sync> ReplicateAndJoin for Cluster<Dir<T>> {
         txn: &Txn,
         peer: Host,
     ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<T>>> {
-        Err(not_implemented!("Cluster::replicate_and_join"))
+        self.state.replicate(txn, peer).await?;
+        self.state.entries(*txn.id()).await
     }
 }
 
-impl<T> Cluster<dir::Dir<T>>
+impl<T> Cluster<Dir<T>>
 where
     T: Clone + fmt::Debug,
 {
@@ -293,10 +298,10 @@ where
         &self,
         txn_id: TxnId,
         path: &'a [PathSegment],
-    ) -> TCResult<(&'a [PathSegment], dir::DirEntry<T>)> {
+    ) -> TCResult<(&'a [PathSegment], DirEntry<T>)> {
         match self.state().lookup(txn_id, path)? {
             Some((path, entry)) => Ok((path, entry)),
-            None => Ok((path, dir::DirEntry::Dir(self.clone()))),
+            None => Ok((path, DirEntry::Dir(self.clone()))),
         }
     }
 }

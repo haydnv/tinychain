@@ -14,12 +14,12 @@ use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_state::object::InstanceClass;
-use tc_transact::fs;
 use tc_transact::lock::{TxnMapLock, TxnMapLockEntry, TxnMapLockIter};
 use tc_transact::public::Route;
+use tc_transact::{fs, Gateway};
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Host, Version as VersionNumber};
-use tcgeneric::{label, Id, Label, PathSegment, ThreadSafe};
+use tc_value::{Host, Link, Value, Version as VersionNumber};
+use tcgeneric::{label, Id, Label, Map, PathSegment, ThreadSafe};
 
 use crate::{CacheBlock, State, Txn};
 
@@ -292,13 +292,55 @@ where
 }
 
 #[async_trait]
-impl<T: Send + Sync> Replicate for Dir<T> {
-    async fn replicate(
-        &self,
-        txn: &Txn,
-        peer: Host,
-    ) -> TCResult<async_hash::Output<async_hash::Sha256>> {
-        Err(not_implemented!("Dir::replicate"))
+impl<T> Replicate for Dir<T>
+where
+    T: Send + Sync + fmt::Debug,
+    Cluster<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
+    Cluster<Dir<T>>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
+{
+    async fn replicate(&self, txn: &Txn, peer: Host) -> TCResult<()> {
+        let link = Link::new(peer, self.schema.link.path().clone());
+        let state = txn.get(link, Value::default()).await?;
+        let state = state.try_into_map(|dir| bad_request!("invalid dir state: {dir:?}"))?;
+        let state = state
+            .into_iter()
+            .map(|(name, is_dir)| bool::try_from(is_dir).map(|is_dir| (name, is_dir)))
+            .collect::<TCResult<Map<bool>>>()?;
+
+        let txn_id = *txn.id();
+
+        let mut deleted = vec![];
+        let entries = self.contents.iter(txn_id).await?;
+        for (name, _) in entries {
+            if !state.contains_key(&*name) {
+                deleted.push(name.clone());
+            }
+        }
+
+        for name in deleted {
+            self.contents.remove(txn_id, &*name).await?;
+        }
+
+        for (name, is_dir) in state {
+            if !self.contents.contains_key(txn_id, &name).await? {
+                let schema = self.schema.clone().append(name.clone());
+                let store = self.dir.create_dir(txn_id, name.clone()).await?;
+
+                let entry = if is_dir {
+                    fs::Persist::create(txn_id, schema, store)
+                        .map_ok(DirEntry::Dir)
+                        .await
+                } else {
+                    fs::Persist::create(txn_id, schema, store)
+                        .map_ok(DirEntry::Item)
+                        .await
+                }?;
+
+                self.contents.insert(txn_id, name, entry).await?;
+            }
+        }
+
+        Ok(())
     }
 }
 

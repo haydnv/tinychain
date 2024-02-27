@@ -146,9 +146,14 @@ impl Kernel {
                 handler: Box::new(KernelHandler::from(self)),
             })
         } else if path[0] == CLASS {
-            auth_claim_route(&self.class, &path[1..], txn)
+            let (path, dir_entry) = self.class.lookup(*txn.id(), &path[1..])?;
+
+            match dir_entry {
+                DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn),
+                DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn),
+            }
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
-            auth_claim_route(&self.hypothetical, &path[2..], txn)
+            auth_claim_route(self.hypothetical.clone(), &path[2..], txn)
         } else {
             Err(not_found!("{}", TCPath::from(path)))
         }
@@ -330,12 +335,12 @@ impl fs::Persist<CacheBlock> for Kernel {
 }
 
 fn auth_claim_route<'a, T>(
-    cluster: &'a Cluster<T>,
+    cluster: Cluster<T>,
     path: &'a [PathSegment],
     txn: &'a Txn,
 ) -> TCResult<Endpoint<'a>>
 where
-    Cluster<T>: Route<State>,
+    T: Route<State> + Transact + Send + Sync + fmt::Debug + 'a,
 {
     let txn_id = *txn.id();
     let keyring = cluster.keyring(txn_id)?;
@@ -350,7 +355,7 @@ where
     }
 
     let handler = cluster
-        .route(&*path)
+        .route_owned(&*path)
         .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
 
     let endpoint = Endpoint {

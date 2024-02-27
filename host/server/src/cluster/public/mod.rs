@@ -18,23 +18,23 @@ use super::Cluster;
 mod class;
 mod dir;
 
-struct ClusterHandler<'a, T> {
-    cluster: &'a Cluster<T>,
+struct ClusterHandler<T> {
+    cluster: Cluster<T>,
 }
 
-impl<'a, T> Handler<'a, State> for ClusterHandler<'a, T>
+impl<'a, T> Handler<'a, State> for ClusterHandler<T>
 where
-    T: Public<State> + Transact + Send + Sync + fmt::Debug,
+    T: Public<State> + Transact + Send + Sync + fmt::Debug + 'a,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
         Some(Box::new(|txn, key: Value| {
-            if txn.has_claims() {
-                self.cluster.state().get(txn, &[], key)
-            } else {
-                Box::pin(async move {
+            Box::pin(async move {
+                if txn.has_claims() {
+                    self.cluster.state().get(txn, &[], key).await
+                } else {
                     let keyring = self.cluster.keyring(*txn.id())?;
                     let keyring: Vec<VerifyingKey> =
                         keyring.values().map(|actor| actor.public_key()).collect();
@@ -59,8 +59,8 @@ where
                             Err(not_found!("{key:?} (keys are {keyring:?})"))
                         }
                     }
-                })
-            }
+                }
+            })
         }))
     }
 
@@ -86,7 +86,7 @@ where
                         .put(&txn, &[], key.clone(), value.clone())
                         .await?;
 
-                    maybe_replicate(self.cluster, &txn, |link| {
+                    maybe_replicate(&self.cluster, &txn, |link| {
                         txn.put(link, key.clone(), value.clone())
                     })
                     .await
@@ -122,33 +122,33 @@ where
                 } else {
                     let txn = self.cluster.claim(txn.clone())?;
                     self.cluster.state.delete(&txn, &[], key.clone()).await?;
-                    maybe_replicate(self.cluster, &txn, |link| txn.delete(link, key.clone())).await
+                    maybe_replicate(&self.cluster, &txn, |link| txn.delete(link, key.clone())).await
                 }
             })
         }))
     }
 }
 
-impl<'a, T> From<&'a Cluster<T>> for ClusterHandler<'a, T> {
-    fn from(cluster: &'a Cluster<T>) -> Self {
+impl<T> From<Cluster<T>> for ClusterHandler<T> {
+    fn from(cluster: Cluster<T>) -> Self {
         Self { cluster }
     }
 }
 
 struct ReplicaHandler<'a, T> {
-    cluster: &'a Cluster<T>,
+    cluster: Cluster<T>,
     path: &'a [PathSegment],
 }
 
 impl<'a, T> ReplicaHandler<'a, T> {
-    fn new(cluster: &'a Cluster<T>, path: &'a [PathSegment]) -> Self {
+    fn new(cluster: Cluster<T>, path: &'a [PathSegment]) -> Self {
         Self { cluster, path }
     }
 }
 
 impl<'a, T> Handler<'a, State> for ReplicaHandler<'a, T>
 where
-    T: Public<State> + Transact + Send + Sync + fmt::Debug,
+    T: Public<State> + Transact + Send + Sync + fmt::Debug + 'a,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
@@ -178,7 +178,7 @@ where
                     .put(&txn, path, key.clone(), value.clone())
                     .await?;
 
-                maybe_replicate(cluster, &txn, |link| {
+                maybe_replicate(&cluster, &txn, |link| {
                     txn.put(link, key.clone(), value.clone())
                 })
                 .await
@@ -209,7 +209,7 @@ where
             Box::pin(async move {
                 let txn = cluster.claim(txn.clone())?;
                 cluster.state().delete(&txn, path, key.clone()).await?;
-                maybe_replicate(cluster, &txn, |link| txn.delete(link, key.clone())).await
+                maybe_replicate(&cluster, &txn, |link| txn.delete(link, key.clone())).await
             })
         }))
     }
@@ -241,15 +241,30 @@ where
     }
 }
 
-impl<T> Route<State> for Cluster<T>
+impl<T> Cluster<T>
 where
     T: Route<State> + Transact + Send + Sync + fmt::Debug,
 {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
+    pub fn route_owned<'a>(
+        self,
+        path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, State> + 'a>>
+    where
+        T: 'a,
+    {
         if path.is_empty() {
             Some(Box::new(ClusterHandler::from(self)))
         } else {
             Some(Box::new(ReplicaHandler::new(self, path)))
         }
+    }
+}
+
+impl<T> Route<State> for Cluster<T>
+where
+    T: Route<State> + Transact + Clone + Send + Sync + fmt::Debug,
+{
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
+        self.clone().route_owned(path)
     }
 }

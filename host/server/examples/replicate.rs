@@ -76,7 +76,7 @@ struct Client {
 impl Client {
     fn add(&self, host: Host, server: Server) {
         let mut servers = self.servers.try_write().unwrap();
-        assert!(servers.insert(host, server).is_none());
+        assert!(servers.insert(host.clone(), server).is_none(), "{host} is already known");
     }
 
     fn get_txn(&self, host: &Host) -> TCResult<Txn> {
@@ -262,6 +262,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // start a second server and replicate the state of the first
     let mut server2 = builder(client.clone(), "two".to_string(), key)
+        .set_port(DEFAULT_PORT + 1)
         .start()
         .await;
 

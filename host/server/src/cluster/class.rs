@@ -150,11 +150,7 @@ impl Transact for Class {
 
 #[async_trait]
 impl Replicate for Class {
-    async fn replicate(
-        &self,
-        txn: &Txn,
-        peer: Host,
-    ) -> TCResult<async_hash::Output<async_hash::Sha256>> {
+    async fn replicate(&self, txn: &Txn, peer: Host) -> TCResult<()> {
         Err(not_implemented!("Class::replicate"))
     }
 }
