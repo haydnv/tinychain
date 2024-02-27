@@ -7,6 +7,7 @@ use aes_gcm_siv::aead::rand_core::{OsRng, RngCore};
 use aes_gcm_siv::aead::Aead;
 use aes_gcm_siv::{Aes256GcmSiv, KeyInit};
 use async_trait::async_trait;
+use futures::join;
 use log::{debug, info, trace, warn};
 use rjwt::VerifyingKey;
 use safecast::TryCastInto;
@@ -219,16 +220,23 @@ impl Kernel {
 
 impl Kernel {
     pub async fn commit(&self, txn_id: TxnId) {
-        self.hypothetical.rollback(&txn_id).await;
+        join!(
+            self.class.commit(txn_id),
+            self.hypothetical.rollback(&txn_id)
+        );
     }
 
     pub async fn finalize(&self, txn_id: TxnId) {
-        self.hypothetical.finalize(&txn_id).await;
+        join!(
+            self.class.commit(txn_id),
+            self.hypothetical.rollback(&txn_id)
+        );
     }
 }
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct Schema {
+    lead: Host,
     host: Host,
     owner: Option<Link>,
     group: Option<Link>,
@@ -237,12 +245,14 @@ pub struct Schema {
 
 impl Schema {
     pub fn new(
+        lead: Host,
         host: Host,
         owner: Option<Link>,
         group: Option<Link>,
         keys: HashSet<aes256::Key>,
     ) -> Self {
         Self {
+            lead,
             host,
             owner,
             group,
@@ -261,14 +271,21 @@ impl fs::Persist<CacheBlock> for Kernel {
         schema: Self::Schema,
         store: fs::Dir<CacheBlock>,
     ) -> TCResult<Self> {
+        let lead = schema.lead;
+
         let class_dir: fs::Dir<CacheBlock> = store.create_dir(txn_id, CLASS.into()).await?;
 
-        let link = Link::new(schema.host.clone(), CLASS.into());
-        let class_schema = cluster::Schema::new(link, schema.owner.clone(), schema.group.clone());
+        let class_schema = cluster::Schema::new(
+            lead.clone(),
+            Link::new(schema.host.clone(), CLASS.into()),
+            schema.owner.clone(),
+            schema.group.clone(),
+        );
+
         let class = fs::Persist::<CacheBlock>::create(txn_id, class_schema, class_dir).await?;
 
         let link = Link::new(schema.host, Hypothetical::PATH.into());
-        let txn_schema = cluster::Schema::new(link, schema.owner, schema.group);
+        let txn_schema = cluster::Schema::new(lead, link, schema.owner, schema.group);
         let hypothetical = Cluster::new(txn_schema, Hypothetical::new(), txn_id);
 
         Ok(Self {
@@ -283,14 +300,21 @@ impl fs::Persist<CacheBlock> for Kernel {
         schema: Self::Schema,
         store: fs::Dir<CacheBlock>,
     ) -> TCResult<Self> {
+        let lead = schema.lead;
+
         let class_dir: fs::Dir<CacheBlock> = store.get_or_create_dir(txn_id, CLASS.into()).await?;
 
-        let link = Link::new(schema.host.clone(), CLASS.into());
-        let class_schema = cluster::Schema::new(link, schema.owner.clone(), schema.group.clone());
+        let class_schema = cluster::Schema::new(
+            lead.clone(),
+            Link::new(schema.host.clone(), CLASS.into()),
+            schema.owner.clone(),
+            schema.group.clone(),
+        );
+
         let class = fs::Persist::<CacheBlock>::load(txn_id, class_schema, class_dir).await?;
 
         let link = Link::new(schema.host, Hypothetical::PATH.into());
-        let txn_schema = cluster::Schema::new(link, schema.owner, schema.group);
+        let txn_schema = cluster::Schema::new(lead, link, schema.owner, schema.group);
         let hypothetical = Cluster::new(txn_schema, Hypothetical::new(), txn_id);
 
         Ok(Self {

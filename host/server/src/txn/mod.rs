@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -12,9 +13,8 @@ use uuid::Uuid;
 
 use tc_error::*;
 use tc_state::CacheBlock;
-use tc_transact::lock::TxnSetLockIter;
 use tc_transact::{Gateway, Transaction, TxnId};
-use tc_value::{Link, ToUrl, Value};
+use tc_value::{Host, Link, ToUrl, Value};
 use tcgeneric::{label, Id, Label, Map, NetworkTime, PathSegment, TCPathBuf};
 
 use crate::claim::Claim;
@@ -205,9 +205,9 @@ impl Txn {
     }
 
     /// Get the set of permissions authorized by hosts in the `keyring` for the given `resource`.
-    pub fn mode<K>(&self, keyring: TxnSetLockIter<K>, resource: &[PathSegment]) -> Mode
+    pub fn mode<Keyring>(&self, keyring: Keyring, resource: &[PathSegment]) -> Mode
     where
-        K: Deref<Target = Actor>,
+        Keyring: Deref<Target = HashMap<Host, Actor>>,
     {
         let mut mode = Mode::new().with_class_perm(umask::OTHERS, umask::ALL);
 
@@ -216,30 +216,30 @@ impl Txn {
         mode
     }
 
-    pub fn is_locked(&self) -> TCResult<bool> {
+    pub fn locked_by(&self) -> TCResult<Option<VerifyingKey>> {
         let token = if let Some(token) = &self.token {
             token
         } else {
-            return Ok(false);
+            return Ok(None);
         };
 
         let mut claims = token.claims().into_iter();
 
         let mut locked_by = None;
-        while let Some((host, actor_id, claim)) = claims.next() {
+        while let Some((_host, actor_id, claim)) = claims.next() {
             if self.is_txn_path(claim.path()) {
                 if claim.mode().has(umask::USER_WRITE) {
-                    locked_by = Some((host, actor_id));
+                    locked_by = Some(actor_id);
                     break;
                 }
             }
         }
 
         let mut owned_by = None;
-        while let Some((host, actor_id, claim)) = claims.next() {
+        while let Some((_host, actor_id, claim)) = claims.next() {
             if self.is_txn_path(claim.path()) {
                 if claim.mode().has(umask::USER_EXEC) {
-                    owned_by = Some((host, actor_id));
+                    owned_by = Some(actor_id);
                 }
             }
         }
@@ -248,12 +248,16 @@ impl Txn {
             let owner = owned_by.ok_or_else(|| internal!("ownerless tranaction"))?;
 
             if locked_by == owner {
-                Ok(true)
+                let locked_by = Arc::<[u8]>::try_from(locked_by.clone())?;
+
+                VerifyingKey::try_from(&*locked_by)
+                    .map_err(|cause| bad_request!("invalid public key for txn leader: {cause}"))
+                    .map(Some)
             } else {
                 Err(internal!("txn locked by non-owner"))
             }
         } else {
-            Ok(false)
+            Ok(None)
         }
     }
 

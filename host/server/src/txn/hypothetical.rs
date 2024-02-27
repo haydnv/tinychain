@@ -66,7 +66,7 @@ impl Transact for Hypothetical {
     type Commit = ();
 
     async fn commit(&self, _txn_id: TxnId) -> Self::Commit {
-        // no-op
+        unreachable!("cannot commit a hypothetical transaction")
     }
 
     async fn rollback(&self, _txn_id: &TxnId) {

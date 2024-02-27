@@ -2,10 +2,11 @@ use std::fmt;
 use std::sync::Arc;
 
 use futures::Future;
+use rjwt::VerifyingKey;
 
 use tc_error::*;
 use tc_transact::public::*;
-use tc_transact::{Gateway, Transaction};
+use tc_transact::{Gateway, Transact, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::PathSegment;
 
@@ -23,7 +24,7 @@ struct ClusterHandler<'a, T> {
 
 impl<'a, T> Handler<'a, State> for ClusterHandler<'a, T>
 where
-    T: Public<State> + Send + Sync,
+    T: Public<State> + Transact + Send + Sync + fmt::Debug,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
@@ -34,11 +35,14 @@ where
                 self.cluster.state().get(txn, &[], key)
             } else {
                 Box::pin(async move {
-                    let mut keyring = self.cluster.keyring(*txn.id())?;
+                    let keyring = self.cluster.keyring(*txn.id())?;
+                    let keyring: Vec<VerifyingKey> =
+                        keyring.values().map(|actor| actor.public_key()).collect();
 
                     if key.is_none() {
                         let keyring = keyring
-                            .map(|actor| Value::Bytes((*actor.public_key().as_bytes()).into()))
+                            .into_iter()
+                            .map(|public_key| Value::Bytes((*public_key.as_bytes()).into()))
                             .map(State::from)
                             .collect();
 
@@ -46,10 +50,13 @@ where
                     } else {
                         let key = Arc::<[u8]>::try_from(key)?;
 
-                        if keyring.any(|actor| actor.public_key().as_bytes() == &key[..]) {
+                        if keyring
+                            .iter()
+                            .any(|public_key| public_key.as_bytes() == &key[..])
+                        {
                             Ok(State::from(Value::from(key)))
                         } else {
-                            Err(not_found!("{key:?}"))
+                            Err(not_found!("{key:?} (keys are {keyring:?})"))
                         }
                     }
                 })
@@ -63,7 +70,7 @@ where
     {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                if txn.is_locked()? {
+                if txn.locked_by()?.is_some() {
                     if key.is_some() {
                         Err(TCError::unexpected(key, "empty commit message"))
                     } else if value.is_some() {
@@ -106,7 +113,7 @@ where
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                if txn.is_locked()? {
+                if txn.locked_by()?.is_some() {
                     if key.is_some() {
                         Err(TCError::unexpected(key, "empty rollback message"))
                     } else {
@@ -141,7 +148,7 @@ impl<'a, T> ReplicaHandler<'a, T> {
 
 impl<'a, T> Handler<'a, State> for ReplicaHandler<'a, T>
 where
-    T: Public<State> + Send + Sync,
+    T: Public<State> + Transact + Send + Sync + fmt::Debug,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
@@ -210,6 +217,7 @@ where
 
 async fn maybe_replicate<T, Op, Fut>(cluster: &Cluster<T>, txn: &Txn, op: Op) -> TCResult<()>
 where
+    T: Transact + Send + Sync + fmt::Debug,
     Op: Fn(Link) -> Fut,
     Fut: Future<Output = TCResult<()>>,
 {
@@ -235,7 +243,7 @@ where
 
 impl<T> Route<State> for Cluster<T>
 where
-    T: Route<State> + Send + Sync + fmt::Debug,
+    T: Route<State> + Transact + Send + Sync + fmt::Debug,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         if path.is_empty() {

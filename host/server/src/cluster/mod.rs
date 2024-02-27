@@ -1,28 +1,26 @@
-use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fmt;
-use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
-use futures::future::{Future, TryFutureExt};
-use futures::stream::FuturesUnordered;
-use futures::StreamExt;
+use futures::future::{Future, FutureExt, TryFutureExt};
+use futures::stream::{FuturesUnordered, StreamExt};
+use log::{debug, error};
 use rjwt::{OsRng, SigningKey, Token, VerifyingKey};
 use umask::Mode;
 
 use tc_error::*;
-use tc_transact::fs;
-use tc_transact::lock::{TxnLock, TxnMapLockIter, TxnSetLock, TxnSetLockIter};
-use tc_transact::{Transact, TxnId};
+use tc_transact::lock::{TxnLock, TxnMapLockIter};
+use tc_transact::{fs, Gateway};
+use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Host, Link, Value};
 use tcgeneric::{PathSegment, TCPathBuf};
 
 use crate::claim::Claim;
 use crate::txn::Txn;
-use crate::{Actor, CacheBlock, SignedToken};
+use crate::{default_host, Actor, CacheBlock, SignedToken, State};
 
 pub use class::Class;
 pub use dir::{Dir, DirEntry};
@@ -36,60 +34,27 @@ mod class;
 mod dir;
 mod public;
 
-#[derive(Debug)]
-pub(crate) struct Key(Actor);
-
-impl Deref for Key {
-    type Target = Actor;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Eq for Key {}
-
-impl PartialEq for Key {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.id() == other.0.id()
-    }
-}
-
-impl Hash for Key {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.id().hash(state)
-    }
-}
-
-impl Ord for Key {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0
-            .public_key()
-            .as_bytes()
-            .cmp(other.0.public_key().as_bytes())
-    }
-}
-
-impl PartialOrd for Key {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct Schema {
+    lead: Host,
     link: Link,
     owner: Option<Link>,
     group: Option<Link>,
 }
 
 impl Schema {
-    pub fn new(link: Link, owner: Option<Link>, group: Option<Link>) -> Self {
-        Self { link, owner, group }
+    pub fn new(lead: Host, link: Link, owner: Option<Link>, group: Option<Link>) -> Self {
+        Self {
+            lead,
+            link,
+            owner,
+            group,
+        }
     }
 
     pub fn append(self, suffix: PathSegment) -> Self {
         Self {
+            lead: self.lead,
             link: self.link.append(suffix),
             owner: self.owner,
             group: self.group,
@@ -116,17 +81,24 @@ pub struct Cluster<T> {
     inner: Arc<Inner>,
     mode: Mode,
     state: T,
-    keyring: TxnSetLock<Key>,
-    replicas: TxnLock<HashSet<Host>>,
+    replicas: TxnLock<HashMap<Host, Actor>>,
 }
 
 impl<T> Cluster<T> {
-    pub fn new(schema: Schema, subject: T, txn_id: TxnId) -> Self {
+    pub fn new(schema: Schema, state: T, txn_id: TxnId) -> Self {
         let keypair = SigningKey::generate(&mut OsRng);
         let public_key = keypair.verifying_key();
         let actor_id = Value::Bytes(Arc::from(*public_key.as_bytes()));
         let actor = Actor::with_keypair(actor_id, keypair);
-        let keyring = [Key(actor.clone())];
+
+        let replicas = [(
+            schema.link.host().cloned().unwrap_or_else(default_host),
+            actor.clone(),
+        )]
+        .into_iter()
+        .collect();
+
+        let replicas = TxnLock::new(replicas);
 
         let mode = if schema.owner.is_some() || schema.group.is_some() {
             DEFAULT_UMASK
@@ -137,9 +109,8 @@ impl<T> Cluster<T> {
         Self {
             inner: Arc::new(Inner { schema, actor }),
             mode,
-            state: subject,
-            keyring: TxnSetLock::new(txn_id, keyring),
-            replicas: TxnLock::new(HashSet::new()),
+            state,
+            replicas,
         }
     }
 
@@ -179,8 +150,8 @@ impl<T> Cluster<T> {
         self.inner.actor.sign_token(token).map_err(TCError::from)
     }
 
-    pub fn keyring(&self, txn_id: TxnId) -> TCResult<TxnSetLockIter<Key>> {
-        self.keyring.try_iter(txn_id).map_err(TCError::from)
+    pub fn keyring(&self, txn_id: TxnId) -> TCResult<impl Deref<Target = HashMap<Host, Actor>>> {
+        self.replicas.try_read(txn_id).map_err(TCError::from)
     }
 
     #[inline]
@@ -207,8 +178,11 @@ impl<T> Cluster<T> {
 
         let replicas = self.replicas.write(txn_id).await?;
 
+        let this_host = self.link().host().cloned().unwrap_or_else(default_host);
         let mut writes: FuturesUnordered<_> = replicas
-            .iter()
+            .keys()
+            .filter(|host| !(host.is_localhost() && host.port() == this_host.port()))
+            .filter(|host| **host != this_host)
             .map(|host| op(Link::new(host.clone(), uri.clone())))
             .collect();
 
@@ -228,10 +202,57 @@ impl<T> Cluster<T> {
             Ok(())
         }
     }
+}
 
+impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
     async fn replicate_commit(&self, txn: &Txn) -> TCResult<()> {
+        let leader = txn
+            .leader(self.path())?
+            .ok_or_else(|| bad_request!("cannot commit a leaderless transaction"))?;
+
+        if leader == self.public_key() {
+            if txn.locked_by()? == Some(self.public_key()) {
+                self.replicate_commit_inner(txn).await?;
+            } else {
+                return Err(unauthorized!("commit {:?}", self));
+            }
+        }
+
+        self.commit(*txn.id()).await;
+
+        Ok(())
+    }
+
+    async fn replicate_commit_inner(&self, txn: &Txn) -> TCResult<()> {
         // TODO: validate that the commit message came from the txn leader, send commit messages to replicas, log errors, crash if >= 50% fail
-        Err(not_implemented!("Cluster::replicate_commit"))
+
+        let mut replicas = self.replicas.read(*txn.id()).await?;
+
+        let this_host = self.link().host().cloned().unwrap_or_else(default_host);
+
+        let mut commits: FuturesUnordered<_> = replicas
+            .keys()
+            .filter(|host| !(host.is_localhost() && host.port() == this_host.port()))
+            .filter(|host| **host != this_host)
+            .cloned()
+            .map(|replica| async move {
+                let link = Link::new(replica.clone(), self.path().clone());
+                txn.put(link, Value::default(), State::default())
+                    .map(|result| (replica, result))
+                    .await
+            })
+            .collect();
+
+        while let Some((host, result)) = commits.next().await {
+            if result.is_ok() {
+                debug!("replica at {host} succeeded");
+            } else {
+                // TODO: enqueue a message to initiate a rebalance of the replica set
+                panic!("replica at {host} failed--the replica set is now out of sync");
+            }
+        }
+
+        Ok(())
     }
 
     async fn replicate_rollback(&self, txn: &Txn) -> TCResult<()> {

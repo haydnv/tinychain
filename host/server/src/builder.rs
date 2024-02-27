@@ -51,6 +51,7 @@ pub struct Builder {
     data_dir: DirLock<CacheBlock>,
     workspace: DirLock<CacheBlock>,
     max_retries: u8,
+    lead: Option<Host>,
     owner: Option<Link>,
     group: Option<Link>,
     keys: HashSet<Aes256Key>,
@@ -72,6 +73,7 @@ impl Builder {
             data_dir,
             workspace,
             max_retries: DEFAULT_MAX_RETRIES,
+            lead: None,
             owner: None,
             group: None,
             keys: HashSet::new(),
@@ -81,6 +83,7 @@ impl Builder {
 
     async fn build(mut self) -> Server {
         let host = self.host();
+        let lead = self.lead.unwrap_or_else(|| host.clone());
 
         if self.secure {
             if self.owner.is_none() {
@@ -96,7 +99,7 @@ impl Builder {
             .await
             .expect("data dir");
 
-        let schema = Schema::new(host.clone(), self.owner, self.group, self.keys);
+        let schema = Schema::new(lead, host.clone(), self.owner, self.group, self.keys);
 
         let kernel: Arc<Kernel> = fs::Persist::load_or_create(txn_id, schema, data_dir)
             .map_ok(Arc::new)

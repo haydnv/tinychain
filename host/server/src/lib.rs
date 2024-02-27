@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use umask::Mode;
 
-use tc_value::{Link, Value};
+use tc_value::{Address, Host, Link, Protocol, Value};
 
 pub use tc_state::CacheBlock;
 
@@ -79,4 +79,8 @@ impl Authorize for Mode {
         const ALLOW: [Mode; 3] = [umask::USER_EXEC, umask::GROUP_EXEC, umask::OTHERS_EXEC];
         self.has_any(ALLOW)
     }
+}
+
+pub fn default_host() -> Host {
+    Host::from((Protocol::HTTP, Address::LOCALHOST, DEFAULT_PORT))
 }

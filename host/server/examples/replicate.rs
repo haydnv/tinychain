@@ -38,6 +38,13 @@
 //  A malicious transaction leader sends commit messages when it receives a rollback message,
 //  and vice versa.
 //  The messages are rejected.
+//
+//  10.
+//  The service at https://example.com/service/users claims ownership of transaction 123-45.
+//  The service at https://example.co.uk/service/users claims leadership.
+//  The service at https://example.co.uk/service/groups claims leadership.
+//  Synchronization messages from example.com go to all hosts in its /users cluster + example.co.uk,
+//  and synchronization messages from example.co.uk go all hosts in its /users and /groups clusters.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -243,6 +250,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let link = Link::new(host1.clone(), [label("class").into()].into());
 
     let txn = client.get_txn(&host1)?;
+
     client
         .put(
             &txn,
