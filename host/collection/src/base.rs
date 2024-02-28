@@ -1,7 +1,6 @@
 use std::fmt;
 use std::marker::PhantomData;
 
-use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use destream::de;
 use futures::TryFutureExt;
@@ -10,7 +9,8 @@ use safecast::{AsType, TryCastFrom};
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Persist, Restore};
-use tc_transact::{fs, AsyncHash, IntoView, Transact, Transaction, TxnId};
+use tc_transact::hash::{AsyncHash, Output, Sha256};
+use tc_transact::{fs, IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
 
 use super::btree::{BTree, BTreeFile, BTreeInstance};

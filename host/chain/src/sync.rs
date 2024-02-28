@@ -4,7 +4,6 @@
 use std::fmt;
 use std::marker::PhantomData;
 
-use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use destream::{de, FromStream};
 use freqfs::{FileLock, FileWriteGuard};
@@ -19,9 +18,10 @@ use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_transact::fs;
+use tc_transact::hash::{AsyncHash, Output, Sha256};
 use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Route, StateInstance};
-use tc_transact::{AsyncHash, Gateway, IntoView, Transact, Transaction, TxnId};
+use tc_transact::{Gateway, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Label};
 

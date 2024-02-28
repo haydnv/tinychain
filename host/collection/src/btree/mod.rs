@@ -2,12 +2,12 @@
 
 use std::fmt;
 
-use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use futures::Stream;
 use safecast::{as_type, AsType};
 
 use tc_error::*;
+use tc_transact::hash::{Digest, Hash, Output};
 use tc_transact::{Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{

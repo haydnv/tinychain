@@ -5,7 +5,6 @@ use std::convert::TryInto;
 use std::fmt;
 use std::marker::PhantomData;
 
-use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use destream::de;
 use futures::future::TryFutureExt;
@@ -15,8 +14,9 @@ use safecast::{CastInto, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_scalar::{Executor, OpDef, OpDefType, OpRef, Scalar, SELF};
+use tc_transact::hash::{AsyncHash, Digest, Hash, Output, Sha256};
 use tc_transact::public::{DeleteHandler, GetHandler, Handler, PostHandler, PutHandler};
-use tc_transact::{AsyncHash, Gateway, IntoView, Transaction, TxnId};
+use tc_transact::{Gateway, IntoView, Transaction, TxnId};
 use tcgeneric::{Id, Instance, Map, PathSegment, TCPathBuf};
 
 use super::view::StateView;

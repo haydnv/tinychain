@@ -4,8 +4,6 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use async_hash::generic_array::GenericArray;
-use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
@@ -18,9 +16,10 @@ use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_transact::fs;
+use tc_transact::hash::{AsyncHash, GenericArray, Output, Sha256};
 use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Route, StateInstance};
-use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::*;
 

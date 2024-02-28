@@ -7,9 +7,10 @@ use safecast::TryCastInto;
 use tc_error::*;
 #[cfg(feature = "collection")]
 use tc_transact::fs;
+use tc_transact::hash::AsyncHash;
 use tc_transact::public::helpers::{AttributeHandler, EchoHandler, SelfHandler};
 use tc_transact::public::{GetHandler, Handler, PostHandler, Route};
-use tc_transact::{AsyncHash, Gateway, Transaction};
+use tc_transact::{Gateway, Transaction};
 use tc_value::{Link, Number, Value};
 use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, PathSegment, TCPath};
 

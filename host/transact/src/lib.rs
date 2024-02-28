@@ -2,7 +2,6 @@
 //!
 //! This library is part of TinyChain: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
 
-use async_hash::Output;
 use async_trait::async_trait;
 use destream::en;
 use freqfs::DirLock;
@@ -12,12 +11,31 @@ use tc_error::*;
 use tc_value::{ToUrl, Value};
 use tcgeneric::{Id, Map};
 
-pub use id::{TxnId, MIN_ID};
 use public::StateInstance;
 
 pub mod fs;
 mod id;
 pub mod public;
+
+pub use id::{TxnId, MIN_ID};
+
+pub mod hash {
+    use async_trait::async_trait;
+
+    use tc_error::TCResult;
+
+    use super::TxnId;
+
+    pub use async_hash::generic_array::GenericArray;
+    pub use async_hash::*;
+
+    /// Defines a method to compute the hash of this state as of a given [`TxnId`]
+    #[async_trait]
+    pub trait AsyncHash {
+        /// Compute the hash of this state as of a given [`TxnId`]
+        async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>>;
+    }
+}
 
 pub mod lock {
     use std::collections::{HashMap, HashSet};
@@ -62,13 +80,6 @@ pub mod lock {
 
     /// A transactional task queue.
     pub type TxnTaskQueue<I, O> = txn_lock::queue::task::TaskQueue<TxnId, I, O>;
-}
-
-/// Defines a method to compute the hash of this state as of a given [`TxnId`]
-#[async_trait]
-pub trait AsyncHash {
-    /// Compute the hash of this state as of a given [`TxnId`]
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<async_hash::Sha256>>;
 }
 
 /// Access a view which can be encoded with [`en::IntoStream`].

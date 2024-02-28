@@ -1,13 +1,13 @@
 use std::fmt;
 
-use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use destream::{de, en};
 use futures::TryFutureExt;
 use safecast::{as_type, AsType, TryCastFrom};
 
 use tc_error::*;
-use tc_transact::{AsyncHash, IntoView, Transaction, TxnId};
+use tc_transact::hash::{hash_try_stream, AsyncHash, Digest, Hash, Output, Sha256};
+use tc_transact::{IntoView, Transaction, TxnId};
 use tcgeneric::{
     path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
 };
@@ -150,20 +150,20 @@ where
         let contents_hash = match self {
             Self::BTree(btree) => {
                 let keys = btree.keys(txn_id).await?;
-                async_hash::hash_try_stream::<Sha256, _, _, _>(keys).await?
+                hash_try_stream::<Sha256, _, _, _>(keys).await?
             }
             Self::Table(table) => {
                 let rows = table.rows(txn_id).await?;
-                async_hash::hash_try_stream::<Sha256, _, _, _>(rows).await?
+                hash_try_stream::<Sha256, _, _, _>(rows).await?
             }
             Self::Tensor(tensor) => match tensor {
                 Tensor::Dense(dense) => {
                     let elements = DenseView::from(dense).into_elements(txn_id).await?;
-                    async_hash::hash_try_stream::<Sha256, _, _, _>(elements).await?
+                    hash_try_stream::<Sha256, _, _, _>(elements).await?
                 }
                 Tensor::Sparse(sparse) => {
                     let elements = SparseView::from(sparse).into_elements(txn_id).await?;
-                    async_hash::hash_try_stream::<Sha256, _, _, _>(elements).await?
+                    hash_try_stream::<Sha256, _, _, _>(elements).await?
                 }
             },
         };

@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
 use safecast::{CastFrom, TryCastInto};
 
 use tc_error::*;
+use tc_transact::hash::{Digest, Hash, Output};
 use tc_value::Value;
 use tcgeneric::Id;
 

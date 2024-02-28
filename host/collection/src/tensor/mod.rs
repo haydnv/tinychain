@@ -4,7 +4,6 @@ use std::marker::PhantomData;
 use std::ops::{Div, Rem};
 use std::{fmt, iter};
 
-use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use collate::Collator;
 use destream::{de, en};
@@ -14,6 +13,7 @@ use safecast::{AsType, CastFrom, CastInto, TryCastFrom, TryCastInto};
 use smallvec::SmallVec;
 
 use tc_error::*;
+use tc_transact::hash::{Digest, Hash, Output};
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::{fs, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Number, NumberType, Value, ValueType};

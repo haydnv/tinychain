@@ -3,8 +3,6 @@ use std::fmt;
 use std::iter;
 use std::marker::PhantomData;
 
-use async_hash::generic_array::GenericArray;
-use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
@@ -21,9 +19,10 @@ use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_transact::fs;
+use tc_transact::hash::{AsyncHash, GenericArray, Output, Sha256};
 use tc_transact::lock::{TxnLock, TxnTaskQueue};
 use tc_transact::public::{Public, Route, StateInstance};
-use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, ThreadSafe, Tuple};
 

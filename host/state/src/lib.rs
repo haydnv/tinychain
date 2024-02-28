@@ -5,7 +5,6 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::str::FromStr;
 
-use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de;
@@ -21,8 +20,9 @@ use tc_chain::{ChainType, ChainVisitor};
 use tc_collection::{CollectionType, CollectionVisitor};
 use tc_error::*;
 use tc_scalar::*;
+use tc_transact::hash::{AsyncHash, Digest, Hash, Output, Sha256};
 use tc_transact::public::{ClosureInstance, Public, StateInstance, ToState};
-use tc_transact::{AsyncHash, Gateway, Transaction, TxnId};
+use tc_transact::{Gateway, Transaction, TxnId};
 use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::{
     path_label, Class, Id, Instance, Map, NativeClass, PathSegment, TCPath, TCPathBuf, Tuple,

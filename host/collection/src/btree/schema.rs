@@ -1,13 +1,13 @@
 use std::fmt;
 use std::ops::Bound;
 
-use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
 use log::trace;
 use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
 
 use tc_error::{bad_request, TCError, TCResult};
+use tc_transact::hash::{Digest, Hash, Output};
 use tc_value::{NumberType, Value, ValueType};
 use tcgeneric::{Id, NativeClass};
 
