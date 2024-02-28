@@ -1,21 +1,22 @@
 use async_trait::async_trait;
 use log::trace;
-use rjwt::{Actor, Error, Resolve};
 use std::sync::Arc;
 
 use tc_error::*;
 use tc_transact::TxnId;
-use tc_value::{Host, Link, ToUrl, Value};
-use tcgeneric::{Map, NetworkTime};
+use tc_value::{Host, ToUrl, Value};
+use tcgeneric::Map;
 
 use crate::kernel::Kernel;
-use crate::{Claim, State, Txn};
+use crate::{Actor, State, Txn};
 
 #[async_trait]
-pub trait RPCClient: Resolve<ActorId = Value, HostId = Link, Claims = Claim> + Send + Sync {
+pub trait RPCClient: Send + Sync {
     fn extract_jwt(&self, txn: &Txn) -> Option<String> {
         txn.token().map(|token| token.jwt().to_string())
     }
+
+    async fn fetch(&self, txn_id: TxnId, link: ToUrl<'_>, actor_id: Value) -> TCResult<Actor>;
 
     async fn get(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<State>;
 
@@ -51,34 +52,22 @@ impl Client {
 }
 
 #[async_trait]
-impl Resolve for Client {
-    type HostId = Link;
-    type ActorId = Value;
-    type Claims = Claim;
+impl RPCClient for Client {
+    async fn fetch(&self, txn_id: TxnId, link: ToUrl<'_>, actor_id: Value) -> TCResult<Actor> {
+        trace!("fetch actor {actor_id:?} at {link}");
 
-    async fn resolve(
-        &self,
-        host: &Self::HostId,
-        actor_id: &Self::ActorId,
-    ) -> Result<Actor<Self::ActorId>, Error> {
-        trace!("resolve actor {actor_id:?} on {host}");
-
-        if self.is_loopback(&host.into()) {
-            let txn_id = TxnId::new(NetworkTime::now());
+        if self.is_loopback(&link) {
             let public_key = self
                 .kernel
-                .public_key(txn_id, host.path())
-                .map_err(Error::fetch)?;
+                .public_key(txn_id, link.path())
+                .map_err(rjwt::Error::fetch)?;
 
             Ok(Actor::with_public_key(actor_id.clone(), public_key))
         } else {
-            self.client.resolve(host, actor_id).await
+            self.client.fetch(txn_id, link, actor_id).await
         }
     }
-}
 
-#[async_trait]
-impl RPCClient for Client {
     async fn get(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<State> {
         if self.is_loopback(&link) {
             let endpoint = self.kernel.route(link.path(), txn)?;

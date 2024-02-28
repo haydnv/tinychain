@@ -6,6 +6,8 @@ use umask::Mode;
 
 use tc_value::{Address, Host, Link, Protocol, Value};
 
+pub use rjwt::VerifyingKey;
+
 pub use tc_state::CacheBlock;
 
 pub use builder::Builder;
@@ -36,8 +38,8 @@ pub const DEFAULT_TTL: Duration = Duration::from_secs(3);
 pub const SERVICE_TYPE: &'static str = "_tinychain._tcp.local.";
 
 pub type Actor = rjwt::Actor<Value>;
-pub type SignedToken = rjwt::SignedToken<Link, Value, claim::Claim>;
-pub type Token = rjwt::Token<Link, Value, claim::Claim>;
+pub type SignedToken = rjwt::SignedToken<Link, Value, Claim>;
+pub type Token = rjwt::Token<Link, Value, Claim>;
 pub type State = tc_state::State<Txn>;
 
 pub trait Authorize {

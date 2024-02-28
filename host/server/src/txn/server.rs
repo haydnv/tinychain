@@ -3,24 +3,58 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use ds_ext::OrdHashSet;
 use freqfs::DirLock;
+use futures::TryFutureExt;
 use log::debug;
-use rjwt::Resolve;
+use rjwt::{Actor, Error, Resolve};
 use tokio::sync::mpsc;
 
 use tc_error::*;
 use tc_state::CacheBlock;
 use tc_transact::TxnId;
+use tc_value::{Link, Value};
 use tcgeneric::NetworkTime;
 
+use crate::claim::Claim;
 use crate::client::Client;
 use crate::kernel::Kernel;
+use crate::RPCClient;
 
 use super::{LazyDir, Txn};
 
 // allow an end-user's request to time out gracefully before garbage collection
 const GRACE: Duration = Duration::from_secs(1);
+
+struct Resolver<'a> {
+    client: &'a Client,
+    txn_id: TxnId,
+}
+
+impl<'a> Resolver<'a> {
+    fn new(client: &'a Client, txn_id: TxnId) -> Self {
+        Self { client, txn_id }
+    }
+}
+
+#[async_trait]
+impl<'a> Resolve for Resolver<'a> {
+    type HostId = Link;
+    type ActorId = Value;
+    type Claims = Claim;
+
+    async fn resolve(
+        &self,
+        host: &Self::HostId,
+        actor_id: &Self::ActorId,
+    ) -> Result<Actor<Self::ActorId>, Error> {
+        self.client
+            .fetch(self.txn_id, host.into(), actor_id.clone())
+            .map_err(Error::fetch)
+            .await
+    }
+}
 
 #[derive(Debug)]
 struct Active {
@@ -161,7 +195,8 @@ impl TxnServer {
         now: NetworkTime,
         token: String,
     ) -> TCResult<Txn> {
-        let token = self.client.verify(token, now.into()).await?;
+        let resolver = Resolver::new(&self.client, txn_id);
+        let token = resolver.verify(token, now.into()).await?;
         let expiry = token.expires().try_into()?;
 
         let workspace = LazyDir::from(self.workspace.clone()).create_dir(txn_id.to_id());

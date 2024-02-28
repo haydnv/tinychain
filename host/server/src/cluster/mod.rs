@@ -177,7 +177,8 @@ impl<T> Cluster<T> {
 
         let (num_replicas, mut failed) = {
             let replicas = self.replicas.read(*txn.id()).await?;
-            let failed = Self::replicate_write_inner(&txn, &this_host, &*replicas, &uri, op).await?;
+            let failed =
+                Self::replicate_write_inner(&txn, &this_host, &*replicas, &uri, op).await?;
             (replicas.len(), failed)
         };
 
@@ -202,7 +203,7 @@ impl<T> Cluster<T> {
             for host in failed {
                 replicas.remove(&host);
                 to_remove.push(host.into());
-            };
+            }
 
             failed =
                 Self::replicate_write_inner(&txn, &this_host, &*replicas, &uri, |txn, link| {

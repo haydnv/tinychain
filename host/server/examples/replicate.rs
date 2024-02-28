@@ -51,15 +51,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use freqfs::Cache;
-use futures::{FutureExt, TryFutureExt};
-use rjwt::{Actor, Error, Resolve, VerifyingKey};
+use futures::FutureExt;
 use tokio::sync::RwLock;
 
 use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
 use tc_server::aes256::{Aes256GcmSiv, Key, KeyInit, OsRng};
-use tc_server::{Builder, Claim, RPCClient, Server, State, Txn, DEFAULT_PORT};
-use tc_transact::Transaction;
+use tc_server::*;
+use tc_transact::{Transaction, TxnId};
 use tc_value::{Host, Link, Protocol, ToUrl, Value};
 use tcgeneric::{label, path_label, Id, Map, PathLabel, TCPath, TCPathBuf};
 
@@ -107,20 +106,11 @@ impl Client {
 }
 
 #[async_trait]
-impl Resolve for Client {
-    type HostId = Link;
-    type ActorId = Value;
-    type Claims = Claim;
-
-    async fn resolve(
-        &self,
-        host: &Self::HostId,
-        actor_id: &Self::ActorId,
-    ) -> Result<Actor<Self::ActorId>, Error> {
-        let link = ToUrl::from(host);
+impl RPCClient for Client {
+    async fn fetch(&self, txn_id: TxnId, link: ToUrl<'_>, actor_id: Value) -> TCResult<Actor> {
         let servers = self.servers.read().await;
-        let server = Self::get_server_for(&*servers, &link).map_err(Error::fetch)?;
-        let txn = server.create_txn().map_err(Error::fetch)?;
+        let server = Self::get_server_for(&*servers, &link)?;
+        let txn = server.get_txn(Some(txn_id), None).await?;
 
         let public_key = self
             .get(&txn, link, actor_id.clone())
@@ -129,17 +119,13 @@ impl Resolve for Client {
                     .and_then(Value::try_from)
                     .and_then(Arc::<[u8]>::try_from)
             })
-            .map_err(|cause| Error::auth(format!("{cause} (for {actor_id} at {host}")))
             .await?;
 
         VerifyingKey::try_from(&*public_key)
-            .map(|public_key| Actor::with_public_key(actor_id.clone(), public_key))
-            .map_err(|cause| Error::auth(format!("{cause} (for {actor_id} at {host})")))
+            .map(|public_key| Actor::with_public_key(actor_id, public_key))
+            .map_err(|cause| bad_request!("invalid public key: {cause}"))
     }
-}
 
-#[async_trait]
-impl RPCClient for Client {
     async fn get(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<State> {
         let servers = self.servers.read().await;
         let server = Self::get_server_for(&*servers, &link)?;
