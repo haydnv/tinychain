@@ -9,7 +9,7 @@ use tc_transact::public::*;
 use tc_transact::Transaction;
 use tcgeneric::{PathSegment, TCPath};
 
-use crate::cluster::dir::{Dir, DirCreate, DirEntry};
+use crate::cluster::dir::{Dir, DirCreate, DirCreateItem, DirEntry, DirItem};
 use crate::cluster::{Cluster, Schema};
 use crate::{State, Txn};
 
@@ -19,7 +19,7 @@ struct DirHandler<'a, T> {
 
 impl<'a, T> Handler<'a, State> for DirHandler<'a, T>
 where
-    T: Send + Sync + fmt::Debug,
+    T: DirItem + fmt::Debug,
     Dir<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema> + Route<State> + fmt::Debug,
     DirEntry<T>: Clone,
     Cluster<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
@@ -59,16 +59,13 @@ where
                 let name: PathSegment =
                     key.try_cast_into(|v| TCError::unexpected(v, "a directory name"))?;
 
-                if value.is_map() {
-                    if value.is_none() {
-                        self.dir.create_dir(txn, name).await?;
-                        Ok(())
-                    } else {
-                        Err(TCError::unexpected(value, "an empty Map"))
-                    }
+                if value.try_into()? {
+                    self.dir.create_dir(txn, name).await?;
                 } else {
-                    Err(not_implemented!("create a new item in a cluster directory"))
+                    self.dir.create_item(txn, name).await?;
                 }
+
+                Ok(())
             })
         }))
     }
@@ -82,7 +79,7 @@ impl<'a, T> From<&'a Dir<T>> for DirHandler<'a, T> {
 
 impl<T> Route<State> for Dir<T>
 where
-    T: Send + Sync + fmt::Debug,
+    T: DirItem + fmt::Debug,
     Dir<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema> + fmt::Debug,
     DirEntry<T>: Clone,
     Cluster<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,

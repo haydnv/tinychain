@@ -91,6 +91,7 @@ pub mod lock {
 
     use super::TxnId;
 
+    pub use txn_lock::scalar::{TxnLockReadGuard, TxnLockWriteGuard};
     pub use txn_lock::semaphore::{PermitRead, PermitWrite};
 
     /// A semaphore used to gate access to a transactional resource

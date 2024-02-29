@@ -222,7 +222,7 @@ where
 #[async_trait]
 impl<T> DirCreateItem<T> for Dir<T>
 where
-    T: DirItem + Route<State> + fmt::Debug,
+    T: DirItem + fmt::Debug,
     Cluster<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
     DirEntry<T>: Clone,
 {

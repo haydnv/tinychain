@@ -58,14 +58,18 @@ use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
 use tc_server::aes256::{Aes256GcmSiv, Key, KeyInit, OsRng};
 use tc_server::*;
+use tc_state::object::InstanceClass;
 use tc_transact::{Transaction, TxnId};
-use tc_value::{Host, Link, Protocol, ToUrl, Value};
-use tcgeneric::{label, path_label, Id, Map, PathLabel, TCPath, TCPathBuf};
+use tc_value::{Host, Link, Protocol, ToUrl, Value, Version as VersionNumber};
+use tcgeneric::{label, path_label, Id, Label, Map, NetworkTime, PathLabel, TCPath, TCPathBuf};
 
 const CACHE_SIZE: usize = 1_000_000;
 const DATA_DIR: &'static str = "/tmp/tc/example_server/data";
 const WORKSPACE: &'static str = "/tmp/tc/example_server/workspace";
 const HYPOTHETICAL: PathLabel = path_label(&["txn", "hypothetical"]);
+
+const CLASS: Label = label("class");
+const TEST: Label = label("test");
 
 #[derive(Default)]
 struct Client {
@@ -95,13 +99,13 @@ impl Client {
             bad_request!("RPC to {} is missing a host", TCPath::from(link.path()))
         })?;
 
-        let port = host.port().ok_or_else(|| {
+        host.port().ok_or_else(|| {
             bad_request!("RPC to {} is missing a port", TCPath::from(link.path()))
         })?;
 
         servers
             .get(host)
-            .ok_or_else(|| not_found!("server at {host}:{port}"))
+            .ok_or_else(|| not_found!("server at {host}"))
     }
 }
 
@@ -235,18 +239,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(Scalar::try_from(response).unwrap(), hello_world);
 
     // try creating a cluster directory
-    let dir_name: Id = "test".parse().unwrap();
-    let link = Link::new(host1.clone(), [label("class").into()].into());
+    let dir_name: Id = TEST.into();
+    let link = Link::new(host1.clone(), [CLASS.into()].into());
 
     let txn = client.get_txn(&host1)?;
 
     client
-        .put(
-            &txn,
-            link.into(),
-            dir_name.into(),
-            Map::<State>::new().into(),
-        )
+        .put(&txn, link.into(), dir_name.clone().into(), true.into())
         .await?;
 
     // start a second server and replicate the state of the first
@@ -263,6 +262,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let host2 = server2.host().clone();
     client.add(host2.clone(), server2.ready());
+
+    // make sure the new dir is present and committed on both hosts
+    // let txn = client.get_txn(&host1)?;
+    // let link = Link::new(host1.clone(), [CLASS.into(), TEST.into()].into());
+    // client.get(&txn, link.into(), Value::default()).await?;
+
+    let txn = client.get_txn(&host2)?;
+    let link = Link::new(host2.clone(), [CLASS.into(), TEST.into()].into());
+    client.get(&txn, link.into(), Value::default()).await?;
+
+    // create a new directory item and make sure it's correctly replicated
+    // let version_number = VersionNumber::default();
+    // let classname: Id = label("classname").into();
+    // let class = InstanceClass::new(Map::default());
+    //
+    // let link = Link::new(host1.clone(), [CLASS.into(), dir_name].into());
+    // let txn = client.get_txn(&host1)?;
+    // client
+    //     .put(
+    //         &txn,
+    //         link.into(),
+    //         version_number.into(),
+    //         State::Map([(classname, State::from(class))].into_iter().collect()),
+    //     )
+    //     .await?;
 
     Ok(())
 }

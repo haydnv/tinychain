@@ -19,9 +19,10 @@ use tc_state::CacheBlock;
 use tc_transact::hash::AsyncHash;
 use tc_transact::public::*;
 use tc_transact::{fs, Gateway, Transact, Transaction, TxnId};
-use tc_value::{Host, Link, Value};
+use tc_value::{Host, Link, ToUrl, Value};
 use tcgeneric::{label, Label, Map, NetworkTime, PathSegment, TCPath, TCPathBuf, Tuple};
 
+use crate::client::Egress;
 use crate::cluster::{Class, Cluster, Dir, DirEntry, ReplicateAndJoin};
 use crate::txn::{Hypothetical, Txn, TxnServer};
 use crate::{aes256, cluster, Authorize, SignedToken, State};
@@ -30,6 +31,23 @@ const CLASS: Label = label("class");
 const REPLICATION_TTL: Duration = Duration::from_secs(30);
 
 type Nonce = [u8; 12];
+
+struct KernelEgress {
+    peer: Link,
+}
+
+impl Egress for KernelEgress {
+    fn is_authorized(&self, link: &ToUrl<'_>, _write: bool) -> bool {
+        link.host() == self.peer.host()
+            && (link.path().is_empty() || link.path().starts_with(&self.peer.path()[..]))
+    }
+}
+
+impl From<Link> for KernelEgress {
+    fn from(peer: Link) -> Self {
+        Self { peer }
+    }
+}
 
 pub struct Endpoint<'a> {
     mode: Mode,
@@ -122,17 +140,15 @@ impl Kernel {
 
     pub fn public_key(&self, txn_id: TxnId, path: &[PathSegment]) -> TCResult<VerifyingKey> {
         if path.is_empty() {
-            Err(bad_request!(
-                "cannot issue a token for {}",
-                TCPath::from(path)
-            ))
+            Err(bad_request!("{} has no public key", TCPath::from(path)))
         } else if path[0] == CLASS {
             public_key(txn_id, &self.class, &path[1..])
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
-            Err(bad_request!(
-                "cannot issue a token for {}",
-                TCPath::from(path)
-            ))
+            if path.len() == Hypothetical::PATH.len() {
+                Err(bad_request!("{} has no public key", TCPath::from(path)))
+            } else {
+                Err(not_found!("{}", TCPath::from(path)))
+            }
         } else {
             Err(not_found!("{}", TCPath::from(path)))
         }
@@ -178,14 +194,23 @@ impl Kernel {
             let mut joined = false;
 
             for peer in &peers {
-                let txn = txn_server.create_txn(NetworkTime::now()).expect("txn");
+                let egress = Arc::new(KernelEgress::from(Link::new(
+                    peer.clone(),
+                    cluster.path().clone(),
+                )));
+
+                let txn = txn_server
+                    .create_txn(NetworkTime::now())
+                    .expect("txn")
+                    .with_egress(egress.clone());
+
                 let txn_id = *txn.id();
                 let txn = match get_token(&txn, peer, &self.keys, cluster.path()).await {
                     Ok(token) => match txn_server
                         .verify_txn(txn_id, NetworkTime::now(), token)
                         .await
                     {
-                        Ok(txn) => txn,
+                        Ok(txn) => txn.with_egress(egress.clone()),
                         Err(cause) => {
                             warn!("failed to verify token from {peer}: {cause}");
                             continue;
@@ -197,8 +222,10 @@ impl Kernel {
                     }
                 };
 
-                match cluster.replicate_and_join(&txn, peer.clone()).await {
+                match cluster.replicate_and_join(txn, peer.clone()).await {
                     Ok(entries) => {
+                        self.commit(txn_id).await;
+
                         joined = true;
                         progress = true;
 
@@ -296,7 +323,7 @@ impl fs::Persist<CacheBlock> for Kernel {
 
         let link = Link::new(schema.host, Hypothetical::PATH.into());
         let txn_schema = cluster::Schema::new(lead, link, schema.owner, schema.group);
-        let hypothetical = Cluster::new(txn_schema, Hypothetical::new(), txn_id);
+        let hypothetical = Cluster::new(txn_schema, Hypothetical::new());
 
         Ok(Self {
             class,
@@ -325,7 +352,7 @@ impl fs::Persist<CacheBlock> for Kernel {
 
         let link = Link::new(schema.host, Hypothetical::PATH.into());
         let txn_schema = cluster::Schema::new(lead, link, schema.owner, schema.group);
-        let hypothetical = Cluster::new(txn_schema, Hypothetical::new(), txn_id);
+        let hypothetical = Cluster::new(txn_schema, Hypothetical::new());
 
         Ok(Self {
             class,

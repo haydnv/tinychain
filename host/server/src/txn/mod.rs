@@ -18,7 +18,7 @@ use tc_value::{Host, Link, ToUrl, Value};
 use tcgeneric::{label, Id, Label, Map, NetworkTime, PathSegment, TCPathBuf};
 
 use crate::claim::Claim;
-use crate::client::Client;
+use crate::client::{Client, Egress};
 use crate::{Actor, RPCClient, SignedToken, State};
 
 pub use hypothetical::Hypothetical;
@@ -341,6 +341,16 @@ impl Txn {
             Ok(Some(public_key))
         } else {
             Ok(None)
+        }
+    }
+
+    pub(crate) fn with_egress(self, egress: Arc<dyn Egress>) -> Self {
+        Self {
+            id: self.id,
+            expires: self.expires,
+            workspace: self.workspace,
+            client: self.client.with_egress(egress),
+            token: self.token,
         }
     }
 

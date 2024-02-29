@@ -1,26 +1,28 @@
-use std::collections::HashMap;
+use std::collections::hash_map::{Entry, HashMap};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use rjwt::{OsRng, SigningKey, Token, VerifyingKey};
 use safecast::TryCastInto;
 use umask::Mode;
 
 use tc_error::*;
 use tc_transact::hash::{Output, Sha256};
-use tc_transact::lock::{TxnLock, TxnMapLockIter};
+use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnMapLockIter};
 use tc_transact::{fs, Gateway};
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Host, Link, Value};
+use tc_value::{Host, Link, ToUrl, Value};
 use tcgeneric::{label, Label, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::claim::Claim;
+use crate::client::Egress;
 use crate::txn::Txn;
 use crate::{default_host, Actor, CacheBlock, SignedToken, State};
 
@@ -37,6 +39,45 @@ const REPLICAS: Label = label("replicas");
 mod class;
 mod dir;
 mod public;
+
+pub(crate) struct ClusterEgress {
+    lead: Host,
+    path: TCPathBuf,
+    replicas: TxnLockReadGuard<HashMap<Host, VerifyingKey>>,
+    external: Arc<Mutex<HashMap<Link, bool>>>,
+}
+
+impl Egress for ClusterEgress {
+    fn is_authorized(&self, link: &ToUrl<'_>, is_write: bool) -> bool {
+        // TODO: replace label("state") with State::PREFIX
+        if link.path().starts_with(&[label("state").into()])
+            || link.path().starts_with(&self.path[..])
+        {
+            if let Some(host) = link.host() {
+                if host == &self.lead {
+                    return true;
+                } else if self.replicas.keys().any(|replica| replica == host) {
+                    return true;
+                }
+            } else {
+                return true;
+            }
+        }
+
+        let mut external = self.external.lock().expect("authorized external services");
+        // TODO: only allow egress to whitelisted services, i.e. don't allow inserting a new entry here
+        match external.entry(link.to_link()) {
+            Entry::Occupied(mut entry) => {
+                *entry.get_mut() |= is_write;
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(is_write);
+            }
+        }
+
+        true
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Schema {
@@ -82,10 +123,11 @@ pub struct Cluster<T> {
     mode: Mode,
     state: T,
     replicas: TxnLock<HashMap<Host, VerifyingKey>>,
+    claimed: Arc<Mutex<BTreeMap<TxnId, Arc<Mutex<HashMap<Link, bool>>>>>>,
 }
 
 impl<T> Cluster<T> {
-    pub fn new(schema: Schema, state: T, txn_id: TxnId) -> Self {
+    pub fn new(schema: Schema, state: T) -> Self {
         let keypair = SigningKey::generate(&mut OsRng);
         let public_key = keypair.verifying_key();
         let actor = Actor::with_keypair(Value::Bytes(Arc::new(*public_key.as_bytes())), keypair);
@@ -110,12 +152,14 @@ impl<T> Cluster<T> {
             mode,
             state,
             replicas,
+            claimed: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
     pub fn link(&self) -> &Link {
         &self.inner.schema.link
     }
+
     pub fn path(&self) -> &TCPathBuf {
         self.inner.schema.link.path()
     }
@@ -129,9 +173,27 @@ impl<T> Cluster<T> {
     }
 
     #[inline]
+    fn authorize_egress(&self, txn: Txn) -> TCResult<Txn> {
+        let whitelist = Arc::new(Mutex::new(HashMap::new()));
+
+        let egress = ClusterEgress {
+            lead: self.inner.schema.lead.clone(),
+            path: self.path().clone(),
+            replicas: self.replicas.try_read(*txn.id())?,
+            external: whitelist.clone(),
+        };
+
+        let mut claimed = self.claimed.lock().expect("claimed");
+        claimed.insert(*txn.id(), whitelist);
+
+        Ok(txn.with_egress(Arc::new(egress)))
+    }
+
+    #[inline]
     pub fn claim(&self, txn: Txn) -> TCResult<Txn> {
         if txn.leader(self.path())?.is_none() {
             txn.claim(self.link().clone(), &self.inner.actor)
+                .and_then(|txn| self.authorize_egress(txn))
         } else {
             Ok(txn)
         }
@@ -180,6 +242,7 @@ impl<T> Cluster<T> {
             let replicas = self.replicas.read(*txn.id()).await?;
             let failed =
                 Self::replicate_write_inner(&txn, &this_host, &*replicas, &uri, op).await?;
+
             (replicas.len(), failed)
         };
 
@@ -253,7 +316,7 @@ impl<T> Cluster<T> {
                     return Err(cause);
                 }
                 Err(cause) => {
-                    debug!("{host} failed: {cause}");
+                    warn!("{host} failed: {cause}");
                     failed.push(host.clone());
                 }
             }
@@ -351,7 +414,7 @@ pub(crate) trait ReplicateAndJoin {
 
     async fn replicate_and_join(
         &self,
-        txn: &Txn,
+        txn: Txn,
         peer: Host,
     ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<Self::State>>>;
 }
@@ -368,10 +431,10 @@ where
 
     async fn replicate_and_join(
         &self,
-        txn: &Txn,
+        txn: Txn,
         peer: Host,
     ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<T>>> {
-        let hash = self.state.replicate(txn, peer.clone()).await?;
+        let hash = self.state.replicate(&txn, peer.clone()).await?;
 
         let peer_link = Link::new(peer, self.path().clone()).append(REPLICAS);
 
@@ -386,7 +449,12 @@ where
         let public_key = Value::Bytes(Arc::new(*self.public_key().as_bytes()));
 
         {
-            assert!(txn.leader(self.path())?.is_none());
+            // since the server is not yet ready, other hosts can't verify any claims by this host
+            assert!(
+                txn.leader(self.path())?.is_none(),
+                "this transaction should not be claimed"
+            );
+
             let mut keyring = self.replicas.write(*txn.id()).await?;
 
             let replica_set = txn.get(peer_link, Value::default()).await?;
@@ -409,15 +477,22 @@ where
                 replica_set.len()
             );
 
+            let mut participants = HashMap::with_capacity(replica_set.len());
             for (host, public_key) in replica_set {
                 let public_key = VerifyingKey::try_from(&*public_key)
                     .map_err(|v| TCError::unexpected(v, "a public key"))?;
 
-                keyring.insert(host, public_key);
+                keyring.insert(host.clone(), public_key);
+                participants.insert(host.into(), true);
             }
+
+            let mut claimed = self.claimed.lock().expect("claimed txns");
+            assert!(claimed
+                .insert(*txn.id(), Arc::new(Mutex::new(participants)))
+                .is_none())
         }
 
-        self.replicate_write(txn, &[REPLICAS.into()], |txn, link| {
+        self.replicate_write(&txn, &[REPLICAS.into()], |txn, link| {
             let host = host.clone();
             let public_key = public_key.clone();
             let hash = Value::Bytes(hash.as_slice().into());
@@ -485,7 +560,7 @@ impl fs::Persist<CacheBlock> for Cluster<Class> {
         store: fs::Dir<CacheBlock>,
     ) -> TCResult<Self> {
         <Class as fs::Persist<CacheBlock>>::create(txn_id, (), store)
-            .map_ok(|subject| Self::new(schema, subject, txn_id))
+            .map_ok(|subject| Self::new(schema, subject))
             .await
     }
 
@@ -495,7 +570,7 @@ impl fs::Persist<CacheBlock> for Cluster<Class> {
         store: fs::Dir<CacheBlock>,
     ) -> TCResult<Self> {
         <Class as fs::Persist<CacheBlock>>::load(txn_id, (), store)
-            .map_ok(|subject| Self::new(schema, subject, txn_id))
+            .map_ok(|subject| Self::new(schema, subject))
             .await
     }
 
@@ -515,7 +590,7 @@ impl fs::Persist<CacheBlock> for Cluster<Dir<Class>> {
         store: fs::Dir<CacheBlock>,
     ) -> TCResult<Self> {
         <Dir<Class> as fs::Persist<CacheBlock>>::create(txn_id, schema.clone(), store)
-            .map_ok(|subject| Self::new(schema, subject, txn_id))
+            .map_ok(|subject| Self::new(schema, subject))
             .await
     }
 
@@ -525,7 +600,7 @@ impl fs::Persist<CacheBlock> for Cluster<Dir<Class>> {
         store: fs::Dir<CacheBlock>,
     ) -> TCResult<Self> {
         <Dir<Class> as fs::Persist<CacheBlock>>::load(txn_id, schema.clone(), store)
-            .map_ok(|subject| Self::new(schema, subject, txn_id))
+            .map_ok(|subject| Self::new(schema, subject))
             .await
     }
 
