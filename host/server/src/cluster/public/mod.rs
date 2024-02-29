@@ -4,16 +4,17 @@ use std::sync::Arc;
 use futures::Future;
 use log::{debug, trace};
 use rjwt::VerifyingKey;
-use safecast::TryCastFrom;
+use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
+use tc_transact::hash::AsyncHash;
 use tc_transact::public::*;
 use tc_transact::{Gateway, Transact, Transaction};
 use tc_value::{Host, Link, Value};
 use tcgeneric::{PathSegment, Tuple};
 
 use crate::txn::Txn;
-use crate::{Authorize, State};
+use crate::State;
 
 use super::{Cluster, REPLICAS};
 
@@ -146,9 +147,9 @@ struct ReplicaSetHandler<T> {
     cluster: Cluster<T>,
 }
 
-impl<'a, T: Send + Sync + fmt::Debug> Handler<'a, State> for ReplicaSetHandler<T>
+impl<'a, T> Handler<'a, State> for ReplicaSetHandler<T>
 where
-    T: 'a,
+    T: AsyncHash + Send + Sync + fmt::Debug + 'a,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
@@ -159,10 +160,6 @@ where
                 debug!("GET {:?} replicas", self.cluster);
 
                 let keyring = self.cluster.keyring(*txn.id())?;
-
-                if !txn.mode(&*keyring, self.cluster.path()).may_read() {
-                    return Err(unauthorized!("read the replica set of {:?}", self.cluster));
-                }
 
                 if key.is_some() {
                     let key = Arc::<[u8]>::try_from(key)?;
@@ -203,17 +200,18 @@ where
             Box::pin(async move {
                 debug!("PUT {:?} replica {key}: {value:?}", self.cluster);
 
-                let mut keyring = self.cluster.keyring_mut(*txn.id())?;
+                let new_replica_hash = Value::try_from(value).and_then(Arc::<[u8]>::try_from)?;
+                let this_replica_hash = AsyncHash::hash(self.cluster.state(), *txn.id()).await?;
 
-                if !txn.mode(&*keyring, self.cluster.path()).may_write() {
-                    return Err(unauthorized!(
-                        "modify the replica set of {:?}",
-                        self.cluster
-                    ));
+                if &new_replica_hash[..] != &this_replica_hash[..] {
+                    return Err(bad_request!("the provided cluster state hash is incorrect"));
                 }
 
-                let host = Host::try_cast_from(key, |v| TCError::unexpected(v, "a host address"))?;
-                let public_key = Value::try_from(value).and_then(Arc::<[u8]>::try_from)?;
+                let mut keyring = self.cluster.keyring_mut(*txn.id())?;
+
+                let (host, public_key): (Host, Arc<[u8]>) =
+                    key.try_cast_into(|v| TCError::unexpected(v, "a host address and key"))?;
+
                 let public_key = VerifyingKey::try_from(&*public_key)
                     .map_err(|cause| bad_request!("invalid public key: {cause}"))?;
 
@@ -233,13 +231,6 @@ where
                 debug!("DELETE {:?} replicas {key}", self.cluster);
 
                 let mut keyring = self.cluster.keyring_mut(*txn.id())?;
-
-                if !txn.mode(&*keyring, self.cluster.path()).may_write() {
-                    return Err(unauthorized!(
-                        "modify the replica set of {:?}",
-                        self.cluster
-                    ));
-                }
 
                 let hosts = Tuple::<Value>::try_from(key)?;
 
@@ -379,7 +370,7 @@ where
 
 impl<T> Cluster<T>
 where
-    T: Route<State> + Transact + Send + Sync + fmt::Debug,
+    T: AsyncHash + Route<State> + Transact + Send + Sync + fmt::Debug,
 {
     pub fn route_owned<'a>(
         self,
@@ -400,7 +391,7 @@ where
 
 impl<T> Route<State> for Cluster<T>
 where
-    T: Route<State> + Transact + Clone + Send + Sync + fmt::Debug,
+    T: AsyncHash + Route<State> + Transact + Clone + Send + Sync + fmt::Debug,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         self.clone().route_owned(path)

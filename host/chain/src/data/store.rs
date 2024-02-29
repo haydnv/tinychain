@@ -78,7 +78,7 @@ where
     Collection<Txn, FE>: AsyncHash,
     Scalar: Hash<Sha256>,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         match self {
             StoreEntry::Collection(collection) => collection.clone().hash(txn_id).await,
             StoreEntry::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),

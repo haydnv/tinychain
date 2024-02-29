@@ -203,7 +203,7 @@ where
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
     T: Send + Sync,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         self.history.hash(txn_id).await
     }
 }

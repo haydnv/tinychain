@@ -100,7 +100,7 @@ impl<Txn> AsyncHash for Object<Txn>
 where
     Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
-    async fn hash(self, _txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, _txn_id: TxnId) -> TCResult<Output<Sha256>> {
         match self {
             Self::Class(class) => Ok(Hash::<Sha256>::hash(class)),
             Self::Instance(instance) => Err(bad_request!("cannot hash {:?}", instance)),

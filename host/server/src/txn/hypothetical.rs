@@ -2,6 +2,7 @@ use async_trait::async_trait;
 
 use tc_error::*;
 use tc_scalar::{Executor, OpDef};
+use tc_transact::hash::{AsyncHash, Output, Sha256};
 use tc_transact::public::{Handler, PostHandler, Route};
 use tc_transact::{Transact, TxnId};
 use tcgeneric::{path_label, PathLabel, PathSegment};
@@ -18,6 +19,13 @@ impl Hypothetical {
 
     pub fn new() -> Self {
         Self {}
+    }
+}
+
+#[async_trait]
+impl AsyncHash for Hypothetical {
+    async fn hash(&self, _txn_id: TxnId) -> TCResult<Output<Sha256>> {
+        Ok(async_hash::default_hash::<Sha256>())
     }
 }
 

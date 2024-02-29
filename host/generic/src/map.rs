@@ -6,6 +6,7 @@ use std::fmt;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::{Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
@@ -139,6 +140,26 @@ impl<T> Deref for Map<T> {
 impl<T> DerefMut for Map<T> {
     fn deref_mut(&'_ mut self) -> &'_ mut <Self as Deref>::Target {
         &mut self.inner
+    }
+}
+
+impl<D, T> Hash<D> for Map<T>
+where
+    D: Digest,
+    T: Hash<D>,
+{
+    fn hash(self) -> Output<D> {
+        self.inner.hash()
+    }
+}
+
+impl<'a, D, T> Hash<D> for &'a Map<T>
+where
+    D: Digest,
+    &'a T: Hash<D>,
+{
+    fn hash(self) -> Output<D> {
+        self.inner.hash()
     }
 }
 

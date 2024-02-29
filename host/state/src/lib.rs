@@ -10,7 +10,7 @@ use bytes::Bytes;
 use destream::de;
 use destream::ArrayAccess;
 use futures::future::TryFutureExt;
-use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::stream::{StreamExt, TryStreamExt};
 use log::debug;
 use safecast::*;
 
@@ -20,7 +20,7 @@ use tc_chain::{ChainType, ChainVisitor};
 use tc_collection::{CollectionType, CollectionVisitor};
 use tc_error::*;
 use tc_scalar::*;
-use tc_transact::hash::{AsyncHash, Digest, Hash, Output, Sha256};
+use tc_transact::hash::{AsyncHash, Hash, Output, Sha256};
 use tc_transact::public::{ClosureInstance, Public, StateInstance, ToState};
 use tc_transact::{Gateway, Transaction, TxnId};
 use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};
@@ -508,48 +508,17 @@ impl<Txn> AsyncHash for State<Txn>
 where
     Txn: Transaction<CacheBlock> + Gateway<Self>,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         match self {
             #[cfg(feature = "chain")]
             Self::Chain(chain) => chain.hash(txn_id).await,
             Self::Closure(closure) => closure.hash(txn_id).await,
             #[cfg(feature = "collection")]
             Self::Collection(collection) => collection.hash(txn_id).await,
-            Self::Map(map) => {
-                let mut hashes = stream::iter(map)
-                    .map(|(id, state)| {
-                        state
-                            .hash(txn_id)
-                            .map_ok(|hash| (Hash::<Sha256>::hash(id), hash))
-                    })
-                    .buffered(num_cpus::get())
-                    .map_ok(|(id, state)| {
-                        let mut inner_hasher = Sha256::default();
-                        inner_hasher.update(&id);
-                        inner_hasher.update(&state);
-                        inner_hasher.finalize()
-                    });
-
-                let mut hasher = Sha256::default();
-                while let Some(hash) = hashes.try_next().await? {
-                    hasher.update(&hash);
-                }
-
-                Ok(hasher.finalize())
-            }
+            Self::Map(map) => map.hash(txn_id).await,
             Self::Object(object) => object.hash(txn_id).await,
             Self::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),
-            Self::Tuple(tuple) => {
-                let mut hashes = stream::iter(tuple)
-                    .map(|state| state.hash(txn_id))
-                    .buffered(num_cpus::get());
-
-                let mut hasher = Sha256::default();
-                while let Some(hash) = hashes.try_next().await? {
-                    hasher.update(&hash);
-                }
-                Ok(hasher.finalize())
-            }
+            Self::Tuple(tuple) => tuple.hash(txn_id).await,
         }
     }
 }

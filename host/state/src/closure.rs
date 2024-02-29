@@ -217,12 +217,10 @@ impl<Txn> AsyncHash for Closure<Txn>
 where
     Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
-        let context = State::Map(self.context).hash(txn_id).await?;
-
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         let mut hasher = Sha256::default();
-        hasher.update(&context);
-        hasher.update(&Hash::<Sha256>::hash(self.op));
+        hasher.update(self.context.hash(txn_id).await?);
+        hasher.update(&Hash::<Sha256>::hash(&self.op));
         Ok(hasher.finalize())
     }
 }

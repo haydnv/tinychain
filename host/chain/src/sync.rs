@@ -145,7 +145,7 @@ where
     State: StateInstance,
     T: AsyncHash + Send + Sync,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         self.subject.hash(txn_id).await
     }
 }

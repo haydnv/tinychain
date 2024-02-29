@@ -115,8 +115,8 @@ where
     T: Transaction<FE>,
     FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
-        Collection::from(self).hash(txn_id).await
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+        Collection::from(self.clone()).hash(txn_id).await
     }
 }
 

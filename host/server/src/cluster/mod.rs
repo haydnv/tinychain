@@ -7,12 +7,13 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
-use log::{debug, info};
+use log::{debug, error, info};
 use rjwt::{OsRng, SigningKey, Token, VerifyingKey};
 use safecast::TryCastInto;
 use umask::Mode;
 
 use tc_error::*;
+use tc_transact::hash::{Output, Sha256};
 use tc_transact::lock::{TxnLock, TxnMapLockIter};
 use tc_transact::{fs, Gateway};
 use tc_transact::{Transact, Transaction, TxnId};
@@ -67,7 +68,7 @@ impl Schema {
 
 #[async_trait]
 pub trait Replicate: Send + Sync {
-    async fn replicate(&self, txn: &Txn, peer: Host) -> TCResult<()>;
+    async fn replicate(&self, txn: &Txn, peer: Host) -> TCResult<Output<Sha256>>;
 }
 
 struct Inner {
@@ -320,16 +321,22 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
 
         debug_assert_eq!(commits.len(), replicas.len() - 1);
 
+        let mut num_failed = 0;
         while let Some((host, result)) = commits.next().await {
             if result.is_ok() {
                 debug!("replica at {host} succeeded");
             } else {
                 // TODO: enqueue a message to initiate a rebalance of the replica set
-                panic!("replica at {host} failed--the replica set is now out of sync");
+                error!("replica at {host} failed--the replica set is now out of sync!");
+                num_failed += 1;
             }
         }
 
-        Ok(())
+        if num_failed * 2 > replicas.len() {
+            panic!("most replicas failed--shutting down this replica since it's now out of sync")
+        } else {
+            Ok(())
+        }
     }
 
     async fn replicate_rollback(&self, txn: &Txn) -> TCResult<()> {
@@ -364,7 +371,7 @@ where
         txn: &Txn,
         peer: Host,
     ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<T>>> {
-        self.state.replicate(txn, peer.clone()).await?;
+        let hash = self.state.replicate(txn, peer.clone()).await?;
 
         let peer_link = Link::new(peer, self.path().clone()).append(REPLICAS);
 
@@ -413,7 +420,8 @@ where
         self.replicate_write(txn, &[REPLICAS.into()], |txn, link| {
             let host = host.clone();
             let public_key = public_key.clone();
-            async move { txn.put(link, host, public_key).await }
+            let hash = Value::Bytes(hash.as_slice().into());
+            async move { txn.put(link, (host, public_key), hash).await }
         })
         .await?;
 

@@ -144,25 +144,28 @@ where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         let schema_hash = Hash::<Sha256>::hash(self.schema());
 
         let contents_hash = match self {
             Self::BTree(btree) => {
-                let keys = btree.keys(txn_id).await?;
+                let keys = btree.clone().keys(txn_id).await?;
                 hash_try_stream::<Sha256, _, _, _>(keys).await?
             }
             Self::Table(table) => {
-                let rows = table.rows(txn_id).await?;
+                let rows = table.clone().rows(txn_id).await?;
                 hash_try_stream::<Sha256, _, _, _>(rows).await?
             }
             Self::Tensor(tensor) => match tensor {
                 Tensor::Dense(dense) => {
-                    let elements = DenseView::from(dense).into_elements(txn_id).await?;
+                    let elements = DenseView::from(dense.clone()).into_elements(txn_id).await?;
                     hash_try_stream::<Sha256, _, _, _>(elements).await?
                 }
                 Tensor::Sparse(sparse) => {
-                    let elements = SparseView::from(sparse).into_elements(txn_id).await?;
+                    let elements = SparseView::from(sparse.clone())
+                        .into_elements(txn_id)
+                        .await?;
+
                     hash_try_stream::<Sha256, _, _, _>(elements).await?
                 }
             },

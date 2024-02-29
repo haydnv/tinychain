@@ -16,6 +16,7 @@ use umask::Mode;
 use tc_error::*;
 use tc_scalar::OpRefType;
 use tc_state::CacheBlock;
+use tc_transact::hash::AsyncHash;
 use tc_transact::public::*;
 use tc_transact::{fs, Gateway, Transact, Transaction, TxnId};
 use tc_value::{Host, Link, Value};
@@ -344,7 +345,7 @@ fn auth_claim_route<'a, T>(
     txn: &'a Txn,
 ) -> TCResult<Endpoint<'a>>
 where
-    T: Route<State> + Transact + Send + Sync + fmt::Debug + 'a,
+    T: AsyncHash + Route<State> + Transact + Send + Sync + fmt::Debug + 'a,
 {
     debug!("auth, claim, and route request to {}", TCPath::from(path));
 

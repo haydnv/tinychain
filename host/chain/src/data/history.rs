@@ -429,7 +429,7 @@ where
     State: StateInstance,
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         let latest_block_id = self.latest.read(txn_id).await?;
         let latest_block = self.read_block(*latest_block_id).await?;
 

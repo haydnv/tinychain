@@ -21,8 +21,11 @@ pub use id::{TxnId, MIN_ID};
 
 pub mod hash {
     use async_trait::async_trait;
+    use futures::future::TryFutureExt;
+    use futures::stream::{FuturesOrdered, TryStreamExt};
 
     use tc_error::TCResult;
+    use tcgeneric::{Map, Tuple};
 
     use super::TxnId;
 
@@ -31,9 +34,54 @@ pub mod hash {
 
     /// Defines a method to compute the hash of this state as of a given [`TxnId`]
     #[async_trait]
-    pub trait AsyncHash {
+    pub trait AsyncHash: Send + Sync {
         /// Compute the hash of this state as of a given [`TxnId`]
-        async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>>;
+        async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>>;
+    }
+
+    #[async_trait]
+    impl<T: AsyncHash> AsyncHash for Map<T> {
+        async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+            if self.is_empty() {
+                return Ok(default_hash::<Sha256>());
+            }
+
+            let mut entries: FuturesOrdered<_> = self
+                .into_iter()
+                .map(|(key, value)| {
+                    value.hash(txn_id).map_ok(move |value_hash| {
+                        let mut hasher = Sha256::default();
+                        hasher.update(Hash::<Sha256>::hash(key));
+                        hasher.update(value_hash);
+                        hasher.finalize()
+                    })
+                })
+                .collect();
+
+            let mut hasher = Sha256::default();
+            while let Some(hash) = entries.try_next().await? {
+                hasher.update(hash);
+            }
+            Ok(hasher.finalize())
+        }
+    }
+
+    #[async_trait]
+    impl<T: AsyncHash> AsyncHash for Tuple<T> {
+        async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+            if self.is_empty() {
+                return Ok(default_hash::<Sha256>());
+            }
+
+            let mut items: FuturesOrdered<_> =
+                self.into_iter().map(|item| item.hash(txn_id)).collect();
+
+            let mut hasher = Sha256::default();
+            while let Some(hash) = items.try_next().await? {
+                hasher.update(hash);
+            }
+            Ok(hasher.finalize())
+        }
     }
 }
 

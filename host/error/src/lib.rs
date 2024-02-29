@@ -80,7 +80,9 @@ impl ErrorKind {
     }
 
     pub fn is_retriable(&self) -> bool {
-        [Self::Timeout, Self::Unavailable].into_iter().any(|code| *self == code)
+        [Self::Timeout, Self::Unavailable]
+            .into_iter()
+            .any(|code| *self == code)
     }
 }
 

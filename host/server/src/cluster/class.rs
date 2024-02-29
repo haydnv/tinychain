@@ -2,12 +2,14 @@
 use std::fmt;
 
 use async_trait::async_trait;
+use futures::stream::FuturesOrdered;
 use futures::{TryFutureExt, TryStreamExt};
 
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_state::object::InstanceClass;
 use tc_transact::fs;
+use tc_transact::hash::{AsyncHash, Digest, Hash, Output, Sha256};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Host, Link, Version as VersionNumber};
 use tcgeneric::{Id, Map};
@@ -50,6 +52,26 @@ impl Version {
             .read_block(txn_id, name)
             .map_ok(|block| InstanceClass::from(block.clone()))
             .await
+    }
+}
+
+#[async_trait]
+impl AsyncHash for Version {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+        let mut blocks = self.classes.iter(txn_id).await?;
+        let mut is_empty = true;
+        let mut hasher = Sha256::new();
+
+        while let Some((name, class)) = blocks.try_next().await? {
+            hasher.update(Hash::<Sha256>::hash((&*name, &*class)));
+            is_empty = false;
+        }
+
+        if is_empty {
+            Ok(async_hash::default_hash::<Sha256>())
+        } else {
+            Ok(hasher.finalize())
+        }
     }
 }
 
@@ -149,8 +171,40 @@ impl Transact for Class {
 }
 
 #[async_trait]
+impl AsyncHash for Class {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+        let versions = self.dir.files(txn_id).await?;
+        let mut is_empty = false;
+
+        let mut versions: FuturesOrdered<_> = versions
+            .map(|(number, file)| async move {
+                let number: VersionNumber = number.as_str().parse()?;
+                let version_hash = Version::with_file(file).hash(txn_id).await?;
+
+                let mut hasher = Sha256::default();
+                hasher.update(Hash::<Sha256>::hash(number));
+                hasher.update(version_hash);
+                TCResult::Ok(hasher.finalize())
+            })
+            .collect();
+
+        let mut hasher = Sha256::new();
+        while let Some(hash) = versions.try_next().await? {
+            hasher.update(hash);
+            is_empty = false;
+        }
+
+        if is_empty {
+            Ok(async_hash::default_hash::<Sha256>())
+        } else {
+            Ok(hasher.finalize())
+        }
+    }
+}
+
+#[async_trait]
 impl Replicate for Class {
-    async fn replicate(&self, txn: &Txn, peer: Host) -> TCResult<()> {
+    async fn replicate(&self, txn: &Txn, peer: Host) -> TCResult<Output<Sha256>> {
         Err(not_implemented!("Class::replicate"))
     }
 }

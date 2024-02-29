@@ -14,6 +14,7 @@ use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_state::object::InstanceClass;
+use tc_transact::hash::{AsyncHash, Digest, Hash, Output, Sha256};
 use tc_transact::lock::{TxnMapLock, TxnMapLockEntry, TxnMapLockIter};
 use tc_transact::public::Route;
 use tc_transact::{fs, Gateway};
@@ -289,13 +290,36 @@ where
 }
 
 #[async_trait]
+impl<T> AsyncHash for Dir<T>
+where
+    T: fmt::Debug + Send + Sync,
+{
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+        let mut contents = self.contents.iter(txn_id).await?;
+        let mut is_empty = true;
+        let mut hasher = Sha256::new();
+
+        for (name, entry) in contents {
+            hasher.update(Hash::<Sha256>::hash((&*name, entry.is_dir())));
+            is_empty = false;
+        }
+
+        if is_empty {
+            Ok(async_hash::default_hash::<Sha256>())
+        } else {
+            Ok(hasher.finalize())
+        }
+    }
+}
+
+#[async_trait]
 impl<T> Replicate for Dir<T>
 where
     T: Send + Sync + fmt::Debug,
     Cluster<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
     Cluster<Dir<T>>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
 {
-    async fn replicate(&self, txn: &Txn, peer: Host) -> TCResult<()> {
+    async fn replicate(&self, txn: &Txn, peer: Host) -> TCResult<Output<Sha256>> {
         let link = Link::new(peer, self.schema.link.path().clone());
         let state = txn.get(link, Value::default()).await?;
         let state = state.try_into_map(|dir| bad_request!("invalid dir state: {dir:?}"))?;
@@ -337,7 +361,7 @@ where
             }
         }
 
-        Ok(())
+        AsyncHash::hash(self, txn_id).await
     }
 }
 
