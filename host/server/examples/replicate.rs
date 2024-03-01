@@ -207,15 +207,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let key = Aes256GcmSiv::generate_key(&mut OsRng);
 
     // start the first server
-    let mut server1 = builder(client.clone(), "one".to_string(), key)
+    let server1 = builder(client.clone(), "one".to_string(), key)
         .set_port(DEFAULT_PORT)
-        .start()
+        .build()
         .await;
 
-    server1.make_discoverable().await?;
+    let host1 = server1.address().clone();
+    client.add(host1.clone(), server1);
 
-    let host1 = server1.host().clone();
-    client.add(host1.clone(), server1.ready());
+    let mut broadcast1 = Broadcast::new();
+    broadcast1.make_discoverable(&host1).await?;
 
     // check that it's working
     let link = Link::new(host1.clone(), TCPathBuf::from(HYPOTHETICAL));
@@ -238,35 +239,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     assert_eq!(Scalar::try_from(response).unwrap(), hello_world);
 
-    // try creating a cluster directory
-    let dir_name: Id = TEST.into();
+    // try creating a cluster directory entry
     let link = Link::new(host1.clone(), [CLASS.into()].into());
 
     let txn = client.get_txn(&host1)?;
 
     client
-        .put(&txn, link.into(), dir_name.clone().into(), true.into())
+        .put(&txn, link.into(), Value::Id(TEST.into()), true.into())
         .await?;
 
+    // make sure the new dir entry is present and committed
+    let txn = client.get_txn(&host1)?;
+    let link = Link::new(host1.clone(), [CLASS.into(), TEST.into()].into());
+    client.get(&txn, link.into(), Value::default()).await?;
+
     // start a second server and replicate the state of the first
-    let mut server2 = builder(client.clone(), "two".to_string(), key)
+    let server2 = builder(client.clone(), "two".to_string(), key)
         .set_port(DEFAULT_PORT + 1)
-        .start()
+        .build()
         .await;
 
-    server2.discover().await?;
-    assert!(!server2.peers().is_empty());
+    let host2 = server2.address().clone();
 
-    assert!(server2.replicate_and_join(Protocol::HTTP).await);
-    server2.make_discoverable().await?;
+    let mut broadcast2 = Broadcast::new();
+    broadcast2.discover().await?;
 
-    let host2 = server2.host().clone();
-    client.add(host2.clone(), server2.ready());
+    let peers = broadcast2.peers(Protocol::default());
+    assert!(!peers.is_empty());
 
-    // make sure the new dir is present and committed on both hosts
-    // let txn = client.get_txn(&host1)?;
-    // let link = Link::new(host1.clone(), [CLASS.into(), TEST.into()].into());
-    // client.get(&txn, link.into(), Value::default()).await?;
+    let replicator = Replicator::from(&server2).with_peers(peers);
+    client.add(host2.clone(), server2);
+
+    assert!(replicator.replicate_and_join().await);
+
+    broadcast2.make_discoverable(&host2).await?;
+
+    // make sure the new dir entry is present and committed on both hosts
+    let txn = client.get_txn(&host1)?;
+    let link = Link::new(host1.clone(), [CLASS.into(), TEST.into()].into());
+    client.get(&txn, link.into(), Value::default()).await?;
 
     let txn = client.get_txn(&host2)?;
     let link = Link::new(host2.clone(), [CLASS.into(), TEST.into()].into());

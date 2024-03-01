@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
-use log::{debug, error, info, warn};
+use log::*;
 use rjwt::{OsRng, SigningKey, Token, VerifyingKey};
 use safecast::TryCastInto;
 use umask::Mode;
@@ -49,6 +49,8 @@ pub(crate) struct ClusterEgress {
 
 impl Egress for ClusterEgress {
     fn is_authorized(&self, link: &ToUrl<'_>, is_write: bool) -> bool {
+        debug_assert!(!link.path().is_empty(), "egress to / from a cluster");
+
         // TODO: replace label("state") with State::PREFIX
         if link.path().starts_with(&[label("state").into()])
             || link.path().starts_with(&self.path[..])
@@ -222,6 +224,24 @@ impl<T> Cluster<T> {
     fn state(&self) -> &T {
         &self.state
     }
+}
+
+impl<T: fmt::Debug> Cluster<T> {
+    pub fn keyring(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<impl Deref<Target = HashMap<Host, VerifyingKey>>> {
+        trace!("read {self:?} keyring");
+        self.replicas.try_read(txn_id).map_err(TCError::from)
+    }
+
+    fn keyring_mut(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<impl DerefMut<Target = HashMap<Host, VerifyingKey>>> {
+        trace!("write {self:?} keyring");
+        self.replicas.try_write(txn_id).map_err(TCError::from)
+    }
 
     async fn replicate_write<Write, Fut>(
         &self,
@@ -259,6 +279,7 @@ impl<T> Cluster<T> {
 
         let uri = self.path().clone().append(REPLICAS);
 
+        trace!("lock replica set of {self:?} in order to replicate a write operation");
         let mut replicas = self.replicas.write(*txn.id()).await?;
         let mut num_failed = failed.len();
 
@@ -326,24 +347,6 @@ impl<T> Cluster<T> {
     }
 }
 
-impl<T: fmt::Debug> Cluster<T> {
-    pub fn keyring(
-        &self,
-        txn_id: TxnId,
-    ) -> TCResult<impl Deref<Target = HashMap<Host, VerifyingKey>>> {
-        debug!("read {self:?} keyring");
-        self.replicas.try_read(txn_id).map_err(TCError::from)
-    }
-
-    fn keyring_mut(
-        &self,
-        txn_id: TxnId,
-    ) -> TCResult<impl DerefMut<Target = HashMap<Host, VerifyingKey>>> {
-        info!("write {self:?} keyring");
-        self.replicas.try_write(txn_id).map_err(TCError::from)
-    }
-}
-
 impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
     async fn replicate_commit(&self, txn: &Txn) -> TCResult<()> {
         let leader = txn
@@ -364,6 +367,41 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
     }
 
     async fn replicate_commit_inner(&self, txn: &Txn) -> TCResult<()> {
+        debug!("commit {:?}", self);
+
+        let downstream = {
+            let mut external = self.claimed.lock().expect("cluster deps");
+            if let Some(deps) = external.remove(txn.id()) {
+                let mut deps = deps.lock().expect("txn deps");
+                deps.drain()
+                    .filter_map(|(link, is_write)| if is_write { Some(link) } else { None })
+                    .collect::<Tuple<Link>>()
+            } else {
+                vec![].into()
+            }
+        };
+
+        debug!("deps to commit are {}", downstream);
+
+        let txn_clone = txn.clone();
+        tokio::spawn(async move {
+            let mut commits: FuturesUnordered<_> = downstream
+                .into_iter()
+                .map(|link| {
+                    txn_clone
+                        .put(link.clone(), Value::default(), State::default())
+                        .map(|result| (link, result))
+                })
+                .collect();
+
+            while let Some((link, result)) = commits.next().await {
+                match result {
+                    Ok(()) => debug!("committed dependency at {link}"),
+                    Err(cause) => error!("dependency at {link} failed commit: {cause}"),
+                }
+            }
+        });
+
         let replicas = self.replicas.read(*txn.id()).await?;
 
         let this_host = self.link().host().cloned().unwrap_or_else(default_host);
@@ -420,9 +458,10 @@ pub(crate) trait ReplicateAndJoin {
 }
 
 #[async_trait]
-impl<T: Send + Sync + fmt::Debug> ReplicateAndJoin for Cluster<Dir<T>>
+impl<T> ReplicateAndJoin for Cluster<Dir<T>>
 where
-    T: Send + Sync + fmt::Debug,
+    T: Transact + Send + Sync + fmt::Debug,
+    Dir<T>: Transact,
     Cluster<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
     Cluster<Dir<T>>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
     DirEntry<T>: Clone,
@@ -448,11 +487,17 @@ where
 
         let public_key = Value::Bytes(Arc::new(*self.public_key().as_bytes()));
 
+        // since the keyring has to be write-locked in the next step,
+        // peers will be unable to read-lock it in order to validate a leadership claim
+        assert!(
+            txn.leader(self.path())?.is_none(),
+            "this transaction should not be claimed"
+        );
+
         {
-            // since the server is not yet ready, other hosts can't verify any claims by this host
-            assert!(
-                txn.leader(self.path())?.is_none(),
-                "this transaction should not be claimed"
+            trace!(
+                "lock replica set of {:?} in order to join an active cluster",
+                self
             );
 
             let mut keyring = self.replicas.write(*txn.id()).await?;
@@ -483,13 +528,16 @@ where
                     .map_err(|v| TCError::unexpected(v, "a public key"))?;
 
                 keyring.insert(host.clone(), public_key);
-                participants.insert(host.into(), true);
+                participants.insert(Link::new(host, self.path().clone()), true);
             }
 
             let mut claimed = self.claimed.lock().expect("claimed txns");
+
             assert!(claimed
                 .insert(*txn.id(), Arc::new(Mutex::new(participants)))
-                .is_none())
+                .is_none());
+
+            trace!("drop lock on replica set of {:?}", self);
         }
 
         self.replicate_write(&txn, &[REPLICAS.into()], |txn, link| {
@@ -499,6 +547,11 @@ where
             async move { txn.put(link, (host, public_key), hash).await }
         })
         .await?;
+
+        let txn = txn.claim(self.link().clone(), &self.inner.actor)?;
+        let txn = txn.lock(&self.inner.actor)?;
+
+        self.replicate_commit(&txn).await?;
 
         self.state.entries(*txn.id()).await
     }

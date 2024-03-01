@@ -10,7 +10,7 @@ pub use rjwt::VerifyingKey;
 
 pub use tc_state::CacheBlock;
 
-pub use builder::Builder;
+pub use builder::{Broadcast, Builder, Replicator};
 pub use claim::Claim;
 pub use client::RPCClient;
 pub use kernel::Endpoint;

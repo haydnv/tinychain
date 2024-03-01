@@ -118,7 +118,7 @@ impl Txn {
                     "invalid token: cannot claim reserved path {}",
                     claim.path()
                 ));
-            } else if claim.path()[0] == PREFIX {
+            } else if !claim.path().is_empty() && claim.path()[0] == PREFIX {
                 if claim.path().len() == 2 && id == claim.path()[1] {
                     if claim.mode().has(umask::USER_EXEC) {
                         if owner.is_none() {

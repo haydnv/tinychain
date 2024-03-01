@@ -178,8 +178,8 @@ impl Kernel {
 
     pub async fn replicate_and_join(
         &self,
-        txn_server: TxnServer,
-        peers: BTreeSet<Host>,
+        txn_server: &TxnServer,
+        peers: &BTreeSet<Host>,
     ) -> Result<(), bool> {
         if peers.is_empty() {
             info!("not joining replica set since no peers were provided");
@@ -193,7 +193,7 @@ impl Kernel {
         while let Some(cluster) = unvisited.pop_front() {
             let mut joined = false;
 
-            for peer in &peers {
+            for peer in peers {
                 let egress = Arc::new(KernelEgress::from(Link::new(
                     peer.clone(),
                     cluster.path().clone(),
@@ -224,8 +224,6 @@ impl Kernel {
 
                 match cluster.replicate_and_join(txn, peer.clone()).await {
                     Ok(entries) => {
-                        self.commit(txn_id).await;
-
                         joined = true;
                         progress = true;
 

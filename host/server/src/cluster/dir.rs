@@ -159,7 +159,16 @@ impl<T: Clone + fmt::Debug> Dir<T> {
             return Ok(None);
         }
 
-        match self.contents.try_get(txn_id, &path[0])? {
+        let entry = self.contents.try_get(txn_id, &path[0]).map_err(|cause| {
+            conflict!(
+                "for a directory lookup of {} in {}",
+                &path[0],
+                self.schema.link
+            )
+            .consume(cause)
+        })?;
+
+        match entry {
             Some(entry) => match &*entry {
                 DirEntry::Item(item) => Ok(Some((&path[1..], DirEntry::Item(item.clone())))),
                 DirEntry::Dir(dir) => dir.lookup(txn_id, &path[1..]).map(Some),
@@ -295,7 +304,7 @@ where
     T: fmt::Debug + Send + Sync,
 {
     async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
-        let mut contents = self.contents.iter(txn_id).await?;
+        let contents = self.contents.iter(txn_id).await?;
         let mut is_empty = true;
         let mut hasher = Sha256::new();
 

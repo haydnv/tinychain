@@ -58,6 +58,10 @@ impl Client {
         }
     }
 
+    pub fn host(&self) -> &Host {
+        &self.host
+    }
+
     #[inline]
     fn authorize(&self, link: &ToUrl<'_>, write: bool) -> TCResult<()> {
         let egress = self

@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use tc_error::*;
 use tc_state::CacheBlock;
 use tc_transact::TxnId;
-use tc_value::{Link, Value};
+use tc_value::{Host, Link, Value};
 use tcgeneric::NetworkTime;
 
 use crate::claim::Claim;
@@ -131,6 +131,10 @@ impl TxnServer {
             tx,
             ttl,
         }
+    }
+
+    pub(crate) fn address(&self) -> &Host {
+        self.client.host()
     }
 }
 

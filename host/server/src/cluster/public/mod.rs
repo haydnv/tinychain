@@ -2,7 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use futures::Future;
-use log::{debug, trace};
+use log::debug;
 use rjwt::VerifyingKey;
 use safecast::{TryCastFrom, TryCastInto};
 
@@ -360,9 +360,7 @@ where
 
     if owner == cluster.public_key() {
         let txn = cluster.lock(txn.clone())?;
-        cluster.replicate_commit(&txn).await?;
-        trace!("committed replicated write at {}", txn.id());
-        Ok(())
+        cluster.replicate_commit(&txn).await
     } else {
         Ok(())
     }
