@@ -47,6 +47,7 @@
 //  and synchronization messages from example.co.uk go all hosts in its /users and /groups clusters.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -61,7 +62,7 @@ use tc_server::*;
 use tc_state::object::InstanceClass;
 use tc_transact::{Transaction, TxnId};
 use tc_value::{Host, Link, Protocol, ToUrl, Value, Version as VersionNumber};
-use tcgeneric::{label, path_label, Id, Label, Map, NetworkTime, PathLabel, TCPath, TCPathBuf};
+use tcgeneric::{label, path_label, Id, Label, Map, PathLabel, TCPath, TCPathBuf};
 
 const CACHE_SIZE: usize = 1_000_000;
 const DATA_DIR: &'static str = "/tmp/tc/example_server/data";
@@ -200,6 +201,9 @@ fn builder(rpc_client: Arc<Client>, name: String, key: Key) -> Builder {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
+    std::fs::remove_dir_all(&DATA_DIR.parse::<PathBuf>().unwrap()).unwrap();
+    std::fs::remove_dir_all(&WORKSPACE.parse::<PathBuf>().unwrap()).unwrap();
+
     // create an RPC client
     let client = Arc::new(Client::default());
 
@@ -245,7 +249,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let txn = client.get_txn(&host1)?;
 
     client
-        .put(&txn, link.into(), Value::Id(TEST.into()), true.into())
+        .put(&txn, link.into(), Value::Id(TEST.into()), false.into())
         .await?;
 
     // make sure the new dir entry is present and committed
@@ -284,20 +288,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.get(&txn, link.into(), Value::default()).await?;
 
     // create a new directory item and make sure it's correctly replicated
-    // let version_number = VersionNumber::default();
-    // let classname: Id = label("classname").into();
-    // let class = InstanceClass::new(Map::default());
-    //
-    // let link = Link::new(host1.clone(), [CLASS.into(), dir_name].into());
-    // let txn = client.get_txn(&host1)?;
-    // client
-    //     .put(
-    //         &txn,
-    //         link.into(),
-    //         version_number.into(),
-    //         State::Map([(classname, State::from(class))].into_iter().collect()),
-    //     )
-    //     .await?;
+    let version_number = VersionNumber::default();
+    let classname: Id = label("classname").into();
+    let class = InstanceClass::new(Map::default());
+
+    let link = Link::new(host1.clone(), [CLASS.into(), TEST.into()].into());
+    let txn = client.get_txn(&host1)?;
+    client
+        .put(
+            &txn,
+            link.into(),
+            version_number.into(),
+            State::Map([(classname, State::from(class))].into_iter().collect()),
+        )
+        .await?;
 
     Ok(())
 }

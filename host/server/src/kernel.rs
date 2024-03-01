@@ -134,7 +134,10 @@ impl Kernel {
                 TCPath::from(path)
             ))
         } else {
-            Err(not_found!("{}", TCPath::from(path)))
+            Err(not_found!(
+                "there is no resource at {} to issue a token",
+                TCPath::from(path)
+            ))
         }
     }
 
@@ -147,10 +150,10 @@ impl Kernel {
             if path.len() == Hypothetical::PATH.len() {
                 Err(bad_request!("{} has no public key", TCPath::from(path)))
             } else {
-                Err(not_found!("{}", TCPath::from(path)))
+                Err(not_found!("there is no resource at {}", TCPath::from(path)))
             }
         } else {
-            Err(not_found!("{}", TCPath::from(path)))
+            Err(not_found!("there is no resource at {}", TCPath::from(path)))
         }
     }
 
@@ -172,7 +175,7 @@ impl Kernel {
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
             auth_claim_route(self.hypothetical.clone(), &path[2..], txn)
         } else {
-            Err(not_found!("{}", TCPath::from(path)))
+            Err(not_found!("cluster to serve {}", TCPath::from(path)))
         }
     }
 
@@ -394,7 +397,7 @@ where
 
     let handler = cluster
         .route_owned(&*path)
-        .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
+        .ok_or_else(|| not_found!("endpoint {}", TCPath::from(path)))?;
 
     let endpoint = Endpoint {
         mode,

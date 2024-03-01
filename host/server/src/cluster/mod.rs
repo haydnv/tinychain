@@ -369,10 +369,12 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
     async fn replicate_commit_inner(&self, txn: &Txn) -> TCResult<()> {
         debug!("commit {:?}", self);
 
-        let downstream = {
+        let mut downstream = {
             let mut external = self.claimed.lock().expect("cluster deps");
+
             if let Some(deps) = external.remove(txn.id()) {
                 let mut deps = deps.lock().expect("txn deps");
+
                 deps.drain()
                     .filter_map(|(link, is_write)| if is_write { Some(link) } else { None })
                     .collect::<Tuple<Link>>()
@@ -383,24 +385,41 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
 
         debug!("deps to commit are {}", downstream);
 
-        let txn_clone = txn.clone();
-        tokio::spawn(async move {
-            let mut commits: FuturesUnordered<_> = downstream
-                .into_iter()
-                .map(|link| {
-                    txn_clone
-                        .put(link.clone(), Value::default(), State::default())
-                        .map(|result| (link, result))
-                })
-                .collect();
+        if !downstream.is_empty() {
+            let txn = txn.clone();
+            tokio::spawn(async move {
+                downstream.sort_by(|l, r| {
+                    l.host()
+                        .cmp(&r.host())
+                        .then(l.path().len().cmp(&r.path().len()))
+                });
 
-            while let Some((link, result)) = commits.next().await {
-                match result {
-                    Ok(()) => debug!("committed dependency at {link}"),
-                    Err(cause) => error!("dependency at {link} failed commit: {cause}"),
+                let mut commits = FuturesUnordered::new();
+                let mut last = downstream.pop().expect("link");
+                for link in downstream {
+                    if link.host() == last.host() {
+                        if link.path().starts_with(last.path()) {
+                            debug!("no need to notify {link} since {last} was already notified");
+                            continue;
+                        }
+                    }
+
+                    last = link.clone();
+
+                    commits.push(
+                        txn.put(link.clone(), Value::default(), State::default())
+                            .map(move |r| (link, r)),
+                    );
                 }
-            }
-        });
+
+                while let Some((link, result)) = commits.next().await {
+                    match result {
+                        Ok(()) => debug!("committed dependency at {link}"),
+                        Err(cause) => error!("dependency at {link} failed commit: {cause}"),
+                    }
+                }
+            });
+        }
 
         let replicas = self.replicas.read(*txn.id()).await?;
 

@@ -30,7 +30,7 @@ impl Version {
         Self { classes }
     }
 
-    async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
+    pub async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
         let mut classes = Map::new();
 
         let mut blocks = self.classes.iter(txn_id).await?;

@@ -167,7 +167,7 @@ impl<State: StateInstance, T: Route<State> + fmt::Debug> Public<State> for T {
     ) -> TCResult<()> {
         let handler = self
             .route(path)
-            .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
+            .ok_or_else(|| not_found!("{} in {:?}", TCPath::from(path), self))?;
 
         if let Some(put_handler) = handler.put() {
             put_handler(txn, key, value).await
