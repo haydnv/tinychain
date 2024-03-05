@@ -357,7 +357,9 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
 
         if leader == self.public_key() {
             if txn.locked_by()? == Some(self.public_key()) {
-                self.replicate_commit_inner(txn).await?;
+                let txn_id = *txn.id();
+                let notify = |link| txn.put(link, Value::default(), State::default());
+                self.replicate_txn_state(txn_id, notify).await?;
             } else {
                 return Err(unauthorized!("commit {:?}", self));
             }
@@ -368,13 +370,35 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
         Ok(())
     }
 
-    async fn replicate_commit_inner(&self, txn: &Txn) -> TCResult<()> {
-        debug!("commit {:?}", self);
+    pub async fn replicate_rollback(&self, txn: &Txn) -> TCResult<()> {
+        let leader = txn
+            .leader(self.path())?
+            .ok_or_else(|| bad_request!("cannot roll back a leaderless transaction"))?;
 
+        if leader == self.public_key() {
+            if txn.locked_by()? == Some(self.public_key()) {
+                let txn_id = *txn.id();
+                let notify = move |link| txn.delete(link, Value::default());
+                self.replicate_txn_state(txn_id, notify).await?;
+            } else {
+                return Err(unauthorized!("roll back {:?}", self));
+            }
+        }
+
+        self.rollback(txn.id()).await;
+
+        Ok(())
+    }
+
+    async fn replicate_txn_state<Notify, Fut>(&self, txn_id: TxnId, notify: Notify) -> TCResult<()>
+    where
+        Notify: Fn(Link) -> Fut + Copy + Send + Sync,
+        Fut: Future<Output = TCResult<()>>,
+    {
         let mut downstream = {
             let mut external = self.claimed.lock().expect("cluster deps");
 
-            if let Some(deps) = external.remove(txn.id()) {
+            if let Some(deps) = external.remove(&txn_id) {
                 let mut deps = deps.lock().expect("txn deps");
 
                 deps.drain()
@@ -385,67 +409,56 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
             }
         };
 
-        debug!("deps to commit are {}", downstream);
+        debug!("deps are {}", downstream);
 
-        if !downstream.is_empty() {
-            let txn = txn.clone();
-            tokio::spawn(async move {
-                // TODO: delete this sort-and-filter logic after implementing an egress whitelist
-                downstream.sort_by(|l, r| {
-                    l.host()
-                        .cmp(&r.host())
-                        .then(l.path().len().cmp(&r.path().len()))
-                });
-
-                let mut commits = FuturesUnordered::new();
-                let mut last = downstream.pop().expect("link");
-                for link in downstream {
-                    if link.host() == last.host() {
-                        if link.path().starts_with(last.path()) {
-                            debug!("no need to notify {link} since {last} was already notified");
-                            continue;
-                        }
-                    }
-
-                    last = link.clone();
-
-                    commits.push(
-                        txn.put(link.clone(), Value::default(), State::default())
-                            .map(move |r| (link, r)),
-                    );
-                }
-
-                while let Some((link, result)) = commits.next().await {
-                    match result {
-                        Ok(()) => debug!("committed dependency at {link}"),
-                        Err(cause) => error!("dependency at {link} failed commit: {cause}"),
-                    }
-                }
+        let downstream = if !downstream.is_empty() {
+            // TODO: delete this sort-and-filter logic after implementing an egress whitelist
+            downstream.sort_by(|l, r| {
+                l.host()
+                    .cmp(&r.host())
+                    .then(l.path().len().cmp(&r.path().len()))
             });
-        }
 
-        let replicas = self.replicas.read(*txn.id()).await?;
+            let updates = FuturesUnordered::new();
+            let mut last = downstream.pop().expect("link");
+            for link in downstream {
+                if link.host() == last.host() {
+                    if link.path().starts_with(last.path()) {
+                        debug!("no need to notify {link} since {last} was already notified");
+                        continue;
+                    }
+                }
+
+                last = link.clone();
+
+                updates.push(notify(link.clone()).map(move |r| (link, r)));
+            }
+
+            Some(updates)
+        } else {
+            None
+        };
+
+        let replicas = self.replicas.read(txn_id).await?;
 
         let this_host = self.link().host().cloned().unwrap_or_else(default_host);
         debug_assert!(replicas.contains_key(&this_host));
 
-        let mut commits: FuturesUnordered<_> = replicas
+        let mut updates: FuturesUnordered<_> = replicas
             .keys()
             .filter(|host| !(host.is_localhost() && host.port() == this_host.port()))
             .filter(|host| **host != this_host)
             .cloned()
             .map(|replica| async move {
                 let link = Link::new(replica.clone(), self.path().clone());
-                txn.put(link, Value::default(), State::default())
-                    .map(|result| (replica, result))
-                    .await
+                notify(link).map(|result| (replica, result)).await
             })
             .collect();
 
-        debug_assert_eq!(commits.len(), replicas.len() - 1);
+        debug_assert_eq!(updates.len(), replicas.len() - 1);
 
         let mut num_failed = 0;
-        while let Some((host, result)) = commits.next().await {
+        while let Some((host, result)) = updates.next().await {
             if result.is_ok() {
                 debug!("replica at {host} succeeded");
             } else {
@@ -455,16 +468,20 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
             }
         }
 
+        if let Some(mut updates) = downstream {
+            while let Some((link, result)) = updates.next().await {
+                match result {
+                    Ok(()) => debug!("synchronized dependency at {link}"),
+                    Err(cause) => error!("dependency at {link} failed: {cause}"),
+                }
+            }
+        }
+
         if num_failed * 2 > replicas.len() {
             panic!("most replicas failed--shutting down this replica since it's now out of sync")
         } else {
             Ok(())
         }
-    }
-
-    async fn replicate_rollback(&self, txn: &Txn) -> TCResult<()> {
-        // TODO: validate that the rollback message came from the txn leader, send rollback messages to replicas, log errors, crash if >= 50% fail
-        Err(not_implemented!("Cluster::replicate_rollback"))
     }
 }
 

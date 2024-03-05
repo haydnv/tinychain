@@ -207,7 +207,7 @@ impl Txn {
     }
 
     /// Get the set of permissions authorized by hosts in the `keyring` for the given `resource`.
-    pub fn mode<Keyring>(&self, keyring: Keyring, resource: &[PathSegment]) -> Mode
+    pub fn mode<Keyring>(&self, _keyring: Keyring, _resource: &[PathSegment]) -> Mode
     where
         Keyring: Deref<Target = HashMap<Host, VerifyingKey>>,
     {
@@ -218,6 +218,7 @@ impl Txn {
         mode
     }
 
+    // TODO: require a write bit for commits and a read bit for rollbacks
     pub fn locked_by(&self) -> TCResult<Option<VerifyingKey>> {
         let token = if let Some(token) = &self.token {
             token
