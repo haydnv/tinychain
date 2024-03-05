@@ -70,6 +70,7 @@ impl<FE> Clone for Dir<FE> {
     }
 }
 
+// TODO: support a mutable "Entry" type to use instead of calling `contains`
 impl<FE: ThreadSafe + Clone> Dir<FE> {
     /// Destructure this [`Dir`] into its underlying [`freqfs::DirLock`].
     pub fn into_inner(self) -> Inner<FE> {

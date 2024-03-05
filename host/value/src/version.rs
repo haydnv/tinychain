@@ -22,6 +22,16 @@ pub struct Version {
     patch: u32,
 }
 
+impl Version {
+    /// Construct an [`Id`] from this [`Version`] number.
+    pub fn to_id(&self) -> Id {
+        Id::try_cast_from(self.to_string(), |_| {
+            unreachable!("number failed ID validation")
+        })
+        .unwrap()
+    }
+}
+
 impl PartialOrd for Version {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))

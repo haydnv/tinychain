@@ -201,6 +201,15 @@ impl TCError {
         Self::new(ErrorKind::Conflict, info)
     }
 
+    /// An internal error which should never occur.
+    pub fn internal<I: fmt::Display>(info: I) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("internal error: {info}");
+
+        #[cfg(not(debug_assertions))]
+        Self::new(ErrorKind::Internal, info)
+    }
+
     /// Error to indicate that the requested resource exists but does not support the request method
     pub fn method_not_allowed<M: fmt::Debug, P: fmt::Display>(method: M, path: P) -> Self {
         let message = format!("endpoint {} does not support {:?}", path, method);
@@ -291,29 +300,21 @@ impl From<txn_lock::Error> for TCError {
 #[cfg(feature = "txfs")]
 impl From<txfs::Error> for TCError {
     fn from(cause: txfs::Error) -> Self {
-        match cause.into_inner() {
-            (txfs::ErrorKind::NotFound, msg) => Self::not_found(msg),
-            (txfs::ErrorKind::Conflict, msg) => Self::conflict(msg),
-            (txfs::ErrorKind::IO, msg) => Self::bad_gateway(msg),
+        match cause {
+            txfs::Error::Conflict(cause) => Self::conflict(cause),
+            txfs::Error::IO(cause) => Self::from(cause),
+            txfs::Error::NotFound(cause) => Self::not_found(cause),
+            txfs::Error::Parse(cause) => Self::from(cause),
         }
     }
 }
 
-#[cfg(debug_assertions)]
-impl From<io::Error> for TCError {
-    fn from(cause: io::Error) -> Self {
-        panic!("IO error: {cause}");
-    }
-}
-
-#[cfg(not(debug_assertions))]
 impl From<io::Error> for TCError {
     fn from(cause: io::Error) -> Self {
         match cause.kind() {
-            io::ErrorKind::AlreadyExists => bad_request!(
-                "tried to create a filesystem entry that already exists: {}",
-                cause
-            ),
+            io::ErrorKind::AlreadyExists => {
+                bad_request!("tried to create an entry that already exists: {}", cause)
+            }
             io::ErrorKind::InvalidInput => bad_request!("{}", cause),
             io::ErrorKind::NotFound => TCError::not_found(cause),
             io::ErrorKind::PermissionDenied => {
@@ -423,7 +424,7 @@ macro_rules! timeout {
 #[macro_export]
 macro_rules! internal {
     ($($t:tt)*) => {{
-        $crate::TCError::new($crate::ErrorKind::Internal, format!($($t)*))
+        $crate::TCError::internal(format!($($t)*))
     }}
 }
 

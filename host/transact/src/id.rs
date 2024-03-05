@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use get_size::GetSize;
 use get_size_derive::*;
 use rand::Rng;
+use safecast::TryCastFrom;
 
 use destream::IntoStream;
 
@@ -60,7 +61,10 @@ impl TxnId {
 
     /// Convert this `TxnId` into an [`Id`].
     pub fn to_id(&self) -> Id {
-        self.to_string().parse().unwrap()
+        Id::try_cast_from(self.to_string(), |_| {
+            unreachable!("number failed ID validation")
+        })
+        .unwrap()
     }
 }
 
