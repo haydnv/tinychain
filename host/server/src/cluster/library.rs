@@ -25,14 +25,6 @@ pub struct Library {
 }
 
 impl Library {
-    pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
-        let block_ids = self.versions.block_ids(txn_id).await?;
-
-        Ok(block_ids
-            .last()
-            .map(|id| id.as_str().parse().expect("version number")))
-    }
-
     pub async fn get_version(
         &self,
         txn_id: TxnId,

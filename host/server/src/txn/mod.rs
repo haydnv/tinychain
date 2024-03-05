@@ -211,7 +211,7 @@ impl Txn {
     where
         Keyring: Deref<Target = HashMap<Host, VerifyingKey>>,
     {
-        let mut mode = Self::DEFAULT_MODE;
+        let mode = Self::DEFAULT_MODE;
 
         // TODO: add user & group permissions
 

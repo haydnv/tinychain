@@ -11,10 +11,9 @@ use tc_state::object::InstanceClass;
 use tc_transact::fs;
 use tc_transact::hash::{AsyncHash, Digest, Hash, Output, Sha256};
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Host, Link, Version as VersionNumber};
+use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{Id, Map};
 
-use crate::cluster::Replicate;
 use crate::{CacheBlock, State, Txn};
 
 use super::dir::DirItem;
@@ -88,43 +87,11 @@ pub struct Class {
 }
 
 impl Class {
-    pub async fn latest(&self, txn_id: TxnId) -> TCResult<Option<VersionNumber>> {
-        let file_names = self.dir.entry_names(txn_id).await?;
-
-        let mut latest: Option<fs::Key> = None;
-        for version in file_names {
-            if let Some(prior) = latest.as_mut() {
-                if &*version > &**prior {
-                    *prior = version;
-                }
-            } else {
-                latest = Some(version);
-            }
-        }
-
-        if let Some(latest) = latest {
-            let latest = latest.as_str().parse()?;
-            Ok(Some(latest))
-        } else {
-            Ok(None)
-        }
-    }
-
     pub async fn get_version(&self, txn_id: TxnId, number: &VersionNumber) -> TCResult<Version> {
         self.dir
             .get_file(txn_id, &number.clone().into())
             .map_ok(|file| Version::with_file(file))
             .await
-    }
-
-    pub async fn to_state(&self, txn_id: TxnId) -> TCResult<State> {
-        let mut versions = Map::new();
-        for (number, file) in self.dir.files(txn_id).await? {
-            let version = Version::with_file(file).to_state(txn_id).await?;
-            versions.insert((*number).clone(), version);
-        }
-
-        Ok(State::Map(versions))
     }
 }
 
@@ -199,13 +166,6 @@ impl AsyncHash for Class {
         } else {
             Ok(hasher.finalize())
         }
-    }
-}
-
-#[async_trait]
-impl Replicate for Class {
-    async fn replicate(&self, txn: &Txn, peer: Host) -> TCResult<Output<Sha256>> {
-        Err(not_implemented!("Class::replicate"))
     }
 }
 
