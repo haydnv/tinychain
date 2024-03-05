@@ -174,7 +174,7 @@ impl Transact for Class {
 impl AsyncHash for Class {
     async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         let versions = self.dir.files(txn_id).await?;
-        let mut is_empty = false;
+        let mut is_empty = true;
 
         let mut versions: FuturesOrdered<_> = versions
             .map(|(number, file)| async move {

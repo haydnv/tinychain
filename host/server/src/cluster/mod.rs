@@ -28,6 +28,7 @@ use crate::{default_host, Actor, CacheBlock, SignedToken, State};
 
 pub use class::Class;
 pub use dir::{Dir, DirEntry};
+pub use library::Library;
 
 pub const DEFAULT_UMASK: Mode = Mode::new()
     .with_class_perm(umask::USER, umask::ALL)
@@ -38,6 +39,7 @@ const REPLICAS: Label = label("replicas");
 
 mod class;
 mod dir;
+mod library;
 mod public;
 
 pub(crate) struct ClusterEgress {
@@ -388,6 +390,7 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
         if !downstream.is_empty() {
             let txn = txn.clone();
             tokio::spawn(async move {
+                // TODO: delete this sort-and-filter logic after implementing an egress whitelist
                 downstream.sort_by(|l, r| {
                     l.host()
                         .cmp(&r.host())
@@ -621,65 +624,72 @@ where
     }
 }
 
-#[async_trait]
-impl fs::Persist<CacheBlock> for Cluster<Class> {
-    type Txn = Txn;
-    type Schema = Schema;
+macro_rules! impl_persist {
+    ($t:ty) => {
+        #[async_trait]
+        impl fs::Persist<CacheBlock> for Cluster<$t> {
+            type Txn = Txn;
+            type Schema = Schema;
 
-    async fn create(
-        txn_id: TxnId,
-        schema: Self::Schema,
-        store: fs::Dir<CacheBlock>,
-    ) -> TCResult<Self> {
-        <Class as fs::Persist<CacheBlock>>::create(txn_id, (), store)
-            .map_ok(|subject| Self::new(schema, subject))
-            .await
-    }
+            async fn create(
+                txn_id: TxnId,
+                schema: Self::Schema,
+                store: fs::Dir<CacheBlock>,
+            ) -> TCResult<Self> {
+                <$t as fs::Persist<CacheBlock>>::create(txn_id, (), store)
+                    .map_ok(|subject| Self::new(schema, subject))
+                    .await
+            }
 
-    async fn load(
-        txn_id: TxnId,
-        schema: Self::Schema,
-        store: fs::Dir<CacheBlock>,
-    ) -> TCResult<Self> {
-        <Class as fs::Persist<CacheBlock>>::load(txn_id, (), store)
-            .map_ok(|subject| Self::new(schema, subject))
-            .await
-    }
+            async fn load(
+                txn_id: TxnId,
+                schema: Self::Schema,
+                store: fs::Dir<CacheBlock>,
+            ) -> TCResult<Self> {
+                <$t as fs::Persist<CacheBlock>>::load(txn_id, (), store)
+                    .map_ok(|subject| Self::new(schema, subject))
+                    .await
+            }
 
-    fn dir(&self) -> fs::Inner<CacheBlock> {
-        <Class as fs::Persist<CacheBlock>>::dir(&self.state)
-    }
+            fn dir(&self) -> fs::Inner<CacheBlock> {
+                <$t as fs::Persist<CacheBlock>>::dir(&self.state)
+            }
+        }
+
+        #[async_trait]
+        impl fs::Persist<CacheBlock> for Cluster<Dir<$t>> {
+            type Txn = Txn;
+            type Schema = Schema;
+
+            async fn create(
+                txn_id: TxnId,
+                schema: Self::Schema,
+                store: fs::Dir<CacheBlock>,
+            ) -> TCResult<Self> {
+                <Dir<$t> as fs::Persist<CacheBlock>>::create(txn_id, schema.clone(), store)
+                    .map_ok(|subject| Self::new(schema, subject))
+                    .await
+            }
+
+            async fn load(
+                txn_id: TxnId,
+                schema: Self::Schema,
+                store: fs::Dir<CacheBlock>,
+            ) -> TCResult<Self> {
+                <Dir<$t> as fs::Persist<CacheBlock>>::load(txn_id, schema.clone(), store)
+                    .map_ok(|subject| Self::new(schema, subject))
+                    .await
+            }
+
+            fn dir(&self) -> fs::Inner<CacheBlock> {
+                <Dir<$t> as fs::Persist<CacheBlock>>::dir(&self.state)
+            }
+        }
+    };
 }
 
-#[async_trait]
-impl fs::Persist<CacheBlock> for Cluster<Dir<Class>> {
-    type Txn = Txn;
-    type Schema = Schema;
-
-    async fn create(
-        txn_id: TxnId,
-        schema: Self::Schema,
-        store: fs::Dir<CacheBlock>,
-    ) -> TCResult<Self> {
-        <Dir<Class> as fs::Persist<CacheBlock>>::create(txn_id, schema.clone(), store)
-            .map_ok(|subject| Self::new(schema, subject))
-            .await
-    }
-
-    async fn load(
-        txn_id: TxnId,
-        schema: Self::Schema,
-        store: fs::Dir<CacheBlock>,
-    ) -> TCResult<Self> {
-        <Dir<Class> as fs::Persist<CacheBlock>>::load(txn_id, schema.clone(), store)
-            .map_ok(|subject| Self::new(schema, subject))
-            .await
-    }
-
-    fn dir(&self) -> fs::Inner<CacheBlock> {
-        <Dir<Class> as fs::Persist<CacheBlock>>::dir(&self.state)
-    }
-}
+impl_persist!(Class);
+impl_persist!(Library);
 
 impl<T: fmt::Debug> fmt::Debug for Cluster<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

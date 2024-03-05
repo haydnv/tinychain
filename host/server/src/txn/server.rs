@@ -162,7 +162,7 @@ impl TxnServer {
 
         debug!("TxnServer::finalize_expired");
 
-        for txn_id in expired.iter().copied() {
+        for txn_id in expired.iter() {
             kernel.finalize(txn_id).await;
         }
 

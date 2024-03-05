@@ -23,11 +23,12 @@ use tc_value::{Host, Link, ToUrl, Value};
 use tcgeneric::{label, Label, Map, NetworkTime, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::client::Egress;
-use crate::cluster::{Class, Cluster, Dir, DirEntry, ReplicateAndJoin};
+use crate::cluster::{Class, Cluster, Dir, DirEntry, Library, ReplicateAndJoin};
 use crate::txn::{Hypothetical, Txn, TxnServer};
 use crate::{aes256, cluster, Authorize, SignedToken, State};
 
-const CLASS: Label = label("class");
+pub const CLASS: Label = label("class");
+pub const LIB: Label = label("lib");
 const REPLICATION_TTL: Duration = Duration::from_secs(30);
 
 type Nonce = [u8; 12];
@@ -115,6 +116,7 @@ impl<'a> Endpoint<'a> {
 
 pub(crate) struct Kernel {
     class: Cluster<Dir<Class>>,
+    library: Cluster<Dir<Library>>,
     hypothetical: Cluster<Hypothetical>,
     keys: HashSet<aes256::Key>,
 }
@@ -126,6 +128,8 @@ impl Kernel {
                 "cannot issue a token for {}",
                 TCPath::from(path)
             ))
+        } else if path[0] == LIB {
+            issue_token(txn_id, &self.library, &path[1..])
         } else if path[0] == CLASS {
             issue_token(txn_id, &self.class, &path[1..])
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
@@ -144,6 +148,8 @@ impl Kernel {
     pub fn public_key(&self, txn_id: TxnId, path: &[PathSegment]) -> TCResult<VerifyingKey> {
         if path.is_empty() {
             Err(bad_request!("{} has no public key", TCPath::from(path)))
+        } else if path[0] == LIB {
+            public_key(txn_id, &self.library, &path[1..])
         } else if path[0] == CLASS {
             public_key(txn_id, &self.class, &path[1..])
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
@@ -165,6 +171,13 @@ impl Kernel {
                 path,
                 handler: Box::new(KernelHandler::from(self)),
             })
+        } else if path[0] == LIB {
+            let (path, dir_entry) = self.library.lookup(*txn.id(), &path[1..])?;
+
+            match dir_entry {
+                DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn),
+                DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn),
+            }
         } else if path[0] == CLASS {
             let (path, dir_entry) = self.class.lookup(*txn.id(), &path[1..])?;
 
@@ -178,7 +191,6 @@ impl Kernel {
             Err(not_found!("cluster to serve {}", TCPath::from(path)))
         }
     }
-
     pub async fn replicate_and_join(
         &self,
         txn_server: &TxnServer,
@@ -189,9 +201,27 @@ impl Kernel {
             return Ok(());
         }
 
+        Self::replicate_and_join_dir(&self.keys, &self.class, txn_server, peers).await?;
+        Self::replicate_and_join_dir(&self.keys, &self.library, txn_server, peers).await?;
+
+        // TODO: replicate services in the /services dir
+
+        Ok(())
+    }
+
+    async fn replicate_and_join_dir<T>(
+        keys: &HashSet<aes256::Key>,
+        parent: &Cluster<Dir<T>>,
+        txn_server: &TxnServer,
+        peers: &BTreeSet<Host>,
+    ) -> Result<(), bool>
+    where
+        T: Clone + fmt::Debug,
+        Cluster<Dir<T>>: ReplicateAndJoin<State = T>,
+    {
         let mut progress = false;
         let mut unvisited = VecDeque::new();
-        unvisited.push_back(Box::new(self.class.clone()));
+        unvisited.push_back(parent.clone());
 
         while let Some(cluster) = unvisited.pop_front() {
             let mut joined = false;
@@ -208,7 +238,7 @@ impl Kernel {
                     .with_egress(egress.clone());
 
                 let txn_id = *txn.id();
-                let txn = match get_token(&txn, peer, &self.keys, cluster.path()).await {
+                let txn = match get_token(&txn, peer, keys, cluster.path()).await {
                     Ok(token) => match txn_server
                         .verify_txn(txn_id, NetworkTime::now(), token)
                         .await
@@ -232,7 +262,7 @@ impl Kernel {
 
                         for (_name, entry) in entries {
                             match &*entry {
-                                DirEntry::Dir(dir) => unvisited.push_back(Box::new(dir.clone())),
+                                DirEntry::Dir(dir) => unvisited.push_back(dir.clone()),
                                 DirEntry::Item(_) => {}
                             }
                         }
@@ -246,8 +276,6 @@ impl Kernel {
             }
         }
 
-        // TODO: replicate services in the /services dir
-
         Ok(())
     }
 }
@@ -258,16 +286,18 @@ impl Kernel {
 
         join!(
             self.class.commit(txn_id),
+            self.library.commit(txn_id),
             self.hypothetical.rollback(&txn_id)
         );
     }
 
-    pub async fn finalize(&self, txn_id: TxnId) {
+    pub async fn finalize(&self, txn_id: &TxnId) {
         debug!("Kernel::finalize");
 
         join!(
-            self.class.finalize(&txn_id),
-            self.hypothetical.finalize(&txn_id)
+            self.class.finalize(txn_id),
+            self.library.finalize(txn_id),
+            self.hypothetical.finalize(txn_id)
         );
     }
 }
@@ -322,12 +352,24 @@ impl fs::Persist<CacheBlock> for Kernel {
 
         let class = fs::Persist::<CacheBlock>::create(txn_id, class_schema, class_dir).await?;
 
+        let lib_dir: fs::Dir<CacheBlock> = store.create_dir(txn_id, LIB.into()).await?;
+
+        let lib_schema = cluster::Schema::new(
+            lead.clone(),
+            Link::new(schema.host.clone(), LIB.into()),
+            schema.owner.clone(),
+            schema.group.clone(),
+        );
+
+        let library = fs::Persist::<CacheBlock>::create(txn_id, lib_schema, lib_dir).await?;
+
         let link = Link::new(schema.host, Hypothetical::PATH.into());
         let txn_schema = cluster::Schema::new(lead, link, schema.owner, schema.group);
         let hypothetical = Cluster::new(txn_schema, Hypothetical::new());
 
         Ok(Self {
             class,
+            library,
             hypothetical,
             keys: schema.keys,
         })
@@ -351,12 +393,24 @@ impl fs::Persist<CacheBlock> for Kernel {
 
         let class = fs::Persist::<CacheBlock>::load(txn_id, class_schema, class_dir).await?;
 
+        let lib_dir: fs::Dir<CacheBlock> = store.get_or_create_dir(txn_id, LIB.into()).await?;
+
+        let lib_schema = cluster::Schema::new(
+            lead.clone(),
+            Link::new(schema.host.clone(), LIB.into()),
+            schema.owner.clone(),
+            schema.group.clone(),
+        );
+
+        let library = fs::Persist::<CacheBlock>::load(txn_id, lib_schema, lib_dir).await?;
+
         let link = Link::new(schema.host, Hypothetical::PATH.into());
         let txn_schema = cluster::Schema::new(lead, link, schema.owner, schema.group);
         let hypothetical = Cluster::new(txn_schema, Hypothetical::new());
 
         Ok(Self {
             class,
+            library,
             hypothetical,
             keys: schema.keys,
         })

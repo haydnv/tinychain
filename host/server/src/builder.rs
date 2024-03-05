@@ -272,7 +272,7 @@ impl Builder {
             .expect("kernel");
 
         kernel.commit(txn_id).await;
-        kernel.finalize(txn_id).await;
+        kernel.finalize(&txn_id).await;
 
         info!("committed kernel");
 

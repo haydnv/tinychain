@@ -13,6 +13,7 @@ use log::*;
 use safecast::TryCastFrom;
 
 use tc_error::*;
+use tc_scalar::Scalar;
 use tc_state::object::InstanceClass;
 use tc_transact::hash::{AsyncHash, Digest, Hash, Output, Sha256};
 use tc_transact::lock::{TxnMapLock, TxnMapLockEntry, TxnMapLockIter};
@@ -24,7 +25,7 @@ use tcgeneric::{Id, Map, PathSegment, ThreadSafe};
 
 use crate::{CacheBlock, State, Txn};
 
-use super::{Class, Cluster, Replicate, Schema};
+use super::{Class, Cluster, Library, Replicate, Schema};
 
 #[async_trait]
 pub trait DirCreate: Sized {
@@ -404,6 +405,62 @@ impl fs::Persist<CacheBlock> for Dir<Class> {
                     let schema = schema.clone().append(Id::clone(&*name));
 
                     if is_class {
+                        Cluster::load(txn_id, schema, dir)
+                            .map_ok(DirEntry::Item)
+                            .await
+                    } else {
+                        Cluster::load(txn_id, schema, dir)
+                            .map_ok(DirEntry::Dir)
+                            .await
+                    }
+                }
+                fs::DirEntry::File(file) => Err(internal!("invalid Class dir entry: {:?}", file)),
+            }?;
+
+            loaded.insert((*name).clone(), entry);
+        }
+
+        std::mem::drop(entries); // needed because `entries` borrows `dir`
+
+        Self::with_contents(txn_id, schema, dir, loaded)
+    }
+
+    fn dir(&self) -> fs::Inner<CacheBlock> {
+        self.dir.clone().into_inner()
+    }
+}
+
+// TODO: dedupe logic with impl Persist for Dir<Class> above
+#[async_trait]
+impl fs::Persist<CacheBlock> for Dir<Library> {
+    type Txn = Txn;
+    type Schema = Schema;
+
+    async fn create(txn_id: TxnId, schema: Schema, store: fs::Dir<CacheBlock>) -> TCResult<Self> {
+        if store.is_empty(txn_id).await? {
+            Self::new(txn_id, schema, store)
+        } else {
+            Err(bad_request!(
+                "cannot create an empty cluster dir from a non-empty filesystem dir"
+            ))
+        }
+    }
+
+    async fn load(txn_id: TxnId, schema: Schema, dir: fs::Dir<CacheBlock>) -> TCResult<Self> {
+        let mut loaded = BTreeMap::new();
+
+        let mut entries = dir.entries::<Map<Scalar>>(txn_id).await?;
+        while let Some((name, entry)) = entries.try_next().await? {
+            let entry = match entry {
+                fs::DirEntry::Dir(dir) => {
+                    let is_lib = {
+                        let mut names = dir.entry_names(txn_id).await?;
+                        names.any(|name| VersionNumber::can_cast_from(&name.as_str()))
+                    };
+
+                    let schema = schema.clone().append(Id::clone(&*name));
+
+                    if is_lib {
                         Cluster::load(txn_id, schema, dir)
                             .map_ok(DirEntry::Item)
                             .await

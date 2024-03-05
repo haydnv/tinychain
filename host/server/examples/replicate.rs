@@ -53,6 +53,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use freqfs::Cache;
 use futures::FutureExt;
+use log::info;
 use tokio::sync::RwLock;
 
 use tc_error::*;
@@ -201,8 +202,15 @@ fn builder(rpc_client: Arc<Client>, name: String, key: Key) -> Builder {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    std::fs::remove_dir_all(&DATA_DIR.parse::<PathBuf>().unwrap()).unwrap();
-    std::fs::remove_dir_all(&WORKSPACE.parse::<PathBuf>().unwrap()).unwrap();
+    let data_dir = DATA_DIR.parse::<PathBuf>().unwrap();
+    if data_dir.exists() {
+        std::fs::remove_dir_all(&data_dir).unwrap();
+    }
+
+    let workspace = WORKSPACE.parse::<PathBuf>().unwrap();
+    if workspace.exists() {
+        std::fs::remove_dir_all(&workspace).unwrap();
+    }
 
     // create an RPC client
     let client = Arc::new(Client::default());
@@ -302,6 +310,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             State::Map([(classname, State::from(class))].into_iter().collect()),
         )
         .await?;
+
+    info!("replication test succeeded");
 
     Ok(())
 }

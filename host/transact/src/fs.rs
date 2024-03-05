@@ -277,6 +277,27 @@ impl<FE, B> File<FE, B> {
 
 impl<FE, B> File<FE, B>
 where
+    FE: Clone + Send + Sync + 'static,
+{
+    /// Load a [`File`] from its [`Inner`] cache representation.
+    pub async fn load(inner: Inner<FE>, txn_id: TxnId) -> TCResult<Self> {
+        let inner = txfs::Dir::load(txn_id, inner).await?;
+
+        let contents = inner.iter(txn_id).await?;
+        for (name, entry) in contents {
+            if entry.is_dir() {
+                return Err(internal!(
+                    "cache dir entry {name} is a subdirectory (not a block)"
+                ));
+            }
+        }
+
+        Ok(Self::new(inner))
+    }
+}
+
+impl<FE, B> File<FE, B>
+where
     FE: for<'a> FileSave<'a> + AsType<B> + Clone + Send + Sync,
     B: FileLoad + GetSize + Clone,
 {

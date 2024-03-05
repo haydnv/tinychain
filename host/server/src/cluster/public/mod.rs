@@ -20,6 +20,7 @@ use super::{Cluster, REPLICAS};
 
 mod class;
 mod dir;
+mod library;
 
 struct ClusterHandler<T> {
     cluster: Cluster<T>,
