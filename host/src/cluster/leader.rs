@@ -8,7 +8,7 @@ use log::{debug, warn};
 use tokio::sync::RwLock;
 
 use tc_state::State;
-use tc_transact::{RPCClient, Transaction};
+use tc_transact::{Gateway, Transaction};
 use tc_value::{Link, Value};
 use tcgeneric::Map;
 

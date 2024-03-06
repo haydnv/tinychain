@@ -2,18 +2,15 @@ use std::fmt;
 
 use futures::future;
 use log::{debug, info};
-use safecast::AsType;
-use tc_chain::ChainBlock;
-use tc_collection::{BTreeNode, DenseCacheFile, TensorNode};
 
 use tc_error::*;
 use tc_transact::public::generic::COPY;
 use tc_transact::public::{GetHandler, Handler, Route, ToState};
-use tc_transact::{fs, RPCClient, Transaction};
+use tc_transact::{Gateway, Transaction};
 use tcgeneric::{Instance, PathSegment, TCPath};
 
 use crate::object::InstanceExt;
-use crate::State;
+use crate::{CacheBlock, State};
 
 use super::method::route_attr;
 
@@ -21,18 +18,12 @@ struct CopyHandler<'a, T> {
     instance: &'a T,
 }
 
-impl<'a, Txn, FE, T> Handler<'a, State<Txn, FE>> for CopyHandler<'a, T>
+impl<'a, Txn, T> Handler<'a, State<Txn>> for CopyHandler<'a, T>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'b> fs::FileSave<'b>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
     T: Instance + fmt::Debug + 'a,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn, FE>>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -51,22 +42,16 @@ impl<'a, T> From<&'a T> for CopyHandler<'a, T> {
     }
 }
 
-impl<Txn, FE, T> Route<State<Txn, FE>> for InstanceExt<Txn, FE, T>
+impl<Txn, T> Route<State<Txn>> for InstanceExt<Txn, T>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
-    T: ToState<State<Txn, FE>> + Instance + Route<State<Txn, FE>> + fmt::Debug,
-    Self: ToState<State<Txn, FE>>,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug,
+    Self: ToState<State<Txn>>,
 {
     fn route<'a>(
         &'a self,
         path: &'a [PathSegment],
-    ) -> Option<Box<dyn Handler<'a, State<Txn, FE>> + 'a>> {
+    ) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>> {
         debug!(
             "{:?} with members {:?} route {} (parent is {} {:?})",
             self,

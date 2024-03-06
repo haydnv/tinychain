@@ -74,6 +74,18 @@ pub enum ErrorKind {
     Unavailable,
 }
 
+impl ErrorKind {
+    pub fn is_conflict(&self) -> bool {
+        *self == Self::Conflict
+    }
+
+    pub fn is_retriable(&self) -> bool {
+        [Self::Timeout, Self::Unavailable]
+            .into_iter()
+            .any(|code| *self == code)
+    }
+}
+
 impl<'en> en::IntoStream<'en> for ErrorKind {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         format!(
@@ -144,7 +156,7 @@ impl TCError {
         }
     }
 
-    /// Reconstruct a [`TCError`] from its [`ErrorType`] and data.
+    /// Reconstruct a [`TCError`] from its [`ErrorKind`] and data.
     pub fn with_stack<I, S, SI>(code: ErrorKind, message: I, stack: S) -> Self
     where
         I: fmt::Display,
@@ -181,26 +193,36 @@ impl TCError {
     }
 
     /// Error to indicate that the requested resource is already locked
-    pub fn conflict<I: fmt::Display>(locator: I) -> Self {
-        Self::new(ErrorKind::Conflict, locator)
+    pub fn conflict<I: fmt::Display>(info: I) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("conflict: {info}");
+
+        #[cfg(not(debug_assertions))]
+        Self::new(ErrorKind::Conflict, info)
+    }
+
+    /// An internal error which should never occur.
+    pub fn internal<I: fmt::Display>(info: I) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("internal error: {info}");
+
+        #[cfg(not(debug_assertions))]
+        Self::new(ErrorKind::Internal, info)
     }
 
     /// Error to indicate that the requested resource exists but does not support the request method
-    pub fn method_not_allowed<M: fmt::Debug, S: fmt::Debug, P: fmt::Display>(
-        method: M,
-        subject: S,
-        path: P,
-    ) -> Self {
-        let message = format!(
-            "{:?} endpoint {} does not support {:?}",
-            subject, path, method
-        );
+    pub fn method_not_allowed<M: fmt::Debug, P: fmt::Display>(method: M, path: P) -> Self {
+        let message = format!("endpoint {} does not support {:?}", path, method);
 
         Self::new(ErrorKind::MethodNotAllowed, message)
     }
 
     /// Error to indicate that the requested resource does not exist at the specified location
     pub fn not_found<I: fmt::Display>(locator: I) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("not found: {locator}");
+
+        #[cfg(not(debug_assertions))]
         Self::new(ErrorKind::NotFound, locator)
     }
 
@@ -244,14 +266,20 @@ impl From<pathlink::ParseError> for TCError {
     }
 }
 
+#[cfg(feature = "ha-ndarray")]
 impl From<ha_ndarray::Error> for TCError {
     fn from(err: ha_ndarray::Error) -> Self {
         Self::new(ErrorKind::Internal, err)
     }
 }
 
+#[cfg(feature = "rjwt")]
 impl From<rjwt::Error> for TCError {
     fn from(err: rjwt::Error) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("rjwt error: {err}");
+
+        #[cfg(not(debug_assertions))]
         match err.into_inner() {
             (rjwt::ErrorKind::Auth | rjwt::ErrorKind::Time, msg) => Self::unauthorized(msg),
             (rjwt::ErrorKind::Base64 | rjwt::ErrorKind::Format | rjwt::ErrorKind::Json, msg) => {
@@ -262,37 +290,31 @@ impl From<rjwt::Error> for TCError {
     }
 }
 
+#[cfg(feature = "txn_lock")]
 impl From<txn_lock::Error> for TCError {
     fn from(err: txn_lock::Error) -> Self {
-        Self::new(ErrorKind::Conflict, err)
+        Self::conflict(err)
     }
 }
 
+#[cfg(feature = "txfs")]
 impl From<txfs::Error> for TCError {
     fn from(cause: txfs::Error) -> Self {
-        match cause.into_inner() {
-            (txfs::ErrorKind::NotFound, msg) => Self::not_found(msg),
-            (txfs::ErrorKind::Conflict, msg) => Self::conflict(msg),
-            (txfs::ErrorKind::IO, msg) => Self::bad_gateway(msg),
+        match cause {
+            txfs::Error::Conflict(cause) => Self::conflict(cause),
+            txfs::Error::IO(cause) => Self::from(cause),
+            txfs::Error::NotFound(cause) => Self::not_found(cause),
+            txfs::Error::Parse(cause) => Self::from(cause),
         }
     }
 }
 
-#[cfg(debug_assertions)]
-impl From<io::Error> for TCError {
-    fn from(cause: io::Error) -> Self {
-        panic!("IO error: {cause}");
-    }
-}
-
-#[cfg(not(debug_assertions))]
 impl From<io::Error> for TCError {
     fn from(cause: io::Error) -> Self {
         match cause.kind() {
-            io::ErrorKind::AlreadyExists => bad_request!(
-                "tried to create a filesystem entry that already exists: {}",
-                cause
-            ),
+            io::ErrorKind::AlreadyExists => {
+                bad_request!("tried to create an entry that already exists: {}", cause)
+            }
             io::ErrorKind::InvalidInput => bad_request!("{}", cause),
             io::ErrorKind::NotFound => TCError::not_found(cause),
             io::ErrorKind::PermissionDenied => {
@@ -362,7 +384,7 @@ macro_rules! bad_request {
 #[macro_export]
 macro_rules! conflict {
     ($($t:tt)*) => {{
-        $crate::TCError::new($crate::ErrorKind::Conflict, format!($($t)*))
+        $crate::TCError::conflict(format!($($t)*))
     }}
 }
 
@@ -370,7 +392,15 @@ macro_rules! conflict {
 #[macro_export]
 macro_rules! forbidden {
     ($($t:tt)*) => {{
-        $crate::TCError::new($crate::ErrorKind::Unavailable, format!($($t)*))
+        $crate::TCError::new($crate::ErrorKind::Unauthorized, format!($($t)*))
+    }}
+}
+
+/// Error to indicate that no resource exists at the requested path or key.
+#[macro_export]
+macro_rules! not_found {
+    ($($t:tt)*) => {{
+        $crate::TCError::not_found(format!($($t)*))
     }}
 }
 
@@ -394,7 +424,7 @@ macro_rules! timeout {
 #[macro_export]
 macro_rules! internal {
     ($($t:tt)*) => {{
-        $crate::TCError::new($crate::ErrorKind::Internal, format!($($t)*))
+        $crate::TCError::internal(format!($($t)*))
     }}
 }
 

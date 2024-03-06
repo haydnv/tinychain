@@ -22,7 +22,7 @@ use crate::{OpDef, Scalar, Scope, SELF};
 
 use super::Refer;
 
-/// A flow control operator which closes over the context of an [`OpDef`] to produce a [`Closure`].
+/// A flow control operator which closes over the context of an [`OpDef`] to produce a closure.
 #[derive(Clone, Eq, PartialEq, GetSize)]
 pub struct With {
     capture: Tuple<Id>,

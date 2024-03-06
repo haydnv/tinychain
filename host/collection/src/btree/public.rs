@@ -3,6 +3,7 @@
 use std::iter::FromIterator;
 use std::ops::Bound;
 
+use freqfs::FileSave;
 use futures::{TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::{AsType, Match, TryCastFrom, TryCastInto};
@@ -15,7 +16,7 @@ use tc_transact::public::{
 };
 use tc_transact::{fs, Transaction};
 use tc_value::Value;
-use tcgeneric::{label, Map, PathSegment, TCPath, Tuple};
+use tcgeneric::{Map, PathSegment, TCPath, Tuple};
 
 use crate::Collection;
 
@@ -25,7 +26,7 @@ use super::{BTree, BTreeFile, BTreeInstance, BTreeType, BTreeWrite, Key, Node, R
 impl<State> Route<State> for BTreeType
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
-    State::FE: AsType<Node>,
+    State::FE: for<'a> FileSave<'a> + AsType<Node>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
 {
@@ -52,11 +53,11 @@ where
     {
         Some(Box::new(|_txn, _params| {
             Box::pin(async move {
-                // let schema: Value = params.require(&label("schema").into())?;
+                // let schema: Value = params.require("schema")?;
                 // let schema = cast_into_schema(schema)?;
                 //
                 // let source: Collection<State::Txn, State::FE> =
-                //     params.require(&label("source").into())?;
+                //     params.require("source")?;
                 //
                 // params.expect_empty()?;
                 //
@@ -80,7 +81,7 @@ struct CreateHandler;
 impl<'a, State> Handler<'a, State> for CreateHandler
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
-    State::FE: AsType<Node>,
+    State::FE: for<'b> FileSave<'b> + AsType<Node>,
     BTreeFile<State::Txn, State::FE>:
         fs::Persist<State::FE, Txn = State::Txn, Schema = BTreeSchema>,
     Collection<State::Txn, State::FE>: From<BTreeFile<State::Txn, State::FE>>,
@@ -143,8 +144,7 @@ where
             Box::pin(async move {
                 if key.is_some() {
                     return Err(bad_request!(
-                        "BTree::insert does not support an explicit key {}",
-                        key,
+                        "BTree::insert does not support an explicit key {key:?}"
                     ));
                 }
 
@@ -174,8 +174,8 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let reverse = params.or_default(&label("reverse").into())?;
-                let range = params.or_default(&label("range").into())?;
+                let reverse = params.or_default("reverse")?;
+                let range = params.or_default("range")?;
                 let range = cast_into_range(range)?;
                 let slice = self.btree.clone().slice(range, reverse)?;
                 Ok(Collection::BTree(slice.into()).into())
@@ -247,7 +247,7 @@ impl<'a, State: StateInstance, T: BTreeInstance> Handler<'a, State> for FirstHan
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if key.is_some() {
-                    return Err(bad_request!("BTree::first does not accept a key {}", key));
+                    return Err(bad_request!("BTree::first does not accept a key {key:?}"));
                 }
 
                 let mut keys = self.btree.clone().keys(*txn.id()).await?;
@@ -288,7 +288,7 @@ where
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 if key.is_some() {
-                    return Err(bad_request!("BTree::reverse does not accept a key {}", key));
+                    return Err(bad_request!("BTree::reverse does not accept a key {key:?}"));
                 }
 
                 let reversed = self.btree.slice(Range::default(), true)?;
@@ -366,7 +366,7 @@ pub struct Static;
 impl<State> Route<State> for Static
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
-    State::FE: AsType<Node>,
+    State::FE: for<'a> FileSave<'a> + AsType<Node>,
     BTreeFile<State::Txn, State::FE>:
         fs::Persist<State::FE, Schema = BTreeSchema, Txn = State::Txn>,
     Collection<State::Txn, State::FE>: From<BTreeFile<State::Txn, State::FE>> + TryCastFrom<State>,

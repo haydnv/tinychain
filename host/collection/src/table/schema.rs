@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
 use safecast::{CastFrom, TryCastInto};
 
 use tc_error::*;
+use tc_transact::hash::{Digest, Hash, Output};
 use tc_value::Value;
 use tcgeneric::Id;
 
@@ -57,7 +57,7 @@ impl TableSchema {
     /// Try to construct a [`TableSchema`] from its [`Value`] representation.
     pub fn try_cast_from_value(value: Value) -> TCResult<Self> {
         let ((key, values), indices): ((Vec<Column>, Vec<Column>), Vec<(String, Vec<Id>)>) =
-            value.try_cast_into(|v| bad_request!("invalid table schema: {}", v))?;
+            value.try_cast_into(|v| bad_request!("invalid table schema: {v:?}"))?;
 
         let key_names = key.iter().map(|col| &col.name).cloned().collect();
         let value_names = values.iter().map(|col| &col.name).cloned().collect();

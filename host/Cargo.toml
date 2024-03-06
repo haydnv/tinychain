@@ -11,6 +11,19 @@ repository = "https://github.com/haydnv/tinychain.git"
 keywords = ["distributed", "transactional", "host", "platform", "runtime"]
 categories = ["concurrency", "database-implementations", "data-structures", "hardware-support", "web-programming"]
 
+[workspace]
+members = [
+    "chain",
+    "collection",
+    "error",
+    "generic",
+    "scalar",
+    "server",
+    "state",
+    "transact",
+    "value",
+]
+
 [[bin]]
 name = "tinychain"
 path = "src/main.rs"

@@ -1,21 +1,23 @@
+use std::marker::PhantomData;
+
 use futures::TryFutureExt;
 use log::debug;
-use safecast::{AsType, TryCastInto};
-use std::marker::PhantomData;
-use tc_chain::ChainBlock;
+use safecast::TryCastInto;
 
-use tc_collection::btree::{BTreeFile, BTreeSchema};
-use tc_collection::table::{TableFile, TableSchema};
-use tc_collection::{BTreeNode, Collection, DenseCacheFile, TensorNode};
 use tc_error::*;
+#[cfg(feature = "collection")]
+use tc_transact::fs;
+use tc_transact::hash::AsyncHash;
 use tc_transact::public::helpers::{AttributeHandler, EchoHandler, SelfHandler};
 use tc_transact::public::{GetHandler, Handler, PostHandler, Route};
-use tc_transact::{fs, AsyncHash, RPCClient, Transaction};
+use tc_transact::{Gateway, Transaction};
 use tc_value::{Link, Number, Value};
 use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, PathSegment, TCPath};
 
+#[cfg(feature = "collection")]
+use crate::collection::{BTreeFile, BTreeSchema, Collection, TableFile, TableSchema};
 use crate::object::{InstanceClass, Object};
-use crate::{State, StateType};
+use crate::{CacheBlock, State, StateType};
 
 pub const PREFIX: Label = label("state");
 
@@ -23,17 +25,11 @@ struct ClassHandler {
     class: StateType,
 }
 
-impl<'a, Txn, FE> Handler<'a, State<Txn, FE>> for ClassHandler
+impl<'a, Txn> Handler<'a, State<Txn>> for ClassHandler
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'b> fs::FileSave<'b>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn, FE>>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -42,7 +38,7 @@ where
         }))
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State<Txn, FE>>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -64,21 +60,15 @@ where
     }
 }
 
-struct HashHandler<Txn, FE> {
-    state: State<Txn, FE>,
+struct HashHandler<Txn> {
+    state: State<Txn>,
 }
 
-impl<'a, Txn, FE> Handler<'a, State<Txn, FE>> for HashHandler<Txn, FE>
+impl<'a, Txn> Handler<'a, State<Txn>> for HashHandler<Txn>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'b> fs::FileSave<'b>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn, FE>>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -97,8 +87,8 @@ where
     }
 }
 
-impl<Txn, FE> From<State<Txn, FE>> for HashHandler<Txn, FE> {
-    fn from(state: State<Txn, FE>) -> HashHandler<Txn, FE> {
+impl<Txn> From<State<Txn>> for HashHandler<Txn> {
+    fn from(state: State<Txn>) -> HashHandler<Txn> {
         Self { state }
     }
 }
@@ -109,22 +99,18 @@ impl From<StateType> for ClassHandler {
     }
 }
 
-impl<Txn, FE> Route<State<Txn, FE>> for StateType
+impl<Txn> Route<State<Txn>> for StateType
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
 {
     fn route<'a>(
         &'a self,
         path: &'a [PathSegment],
-    ) -> Option<Box<dyn Handler<'a, State<Txn, FE>> + 'a>> {
+    ) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>> {
         let child_handler = match self {
+            #[cfg(feature = "chain")]
             Self::Chain(ct) => ct.route(path),
+            #[cfg(feature = "collection")]
             Self::Collection(ct) => ct.route(path),
             Self::Object(ot) => ot.route(path),
             Self::Scalar(st) => st.route(path),
@@ -143,20 +129,14 @@ where
     }
 }
 
-impl<Txn, FE> Route<State<Txn, FE>> for State<Txn, FE>
+impl<Txn> Route<State<Txn>> for State<Txn>
 where
-    Txn: Transaction<FE> + RPCClient<Self>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
+    Txn: Transaction<CacheBlock> + Gateway<Self>,
 {
     fn route<'a>(
         &'a self,
         path: &'a [PathSegment],
-    ) -> Option<Box<dyn Handler<'a, State<Txn, FE>> + 'a>> {
+    ) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>> {
         debug!(
             "instance of {:?} route {}",
             self.class(),
@@ -164,11 +144,13 @@ where
         );
 
         if let Some(handler) = match self {
+            #[cfg(feature = "chain")]
             Self::Chain(chain) => chain.route(path),
             Self::Closure(closure) if path.is_empty() => {
-                let handler: Box<dyn Handler<'a, State<Txn, FE>> + 'a> = Box::new(closure.clone());
+                let handler: Box<dyn Handler<'a, State<Txn>> + 'a> = Box::new(closure.clone());
                 Some(handler)
             }
+            #[cfg(feature = "collection")]
             Self::Collection(collection) => collection.route(path),
             Self::Map(map) => map.route(path),
             Self::Object(object) => object.route(path),
@@ -197,11 +179,11 @@ where
 }
 
 #[derive(Copy, Clone)]
-pub struct Static<Txn, FE> {
-    phantom: PhantomData<(Txn, FE)>,
+pub struct Static<Txn> {
+    phantom: PhantomData<Txn>,
 }
 
-impl<Txn, FE> Default for Static<Txn, FE> {
+impl<Txn> Default for Static<Txn> {
     fn default() -> Self {
         Self {
             phantom: PhantomData,
@@ -209,29 +191,46 @@ impl<Txn, FE> Default for Static<Txn, FE> {
     }
 }
 
-impl<Txn, FE> Route<State<Txn, FE>> for Static<Txn, FE>
+#[cfg(feature = "collection")]
+impl<Txn> Route<State<Txn>> for Static<Txn>
 where
-    Txn: Transaction<FE> + RPCClient<State<Txn, FE>>,
-    FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>
-        + Clone,
-    BTreeFile<Txn, FE>: fs::Persist<FE, Schema = BTreeSchema, Txn = Txn>,
-    TableFile<Txn, FE>: fs::Persist<FE, Schema = TableSchema, Txn = Txn>,
-    Collection<Txn, FE>: From<BTreeFile<Txn, FE>>,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    BTreeFile<Txn>: fs::Persist<CacheBlock, Schema = BTreeSchema, Txn = Txn>,
+    TableFile<Txn>: fs::Persist<CacheBlock, Schema = TableSchema, Txn = Txn>,
+    Collection<Txn>: From<BTreeFile<Txn>>,
 {
     fn route<'a>(
         &'a self,
         path: &'a [PathSegment],
-    ) -> Option<Box<dyn Handler<'a, State<Txn, FE>> + 'a>> {
+    ) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>> {
         if path.is_empty() {
             return Some(Box::new(EchoHandler));
         }
 
         match path[0].as_str() {
             "collection" => tc_collection::public::Static.route(&path[1..]),
+            "scalar" => tc_scalar::public::Static.route(&path[1..]),
+            "map" => tc_transact::public::generic::MapStatic.route(&path[1..]),
+            "tuple" => tc_transact::public::generic::TupleStatic.route(&path[1..]),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(not(feature = "collection"))]
+impl<Txn> Route<State<Txn>> for Static<Txn>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+{
+    fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>> {
+        if path.is_empty() {
+            return Some(Box::new(EchoHandler));
+        }
+
+        match path[0].as_str() {
             "scalar" => tc_scalar::public::Static.route(&path[1..]),
             "map" => tc_transact::public::generic::MapStatic.route(&path[1..]),
             "tuple" => tc_transact::public::generic::TupleStatic.route(&path[1..]),

@@ -10,7 +10,7 @@ use tc_transact::public::{
     ClosureInstance, DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route,
     StateInstance,
 };
-use tc_transact::RPCClient;
+use tc_transact::Gateway;
 use tc_value::{Number, TCString, Value};
 use tcgeneric::{Id, Map, PathSegment, TCPathBuf, Tuple};
 

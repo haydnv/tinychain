@@ -49,7 +49,7 @@ impl ValueType {
     where
         Value: From<V>,
     {
-        let on_err = |v: &Value| bad_request!("cannot cast into {} from {}", self, v);
+        let on_err = |v: &Value| bad_request!("cannot cast into {self:?} from {v:?}");
         let value = Value::from(value);
 
         match self {
@@ -57,12 +57,12 @@ impl ValueType {
                 Value::Bytes(bytes) => Ok(Value::Bytes(bytes)),
                 Value::Number(_) => Err(not_implemented!("cast into Bytes from Number")),
                 Value::String(s) => {
-                    Bytes::try_cast_from(s, |s| bad_request!("cannot cast into Bytes from {}", s))
+                    Bytes::try_cast_from(s, |s| bad_request!("cannot cast into Bytes from {s}"))
                         .map(Vec::from)
                         .map(Arc::from)
                         .map(Value::Bytes)
                 }
-                other => Err(bad_request!("cannot cast into Bytes from {}", other)),
+                other => Err(bad_request!("cannot cast into Bytes from {other:?}")),
             },
             Self::Email => match value {
                 Value::Email(email) => Ok(Value::Email(email)),
@@ -78,15 +78,14 @@ impl ValueType {
                     .ok_or_else(|| bad_request!("cannot cast into an email address from {}", s)),
 
                 other => Err(bad_request!(
-                    "cannot cast into an email address from {}",
-                    other
+                    "cannot cast into an email address from {other:?}"
                 )),
             },
             Self::Id => value.try_cast_into(on_err).map(Value::Id),
             Self::Link => value.try_cast_into(on_err).map(Value::String),
             Self::None => Ok(Value::None),
             Self::Number(nt) => value
-                .try_cast_into(|v| bad_request!("cannot cast into Number from {}", v))
+                .try_cast_into(|v| bad_request!("cannot cast into Number from {v:?}"))
                 .map(|n| nt.cast(n))
                 .map(Value::Number),
 
@@ -98,12 +97,12 @@ impl ValueType {
                 Value::String(s) => s.as_str().parse().map(Value::Version),
                 Value::Tuple(t) => {
                     let (maj, min, rev) =
-                        t.try_cast_into(|t| bad_request!("invalid semantic version {}", t))?;
+                        t.try_cast_into(|t| bad_request!("invalid semantic version {t:?}"))?;
 
                     Ok(Value::Version(Version::from((maj, min, rev))))
                 }
                 Value::Version(v) => Ok(Value::Version(v)),
-                other => Err(bad_request!("cannot cast into Version from {}", other)),
+                other => Err(bad_request!("cannot cast into Version from {other:?}")),
             },
         }
     }

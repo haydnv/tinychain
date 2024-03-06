@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 
 use tc_error::*;
 use tc_value::{Float, Number, NumberClass, NumberInstance, Trigonometry, Value};
-use tcgeneric::{label, PathSegment};
+use tcgeneric::PathSegment;
 
 use super::{GetHandler, Handler, PostHandler, Route, StateInstance};
 
@@ -42,7 +42,7 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let value: Number = params.require(&label("r").into())?;
+                let value: Number = params.require("r")?;
                 params.expect_empty()?;
 
                 (self.op)(value).map(Value::Number).map(State::from)
@@ -101,14 +101,14 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let base: Value = params.or_default(&label("r").into())?;
+                let base: Value = params.or_default("r")?;
                 params.expect_empty()?;
 
                 let log = if base.is_none() {
                     self.n.ln()
                 } else {
                     let base: Number =
-                        base.try_cast_into(|v| bad_request!("invalid base {} for log", v))?;
+                        base.try_cast_into(|v| bad_request!("invalid base {v:?} for log"))?;
 
                     if base.class().is_complex() {
                         return Err(bad_request!("log does not support a complex base {}", base));
@@ -153,7 +153,7 @@ where
             Box::pin(async move {
                 if value.is_some() {
                     return Err(bad_request!(
-                        "{} does not have any parameters (found {})",
+                        "{} does not have any parameters (found {:?})",
                         self.name,
                         value
                     ));

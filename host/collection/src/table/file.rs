@@ -836,7 +836,7 @@ where
                 }
             }
 
-            while let Some(version_id) = state.commits.first().map(|id| **id) {
+            while let Some(version_id) = state.commits.first().map(|id| *id) {
                 if &version_id <= txn_id {
                     state.commits.pop_first();
                 } else {

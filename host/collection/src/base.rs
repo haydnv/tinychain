@@ -1,16 +1,17 @@
 use std::fmt;
 use std::marker::PhantomData;
 
-use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use destream::de;
+use freqfs::FileSave;
 use futures::TryFutureExt;
 use log::{debug, info};
 use safecast::{AsType, TryCastFrom};
 
 use tc_error::*;
 use tc_transact::fs::{CopyFrom, Dir, Persist, Restore};
-use tc_transact::{fs, AsyncHash, IntoView, Transact, Transaction, TxnId};
+use tc_transact::hash::{AsyncHash, Output, Sha256};
+use tc_transact::{fs, IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
 
 use super::btree::{BTree, BTreeFile, BTreeInstance};
@@ -115,8 +116,8 @@ where
     T: Transaction<FE>,
     FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
-        Collection::from(self).hash(txn_id).await
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+        Collection::from(self.clone()).hash(txn_id).await
     }
 }
 
@@ -124,7 +125,7 @@ where
 impl<Txn, FE> Persist<FE> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
     BTreeNode: freqfs::FileLoad,
 {
     type Txn = Txn;
@@ -201,7 +202,7 @@ where
 impl<Txn, FE> CopyFrom<FE, Collection<Txn, FE>> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
     BTreeNode: freqfs::FileLoad,
 {
     async fn copy_from(txn: &Txn, store: Dir<FE>, instance: Collection<Txn, FE>) -> TCResult<Self> {
@@ -229,7 +230,7 @@ where
 impl<Txn, FE> Restore<FE> for CollectionBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
     BTreeNode: freqfs::FileLoad,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
@@ -298,7 +299,7 @@ pub struct CollectionVisitor<Txn, FE> {
 impl<Txn, FE> CollectionVisitor<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     pub fn new(txn: Txn) -> Self {
         Self {
@@ -353,7 +354,7 @@ where
 impl<T, FE> de::Visitor for CollectionVisitor<T, FE>
 where
     T: Transaction<FE>,
-    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     type Value = CollectionBase<T, FE>;
 
@@ -378,7 +379,7 @@ where
 impl<T, FE> de::FromStream for CollectionBase<T, FE>
 where
     T: Transaction<FE>,
-    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     type Context = T;
 

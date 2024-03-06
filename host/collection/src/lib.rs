@@ -1,13 +1,14 @@
 use std::fmt;
 
-use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use destream::{de, en};
+use freqfs::FileSave;
 use futures::TryFutureExt;
 use safecast::{as_type, AsType, TryCastFrom};
 
 use tc_error::*;
-use tc_transact::{AsyncHash, IntoView, Transaction, TxnId};
+use tc_transact::hash::{hash_try_stream, AsyncHash, Digest, Hash, Output, Sha256};
+use tc_transact::{IntoView, Transaction, TxnId};
 use tcgeneric::{
     path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf, ThreadSafe,
 };
@@ -19,7 +20,7 @@ use tensor::TensorType;
 pub use base::{CollectionBase, CollectionVisitor};
 pub use btree::{BTree, BTreeFile, Node as BTreeNode};
 pub use schema::Schema;
-pub use table::Table;
+pub use table::{Table, TableFile};
 pub use tensor::{
     Dense, DenseBase, DenseCacheFile, DenseView, Node as TensorNode, Sparse, SparseBase,
     SparseView, Tensor, TensorBase, TensorInstance, TensorView,
@@ -144,26 +145,29 @@ where
     Txn: Transaction<FE>,
     FE: DenseCacheFile + AsType<btree::Node> + AsType<tensor::Node> + Clone,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         let schema_hash = Hash::<Sha256>::hash(self.schema());
 
         let contents_hash = match self {
             Self::BTree(btree) => {
-                let keys = btree.keys(txn_id).await?;
-                async_hash::hash_try_stream::<Sha256, _, _, _>(keys).await?
+                let keys = btree.clone().keys(txn_id).await?;
+                hash_try_stream::<Sha256, _, _, _>(keys).await?
             }
             Self::Table(table) => {
-                let rows = table.rows(txn_id).await?;
-                async_hash::hash_try_stream::<Sha256, _, _, _>(rows).await?
+                let rows = table.clone().rows(txn_id).await?;
+                hash_try_stream::<Sha256, _, _, _>(rows).await?
             }
             Self::Tensor(tensor) => match tensor {
                 Tensor::Dense(dense) => {
-                    let elements = DenseView::from(dense).into_elements(txn_id).await?;
-                    async_hash::hash_try_stream::<Sha256, _, _, _>(elements).await?
+                    let elements = DenseView::from(dense.clone()).into_elements(txn_id).await?;
+                    hash_try_stream::<Sha256, _, _, _>(elements).await?
                 }
                 Tensor::Sparse(sparse) => {
-                    let elements = SparseView::from(sparse).into_elements(txn_id).await?;
-                    async_hash::hash_try_stream::<Sha256, _, _, _>(elements).await?
+                    let elements = SparseView::from(sparse.clone())
+                        .into_elements(txn_id)
+                        .await?;
+
+                    hash_try_stream::<Sha256, _, _, _>(elements).await?
                 }
             },
         };
@@ -213,7 +217,7 @@ where
 impl<T, FE> de::FromStream for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     type Context = T;
 
@@ -331,5 +335,5 @@ async fn finalize_dir<FE: Send + Sync>(dir: &freqfs::DirLock<FE>, txn_id: &TxnId
         .expect("transactional versions directory");
 
     let mut versions = versions.write().await;
-    versions.delete(txn_id);
+    versions.delete(txn_id).await;
 }

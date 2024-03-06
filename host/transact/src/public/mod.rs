@@ -8,7 +8,7 @@ use tc_error::*;
 use tc_value::{Number, Value};
 use tcgeneric::{Instance, Map, PathSegment, TCPath, ThreadSafe, Tuple};
 
-use super::{RPCClient, Transaction};
+use super::{Gateway, Transaction};
 
 pub mod generic;
 pub mod helpers;
@@ -63,7 +63,7 @@ pub trait StateInstance:
     + 'static
 {
     type FE: ThreadSafe + Clone;
-    type Txn: Transaction<Self::FE> + RPCClient<Self>;
+    type Txn: Transaction<Self::FE> + Gateway<Self>;
     type Closure: ClosureInstance<Self>;
 
     /// Return `true` if this is a `Map` of states.
@@ -153,7 +153,6 @@ impl<State: StateInstance, T: Route<State> + fmt::Debug> Public<State> for T {
         } else {
             Err(TCError::method_not_allowed(
                 HandlerType::Get,
-                self,
                 TCPath::from(path),
             ))
         }
@@ -168,14 +167,13 @@ impl<State: StateInstance, T: Route<State> + fmt::Debug> Public<State> for T {
     ) -> TCResult<()> {
         let handler = self
             .route(path)
-            .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
+            .ok_or_else(|| not_found!("{} in {:?}", TCPath::from(path), self))?;
 
         if let Some(put_handler) = handler.put() {
             put_handler(txn, key, value).await
         } else {
             Err(TCError::method_not_allowed(
                 HandlerType::Put,
-                self,
                 TCPath::from(path),
             ))
         }
@@ -196,7 +194,6 @@ impl<State: StateInstance, T: Route<State> + fmt::Debug> Public<State> for T {
         } else {
             Err(TCError::method_not_allowed(
                 HandlerType::Post,
-                self,
                 TCPath::from(path),
             ))
         }
@@ -212,7 +209,6 @@ impl<State: StateInstance, T: Route<State> + fmt::Debug> Public<State> for T {
         } else {
             Err(TCError::method_not_allowed(
                 HandlerType::Delete,
-                self,
                 TCPath::from(path),
             ))
         }

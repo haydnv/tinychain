@@ -1,7 +1,6 @@
 use std::collections::btree_map::{BTreeMap, Entry};
 use std::fmt;
 
-use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
@@ -11,6 +10,7 @@ use log::debug;
 
 use tc_error::*;
 use tc_scalar::Scalar;
+use tc_transact::hash::{Digest, Hash, Output, Sha256};
 use tc_transact::TxnId;
 use tc_value::Value;
 

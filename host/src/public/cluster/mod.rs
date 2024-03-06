@@ -11,7 +11,7 @@ use tc_state::object::InstanceClass;
 use tc_transact::public::{
     DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route,
 };
-use tc_transact::{RPCClient, Transact, Transaction};
+use tc_transact::{Gateway, Transact, Transaction};
 use tc_value::{Host, Link, Value};
 use tcgeneric::{label, PathSegment, TCPath, TCPathBuf, Tuple};
 

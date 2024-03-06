@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 
 use async_trait::async_trait;
 use destream::en;
+use freqfs::FileSave;
 use futures::future::TryFutureExt;
 use log::debug;
 use safecast::*;
@@ -13,8 +14,9 @@ use tc_collection::{btree, Collection, CollectionBase, CollectionView, Schema};
 use tc_error::*;
 use tc_scalar::{OpRef, Scalar, TCRef};
 use tc_transact::fs;
+use tc_transact::hash::{AsyncHash, Hash, Output, Sha256};
 use tc_transact::public::StateInstance;
-use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{Id, Instance, NativeClass, ThreadSafe};
 
@@ -75,12 +77,12 @@ where
     FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
     Txn: Transaction<FE>,
     Collection<Txn, FE>: AsyncHash,
-    Scalar: async_hash::Hash<async_hash::Sha256>,
+    Scalar: Hash<Sha256>,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<async_hash::Output<async_hash::Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         match self {
             StoreEntry::Collection(collection) => collection.clone().hash(txn_id).await,
-            StoreEntry::Scalar(scalar) => Ok(async_hash::Hash::<async_hash::Sha256>::hash(scalar)),
+            StoreEntry::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),
         }
     }
 }
@@ -156,7 +158,7 @@ impl<Txn, FE> Store<Txn, FE> {
 impl<Txn, FE> Store<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
     BTreeNode: freqfs::FileLoad,
 {
     pub async fn resolve(&self, txn_id: TxnId, scalar: Scalar) -> TCResult<StoreEntry<Txn, FE>> {

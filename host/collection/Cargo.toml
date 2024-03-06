@@ -15,15 +15,14 @@ categories = ["database", "database-implementations", "data-structures"]
 opencl = ["ha-ndarray/opencl"]
 
 [dependencies]
-async-hash = "0.5"
 async-trait = "0.1"
 b-table = { version = "0.2", features = ["all"] }
 b-tree = { version = "0.3", features = ["all"] }
 collate = { version = "0.4", features = ["stream"] }
 destream = "0.7"
-ds-ext = "~0.1.3"
+ds-ext = { path = "../../../ds-ext" }
 futures = "0.3"
-freqfs = { version = "0.9", features = ["logging"] }
+freqfs = { version = "~0.9.1", features = ["logging"] }
 ha-ndarray = { version = "0.3", features = ["freqfs", "stream"] }
 itertools = "0.12"
 log = { version = "0.4", features = ["release_max_level_info"] }
@@ -32,9 +31,9 @@ smallvec = "1.11"
 pin-project = "1.1"
 rayon = "1.8"
 safecast = "0.2"
-tc-error = { path = "../error" }
+tc-error = { path = "../error", features = ["ha-ndarray"] }
 tc-scalar = { path = "../scalar" }
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }
 tcgeneric = { path = "../generic" }
-tokio = { version = "1.35", features = ["sync"] }
+tokio = { version = "1.36", features = ["sync"] }

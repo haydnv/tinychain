@@ -315,7 +315,7 @@ impl Transaction<CacheBlock> for Txn {
 }
 
 #[async_trait]
-impl tc_transact::RPCClient<State> for Txn {
+impl tc_transact::Gateway<State> for Txn {
     async fn get<'a, L, V>(&'a self, link: L, key: V) -> TCResult<State>
     where
         L: Into<ToUrl<'a>> + Send,

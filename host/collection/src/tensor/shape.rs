@@ -1,6 +1,5 @@
 use std::{fmt, iter, ops};
 
-use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use b_table::collate::{Collate, Collator, Overlap, OverlapsRange, OverlapsValue};
 use destream::{de, en};
@@ -10,6 +9,7 @@ use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
 use smallvec::{smallvec, SmallVec};
 
 use tc_error::*;
+use tc_transact::hash::{Digest, Hash, Output};
 use tc_value::Value;
 use tcgeneric::Tuple;
 

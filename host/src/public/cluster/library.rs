@@ -7,7 +7,7 @@ use tc_state::object::InstanceClass;
 use tc_transact::public::{
     DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route,
 };
-use tc_transact::{RPCClient, Transaction};
+use tc_transact::{Gateway, Transaction};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{Map, PathSegment, TCPath, TCPathBuf};
 

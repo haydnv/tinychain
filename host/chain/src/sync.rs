@@ -4,10 +4,9 @@
 use std::fmt;
 use std::marker::PhantomData;
 
-use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use destream::{de, FromStream};
-use freqfs::{FileLock, FileWriteGuard};
+use freqfs::{FileLock, FileSave, FileWriteGuard};
 use futures::TryFutureExt;
 use get_size::GetSize;
 use log::{debug, trace};
@@ -19,9 +18,10 @@ use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_transact::fs;
+use tc_transact::hash::{AsyncHash, Output, Sha256};
 use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Route, StateInstance};
-use tc_transact::{AsyncHash, IntoView, RPCClient, Transact, Transaction, TxnId};
+use tc_transact::{Gateway, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Label};
 
@@ -145,7 +145,7 @@ where
     State: StateInstance,
     T: AsyncHash + Send + Sync,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         self.subject.hash(txn_id).await
     }
 }
@@ -350,7 +350,11 @@ where
 impl<State, T> de::FromStream for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<ChainBlock> + AsType<TensorNode>,
+    State::FE: for<'a> FileSave<'a>
+        + DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>,
     T: FromStream<Context = State::Txn>,
 {
     type Context = State::Txn;

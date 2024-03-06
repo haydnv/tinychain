@@ -1,10 +1,10 @@
 use std::fmt;
 
-use async_hash::{Digest, Hash, Output};
 use destream::en;
 use safecast::{as_type, CastFrom, CastInto, TryCastFrom};
 
 use tc_error::*;
+use tc_transact::hash::{Digest, Hash, Output};
 use tc_value::Value;
 use tcgeneric::{NativeClass, TCPathBuf};
 
@@ -27,7 +27,7 @@ as_type!(Schema, Table, TableSchema);
 
 impl<D: Digest> Hash<D> for Schema {
     fn hash(self) -> Output<D> {
-        async_hash::Hash::<D>::hash(&self)
+        Hash::<D>::hash(&self)
     }
 }
 

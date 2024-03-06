@@ -1,5 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::hash::Hash;
 use std::iter::FromIterator;
 use std::mem::size_of;
 use std::ops::{Bound, Deref};
@@ -7,7 +8,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use async_hash::generic_array::GenericArray;
-use async_hash::{Digest, Hash, Output};
+use async_hash::{Digest, Hash as Sha256Hash, Output};
 use async_trait::async_trait;
 use base64::engine::general_purpose::STANDARD_NO_PAD;
 use base64::Engine;
@@ -35,7 +36,7 @@ const EMPTY_SEQ: [u8; 0] = [];
 const EXPECTING: &'static str = "a TinyChain value, e.g. 1 or \"two\" or [3]";
 
 /// A generic value enum
-#[derive(Clone)]
+#[derive(Clone, Hash)]
 pub enum Value {
     Bytes(Arc<[u8]>),
     Email(Arc<EmailAddress>),
@@ -118,7 +119,7 @@ impl Value {
             VT::Number(nt) => Number::opt_cast_from(self)
                 .map(|n| n.into_type(nt))
                 .map(Self::Number),
-            VT::String => Some(Value::String(self.to_string().into())),
+            VT::String => self.opt_cast_into().map(Self::String),
             VT::Tuple => match self {
                 Self::Tuple(tuple) => Some(Self::Tuple(tuple)),
                 _ => None,
@@ -212,24 +213,24 @@ impl Instance for Value {
     }
 }
 
-impl<D: Digest> Hash<D> for Value {
+impl<D: Digest> Sha256Hash<D> for Value {
     fn hash(self) -> Output<D> {
-        Hash::<D>::hash(&self)
+        Sha256Hash::<D>::hash(&self)
     }
 }
 
-impl<'a, D: Digest> Hash<D> for &'a Value {
+impl<'a, D: Digest> Sha256Hash<D> for &'a Value {
     fn hash(self) -> Output<D> {
         match self {
             Value::Bytes(bytes) => D::digest(bytes),
-            Value::Email(email) => Hash::<D>::hash(email.to_string()),
-            Value::Id(id) => Hash::<D>::hash(id),
-            Value::Link(link) => Hash::<D>::hash(link),
+            Value::Email(email) => Sha256Hash::<D>::hash(email.to_string()),
+            Value::Id(id) => Sha256Hash::<D>::hash(id),
+            Value::Link(link) => Sha256Hash::<D>::hash(link),
             Value::None => GenericArray::default(),
-            Value::Number(n) => Hash::<D>::hash(*n),
-            Value::String(s) => Hash::<D>::hash(s.as_str()),
-            Value::Tuple(tuple) => Hash::<D>::hash(tuple.deref()),
-            Value::Version(v) => Hash::<D>::hash(*v),
+            Value::Number(n) => Sha256Hash::<D>::hash(*n),
+            Value::String(s) => Sha256Hash::<D>::hash(s.as_str()),
+            Value::Tuple(tuple) => Sha256Hash::<D>::hash(tuple.deref()),
+            Value::Version(v) => Sha256Hash::<D>::hash(*v),
         }
     }
 }
@@ -245,10 +246,12 @@ impl Serialize for Value {
         match self {
             Self::Bytes(bytes) => {
                 let mut map = serializer.serialize_map(Some(1))?;
+
                 map.serialize_entry(
                     &self.class().path().to_string(),
                     &STANDARD_NO_PAD.encode(&bytes),
                 )?;
+
                 map.end()
             }
             Self::Email(email) => {
@@ -393,6 +396,12 @@ impl From<Bytes> for Value {
     }
 }
 
+impl<const N: usize> From<[u8; N]> for Value {
+    fn from(bytes: [u8; N]) -> Self {
+        Self::Bytes(bytes.into())
+    }
+}
+
 impl From<Host> for Value {
     fn from(host: Host) -> Self {
         Self::Link(host.into())
@@ -464,6 +473,21 @@ impl TryFrom<Value> for bool {
             Value::String(s) if &s == "true" => Ok(true),
             Value::String(s) if &s == "false" => Ok(false),
             other => Err(TCError::unexpected(other, "a boolean")),
+        }
+    }
+}
+
+impl TryFrom<Value> for Arc<[u8]> {
+    type Error = TCError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Bytes(bytes) => Ok(bytes),
+            Value::Id(id) => Ok(id.as_str().as_bytes().into()),
+            Value::None => Ok(Arc::new([])),
+            Value::Number(_n) => Err(not_implemented!("cast a number to a bitstring")),
+            Value::String(string) => Ok(string.as_str().as_bytes().into()),
+            other => Err(TCError::unexpected(other, "a bitstring")),
         }
     }
 }

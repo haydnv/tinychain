@@ -4,11 +4,10 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use async_hash::generic_array::GenericArray;
-use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
+use freqfs::FileSave;
 use futures::future::TryFutureExt;
 use safecast::{AsType, TryCastFrom};
 
@@ -18,9 +17,10 @@ use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_transact::fs;
+use tc_transact::hash::{AsyncHash, GenericArray, Output, Sha256};
 use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Route, StateInstance};
-use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::*;
 
@@ -190,7 +190,7 @@ where
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe,
     T: AsyncHash + Send + Sync,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         match self {
             Self::Block(chain) => chain.hash(txn_id).await,
             Self::Sync(chain) => chain.hash(txn_id).await,
@@ -550,7 +550,8 @@ fn new_queue<State>(
 ) -> TxnTaskQueue<MutationPending<State::Txn, State::FE>, TCResult<MutationRecord>>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    State::FE:
+        for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     TxnTaskQueue::new(Arc::pin(move |mutation| {
         let store = store.clone();

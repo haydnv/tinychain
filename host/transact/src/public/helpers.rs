@@ -5,7 +5,7 @@ use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_value::TCString;
-use tcgeneric::{label, Id, TCPath, Tuple};
+use tcgeneric::{Id, TCPath, Tuple};
 
 use super::{
     DeleteHandler, GetHandler, Handler, HandlerType, PostHandler, PutHandler, StateInstance,
@@ -61,8 +61,8 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let message: TCString = params.require(&label("message").into())?;
-                let stack: Tuple<TCString> = params.require(&label("stack").into())?;
+                let message: TCString = params.require("message")?;
+                let stack: Tuple<TCString> = params.require("stack")?;
                 params.expect_empty()?;
 
                 if let Some(err_type) = error_type(self.code) {
@@ -99,7 +99,7 @@ where
                 if key.is_none() {
                     Ok(self.attribute.into())
                 } else {
-                    Err(TCError::not_found(format!("attribute {}", key)))
+                    Err(TCError::not_found(format!("attribute {key:?}")))
                 }
             })
         }))
@@ -112,15 +112,9 @@ impl<T> From<T> for AttributeHandler<T> {
     }
 }
 
-pub struct MethodNotAllowedHandler<'a, T> {
-    subject: &'a T,
-}
+pub struct MethodNotAllowedHandler;
 
-impl<'a, State, T> Handler<'a, State> for MethodNotAllowedHandler<'a, T>
-where
-    State: StateInstance,
-    T: Clone + Send + Sync + fmt::Debug,
-{
+impl<'a, State: StateInstance> Handler<'a, State> for MethodNotAllowedHandler {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
         'b: 'a,
@@ -128,7 +122,6 @@ where
         Some(Box::new(move |_txn, _key| {
             Box::pin(future::ready(Err(TCError::method_not_allowed(
                 HandlerType::Get,
-                self.subject,
                 TCPath::default(),
             ))))
         }))
@@ -141,7 +134,6 @@ where
         Some(Box::new(move |_txn, _key, _value| {
             Box::pin(future::ready(Err(TCError::method_not_allowed(
                 HandlerType::Put,
-                self.subject,
                 TCPath::default(),
             ))))
         }))
@@ -154,7 +146,6 @@ where
         Some(Box::new(move |_txn, _key| {
             Box::pin(future::ready(Err(TCError::method_not_allowed(
                 HandlerType::Post,
-                self.subject,
                 TCPath::default(),
             ))))
         }))
@@ -167,16 +158,9 @@ where
         Some(Box::new(move |_txn, _key| {
             Box::pin(future::ready(Err(TCError::method_not_allowed(
                 HandlerType::Delete,
-                self.subject,
                 TCPath::default(),
             ))))
         }))
-    }
-}
-
-impl<'a, T> From<&'a T> for MethodNotAllowedHandler<'a, T> {
-    fn from(subject: &'a T) -> Self {
-        Self { subject }
     }
 }
 
@@ -199,7 +183,7 @@ where
                     Ok(self.subject.clone().into())
                 } else {
                     Err(TCError::not_found(format!(
-                        "attribute {} of {:?}",
+                        "attribute {:?} of {:?}",
                         key, self.subject
                     )))
                 }
@@ -233,7 +217,7 @@ where
                     Ok(self.subject.into())
                 } else {
                     Err(TCError::not_found(format!(
-                        "attribute {} of {:?}",
+                        "attribute {:?} of {:?}",
                         key, self.subject
                     )))
                 }

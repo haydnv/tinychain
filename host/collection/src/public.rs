@@ -1,9 +1,10 @@
 //! Public API endpoints for a [`Collection`]
 
+use freqfs::FileSave;
 use safecast::{AsType, CastInto, TryCastFrom};
+
 use tc_error::TCError;
 use tc_scalar::Scalar;
-
 use tc_transact::fs;
 use tc_transact::public::{GetHandler, Handler, Route, StateInstance};
 use tc_value::{Number, NumberType, Value};
@@ -19,7 +20,7 @@ where
     State: StateInstance
         + From<Collection<State::Txn, State::FE>>
         + From<Tensor<State::Txn, State::FE>>,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
+    State::FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     TableFile<State::Txn, State::FE>:
         fs::Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
@@ -82,7 +83,7 @@ where
         + From<Tuple<Value>>
         + From<u64>,
     State::Class: From<NumberType>,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
+    State::FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
     BTree<State::Txn, State::FE>: TryCastFrom<State>,
     Map<Value>: TryFrom<State, Error = TCError>,
     Number: TryCastFrom<State>,
@@ -124,7 +125,7 @@ where
         + From<Tuple<Value>>
         + From<u64>,
     State::Class: From<NumberType>,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
+    State::FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
     BTree<State::Txn, State::FE>: TryCastFrom<State>,
     Collection<State::Txn, State::FE>: From<BTree<State::Txn, State::FE>>,
     Map<Value>: TryFrom<State, Error = TCError>,
@@ -156,7 +157,7 @@ where
         + From<Tensor<State::Txn, State::FE>>
         + From<Tuple<Value>>,
     State::Class: From<NumberType>,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
+    State::FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
     BTreeFile<State::Txn, State::FE>:
         fs::Persist<State::FE, Schema = BTreeSchema, Txn = State::Txn>,
     TableFile<State::Txn, State::FE>:

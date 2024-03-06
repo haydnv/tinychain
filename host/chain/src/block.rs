@@ -5,10 +5,10 @@
 use std::fmt;
 use std::marker::PhantomData;
 
-use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de;
+use freqfs::FileSave;
 use futures::future::TryFutureExt;
 use futures::join;
 use log::debug;
@@ -20,8 +20,9 @@ use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_transact::fs;
+use tc_transact::hash::{AsyncHash, Output, Sha256};
 use tc_transact::public::{Route, StateInstance};
-use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{Map, ThreadSafe, Tuple};
 
@@ -203,7 +204,7 @@ where
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
     T: Send + Sync,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         self.history.hash(txn_id).await
     }
 }
@@ -271,7 +272,11 @@ where
 impl<'en, State, T> IntoView<'en, State::FE> for BlockChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode>,
+    State::FE: for<'a> FileSave<'a>
+        + DenseCacheFile
+        + AsType<ChainBlock>
+        + AsType<BTreeNode>
+        + AsType<TensorNode>,
     T: IntoView<'en, State::FE, Txn = State::Txn> + Send + Sync,
 {
     type Txn = State::Txn;

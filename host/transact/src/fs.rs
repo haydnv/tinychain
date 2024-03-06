@@ -70,15 +70,8 @@ impl<FE> Clone for Dir<FE> {
     }
 }
 
+// TODO: support a mutable "Entry" type to use instead of calling `contains`
 impl<FE: ThreadSafe + Clone> Dir<FE> {
-    /// Load a transactional [`Dir`] from the filesystem cache.
-    pub async fn load(txn_id: TxnId, canon: freqfs::DirLock<FE>) -> TCResult<Self> {
-        txfs::Dir::load(txn_id, canon)
-            .map_ok(|inner| Self { inner })
-            .map_err(TCError::from)
-            .await
-    }
-
     /// Destructure this [`Dir`] into its underlying [`freqfs::DirLock`].
     pub fn into_inner(self) -> Inner<FE> {
         self.inner.into_inner()
@@ -88,28 +81,6 @@ impl<FE: ThreadSafe + Clone> Dir<FE> {
     pub async fn contains(&self, txn_id: TxnId, name: &Id) -> TCResult<bool> {
         self.inner
             .contains(txn_id, name)
-            .map_err(TCError::from)
-            .await
-    }
-
-    /// Create a new sub-directory with the given `name` at `txn_id`.
-    pub async fn create_dir(&self, txn_id: TxnId, name: Id) -> TCResult<Self> {
-        self.inner
-            .create_dir(txn_id, name.into())
-            .map_ok(|inner| Self { inner })
-            .map_err(TCError::from)
-            .await
-    }
-
-    /// Create a new [`File`] with the given `name` at `txn_id`.
-    pub async fn create_file<B>(&self, txn_id: TxnId, name: Id) -> TCResult<File<FE, B>>
-    where
-        B: GetSize + Clone,
-        FE: AsType<B>,
-    {
-        self.inner
-            .create_dir(txn_id, name.into())
-            .map_ok(File::new)
             .map_err(TCError::from)
             .await
     }
@@ -141,15 +112,6 @@ impl<FE: ThreadSafe + Clone> Dir<FE> {
             Ok(Self { inner: dir.clone() })
         } else {
             Err(TCError::not_found(name))
-        }
-    }
-
-    /// Get the sub-[`Dir`] with the given `name` at `txn_id`, or create a new one.
-    pub async fn get_or_create_dir(&self, txn_id: TxnId, name: Id) -> TCResult<Self> {
-        if let Some(dir) = self.inner.get_dir(txn_id, &name).await? {
-            Ok(Self { inner: dir.clone() })
-        } else {
-            self.create_dir(txn_id, name).await
         }
     }
 
@@ -223,6 +185,50 @@ impl<FE: ThreadSafe + Clone> Dir<FE> {
     }
 }
 
+impl<FE> Dir<FE>
+where
+    FE: for<'a> FileSave<'a> + Clone,
+{
+    /// Load a transactional [`Dir`] from the filesystem cache.
+    pub async fn load(txn_id: TxnId, canon: freqfs::DirLock<FE>) -> TCResult<Self> {
+        txfs::Dir::load(txn_id, canon)
+            .map_ok(|inner| Self { inner })
+            .map_err(TCError::from)
+            .await
+    }
+
+    /// Create a new sub-directory with the given `name` at `txn_id`.
+    pub async fn create_dir(&self, txn_id: TxnId, name: Id) -> TCResult<Self> {
+        self.inner
+            .create_dir(txn_id, name.into())
+            .map_ok(|inner| Self { inner })
+            .map_err(TCError::from)
+            .await
+    }
+
+    /// Create a new [`File`] with the given `name` at `txn_id`.
+    pub async fn create_file<B>(&self, txn_id: TxnId, name: Id) -> TCResult<File<FE, B>>
+    where
+        B: GetSize + Clone,
+        FE: AsType<B>,
+    {
+        self.inner
+            .create_dir(txn_id, name.into())
+            .map_ok(File::new)
+            .map_err(TCError::from)
+            .await
+    }
+
+    /// Get the sub-[`Dir`] with the given `name` at `txn_id`, or create a new one.
+    pub async fn get_or_create_dir(&self, txn_id: TxnId, name: Id) -> TCResult<Self> {
+        if let Some(dir) = self.inner.get_dir(txn_id, &name).await? {
+            Ok(Self { inner: dir.clone() })
+        } else {
+            self.create_dir(txn_id, name).await
+        }
+    }
+}
+
 impl<FE: ThreadSafe + Clone + for<'a> FileSave<'a>> Dir<FE> {
     /// Commit this [`Dir`] at `txn_id`.
     pub async fn commit(&self, txn_id: TxnId, recursive: bool) {
@@ -277,7 +283,28 @@ impl<FE, B> File<FE, B> {
 
 impl<FE, B> File<FE, B>
 where
-    FE: for<'a> FileSave<'a> + AsType<B> + Clone + Send + Sync,
+    FE: for<'a> FileSave<'a> + Clone,
+{
+    /// Load a [`File`] from its [`Inner`] cache representation.
+    pub async fn load(inner: Inner<FE>, txn_id: TxnId) -> TCResult<Self> {
+        let inner = txfs::Dir::load(txn_id, inner).await?;
+
+        let contents = inner.iter(txn_id).await?;
+        for (name, entry) in contents {
+            if entry.is_dir() {
+                return Err(internal!(
+                    "cache dir entry {name} is a subdirectory (not a block)"
+                ));
+            }
+        }
+
+        Ok(Self::new(inner))
+    }
+}
+
+impl<FE, B> File<FE, B>
+where
+    FE: for<'a> FileSave<'a> + AsType<B> + Clone,
     B: FileLoad + GetSize + Clone,
 {
     /// Construct an iterator over the name of each block in this [`File`] at `txn_id`.

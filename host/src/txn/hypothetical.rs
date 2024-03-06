@@ -12,7 +12,7 @@ use tokio::sync::RwLock;
 use tc_error::*;
 use tc_scalar::{Executor, Refer, Scope};
 use tc_transact::public::{DeleteHandler, GetHandler, Handler, PutHandler, Route, StateInstance};
-use tc_transact::{RPCClient, Transaction, TxnId};
+use tc_transact::{Gateway, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Id, Map, PathLabel, PathSegment};
 

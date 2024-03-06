@@ -1,13 +1,13 @@
 use std::fmt;
 use std::ops::Bound;
 
-use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
 use log::trace;
 use safecast::{CastFrom, Match, TryCastFrom, TryCastInto};
 
 use tc_error::{bad_request, TCError, TCResult};
+use tc_transact::hash::{Digest, Hash, Output};
 use tc_value::{NumberType, Value, ValueType};
 use tcgeneric::{Id, NativeClass};
 
@@ -84,7 +84,7 @@ impl BTreeSchema {
 
     /// Try to construct a schema from its [`Value`] representation.
     pub fn try_cast_from_value(value: Value) -> TCResult<Self> {
-        let columns = value.try_cast_into(|v| bad_request!("invalid BTree schema: {}", v))?;
+        let columns = value.try_cast_into(|v| bad_request!("invalid BTree schema: {v:?}"))?;
         Self::new(columns)
     }
 
