@@ -10,7 +10,7 @@ use tc_scalar::value::Version as VersionNumber;
 use tc_scalar::{OpDef, Scalar};
 use tc_state::CacheBlock;
 use tc_transact::fs;
-use tc_transact::hash::{AsyncHash, Digest, Output, Sha256};
+use tc_transact::hash::*;
 use tc_transact::{Transact, Transaction, TxnId};
 use tcgeneric::Map;
 
@@ -77,12 +77,12 @@ impl AsyncHash for Library {
         let mut hasher = Sha256::new();
         while let Some((number, library)) = versions.try_next().await? {
             let number: VersionNumber = number.as_str().parse()?;
-            hasher.update(async_hash::Hash::<Sha256>::hash((number, &*library)));
+            hasher.update(Hash::<Sha256>::hash((number, &*library)));
             is_empty = false;
         }
 
         if is_empty {
-            Ok(async_hash::default_hash::<Sha256>())
+            Ok(default_hash::<Sha256>())
         } else {
             Ok(hasher.finalize())
         }

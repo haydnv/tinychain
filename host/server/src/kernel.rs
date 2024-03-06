@@ -23,13 +23,18 @@ use tc_value::{Host, Link, ToUrl, Value};
 use tcgeneric::{label, Label, Map, NetworkTime, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::client::Egress;
+#[cfg(feature = "service")]
+use crate::cluster::Service;
 use crate::cluster::{Class, Cluster, Dir, DirEntry, Library, ReplicateAndJoin};
 use crate::txn::{Hypothetical, Txn, TxnServer};
 use crate::{aes256, cluster, Authorize, SignedToken, State};
 
 pub const CLASS: Label = label("class");
 pub const LIB: Label = label("lib");
+pub const SERVICE: Label = label("service");
 const REPLICATION_TTL: Duration = Duration::from_secs(30);
+#[cfg(not(feature = "service"))]
+const ERR_NOT_ENABLED: &str = "this binary was compiled without the 'service' feature";
 
 type Nonce = [u8; 12];
 
@@ -117,6 +122,8 @@ impl<'a> Endpoint<'a> {
 pub(crate) struct Kernel {
     class: Cluster<Dir<Class>>,
     library: Cluster<Dir<Library>>,
+    #[cfg(feature = "service")]
+    service: Cluster<Dir<Service>>,
     hypothetical: Cluster<Hypothetical>,
     keys: HashSet<aes256::Key>,
 }
@@ -128,6 +135,16 @@ impl Kernel {
                 "cannot issue a token for {}",
                 TCPath::from(path)
             ))
+        } else if path[0] == SERVICE {
+            #[cfg(feature = "service")]
+            {
+                issue_token(txn_id, &self.service, &path[1..])
+            }
+
+            #[cfg(not(feature = "service"))]
+            {
+                Err(not_implemented!("{ERR_NOT_ENABLED}"))
+            }
         } else if path[0] == LIB {
             issue_token(txn_id, &self.library, &path[1..])
         } else if path[0] == CLASS {
@@ -148,6 +165,16 @@ impl Kernel {
     pub fn public_key(&self, txn_id: TxnId, path: &[PathSegment]) -> TCResult<VerifyingKey> {
         if path.is_empty() {
             Err(bad_request!("{} has no public key", TCPath::from(path)))
+        } else if path[0] == SERVICE {
+            #[cfg(feature = "service")]
+            {
+                public_key(txn_id, &self.service, &path[1..])
+            }
+
+            #[cfg(not(feature = "service"))]
+            {
+                Err(not_implemented!("{ERR_NOT_ENABLED}"))
+            }
         } else if path[0] == LIB {
             public_key(txn_id, &self.library, &path[1..])
         } else if path[0] == CLASS {
@@ -171,6 +198,21 @@ impl Kernel {
                 path,
                 handler: Box::new(KernelHandler::from(self)),
             })
+        } else if path[0] == SERVICE {
+            #[cfg(feature = "service")]
+            {
+                let (path, dir_entry) = self.service.lookup(*txn.id(), &path[1..])?;
+
+                match dir_entry {
+                    DirEntry::Dir(cluster) => crate::kernel::auth_claim_route(cluster, path, txn),
+                    DirEntry::Item(cluster) => crate::kernel::auth_claim_route(cluster, path, txn),
+                }
+            }
+
+            #[cfg(not(feature = "service"))]
+            {
+                Err(not_implemented!("{ERR_NOT_ENABLED}"))
+            }
         } else if path[0] == LIB {
             let (path, dir_entry) = self.library.lookup(*txn.id(), &path[1..])?;
 
@@ -203,6 +245,8 @@ impl Kernel {
 
         Self::replicate_and_join_dir(&self.keys, &self.class, txn_server, peers).await?;
         Self::replicate_and_join_dir(&self.keys, &self.library, txn_server, peers).await?;
+        #[cfg(feature = "service")]
+        Self::replicate_and_join_dir(&self.keys, &self.service, txn_server, peers).await?;
 
         // TODO: replicate services in the /services dir
 
@@ -327,6 +371,15 @@ impl Schema {
             keys,
         }
     }
+
+    fn to_cluster(&self, prefix: Label) -> cluster::Schema {
+        cluster::Schema::new(
+            self.lead.clone(),
+            Link::new(self.host.clone(), prefix.into()),
+            self.owner.clone(),
+            self.group.clone(),
+        )
+    }
 }
 
 #[async_trait]
@@ -339,29 +392,26 @@ impl fs::Persist<CacheBlock> for Kernel {
         schema: Self::Schema,
         store: fs::Dir<CacheBlock>,
     ) -> TCResult<Self> {
-        let lead = schema.lead;
+        let lead = schema.lead.clone();
 
-        let class_dir: fs::Dir<CacheBlock> = store.create_dir(txn_id, CLASS.into()).await?;
+        let class = {
+            let schema = schema.to_cluster(CLASS);
+            let dir: fs::Dir<CacheBlock> = store.create_dir(txn_id, CLASS.into()).await?;
+            fs::Persist::<CacheBlock>::create(txn_id, schema, dir).await?
+        };
 
-        let class_schema = cluster::Schema::new(
-            lead.clone(),
-            Link::new(schema.host.clone(), CLASS.into()),
-            schema.owner.clone(),
-            schema.group.clone(),
-        );
+        let library = {
+            let schema = schema.to_cluster(LIB);
+            let dir: fs::Dir<CacheBlock> = store.create_dir(txn_id, LIB.into()).await?;
+            fs::Persist::<CacheBlock>::create(txn_id, schema, dir).await?
+        };
 
-        let class = fs::Persist::<CacheBlock>::create(txn_id, class_schema, class_dir).await?;
-
-        let lib_dir: fs::Dir<CacheBlock> = store.create_dir(txn_id, LIB.into()).await?;
-
-        let lib_schema = cluster::Schema::new(
-            lead.clone(),
-            Link::new(schema.host.clone(), LIB.into()),
-            schema.owner.clone(),
-            schema.group.clone(),
-        );
-
-        let library = fs::Persist::<CacheBlock>::create(txn_id, lib_schema, lib_dir).await?;
+        #[cfg(feature = "service")]
+        let service = {
+            let schema = schema.to_cluster(SERVICE);
+            let dir: fs::Dir<CacheBlock> = store.create_dir(txn_id, SERVICE.into()).await?;
+            fs::Persist::<CacheBlock>::create(txn_id, schema, dir).await?
+        };
 
         let link = Link::new(schema.host, Hypothetical::PATH.into());
         let txn_schema = cluster::Schema::new(lead, link, schema.owner, schema.group);
@@ -371,6 +421,8 @@ impl fs::Persist<CacheBlock> for Kernel {
             class,
             library,
             hypothetical,
+            #[cfg(feature = "service")]
+            service,
             keys: schema.keys,
         })
     }
@@ -380,29 +432,26 @@ impl fs::Persist<CacheBlock> for Kernel {
         schema: Self::Schema,
         store: fs::Dir<CacheBlock>,
     ) -> TCResult<Self> {
-        let lead = schema.lead;
+        let lead = schema.lead.clone();
 
-        let class_dir: fs::Dir<CacheBlock> = store.get_or_create_dir(txn_id, CLASS.into()).await?;
+        let class = {
+            let schema = schema.to_cluster(CLASS);
+            let dir = store.get_or_create_dir(txn_id, CLASS.into()).await?;
+            fs::Persist::<CacheBlock>::load(txn_id, schema, dir).await?
+        };
 
-        let class_schema = cluster::Schema::new(
-            lead.clone(),
-            Link::new(schema.host.clone(), CLASS.into()),
-            schema.owner.clone(),
-            schema.group.clone(),
-        );
+        let library = {
+            let schema = schema.to_cluster(LIB);
+            let dir = store.get_or_create_dir(txn_id, LIB.into()).await?;
+            fs::Persist::<CacheBlock>::load(txn_id, schema, dir).await?
+        };
 
-        let class = fs::Persist::<CacheBlock>::load(txn_id, class_schema, class_dir).await?;
-
-        let lib_dir: fs::Dir<CacheBlock> = store.get_or_create_dir(txn_id, LIB.into()).await?;
-
-        let lib_schema = cluster::Schema::new(
-            lead.clone(),
-            Link::new(schema.host.clone(), LIB.into()),
-            schema.owner.clone(),
-            schema.group.clone(),
-        );
-
-        let library = fs::Persist::<CacheBlock>::load(txn_id, lib_schema, lib_dir).await?;
+        #[cfg(feature = "service")]
+        let service = {
+            let schema = schema.to_cluster(SERVICE);
+            let dir = store.get_or_create_dir(txn_id, SERVICE.into()).await?;
+            fs::Persist::<CacheBlock>::load(txn_id, schema, dir).await?
+        };
 
         let link = Link::new(schema.host, Hypothetical::PATH.into());
         let txn_schema = cluster::Schema::new(lead, link, schema.owner, schema.group);
@@ -411,6 +460,8 @@ impl fs::Persist<CacheBlock> for Kernel {
         Ok(Self {
             class,
             library,
+            #[cfg(feature = "service")]
+            service,
             hypothetical,
             keys: schema.keys,
         })
@@ -418,6 +469,16 @@ impl fs::Persist<CacheBlock> for Kernel {
 
     fn dir(&self) -> fs::Inner<CacheBlock> {
         unimplemented!("Kernel::inner")
+    }
+}
+
+#[cfg(feature = "service")]
+#[async_trait]
+impl tc_chain::Recover<CacheBlock> for Kernel {
+    type Txn = Txn;
+
+    async fn recover(&self, txn: &Txn) -> TCResult<()> {
+        self.service.recover(txn).await
     }
 }
 

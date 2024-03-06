@@ -15,7 +15,7 @@ use safecast::TryCastFrom;
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_state::object::InstanceClass;
-use tc_transact::hash::{AsyncHash, Digest, Hash, Output, Sha256};
+use tc_transact::hash::*;
 use tc_transact::lock::{TxnMapLock, TxnMapLockEntry, TxnMapLockIter};
 use tc_transact::public::Route;
 use tc_transact::{fs, Gateway};
@@ -74,6 +74,22 @@ impl<T> DirEntry<T> {
 pub enum DirEntryCommit<T: Transact + Clone + Send + Sync + fmt::Debug + 'static> {
     Dir(<Cluster<Dir<T>> as Transact>::Commit),
     Item(<Cluster<T> as Transact>::Commit),
+}
+
+#[cfg(feature = "service")]
+#[async_trait]
+impl<T> tc_chain::Recover<CacheBlock> for DirEntry<T>
+where
+    T: tc_chain::Recover<CacheBlock, Txn = Txn> + fmt::Debug + Send + Sync,
+{
+    type Txn = Txn;
+
+    async fn recover(&self, txn: &Txn) -> TCResult<()> {
+        match self {
+            Self::Dir(dir) => dir.recover(txn).await,
+            Self::Item(cluster) => cluster.recover(txn).await,
+        }
+    }
 }
 
 #[async_trait]
@@ -258,6 +274,30 @@ where
     }
 }
 
+#[cfg(feature = "service")]
+#[async_trait]
+impl<T> tc_chain::Recover<CacheBlock> for Dir<T>
+where
+    T: tc_chain::Recover<CacheBlock, Txn = Txn> + fmt::Debug + Send + Sync,
+{
+    type Txn = Txn;
+
+    async fn recover(&self, txn: &Txn) -> TCResult<()> {
+        let contents = self.contents.iter(*txn.id()).await?;
+
+        let mut recovered = FuturesUnordered::new();
+        for (_name, entry) in contents {
+            recovered.push(entry.recover(txn));
+        }
+
+        while let Some(()) = recovered.try_next().await? {
+            // pass
+        }
+
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl<T: Transact + ThreadSafe + Clone + fmt::Debug> Transact for Dir<T>
 where
@@ -315,7 +355,7 @@ where
         }
 
         if is_empty {
-            Ok(async_hash::default_hash::<Sha256>())
+            Ok(default_hash::<Sha256>())
         } else {
             Ok(hasher.finalize())
         }
@@ -477,6 +517,63 @@ impl fs::Persist<CacheBlock> for Dir<Library> {
         }
 
         std::mem::drop(entries); // needed because `entries` borrows `dir`
+
+        Self::with_contents(txn_id, schema, dir, loaded)
+    }
+
+    fn dir(&self) -> fs::Inner<CacheBlock> {
+        self.dir.clone().into_inner()
+    }
+}
+
+#[cfg(feature = "service")]
+#[async_trait]
+impl fs::Persist<CacheBlock> for Dir<super::Service> {
+    type Txn = Txn;
+    type Schema = Schema;
+
+    async fn create(
+        txn_id: TxnId,
+        schema: Self::Schema,
+        store: fs::Dir<CacheBlock>,
+    ) -> TCResult<Self> {
+        Self::new(txn_id, schema, store)
+    }
+
+    async fn load(txn_id: TxnId, schema: Self::Schema, dir: fs::Dir<CacheBlock>) -> TCResult<Self> {
+        let mut loaded = BTreeMap::new();
+        let mut contents = dir.entries::<InstanceClass>(txn_id).await?;
+
+        while let Some((name, entry)) = contents.try_next().await? {
+            let schema = schema.clone().append((*name).clone());
+
+            let entry = match entry {
+                tc_transact::fs::DirEntry::File(file) => {
+                    Err(internal!("invalid Service directory entry: {:?}", file))
+                }
+                tc_transact::fs::DirEntry::Dir(dir) => {
+                    let is_service = dir.contains(txn_id, &super::service::SCHEMA.into()).await?;
+
+                    if is_service {
+                        trace!("load item {} in service dir", name);
+
+                        Cluster::load(txn_id, schema, dir.clone())
+                            .map_ok(DirEntry::Item)
+                            .await
+                    } else {
+                        trace!("load sub-dir {} in service dir", name);
+
+                        Cluster::load(txn_id, schema, dir.clone())
+                            .map_ok(DirEntry::Dir)
+                            .await
+                    }
+                }
+            }?;
+
+            loaded.insert((*name).clone(), entry);
+        }
+
+        std::mem::drop(contents);
 
         Self::with_contents(txn_id, schema, dir, loaded)
     }

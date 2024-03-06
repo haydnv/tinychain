@@ -21,6 +21,8 @@ use super::{Cluster, REPLICAS};
 mod class;
 mod dir;
 mod library;
+#[cfg(feature = "service")]
+mod service;
 
 struct ClusterHandler<T> {
     cluster: Cluster<T>,

@@ -9,7 +9,7 @@ use tc_error::*;
 use tc_scalar::Scalar;
 use tc_state::object::InstanceClass;
 use tc_transact::fs;
-use tc_transact::hash::{AsyncHash, Digest, Hash, Output, Sha256};
+use tc_transact::hash::*;
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Link, Version as VersionNumber};
 use tcgeneric::{Id, Map};
@@ -67,7 +67,7 @@ impl AsyncHash for Version {
         }
 
         if is_empty {
-            Ok(async_hash::default_hash::<Sha256>())
+            Ok(default_hash::<Sha256>())
         } else {
             Ok(hasher.finalize())
         }
@@ -162,7 +162,7 @@ impl AsyncHash for Class {
         }
 
         if is_empty {
-            Ok(async_hash::default_hash::<Sha256>())
+            Ok(default_hash::<Sha256>())
         } else {
             Ok(hasher.finalize())
         }

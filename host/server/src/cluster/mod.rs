@@ -29,6 +29,15 @@ use crate::{default_host, Actor, CacheBlock, SignedToken, State};
 pub use class::Class;
 pub use dir::{Dir, DirEntry};
 pub use library::Library;
+#[cfg(feature = "service")]
+pub use service::Service;
+
+mod class;
+mod dir;
+mod library;
+mod public;
+#[cfg(feature = "service")]
+mod service;
 
 pub const DEFAULT_UMASK: Mode = Mode::new()
     .with_class_perm(umask::USER, umask::ALL)
@@ -36,11 +45,6 @@ pub const DEFAULT_UMASK: Mode = Mode::new()
     .with_class_perm(umask::OTHERS, umask::READ);
 
 const REPLICAS: Label = label("replicas");
-
-mod class;
-mod dir;
-mod library;
-mod public;
 
 pub(crate) struct ClusterEgress {
     lead: Host,
@@ -612,6 +616,19 @@ where
     }
 }
 
+#[cfg(feature = "service")]
+#[async_trait]
+impl<T> tc_chain::Recover<CacheBlock> for Cluster<T>
+where
+    T: tc_chain::Recover<CacheBlock, Txn = Txn> + Send + Sync,
+{
+    type Txn = Txn;
+
+    async fn recover(&self, txn: &Txn) -> TCResult<()> {
+        self.state.recover(txn).await
+    }
+}
+
 #[async_trait]
 impl<T> Transact for Cluster<T>
 where
@@ -707,6 +724,8 @@ macro_rules! impl_persist {
 
 impl_persist!(Class);
 impl_persist!(Library);
+#[cfg(feature = "service")]
+impl_persist!(Service);
 
 impl<T: fmt::Debug> fmt::Debug for Cluster<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

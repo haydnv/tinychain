@@ -279,6 +279,17 @@ impl Builder {
         let client = Client::new(host, kernel.clone(), self.rpc_client);
         let txn_server = TxnServer::create(client, self.workspace, self.request_ttl);
 
+        #[cfg(feature = "service")]
+        {
+            let txn = txn_server
+                .create_txn(NetworkTime::now())
+                .expect("transaction context");
+
+            tc_chain::Recover::recover(&*kernel, &txn)
+                .await
+                .expect("recover service state");
+        }
+
         Server::new(kernel, txn_server).expect("server")
     }
 
