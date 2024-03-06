@@ -3,6 +3,7 @@
 use std::iter::FromIterator;
 use std::ops::Bound;
 
+use freqfs::FileSave;
 use futures::{TryFutureExt, TryStreamExt};
 use log::debug;
 use safecast::{AsType, Match, TryCastFrom, TryCastInto};
@@ -25,7 +26,7 @@ use super::{BTree, BTreeFile, BTreeInstance, BTreeType, BTreeWrite, Key, Node, R
 impl<State> Route<State> for BTreeType
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
-    State::FE: AsType<Node>,
+    State::FE: for<'a> FileSave<'a> + AsType<Node>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
 {
@@ -80,7 +81,7 @@ struct CreateHandler;
 impl<'a, State> Handler<'a, State> for CreateHandler
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
-    State::FE: AsType<Node>,
+    State::FE: for<'b> FileSave<'b> + AsType<Node>,
     BTreeFile<State::Txn, State::FE>:
         fs::Persist<State::FE, Txn = State::Txn, Schema = BTreeSchema>,
     Collection<State::Txn, State::FE>: From<BTreeFile<State::Txn, State::FE>>,
@@ -365,7 +366,7 @@ pub struct Static;
 impl<State> Route<State> for Static
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
-    State::FE: AsType<Node>,
+    State::FE: for<'a> FileSave<'a> + AsType<Node>,
     BTreeFile<State::Txn, State::FE>:
         fs::Persist<State::FE, Schema = BTreeSchema, Txn = State::Txn>,
     Collection<State::Txn, State::FE>: From<BTreeFile<State::Txn, State::FE>> + TryCastFrom<State>,

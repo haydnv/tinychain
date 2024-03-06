@@ -2,6 +2,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use destream::{de, en};
+use freqfs::FileSave;
 use futures::TryFutureExt;
 use safecast::{as_type, AsType, TryCastFrom};
 
@@ -216,7 +217,7 @@ where
 impl<T, FE> de::FromStream for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     type Context = T;
 

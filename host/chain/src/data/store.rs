@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 
 use async_trait::async_trait;
 use destream::en;
+use freqfs::FileSave;
 use futures::future::TryFutureExt;
 use log::debug;
 use safecast::*;
@@ -157,7 +158,7 @@ impl<Txn, FE> Store<Txn, FE> {
 impl<Txn, FE> Store<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
     BTreeNode: freqfs::FileLoad,
 {
     pub async fn resolve(&self, txn_id: TxnId, scalar: Scalar) -> TCResult<StoreEntry<Txn, FE>> {

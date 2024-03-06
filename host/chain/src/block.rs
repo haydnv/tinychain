@@ -8,6 +8,7 @@ use std::marker::PhantomData;
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de;
+use freqfs::FileSave;
 use futures::future::TryFutureExt;
 use futures::join;
 use log::debug;
@@ -271,7 +272,11 @@ where
 impl<'en, State, T> IntoView<'en, State::FE> for BlockChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode>,
+    State::FE: for<'a> FileSave<'a>
+        + DenseCacheFile
+        + AsType<ChainBlock>
+        + AsType<BTreeNode>
+        + AsType<TensorNode>,
     T: IntoView<'en, State::FE, Txn = State::Txn> + Send + Sync,
 {
     type Txn = State::Txn;

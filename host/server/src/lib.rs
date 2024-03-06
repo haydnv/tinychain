@@ -40,6 +40,11 @@ pub const SERVICE_TYPE: &'static str = "_tinychain._tcp.local.";
 pub type Actor = rjwt::Actor<Value>;
 pub type SignedToken = rjwt::SignedToken<Link, Value, Claim>;
 pub type Token = rjwt::Token<Link, Value, Claim>;
+
+#[cfg(feature = "service")]
+pub type Chain<T> = tc_chain::Chain<State, Txn, CacheBlock, T>;
+#[cfg(feature = "service")]
+pub type Collection = tc_collection::CollectionBase<State, Txn>;
 pub type State = tc_state::State<Txn>;
 
 pub trait Authorize {

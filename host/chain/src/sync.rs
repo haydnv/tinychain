@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 
 use async_trait::async_trait;
 use destream::{de, FromStream};
-use freqfs::{FileLock, FileWriteGuard};
+use freqfs::{FileLock, FileSave, FileWriteGuard};
 use futures::TryFutureExt;
 use get_size::GetSize;
 use log::{debug, trace};
@@ -350,7 +350,11 @@ where
 impl<State, T> de::FromStream for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<ChainBlock> + AsType<TensorNode>,
+    State::FE: for<'a> FileSave<'a>
+        + DenseCacheFile
+        + AsType<BTreeNode>
+        + AsType<ChainBlock>
+        + AsType<TensorNode>,
     T: FromStream<Context = State::Txn>,
 {
     type Context = State::Txn;

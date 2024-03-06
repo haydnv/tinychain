@@ -6,6 +6,7 @@ use std::fmt;
 use std::ops::Bound;
 
 use b_table::{IndexSchema, Schema};
+use freqfs::FileSave;
 use futures::TryFutureExt;
 use log::debug;
 use safecast::*;
@@ -32,6 +33,7 @@ use super::{
 impl<State> Route<State> for TableType
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
+    State::FE: for<'a> FileSave<'a>,
     TableFile<State::Txn, State::FE>: Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
     Value: TryCastFrom<State>,
 {
@@ -81,6 +83,7 @@ struct CreateHandler;
 impl<'a, State> Handler<'a, State> for CreateHandler
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
+    State::FE: for<'b> FileSave<'b>,
     TableFile<State::Txn, State::FE>: Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
@@ -557,6 +560,7 @@ pub struct Static;
 impl<State> Route<State> for Static
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
+    State::FE: for<'a> FileSave<'a>,
     TableFile<State::Txn, State::FE>: Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
     Value: TryCastFrom<State>,
 {

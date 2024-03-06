@@ -8,6 +8,7 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use collate::Collate;
 use destream::de;
+use freqfs::FileSave;
 use futures::future::{self, TryFutureExt};
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::{join, try_join};
@@ -921,7 +922,7 @@ where
 impl<Txn, FE> DenseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + Clone,
 {
     pub async fn constant(
         store: fs::Dir<FE>,
@@ -1486,7 +1487,7 @@ where
 impl<Txn, FE> fs::Persist<FE> for DenseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + Clone,
 {
     type Txn = Txn;
     type Schema = Schema;
@@ -1672,7 +1673,7 @@ where
 impl<Txn, FE> fs::CopyFrom<FE, DenseView<Txn, FE>> for DenseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<Node> + Clone,
 {
     async fn copy_from(
         txn: &Txn,
@@ -1766,7 +1767,7 @@ where
 impl<Txn, FE> fs::Restore<FE> for DenseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<Node> + Clone,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         match (self, backup) {

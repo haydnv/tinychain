@@ -7,6 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
+use freqfs::FileSave;
 use futures::future::TryFutureExt;
 use safecast::{AsType, TryCastFrom};
 
@@ -549,7 +550,8 @@ fn new_queue<State>(
 ) -> TxnTaskQueue<MutationPending<State::Txn, State::FE>, TCResult<MutationRecord>>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    State::FE:
+        for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
 {
     TxnTaskQueue::new(Arc::pin(move |mutation| {
         let store = store.clone();
