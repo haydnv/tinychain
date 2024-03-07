@@ -173,11 +173,12 @@ fn main() {
         info!("found mDNS peers: {:?}", peers);
     }
 
-    let server = rt.block_on(builder.build());
-    let replicator = Replicator::from(&server).with_peers(peers);
-    let address = server.address().clone();
+    let app_server = rt.block_on(builder.build());
+    let replicator = Replicator::from(&app_server).with_peers(peers);
+    let address = app_server.address().clone();
 
-    let http_io_task = rt.spawn(async move { TCResult::Ok(server) });
+    let http_server = http::Server::new(app_server, config.request_ttl);
+    let http_io_task = rt.spawn(http_server.listen(config.http_port));
 
     assert!(
         rt.block_on(replicator.replicate_and_join()),
