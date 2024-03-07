@@ -7,33 +7,22 @@ use tc_error::TCError;
 use tc_scalar::Scalar;
 use tc_transact::fs;
 use tc_transact::public::{GetHandler, Handler, Route, StateInstance};
-use tc_value::{Number, NumberType, Value};
+use tc_value::Value;
 use tcgeneric::{Map, PathSegment, TCPath, Tuple};
 
-use super::btree::{BTree, BTreeFile, BTreeInstance, BTreeSchema, Node as BTreeNode};
-use super::table::{TableFile, TableInstance, TableSchema};
-use super::tensor::{DenseCacheFile, Node as TensorNode, Tensor, TensorBase, TensorInstance};
-use super::{Collection, CollectionBase, CollectionType};
+use crate::btree::{BTree, BTreeFile, BTreeInstance, BTreeSchema, Node as BTreeNode};
+use crate::{Collection, CollectionBase, CollectionType};
 
 impl<State> Route<State> for CollectionType
 where
-    State: StateInstance
-        + From<Collection<State::Txn, State::FE>>
-        + From<Tensor<State::Txn, State::FE>>,
-    State::FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
+    State: StateInstance + From<Collection<State::Txn, State::FE>>,
+    State::FE: for<'a> FileSave<'a> + AsType<BTreeNode>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
-    TableFile<State::Txn, State::FE>:
-        fs::Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
-    Number: TryCastFrom<State>,
-    Tensor<State::Txn, State::FE>: TryCastFrom<State>,
-    Vec<Tensor<State::Txn, State::FE>>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         match self {
             Self::BTree(btt) => btt.route(path),
-            Self::Table(tt) => tt.route(path),
-            Self::Tensor(tt) => tt.route(path),
         }
     }
 }
@@ -57,10 +46,6 @@ where
 
                 let schema: Value = match self.collection {
                     Collection::BTree(btree) => btree.schema().clone().cast_into(),
-
-                    Collection::Table(table) => table.schema().clone().cast_into(),
-
-                    Collection::Tensor(tensor) => tensor.schema().clone().cast_into(),
                 };
 
                 Ok(schema.into())
@@ -77,17 +62,10 @@ impl<'a, Txn, FE> From<&'a Collection<Txn, FE>> for SchemaHandler<'a, Txn, FE> {
 
 impl<State> Route<State> for Collection<State::Txn, State::FE>
 where
-    State: StateInstance
-        + From<Collection<State::Txn, State::FE>>
-        + From<Tensor<State::Txn, State::FE>>
-        + From<Tuple<Value>>
-        + From<u64>,
-    State::Class: From<NumberType>,
-    State::FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
+    State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Tuple<Value>> + From<u64>,
+    State::FE: for<'a> FileSave<'a> + AsType<BTreeNode>,
     BTree<State::Txn, State::FE>: TryCastFrom<State>,
     Map<Value>: TryFrom<State, Error = TCError>,
-    Number: TryCastFrom<State>,
-    Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Tuple<State>: TryFrom<State, Error = TCError>,
     Scalar: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -98,8 +76,6 @@ where
 
         let child_handler: Option<Box<dyn Handler<'a, State> + 'a>> = match self {
             Self::BTree(btree) => btree.route(path),
-            Self::Table(table) => table.route(path),
-            Self::Tensor(tensor) => tensor.route(path),
         };
 
         if child_handler.is_some() {
@@ -119,19 +95,12 @@ where
 
 impl<State> Route<State> for CollectionBase<State::Txn, State::FE>
 where
-    State: StateInstance
-        + From<Collection<State::Txn, State::FE>>
-        + From<Tensor<State::Txn, State::FE>>
-        + From<Tuple<Value>>
-        + From<u64>,
-    State::Class: From<NumberType>,
-    State::FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
+    State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Tuple<Value>> + From<u64>,
+    State::FE: for<'a> FileSave<'a> + AsType<BTreeNode>,
     BTree<State::Txn, State::FE>: TryCastFrom<State>,
     Collection<State::Txn, State::FE>: From<BTree<State::Txn, State::FE>>,
     Map<Value>: TryFrom<State, Error = TCError>,
-    Number: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
-    Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Tuple<State>: TryFrom<State, Error = TCError>,
     Value: TryCastFrom<State>,
     bool: TryCastFrom<State>,
@@ -139,11 +108,6 @@ where
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         match self {
             Self::BTree(btree) => btree.route(path),
-            Self::Table(table) => table.route(path),
-            Self::Tensor(tensor) => match tensor {
-                TensorBase::Dense(dense) => dense.route(path),
-                TensorBase::Sparse(sparse) => sparse.route(path),
-            },
         }
     }
 }
@@ -152,21 +116,12 @@ pub struct Static;
 
 impl<State> Route<State> for Static
 where
-    State: StateInstance
-        + From<Collection<State::Txn, State::FE>>
-        + From<Tensor<State::Txn, State::FE>>
-        + From<Tuple<Value>>,
-    State::Class: From<NumberType>,
-    State::FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
+    State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Tuple<Value>>,
+    State::FE: for<'a> FileSave<'a> + AsType<BTreeNode>,
     BTreeFile<State::Txn, State::FE>:
         fs::Persist<State::FE, Schema = BTreeSchema, Txn = State::Txn>,
-    TableFile<State::Txn, State::FE>:
-        fs::Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
     Collection<State::Txn, State::FE>: From<BTreeFile<State::Txn, State::FE>> + TryCastFrom<State>,
-    Number: TryCastFrom<State>,
-    Tensor<State::Txn, State::FE>: TryCastFrom<State>,
     Value: TryCastFrom<State>,
-    Vec<Tensor<State::Txn, State::FE>>: TryCastFrom<State>,
     bool: TryCastFrom<State>,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
@@ -175,9 +130,7 @@ where
         }
 
         match path[0].as_str() {
-            "btree" => super::btree::public::Static.route(&path[1..]),
-            "table" => super::table::public::Static.route(&path[1..]),
-            "tensor" => super::tensor::public::Static.route(&path[1..]),
+            "btree" => crate::btree::public::Static.route(&path[1..]),
             _ => None,
         }
     }

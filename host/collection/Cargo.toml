@@ -12,28 +12,31 @@ keywords = ["tinychain", "btree", "table", "tensor", "collection"]
 categories = ["database", "database-implementations", "data-structures"]
 
 [features]
+btree = ["b-tree/all", "collate/stream", "tokio/sync"]
+table = ["btree", "b-table/all", "smallvec"]
+tensor = ["table", "tc-error/ha-ndarray", "ha-ndarray/freqfs", "ha-ndarray/stream", "itertools", "rayon"]
 opencl = ["ha-ndarray/opencl"]
 
 [dependencies]
 async-trait = "0.1"
-b-table = { version = "0.2", features = ["all"] }
-b-tree = { version = "0.3", features = ["all"] }
-collate = { version = "0.4", features = ["stream"] }
+b-table = { version = "0.2", optional = true }
+b-tree = { version = "0.3", optional = true }
+collate = { version = "0.4", optional = true }
 destream = "0.7"
 ds-ext = { path = "../../../ds-ext" }
 futures = "0.3"
 freqfs = { version = "~0.9.1", features = ["logging"] }
-ha-ndarray = { version = "0.3", features = ["freqfs", "stream"] }
-itertools = "0.12"
+ha-ndarray = { version = "0.3", optional = true }
+itertools = { version = "0.12", optional = true }
 log = { version = "0.4", features = ["release_max_level_info"] }
 num_cpus = "1.16"
-smallvec = "1.11"
+smallvec = { version = "1.13", optional = true }
 pin-project = "1.1"
-rayon = "1.8"
+rayon = { version = "1.8", optional = true }
 safecast = "0.2"
-tc-error = { path = "../error", features = ["ha-ndarray"] }
+tc-error = { path = "../error" }
 tc-scalar = { path = "../scalar" }
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }
 tcgeneric = { path = "../generic" }
-tokio = { version = "1.36", features = ["sync"] }
+tokio = { version = "1.36", optional = true }

@@ -161,6 +161,7 @@ impl b_tree::Schema for BTreeSchema {
     }
 }
 
+#[cfg(feature = "table")]
 impl b_table::IndexSchema for BTreeSchema {
     type Id = Id;
 
