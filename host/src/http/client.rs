@@ -28,9 +28,9 @@ impl Client {
         request: hyper::http::request::Builder,
         body: B,
     ) -> TCResult<hyper::Response<Incoming>>
-        where
-            B: Body<Data = Bytes> + Send + Unpin + 'static,
-            B::Error: std::error::Error + Send + Sync + 'static,
+    where
+        B: Body<Data = Bytes> + Send + Unpin + 'static,
+        B::Error: std::error::Error + Send + Sync + 'static,
     {
         let io = TokioIo::new(stream);
 
@@ -64,8 +64,8 @@ impl Client {
         auth: Option<&str>,
         cxt: T::Context,
     ) -> TCResult<T>
-        where
-            T: de::FromStream,
+    where
+        T: de::FromStream,
     {
         let url = if key.is_some() {
             let key_json = serde_json::to_string(&key)

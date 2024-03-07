@@ -9,7 +9,7 @@
 //! HTTP API. For usage instructions and more details, visit the repository page at
 //! [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain).
 
-mod http;
+pub mod http;
 
 /// The minimum size of the transactional filesystem cache, in bytes
 pub const MIN_CACHE_SIZE: usize = 5000;

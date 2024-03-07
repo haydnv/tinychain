@@ -23,7 +23,7 @@ use crate::{Actor, RPCClient, SignedToken, State};
 
 pub use hypothetical::Hypothetical;
 pub use server::TxnServer;
-pub use tc_transact::TxnId;
+pub use tc_transact::{IntoView, TxnId};
 
 mod hypothetical;
 mod server;

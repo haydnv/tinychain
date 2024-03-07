@@ -1,12 +1,19 @@
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use clap::Parser;
+use freqfs::Cache;
+use log::info;
 use tokio::time::Duration;
 
 use tc_error::*;
-use tc_value::Host;
+use tc_server::aes256::Key;
+use tc_server::{Broadcast, Builder, Replicator};
+use tc_value::{Host, Protocol};
+
+use tinychain::{http, MIN_CACHE_SIZE};
 
 fn data_size(flag: &str) -> TCResult<usize> {
     if flag.is_empty() || flag == "0" {
@@ -63,6 +70,12 @@ struct Config {
     pub http_port: u16,
 
     #[arg(
+        long = "insecure",
+        help = "disable security checks when installing new services"
+    )]
+    pub insecure: bool,
+
+    #[arg(
         long = "log_level",
         default_value = "info",
         value_parser = ["trace", "debug", "info", "warn", "error"],
@@ -72,9 +85,9 @@ struct Config {
 
     #[arg(
         long = "symmetric key",
-        help = "a hexadecimal string representation of this host's clusters' symmetric key"
+        help = "a hexadecimal string representations of amn AES256 key used for replication at startup"
     )]
-    pub public_key: Option<String>,
+    pub keys: Vec<String>,
 
     #[arg(long, help = "a link to the cluster to replicate from on startup")]
     pub replicate: Option<Host>,
@@ -106,29 +119,75 @@ struct Config {
 fn main() {
     let config = Config::parse();
 
+    let keys = config
+        .keys
+        .into_iter()
+        .map(|key| {
+            let key = hex::decode(key).expect("AES256 key");
+            Key::from_slice(key.as_slice()).clone()
+        })
+        .collect::<Vec<Key>>();
+
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log_level))
         .init();
 
-    let runtime = tokio::runtime::Builder::new_multi_thread()
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
         .enable_time()
         .thread_stack_size(config.stack_size)
         .build()
         .expect("tokio runtime");
 
-    todo!()
-    // let builder = runtime
-    //     .block_on(Builder::load(
-    //         config.cache_size,
-    //         config.data_dir,
-    //         config.workspace,
-    //     ))
-    //     .with_public_key(config.public_key)
-    //     .with_gateway(gateway_config)
-    //     .with_lead(config.replicate);
-    //
-    // match runtime.block_on(builder.replicate_and_serve()) {
-    //     Ok(_) => {}
-    //     Err(cause) => panic!("HTTP server failed: {}", cause),
-    // }
+    if !config.workspace.exists() {
+        std::fs::create_dir_all(&config.workspace).expect("create workspace");
+    }
+
+    if config.cache_size < MIN_CACHE_SIZE {
+        panic!(
+            "cache size {} is below the minimum of {}",
+            config.cache_size, MIN_CACHE_SIZE
+        );
+    }
+
+    let (data_dir, workspace) = rt
+        .block_on(async move {
+            let cache = Cache::new(config.cache_size, None);
+            let data_dir = cache.clone().load(config.data_dir)?;
+            let workspace = cache.clone().load(config.workspace)?;
+            TCResult::Ok((data_dir, workspace))
+        })
+        .expect("cache load");
+
+    let rpc_client = Arc::new(http::Client::new());
+
+    let builder = Builder::load(data_dir, workspace, rpc_client)
+        .detect_address()
+        .set_port(config.http_port)
+        .with_keys(keys)
+        .set_secure(false);
+
+    let mut broadcast = Broadcast::new();
+    let peers = broadcast.peers(Protocol::default());
+
+    if !peers.is_empty() {
+        info!("found mDNS peers: {:?}", peers);
+    }
+
+    let server = rt.block_on(builder.build());
+    let replicator = Replicator::from(&server).with_peers(peers);
+    let address = server.address().clone();
+
+    let http_io_task = rt.spawn(async move { TCResult::Ok(server) });
+
+    assert!(
+        rt.block_on(replicator.replicate_and_join()),
+        "replication failed"
+    );
+
+    rt.block_on(broadcast.make_discoverable(&address))
+        .expect("mDNS daemon");
+
+    rt.block_on(http_io_task)
+        .expect("server shutdown")
+        .expect("server");
 }
