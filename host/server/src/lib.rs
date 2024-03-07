@@ -16,7 +16,7 @@ pub use claim::Claim;
 pub use client::RPCClient;
 pub use kernel::Endpoint;
 pub use server::Server;
-pub use txn::{IntoView, Txn, TxnId};
+pub use txn::{IntoView, Transaction, Txn, TxnId};
 
 mod builder;
 mod claim;
