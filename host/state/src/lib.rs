@@ -15,7 +15,7 @@ use log::debug;
 use safecast::*;
 
 #[cfg(feature = "chain")]
-use tc_chain::{ChainType, ChainVisitor};
+use tc_chain::ChainVisitor;
 #[cfg(feature = "collection")]
 use tc_collection::{CollectionType, CollectionVisitor};
 use tc_error::*;
@@ -47,6 +47,8 @@ pub mod view;
 pub mod chain {
     use crate::{CacheBlock, State};
 
+    pub use tc_chain::{ChainType, Recover};
+
     pub type Chain<Txn, T> = tc_chain::Chain<State<Txn>, Txn, CacheBlock, T>;
     pub type BlockChain<Txn, T> = tc_chain::BlockChain<State<Txn>, Txn, CacheBlock, T>;
     pub type SyncChain<Txn, T> = tc_chain::SyncChain<State<Txn>, Txn, CacheBlock, T>;
@@ -56,16 +58,33 @@ pub mod chain {
 pub mod collection {
     use crate::CacheBlock;
 
+    pub use tc_collection::Schema;
+
+    #[cfg(feature = "btree")]
     pub use tc_collection::btree::{BTreeSchema, BTreeType};
+    #[cfg(all(feature = "table", not(feature = "btree")))]
+    pub(crate) use tc_collection::btree::{BTreeSchema, BTreeType};
+    #[cfg(feature = "table")]
     pub use tc_collection::table::{TableSchema, TableType};
+    #[cfg(feature = "tensor")]
     pub use tc_collection::tensor::TensorType;
 
     pub type Collection<Txn> = tc_collection::Collection<Txn, CacheBlock>;
     pub type CollectionBase<Txn> = tc_collection::CollectionBase<Txn, CacheBlock>;
+
+    #[cfg(feature = "btree")]
     pub type BTree<Txn> = tc_collection::BTree<Txn, CacheBlock>;
+    #[cfg(feature = "btree")]
     pub type BTreeFile<Txn> = tc_collection::BTreeFile<Txn, CacheBlock>;
+    #[cfg(all(any(feature = "table", feature = "tensor"), not(feature = "btree")))]
+    pub(crate) type BTree<Txn> = tc_collection::BTree<Txn, CacheBlock>;
+    #[cfg(all(feature = "table", not(feature = "btree")))]
+    pub(crate) type BTreeFile<Txn> = tc_collection::BTreeFile<Txn, CacheBlock>;
+    #[cfg(feature = "table")]
     pub type Table<Txn> = tc_collection::Table<Txn, CacheBlock>;
+    #[cfg(feature = "table")]
     pub type TableFile<Txn> = tc_collection::TableFile<Txn, CacheBlock>;
+    #[cfg(feature = "tensor")]
     pub type Tensor<Txn> = tc_collection::Tensor<Txn, CacheBlock>;
 }
 
@@ -132,7 +151,7 @@ impl NativeClass for StateType {
     }
 }
 
-#[cfg(feature = "collection")]
+#[cfg(any(feature = "btree", feature = "table"))]
 impl From<BTreeType> for StateType {
     fn from(btt: BTreeType) -> Self {
         CollectionType::BTree(btt).into()
@@ -171,14 +190,14 @@ impl From<ScalarType> for StateType {
     }
 }
 
-#[cfg(feature = "collection")]
+#[cfg(feature = "table")]
 impl From<TableType> for StateType {
     fn from(tt: TableType) -> Self {
         Self::Collection(tt.into())
     }
 }
 
-#[cfg(feature = "collection")]
+#[cfg(feature = "tensor")]
 impl From<TensorType> for StateType {
     fn from(tt: TensorType) -> Self {
         Self::Collection(tt.into())
@@ -529,7 +548,7 @@ impl<Txn> From<()> for State<Txn> {
     }
 }
 
-#[cfg(feature = "collection")]
+#[cfg(feature = "btree")]
 impl<Txn> From<BTree<Txn>> for State<Txn> {
     fn from(btree: BTree<Txn>) -> Self {
         Self::Collection(btree.into())
@@ -665,14 +684,14 @@ impl<Txn> From<StateType> for State<Txn> {
     }
 }
 
-#[cfg(feature = "collection")]
+#[cfg(feature = "table")]
 impl<Txn> From<Table<Txn>> for State<Txn> {
     fn from(table: Table<Txn>) -> Self {
         Self::Collection(table.into())
     }
 }
 
-#[cfg(feature = "collection")]
+#[cfg(feature = "tensor")]
 impl<Txn> From<Tensor<Txn>> for State<Txn> {
     fn from(tensor: Tensor<Txn>) -> Self {
         Self::Collection(tensor.into())
@@ -1097,7 +1116,7 @@ impl<Txn> TryCastFrom<State<Txn>> for CollectionBase<Txn> {
     }
 }
 
-#[cfg(feature = "collection")]
+#[cfg(any(feature = "btree", feature = "table", feature = "tensor"))]
 impl<Txn> TryCastFrom<State<Txn>> for BTree<Txn> {
     fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
@@ -1114,7 +1133,7 @@ impl<Txn> TryCastFrom<State<Txn>> for BTree<Txn> {
     }
 }
 
-#[cfg(feature = "collection")]
+#[cfg(feature = "table")]
 impl<Txn> TryCastFrom<State<Txn>> for Table<Txn> {
     fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
@@ -1131,7 +1150,7 @@ impl<Txn> TryCastFrom<State<Txn>> for Table<Txn> {
     }
 }
 
-#[cfg(feature = "collection")]
+#[cfg(feature = "tensor")]
 impl<Txn> TryCastFrom<State<Txn>> for Tensor<Txn> {
     fn can_cast_from(state: &State<Txn>) -> bool {
         match state {

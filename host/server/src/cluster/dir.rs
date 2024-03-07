@@ -14,6 +14,8 @@ use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_scalar::Scalar;
+#[cfg(feature = "service")]
+use tc_state::chain::Recover;
 use tc_state::object::InstanceClass;
 use tc_transact::hash::*;
 use tc_transact::lock::{TxnMapLock, TxnMapLockEntry, TxnMapLockIter};
@@ -78,9 +80,9 @@ pub enum DirEntryCommit<T: Transact + Clone + Send + Sync + fmt::Debug + 'static
 
 #[cfg(feature = "service")]
 #[async_trait]
-impl<T> tc_chain::Recover<CacheBlock> for DirEntry<T>
+impl<T> Recover<CacheBlock> for DirEntry<T>
 where
-    T: tc_chain::Recover<CacheBlock, Txn = Txn> + fmt::Debug + Send + Sync,
+    T: Recover<CacheBlock, Txn = Txn> + fmt::Debug + Clone + Send + Sync,
 {
     type Txn = Txn;
 
@@ -276,9 +278,9 @@ where
 
 #[cfg(feature = "service")]
 #[async_trait]
-impl<T> tc_chain::Recover<CacheBlock> for Dir<T>
+impl<T> Recover<CacheBlock> for Dir<T>
 where
-    T: tc_chain::Recover<CacheBlock, Txn = Txn> + fmt::Debug + Send + Sync,
+    T: Recover<CacheBlock, Txn = Txn> + fmt::Debug + Clone + Send + Sync,
 {
     type Txn = Txn;
 
@@ -287,7 +289,7 @@ where
 
         let mut recovered = FuturesUnordered::new();
         for (_name, entry) in contents {
-            recovered.push(entry.recover(txn));
+            recovered.push(async move { entry.recover(txn).await });
         }
 
         while let Some(()) = recovered.try_next().await? {

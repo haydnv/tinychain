@@ -15,6 +15,8 @@ use umask::Mode;
 
 use tc_error::*;
 use tc_scalar::OpRefType;
+#[cfg(feature = "service")]
+use tc_state::chain::Recover;
 use tc_state::CacheBlock;
 use tc_transact::hash::AsyncHash;
 use tc_transact::public::*;
@@ -474,7 +476,7 @@ impl fs::Persist<CacheBlock> for Kernel {
 
 #[cfg(feature = "service")]
 #[async_trait]
-impl tc_chain::Recover<CacheBlock> for Kernel {
+impl Recover<CacheBlock> for Kernel {
     type Txn = Txn;
 
     async fn recover(&self, txn: &Txn) -> TCResult<()> {

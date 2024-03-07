@@ -12,8 +12,12 @@ keywords = ["chain", "collection", "object", "scalar", "generic"]
 categories = ["data-structures"]
 
 [features]
-chain = ["tc-chain", "collection"]
 collection = ["tc-collection"]
+btree = ["tc-collection/btree", "tc-chain/btree", "collection"]
+table = ["tc-collection/btree", "tc-collection/table", "tc-chain/table", "collection"]
+tensor = ["tc-collection/tensor", "tc-chain/tensor", "collection"]
+chain = ["tc-chain", "collection"]
+opencl = ["tc-collection/opencl", "tc-chain/opencl"]
 
 [dependencies]
 async-hash = "0.5"

@@ -11,7 +11,11 @@ keywords = ["tinychain", "cluster", "peer", "discovery", "replication"]
 categories = ["concurrency", "data-structures", "network-programming"]
 
 [features]
-service = ["tc-chain", "tc-collection", "tc-state/chain"]
+btree = ["tc-state/btree"]
+table = ["tc-state/table"]
+tensor = ["tc-state/tensor"]
+service = ["tc-state/chain"]
+opencl = ["tc-state/opencl"]
 
 [dependencies]
 aes-gcm-siv = "0.11"
@@ -27,7 +31,6 @@ mdns-sd = "0.10"
 rjwt = { path = "../../../rjwt/rust" }
 safecast = "0.2"
 serde = "1.0"
-tc-chain = { path = "../chain", optional = true }
 tc-collection = { path = "../collection", optional = true }
 tc-error = { path = "../error", features = ["rjwt"] }
 tc-scalar = { path = "../scalar" }

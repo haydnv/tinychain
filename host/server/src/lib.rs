@@ -42,9 +42,9 @@ pub type SignedToken = rjwt::SignedToken<Link, Value, Claim>;
 pub type Token = rjwt::Token<Link, Value, Claim>;
 
 #[cfg(feature = "service")]
-pub type Chain<T> = tc_chain::Chain<State, Txn, CacheBlock, T>;
+pub type Chain<T> = tc_state::chain::Chain<Txn, T>;
 #[cfg(feature = "service")]
-pub type Collection = tc_collection::CollectionBase<Txn, CacheBlock>;
+pub type Collection = tc_state::collection::CollectionBase<Txn>;
 pub type State = tc_state::State<Txn>;
 
 pub trait Authorize {

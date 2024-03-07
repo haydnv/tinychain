@@ -14,6 +14,8 @@ use safecast::TryCastInto;
 use umask::Mode;
 
 use tc_error::*;
+#[cfg(feature = "service")]
+use tc_state::chain::Recover;
 use tc_transact::hash::{Output, Sha256};
 use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnMapLockIter};
 use tc_transact::{fs, Gateway};
@@ -618,9 +620,9 @@ where
 
 #[cfg(feature = "service")]
 #[async_trait]
-impl<T> tc_chain::Recover<CacheBlock> for Cluster<T>
+impl<T> Recover<CacheBlock> for Cluster<T>
 where
-    T: tc_chain::Recover<CacheBlock, Txn = Txn> + Send + Sync,
+    T: Recover<CacheBlock, Txn = Txn> + Send + Sync,
 {
     type Txn = Txn;
 

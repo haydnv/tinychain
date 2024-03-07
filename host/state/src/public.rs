@@ -5,7 +5,7 @@ use log::debug;
 use safecast::TryCastInto;
 
 use tc_error::*;
-#[cfg(feature = "collection")]
+#[cfg(any(feature = "btree", feature = "table"))]
 use tc_transact::fs;
 use tc_transact::hash::AsyncHash;
 use tc_transact::public::helpers::{AttributeHandler, EchoHandler, SelfHandler};
@@ -14,9 +14,13 @@ use tc_transact::{Gateway, Transaction};
 use tc_value::{Link, Number, Value};
 use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, PathSegment, TCPath};
 
-#[cfg(feature = "collection")]
-use crate::collection::{BTreeFile, BTreeSchema, Collection, TableFile, TableSchema};
+#[cfg(any(feature = "btree", feature = "table"))]
+use crate::collection::{BTreeFile, BTreeSchema};
+#[cfg(feature = "table")]
+use crate::collection::{TableFile, TableSchema};
 use crate::object::{InstanceClass, Object};
+#[cfg(any(feature = "btree", feature = "table"))]
+use crate::Collection;
 use crate::{CacheBlock, State, StateType};
 
 pub const PREFIX: Label = label("state");
@@ -191,7 +195,55 @@ impl<Txn> Default for Static<Txn> {
     }
 }
 
-#[cfg(feature = "collection")]
+#[cfg(all(feature = "collection", not(feature = "btree"), not(feature = "table")))]
+impl<Txn> Route<State<Txn>> for Static<Txn>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+{
+    fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>> {
+        if path.is_empty() {
+            return Some(Box::new(EchoHandler));
+        }
+
+        match path[0].as_str() {
+            "collection" => tc_collection::public::Static.route(&path[1..]),
+            "scalar" => tc_scalar::public::Static.route(&path[1..]),
+            "map" => tc_transact::public::generic::MapStatic.route(&path[1..]),
+            "tuple" => tc_transact::public::generic::TupleStatic.route(&path[1..]),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(all(feature = "btree", not(feature = "table")))]
+impl<Txn> Route<State<Txn>> for Static<Txn>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    BTreeFile<Txn>: fs::Persist<CacheBlock, Schema = BTreeSchema, Txn = Txn>,
+    Collection<Txn>: From<BTreeFile<Txn>>,
+{
+    fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>> {
+        if path.is_empty() {
+            return Some(Box::new(EchoHandler));
+        }
+
+        match path[0].as_str() {
+            "collection" => tc_collection::public::Static.route(&path[1..]),
+            "scalar" => tc_scalar::public::Static.route(&path[1..]),
+            "map" => tc_transact::public::generic::MapStatic.route(&path[1..]),
+            "tuple" => tc_transact::public::generic::TupleStatic.route(&path[1..]),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(feature = "table")]
 impl<Txn> Route<State<Txn>> for Static<Txn>
 where
     Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
