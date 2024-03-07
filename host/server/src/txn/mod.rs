@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use tc_error::*;
 use tc_state::CacheBlock;
-use tc_transact::{Gateway, Transaction, TxnId};
+use tc_transact::{Gateway, Transaction};
 use tc_value::{Host, Link, ToUrl, Value};
 use tcgeneric::{label, Id, Label, Map, NetworkTime, PathSegment, TCPathBuf};
 
@@ -23,6 +23,7 @@ use crate::{Actor, RPCClient, SignedToken, State};
 
 pub use hypothetical::Hypothetical;
 pub use server::TxnServer;
+pub use tc_transact::TxnId;
 
 mod hypothetical;
 mod server;

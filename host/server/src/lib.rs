@@ -9,13 +9,14 @@ use tc_value::{Address, Host, Link, Protocol, Value};
 pub use rjwt::VerifyingKey;
 
 pub use tc_state::CacheBlock;
+pub use tc_state::view::StateView;
 
 pub use builder::{Broadcast, Builder, Replicator};
 pub use claim::Claim;
 pub use client::RPCClient;
 pub use kernel::Endpoint;
 pub use server::Server;
-pub use txn::Txn;
+pub use txn::{Txn, TxnId};
 
 mod builder;
 mod claim;
