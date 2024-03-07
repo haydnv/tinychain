@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use destream::de;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
@@ -7,11 +9,15 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 
 use tc_error::*;
-use tc_server::{Actor, RPCClient, State, StateView, Txn, TxnId};
+use tc_server::{
+    Actor, IntoView, RPCClient, State, StateView, Transaction, Txn, TxnId, VerifyingKey,
+};
 use tc_value::{ToUrl, Value};
 use tcgeneric::Map;
 
 use super::Encoding;
+
+const ERR_NO_OWNER: &str = "an ownerless transaction may not make outgoing requests";
 
 /// A TinyChain HTTP client. Should only be used through a `Gateway`.
 pub struct Client;
@@ -61,7 +67,7 @@ impl Client {
         txn_id: &TxnId,
         key: &Value,
         value: Option<StateView<'static>>,
-        auth: Option<&str>,
+        auth: Option<String>,
         cxt: T::Context,
     ) -> TCResult<T>
     where
@@ -149,23 +155,60 @@ impl Client {
 #[async_trait]
 impl RPCClient for Client {
     async fn fetch(&self, txn_id: TxnId, link: ToUrl<'_>, actor_id: Value) -> TCResult<Actor> {
-        todo!()
+        let public_key: Value = self
+            .request("GET", link, &txn_id, &actor_id, None, None, ())
+            .await?;
+
+        let public_key = Arc::<[u8]>::try_from(public_key)?;
+        let public_key = VerifyingKey::try_from(&*public_key)
+            .map_err(|cause| unauthorized!("invalid public key for {actor_id}: {cause}"))?;
+
+        Ok(Actor::with_public_key(actor_id, public_key))
     }
 
     async fn get(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<State> {
-        todo!()
+        let token = self.extract_jwt(txn);
+        let txn_id = txn.id();
+        let txn = txn.subcontext_unique();
+        self.request("GET", link, txn_id, &key, None, token, txn)
+            .await
     }
 
     async fn put(&self, txn: &Txn, link: ToUrl<'_>, key: Value, value: State) -> TCResult<()> {
-        todo!()
+        if txn.owner().map(|owner| owner.is_some())? {
+            let value = value.into_view(txn.subcontext_unique()).await?;
+            let token = self.extract_jwt(txn);
+            self.request("PUT", link, txn.id(), &key, Some(value), token, ())
+                .await
+        } else {
+            Err(bad_request!("{ERR_NO_OWNER}"))
+        }
     }
 
     async fn post(&self, txn: &Txn, link: ToUrl<'_>, params: Map<State>) -> TCResult<State> {
-        todo!()
+        if txn.owner().map(|owner| owner.is_some())? {
+            let params = State::Map(params);
+            let params = params.into_view(txn.subcontext_unique()).await?;
+            let token = self.extract_jwt(txn);
+            let txn_id = txn.id();
+            let txn = txn.subcontext_unique();
+
+            self.request("POST", link, txn_id, &Value::None, Some(params), token, txn)
+                .await
+        } else {
+            Err(bad_request!("{ERR_NO_OWNER}"))
+        }
     }
 
     async fn delete(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<()> {
-        todo!()
+        if txn.owner().map(|owner| owner.is_some())? {
+            let token = self.extract_jwt(txn);
+
+            self.request("DELETE", link, txn.id(), &key, None, token, ())
+                .await
+        } else {
+            Err(bad_request!("{ERR_NO_OWNER}"))
+        }
     }
 }
 
