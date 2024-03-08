@@ -30,8 +30,8 @@ path = "src/main.rs"
 
 [features]
 btree = ["tc-server/btree"]
-table = ["tc-server/btree"]
-tensor = ["tc-server/btree"]
+table = ["tc-server/table"]
+tensor = ["tc-server/tensor"]
 collection = ["btree", "table", "tensor"]
 service = ["tc-server/service"]
 opencl = ["tc-server/opencl"]
@@ -51,7 +51,6 @@ http-body-util = "0.1"
 hyper = { version = "1.2", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 log = { version = "0.4", features = ["release_max_level_info"] }
-rjwt = "0.5"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0" }
 tbon = "0.5"
