@@ -25,7 +25,8 @@ use tc_transact::public::{ClosureInstance, Public, StateInstance, ToState};
 use tc_transact::{Gateway, Transaction, TxnId};
 use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::{
-    path_label, Class, Id, Instance, Map, NativeClass, PathSegment, TCPath, TCPathBuf, Tuple,
+    label, path_label, Class, Id, Instance, Label, Map, NativeClass, PathSegment, TCPath,
+    TCPathBuf, Tuple,
 };
 
 use closure::*;
@@ -267,6 +268,9 @@ impl<Txn> Clone for State<Txn> {
 }
 
 impl<Txn> State<Txn> {
+    // TODO: make this an associated const of the NativeClass trait
+    pub const PREFIX: Label = label("state");
+
     /// Return true if this `State` is an empty [`Tuple`] or [`Map`], default [`Link`], or `Value::None`
     pub fn is_none(&self) -> bool {
         match self {

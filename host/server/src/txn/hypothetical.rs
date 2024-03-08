@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 
 use tc_error::*;
-use tc_scalar::{Executor, OpDef};
+use tc_scalar::Executor;
 use tc_transact::hash::{default_hash, AsyncHash, Output, Sha256};
 use tc_transact::public::{Handler, PostHandler, Route};
 use tc_transact::{Transact, TxnId};
-use tcgeneric::{path_label, PathLabel, PathSegment};
+use tcgeneric::{path_label, Id, PathLabel, PathSegment};
 
 use crate::State;
 
@@ -15,7 +15,7 @@ use super::Txn;
 pub struct Hypothetical {}
 
 impl Hypothetical {
-    pub const PATH: PathLabel = path_label(&["txn", "hypothetical"]);
+    pub const PATH: PathLabel = path_label(&["transact", "hypothetical"]);
 
     pub fn new() -> Self {
         Self {}
@@ -38,13 +38,8 @@ impl<'a> Handler<'a, State> for OpHandler {
     {
         Some(Box::new(|txn, mut params| {
             Box::pin(async move {
-                let op_def: OpDef = params.require("op")?;
+                let op_def: Vec<(Id, State)> = params.require("op")?;
                 params.expect_empty()?;
-
-                let op_def = match op_def {
-                    OpDef::Post(op_def) => Ok(op_def),
-                    other => Err(TCError::unexpected(other, "a POST Op")),
-                }?;
 
                 let capture = if let Some((capture, _)) = op_def.last() {
                     capture.clone()

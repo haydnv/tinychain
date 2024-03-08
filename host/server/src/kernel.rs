@@ -35,6 +35,9 @@ pub const CLASS: Label = label("class");
 pub const LIB: Label = label("lib");
 pub const SERVICE: Label = label("service");
 const REPLICATION_TTL: Duration = Duration::from_secs(30);
+const STATE_MODE: Mode = Mode::new()
+    .with_class_perm(umask::OTHERS, umask::READ)
+    .with_class_perm(umask::OTHERS, umask::EXEC);
 #[cfg(not(feature = "service"))]
 const ERR_NOT_ENABLED: &str = "this binary was compiled without the 'service' feature";
 
@@ -126,6 +129,7 @@ pub(crate) struct Kernel {
     library: Cluster<Dir<Library>>,
     #[cfg(feature = "service")]
     service: Cluster<Dir<Service>>,
+    state: tc_state::public::Static<Txn>,
     hypothetical: Cluster<Hypothetical>,
     keys: HashSet<aes256::Key>,
 }
@@ -200,6 +204,18 @@ impl Kernel {
                 path,
                 handler: Box::new(KernelHandler::from(self)),
             })
+        } else if path[0] == State::PREFIX {
+            let path = &path[1..];
+            let handler = self
+                .state
+                .route(path)
+                .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
+            Ok(Endpoint {
+                mode: STATE_MODE,
+                txn,
+                path,
+                handler,
+            })
         } else if path[0] == SERVICE {
             #[cfg(feature = "service")]
             {
@@ -232,7 +248,7 @@ impl Kernel {
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
             auth_claim_route(self.hypothetical.clone(), &path[2..], txn)
         } else {
-            Err(not_found!("cluster to serve {}", TCPath::from(path)))
+            Err(TCError::not_found(TCPath::from(path)))
         }
     }
     pub async fn replicate_and_join(
@@ -425,6 +441,7 @@ impl fs::Persist<CacheBlock> for Kernel {
             hypothetical,
             #[cfg(feature = "service")]
             service,
+            state: tc_state::public::Static::default(),
             keys: schema.keys,
         })
     }
@@ -465,6 +482,7 @@ impl fs::Persist<CacheBlock> for Kernel {
             #[cfg(feature = "service")]
             service,
             hypothetical,
+            state: tc_state::public::Static::default(),
             keys: schema.keys,
         })
     }
