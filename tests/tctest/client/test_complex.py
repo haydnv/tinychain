@@ -1,12 +1,7 @@
-import itertools
-
-import numpy as np
 import tinychain as tc
 import unittest
 
 from .base import ClientTest
-
-ENDPOINT = "/transact/hypothetical"
 
 
 class ComplexNumberOpsTests(ClientTest):
@@ -19,7 +14,7 @@ class ComplexNumberOpsTests(ClientTest):
         cxt.b = tc.Complex(tc.URI("n")).angle()
         cxt.test = cxt.a == cxt.b
 
-        self.assertTrue(self.host.post(ENDPOINT, cxt))
+        self.assertTrue(self.host.hypothetical(cxt))
 
     def testConjugate(self):
         n = 2 - 2j
@@ -27,7 +22,7 @@ class ComplexNumberOpsTests(ClientTest):
         cxt = tc.Context()
         cxt.z = tc.C64(n).conj()
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(expect_number(actual), n.conjugate())
 
 

@@ -146,6 +146,9 @@ class Host(object):
 
         return self._handle(request)
 
+    def hypothetical(self, op_def, auth=None):
+        return self.post("/transact/hypothetical", {"op": op_def}, auth)
+
     def _namespace_args(self, actor, base_dir, ns, lead):
         ns = URI(ns)
         lead = None if lead is None else URI(lead)

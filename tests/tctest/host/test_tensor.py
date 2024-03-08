@@ -9,9 +9,6 @@ from .base import HostTest
 from ..process import TC_PATH
 
 
-ENDPOINT = "/transact/hypothetical"
-
-
 class DenseTests(HostTest):
     def testConstant(self):
         c = 1.414
@@ -22,7 +19,7 @@ class DenseTests(HostTest):
         cxt.result = tc.after(cxt.tensor[0, 0, 0].write(0), cxt.tensor)
 
         expected = expect_dense(tc.F64, shape, [0] + [c] * (np.prod(shape) - 1))
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         self.assertEqual(expected, actual)
 
@@ -34,7 +31,7 @@ class DenseTests(HostTest):
         cxt.slice = cxt.tensor[:, :, 1:-1, 1:-1]
         cxt.result = cxt.slice, cxt.slice.shape
 
-        actual, actual_shape = self.host.post(ENDPOINT, cxt)
+        actual, actual_shape = self.host.hypothetical(cxt)
         expected = np.arange(1, 91).reshape([2, 5, 3, 3])[:, :, 1:-1, 1:-1]
 
         self.assertEqual(actual_shape, list(expected.shape))
@@ -49,7 +46,7 @@ class DenseTests(HostTest):
         cxt.tensor = tc.tensor.Dense.arange(shape, 1, 91)
         cxt.result = tc.after(cxt.tensor[:, :, 1:-1, 1:-1].write(1), cxt.tensor)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = np.arange(1, 91).reshape([2, 5, 3, 3])
         expected[:, :, 1:-1, 1:-1] = 1
         expected = expect_dense(tc.I64, list(expected.shape), expected.flatten())
@@ -61,7 +58,7 @@ class DenseTests(HostTest):
         cxt.small = tc.tensor.Dense.arange([2, 5], 1, 11)
         cxt.result = tc.after(cxt.big[1, :2].write(cxt.small[0]), cxt.big)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         expected = np.zeros([2, 2, 5], np.int64)
         expected[1, 0:2] = np.arange(1, 11).reshape(2, 5)[0]
@@ -75,7 +72,7 @@ class DenseTests(HostTest):
         cxt.right = tc.tensor.Dense.constant([2, 5, 1, 2], 2)
         cxt.result = cxt.left + cxt.right
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         left = np.arange(1.0, 21.0, 1.0).reshape([5, 2, 2])
         right = np.ones([2, 5, 1, 2], np.int32) * 2
@@ -91,7 +88,7 @@ class DenseTests(HostTest):
         cxt.y3 = cxt.x.cast(tc.F32) / 3
         cxt.result = (cxt.y1.dtype, cxt.y2.dtype, cxt.y3.dtype)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(
             actual, tc.to_json([{tc.URI(tc.Class): {tc.URI(tc.F32): {}}}] * 3)
         )
@@ -104,7 +101,7 @@ class DenseTests(HostTest):
         cxt.right = tc.tensor.Dense.constant([1], 2)
         cxt.result = cxt.left / cxt.right
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = expect_dense(tc.F64, shape, np.arange(1, 4))
         self.assertEqual(actual, expected)
 
@@ -116,7 +113,7 @@ class DenseTests(HostTest):
         cxt.right = tc.tensor.Dense.constant([5], 2)
         cxt.result = cxt.left * cxt.right
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         left = np.arange(1, 11).reshape(shape)
         right = np.ones([5]) * 2
@@ -133,7 +130,7 @@ class DenseTests(HostTest):
         cxt.matrices = load_dense(matrices, tc.F32)
         cxt.actual = cxt.matrices.norm(-1)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertTrue(all_close(actual, expected))
 
     def testNorm_matrix(self):
@@ -145,7 +142,7 @@ class DenseTests(HostTest):
         cxt.matrices = load_dense(matrices, tc.F32)
         cxt.actual = cxt.matrices.norm()
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertTrue(all_close(actual, expected))
 
     def testPow(self):
@@ -153,7 +150,7 @@ class DenseTests(HostTest):
         cxt.left = tc.tensor.Dense.load([1, 2], [1, 2], tc.I64)
         cxt.result = cxt.left**2
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = expect_dense(tc.I64, [1, 2], [1, 4])
 
         self.assertEqual(actual, expected)
@@ -166,7 +163,7 @@ class DenseTests(HostTest):
         cxt.right = tc.tensor.Dense.constant([1], 2)
         cxt.result = cxt.left - cxt.right
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = expect_dense(tc.I64, shape, np.arange(-2, 4, 2))
         self.assertEqual(actual, expected)
 
@@ -180,7 +177,7 @@ class DenseTests(HostTest):
         cxt.log = cxt.x.log(math.e)
         cxt.test = (cxt.ln == cxt.log).all()
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         self.assertEqual(actual, True)
 
@@ -201,7 +198,7 @@ class DenseTests(HostTest):
             cxt.big_ones.logical_xor(cxt.big_zeros).all(),
         ]
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(actual, [False, True, True, False, True])
 
     def testMatMul(self):
@@ -215,7 +212,7 @@ class DenseTests(HostTest):
 
         expected = np.matmul(l, r)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         actual = actual[tc.URI(tc.tensor.Dense)][1]
 
         self.assertTrue(np.allclose(expected.flatten(), actual))
@@ -229,7 +226,7 @@ class DenseTests(HostTest):
         cxt.x = tc.tensor.Dense.load(shape, x.flatten().tolist())
         cxt.result = cxt.x.mean(axis)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = np.mean(x, axis)
 
         self.assertTrue(all_close(actual, expected))
@@ -242,7 +239,7 @@ class DenseTests(HostTest):
         cxt.big = tc.tensor.Dense.arange(shape, 0, 24)
         cxt.result = cxt.big.product(axis)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         big = np.arange(0, 24).reshape(shape)
         expected = np.prod(big, axis)
@@ -256,7 +253,7 @@ class DenseTests(HostTest):
         cxt.big = tc.tensor.Dense.arange(shape, 1, 7)
         cxt.result = cxt.big.product()
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(actual, np.prod(range(1, 7)))
 
     def testRound(self):
@@ -267,7 +264,7 @@ class DenseTests(HostTest):
         cxt.x = tc.tensor.Dense.load(shape, x.flatten().tolist())
         cxt.result = cxt.x.round()
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = expect_dense(tc.F32, shape, x.round().astype(int).flatten())
 
         self.assertEqual(actual, expected)
@@ -280,7 +277,7 @@ class DenseTests(HostTest):
         cxt.big = tc.tensor.Dense.arange(shape, 0.0, 24.0)
         cxt.result = cxt.big.max(axis)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = np.max(np.arange(0, 24).reshape(shape), axis)
         self.assertEqual(
             actual, expect_dense(tc.F64, expected.shape, expected.flatten())
@@ -295,7 +292,7 @@ class DenseTests(HostTest):
         cxt.big = tc.tensor.Dense.arange(shape, 0.0, size)
         cxt.result = cxt.big.sum(axis)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = np.arange(0, size).reshape(shape)
         expected = np.sum(expected, axis)
         expected = expect_dense(tc.F64, [4, 2, 5], expected.flatten())
@@ -308,7 +305,7 @@ class DenseTests(HostTest):
         cxt.big = tc.tensor.Dense.arange(shape, 0, 10)
         cxt.result = cxt.big.sum()
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(actual, sum(range(10)))
 
     def testTanh(self):
@@ -321,7 +318,7 @@ class DenseTests(HostTest):
         cxt.z = tc.math.operator.derivative_of(cxt.y)
         cxt.result = (cxt.y, cxt.z)
 
-        actual_y, actual_z = self.host.post(ENDPOINT, cxt)
+        actual_y, actual_z = self.host.hypothetical(cxt)
 
         expected_y = np.tanh(x)
         expected_z = 1 / (np.cosh(x) ** 2)
@@ -340,7 +337,7 @@ class DenseTests(HostTest):
         cxt.reshaped = cxt.x.reshape((1, 1) + input_shape).transpose(permutation)
         cxt.result = [cxt.reshaped, cxt.expanded]
 
-        reshaped, expanded = self.host.post(ENDPOINT, cxt)
+        reshaped, expanded = self.host.hypothetical(cxt)
 
         expected = np.transpose(x.reshape((1, 1) + input_shape), permutation)
         expected = expected.flatten().tolist()
@@ -362,7 +359,7 @@ class DenseTests(HostTest):
         expected = expected[0]
         expected = np.transpose(expected)[1, 1:3]
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         expected = expect_dense(tc.I64, expected.shape, expected.flatten())
         self.assertEqual(actual, expected)
@@ -375,7 +372,7 @@ class DenseTests(HostTest):
         cxt.x = tc.tensor.Dense.arange(source, 0, 24)
         cxt.result = cxt.x.reshape(dest)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(actual, expect_dense(tc.I64, dest, np.arange(24).tolist()))
 
     def testCond(self):
@@ -391,7 +388,7 @@ class DenseTests(HostTest):
         cxt.b = load_dense(b)
         cxt.result = cxt.x.cond(cxt.a, cxt.b)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertTrue(all_close(actual, expected))
 
     def testRandomUniform(self):
@@ -407,7 +404,7 @@ class DenseTests(HostTest):
             .logical_and(cxt.x.mean() > 0)
         )
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertTrue(actual)
 
 
@@ -425,7 +422,7 @@ class SparseTests(HostTest):
         cxt.tensor = tc.tensor.Sparse.zeros(shape, tc.I32)
         cxt.result = tc.after(cxt.tensor[coord].write(value), cxt.tensor)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = expect_sparse(tc.I32, shape, [[coord, value]])
         self.assertEqual(actual, expected)
 
@@ -436,7 +433,7 @@ class SparseTests(HostTest):
         cxt.tensor = tc.tensor.Sparse.zeros(shape)
         cxt.result = tc.after(cxt.tensor[0, 1].write(1), cxt.tensor)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = expect_sparse(tc.F32, shape, [[[0, 1], 1]])
         self.assertEqual(actual, expected)
 
@@ -454,7 +451,7 @@ class SparseTests(HostTest):
             cxt.big + cxt.small,
         )
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         big = np.zeros(shape)
         big[1, 1] = 1
@@ -480,7 +477,7 @@ class SparseTests(HostTest):
         cxt.sparse = tc.tensor.Sparse.load(shape, data, tc.I32)
         cxt.result = cxt.sparse.expand_dims(2) * cxt.sparse.expand_dims(1)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         expected = np.zeros(shape)
         for coord, value in data:
@@ -504,7 +501,7 @@ class SparseTests(HostTest):
             cxt.small - cxt.big,
         )
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         big = np.zeros(shape)
         big[1, 2, 0] = 2
@@ -530,7 +527,7 @@ class SparseTests(HostTest):
         cxt.sparse = tc.tensor.Sparse.load(shape, data, tc.I32)
         cxt.result = cxt.sparse.sum(0)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         expected = np.zeros(shape)
         for coord, value in data:
@@ -549,7 +546,7 @@ class SparseTests(HostTest):
         cxt.big = tc.tensor.Sparse.zeros(shape, tc.I32)
         cxt.result = tc.after(cxt.big[0, 1, 2, 3].write(2), cxt.big.sum(axis))
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = np.zeros(shape, dtype=np.int32)
         expected[0, 1, 2, 3] = 2
         expected = expected.sum(axis)
@@ -565,7 +562,7 @@ class SparseTests(HostTest):
         cxt.big = tc.tensor.Sparse.zeros(shape, tc.I32)
         cxt.result = tc.after(cxt.big[0, 1, 2, 3].write(2), cxt.big.product(axis))
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         expected = np.zeros(shape, dtype=np.int32)
         expected[0, 1, 2, 3] = 2
@@ -582,7 +579,7 @@ class SparseTests(HostTest):
         cxt.tensor = tc.tensor.Sparse.load(shape, elements, tc.I32)
         cxt.result = cxt.tensor.transpose()
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         expected = np.zeros(shape)
         for coord, value in elements:
@@ -607,7 +604,7 @@ class SparseTests(HostTest):
         cxt.big = cxt.small * tc.tensor.Dense.ones(shape)
         cxt.slice = cxt.big[0]
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         expected = np.zeros([2, 3])
         for coord, value in data:
@@ -626,7 +623,7 @@ class SparseTests(HostTest):
         cxt.tensor = tc.tensor.Sparse.load(shape, elements, tc.I32)
         cxt.result = cxt.tensor.expand_dims(1).transpose().sum(1)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         expected = np.zeros(shape)
         for coord, value in elements:
@@ -645,7 +642,7 @@ class TensorTests(HostTest):
         cxt.sparse = tc.tensor.Sparse.zeros([5, 2], tc.I32)
         cxt.result = tc.after(cxt.sparse[1, 1].write(3), cxt.dense + cxt.sparse)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         l = np.arange(0, 30).reshape([3, 5, 2])
         r = np.zeros([5, 2], np.int32)
         r[1, 1] = 3
@@ -659,7 +656,7 @@ class TensorTests(HostTest):
         cxt.sparse = tc.tensor.Sparse.zeros([3, 2], tc.F32)
         cxt.result = tc.after(cxt.sparse[1, 0].write(2), cxt.sparse / cxt.dense)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         l = np.arange(1, 181).reshape([30, 3, 2])
         r = np.zeros([3, 2], float)
         r[1, 0] = 2.0
@@ -672,7 +669,7 @@ class TensorTests(HostTest):
         cxt.sparse = tc.tensor.Sparse.zeros([2, 3], tc.I32)
         cxt.result = tc.after(cxt.sparse[0, 1].write(2), cxt.dense * cxt.sparse)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = np.zeros([2, 3])
         expected[0, 1] = 2
         expected = expected * np.arange(0, 3)
@@ -689,7 +686,7 @@ class TensorTests(HostTest):
         cxt.dense = tc.tensor.Dense.ones([x, 1, z])
         cxt.result = (cxt.sparse - cxt.dense).sum()
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(actual, -(x * y * z))
 
     def testSparseAsDense(self):
@@ -704,7 +701,7 @@ class TensorTests(HostTest):
         cxt.sparse = tc.tensor.Sparse.load([3, 3], data, tc.Bool)
         cxt.dense = cxt.sparse.as_dense()
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = expect_dense(tc.Bool, [3, 3], matrix.flatten().tolist())
         self.assertEqual(actual, expected)
 
@@ -715,7 +712,7 @@ class TensorTests(HostTest):
         cxt.dense = load_dense(matrix, tc.I32)
         cxt.sparse = cxt.dense.as_sparse()
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = expect_sparse(tc.I32, [3, 3], matrix)
         self.assertEqual(actual, expected)
 
@@ -727,7 +724,7 @@ class TensorTests(HostTest):
         cxt.x1 = load_dense(x1, tc.I32)
         cxt.x2 = load_dense(x2, tc.I32)
         cxt.result = tc.tensor.Dense.concatenate([cxt.x1, cxt.x2], axis=1)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         expected = np.concatenate([x1, x2], axis=1)
         self.assertEqual(
