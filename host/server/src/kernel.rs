@@ -222,8 +222,8 @@ impl Kernel {
                 let (path, dir_entry) = self.service.lookup(*txn.id(), &path[1..])?;
 
                 match dir_entry {
-                    DirEntry::Dir(cluster) => crate::kernel::auth_claim_route(cluster, path, txn),
-                    DirEntry::Item(cluster) => crate::kernel::auth_claim_route(cluster, path, txn),
+                    DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn),
+                    DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn),
                 }
             }
 

@@ -214,15 +214,15 @@ impl TCError {
     pub fn method_not_allowed<M: fmt::Debug, P: fmt::Display>(method: M, path: P) -> Self {
         let message = format!("endpoint {} does not support {:?}", path, method);
 
+        #[cfg(debug_assertions)]
+        panic!("{message}");
+
+        #[cfg(not(debug_assertions))]
         Self::new(ErrorKind::MethodNotAllowed, message)
     }
 
     /// Error to indicate that the requested resource does not exist at the specified location
     pub fn not_found<I: fmt::Display>(locator: I) -> Self {
-        #[cfg(debug_assertions)]
-        panic!("not found: {locator}");
-
-        #[cfg(not(debug_assertions))]
         Self::new(ErrorKind::NotFound, locator)
     }
 

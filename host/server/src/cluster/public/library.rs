@@ -1,12 +1,15 @@
+use std::ops::Deref;
+
+use log::{debug, info};
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_scalar::value::{Link, Version as VersionNumber};
 use tc_scalar::{OpRef, Scalar, TCRef};
 use tc_state::object::InstanceClass;
-use tc_transact::public::{GetHandler, Handler, PutHandler, Route};
-use tc_transact::{Gateway, Transaction};
-use tcgeneric::{Id, Map, PathSegment, TCPathBuf};
+use tc_transact::public::{GetHandler, Handler, PostHandler, PutHandler, Route};
+use tc_transact::{Gateway, Transaction, TxnId};
+use tcgeneric::{Id, Map, PathSegment, TCPath, TCPathBuf};
 
 use crate::cluster::dir::DirItem;
 use crate::cluster::Library;
@@ -82,6 +85,7 @@ impl<'a> Handler<'a, State> for LibraryHandler<'a> {
                 if !classes.is_empty() {
                     let mut class_path = TCPathBuf::from(CLASS);
                     class_path.extend(link.path()[1..].iter().cloned());
+                    info!("installing a class set at {class_path}");
                     txn.put(class_path, number.clone(), classes).await?;
                 }
 
@@ -118,6 +122,7 @@ impl<'a> Handler<'a, State> for LibraryVersionHandler<'a> {
                 let number: VersionNumber = self.version.as_str().parse()?;
 
                 let version = self.library.get_version(*txn.id(), &number).await?;
+
                 if key.is_none() {
                     Ok(State::Scalar(version.clone().into()))
                 } else {
@@ -135,14 +140,65 @@ impl<'a> Handler<'a, State> for LibraryVersionHandler<'a> {
     }
 }
 
+struct LibraryAttrHandler<'a> {
+    library: &'a Library,
+    path: &'a [PathSegment],
+}
+
+impl<'a> LibraryAttrHandler<'a> {
+    fn new(library: &'a Library, path: &'a [PathSegment]) -> LibraryAttrHandler<'a> {
+        Self { library, path }
+    }
+
+    async fn get_version(&self, txn_id: TxnId) -> TCResult<impl Deref<Target = Map<Scalar>>> {
+        let number: VersionNumber = self.path[0].as_str().parse()?;
+        self.library.get_version(txn_id, &number).await
+    }
+}
+
+impl<'a> Handler<'a, State> for LibraryAttrHandler<'a> {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(move |txn, key| {
+            Box::pin(async move {
+                let version = self.get_version(*txn.id()).await?;
+
+                debug!(
+                    "execute GET {}: {} from library version",
+                    TCPath::from(&self.path[1..]),
+                    key
+                );
+
+                tc_transact::public::Public::get(&*version, txn, &self.path[1..], key).await
+            })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(move |txn, params| {
+            Box::pin(async move {
+                let version = self.get_version(*txn.id()).await?;
+                tc_transact::public::Public::post(&*version, txn, &self.path[1..], params).await
+            })
+        }))
+    }
+}
+
 impl Route<State> for Library {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
+        debug!("Library::route {}", TCPath::from(path));
+
         if path.is_empty() {
             Some(Box::new(LibraryHandler::from(self)))
         } else if path.len() == 1 {
             Some(Box::new(LibraryVersionHandler::new(self, &path[0])))
         } else {
-            None
+            Some(Box::new(LibraryAttrHandler::new(self, path)))
         }
     }
 }

@@ -21,7 +21,7 @@ use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnMapLockIter};
 use tc_transact::{fs, Gateway};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Host, Link, ToUrl, Value};
-use tcgeneric::{label, Label, PathSegment, TCPath, TCPathBuf, Tuple};
+use tcgeneric::{label, Label, PathSegment, TCPathBuf, Tuple};
 
 use crate::claim::Claim;
 use crate::client::Egress;
@@ -178,7 +178,8 @@ impl<T> Cluster<T> {
         if path.is_empty() || path == [REPLICAS] {
             self.mode
         } else {
-            todo!("cluster subject umask for {}", TCPath::from(path))
+            // TODO: granular permissions
+            self.mode
         }
     }
 
@@ -357,12 +358,16 @@ impl<T: fmt::Debug> Cluster<T> {
 
 impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
     async fn replicate_commit(&self, txn: &Txn) -> TCResult<()> {
+        debug!("Cluster::replicate_commit");
+
+        // TODO: verify that the txn owner has permission to write to this cluster w/ a smart contract
+
         let leader = txn
             .leader(self.path())?
             .ok_or_else(|| bad_request!("cannot commit a leaderless transaction"))?;
 
         if leader == self.public_key() {
-            if txn.locked_by()? == Some(self.public_key()) {
+            if txn.locked_by()? == txn.owner()? {
                 let txn_id = *txn.id();
                 let notify = |link| txn.put(link, Value::default(), State::default());
                 self.replicate_txn_state(txn_id, notify).await?;
@@ -373,16 +378,22 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
 
         self.commit(*txn.id()).await;
 
+        debug!("Cluster::replicate_commit complete");
+
         Ok(())
     }
 
     pub async fn replicate_rollback(&self, txn: &Txn) -> TCResult<()> {
+        debug!("Cluster::replicate_rollback");
+
+        // TODO: verify that the txn owner has permission to write to this cluster w/ a smart contract
+
         let leader = txn
             .leader(self.path())?
             .ok_or_else(|| bad_request!("cannot roll back a leaderless transaction"))?;
 
         if leader == self.public_key() {
-            if txn.locked_by()? == Some(self.public_key()) {
+            if txn.locked_by()? == txn.owner()? {
                 let txn_id = *txn.id();
                 let notify = move |link| txn.delete(link, Value::default());
                 self.replicate_txn_state(txn_id, notify).await?;
@@ -392,6 +403,8 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
         }
 
         self.rollback(txn.id()).await;
+
+        debug!("Cluster::replicate_rollback complete");
 
         Ok(())
     }
@@ -426,16 +439,18 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
             });
 
             let updates = FuturesUnordered::new();
-            let mut last = downstream.pop().expect("link");
+
+            let mut last = Option::<Link>::None;
+
             for link in downstream {
-                if link.host() == last.host() {
+                if let Some(last) = &last {
                     if link.path().starts_with(last.path()) {
                         debug!("no need to notify {link} since {last} was already notified");
                         continue;
                     }
                 }
 
-                last = link.clone();
+                last = Some(link.clone());
 
                 updates.push(notify(link.clone()).map(move |r| (link, r)));
             }
@@ -457,6 +472,7 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
             .cloned()
             .map(|replica| async move {
                 let link = Link::new(replica.clone(), self.path().clone());
+                trace!("notify replica at {link}...");
                 notify(link).map(|result| (replica, result)).await
             })
             .collect();

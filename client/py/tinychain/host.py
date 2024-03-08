@@ -3,6 +3,8 @@
 import abc
 
 import json
+import logging
+
 import requests
 import urllib.parse
 
@@ -142,14 +144,7 @@ class Host(object):
 
         return self._handle(request)
 
-    def _create_namespace(self, path, is_dir):
-        assert path[:1] in [URI(Library), URI(Service)], f"invalid library or service prefix: {path[0]}"
-        self.put(URI(Model), path[-1], is_dir)
-        self.put(path[:-1], path[-1], is_dir)
-
-    def _create_namespace_all(self, path):
-        assert path
-
+    def _create_namespace(self, path):
         exists = 1
         while exists < len(path):
             try:
@@ -159,13 +154,21 @@ class Host(object):
                 break
 
         for i in range(exists, len(path) - 1):
-            self._create_namespace(path[:i], True)
+            self.put(path[:i], path[i], True)
 
-        self._create_namespace(path, False)
+        self.put(path[:-1], path[-1], False)
 
     def install(self, service):
-        self._create_namespace_all(URI(service)[:-1])
-        self.put(URI(service)[:-1], URI(service)[-1], service)
+        service_uri = URI(service)
+        assert service_uri.path()
+        assert service_uri[:1] in [URI(Library), URI(Service)]
+
+        class_uri = URI(Model) + service_uri[1:]
+
+        self._create_namespace(service_uri[:-1])
+        self._create_namespace(class_uri[:-1])
+
+        self.put(service_uri[:-1], service_uri[-1], service)
 
     def hypothetical(self, op_def, auth=None):
         return self.post("/transact/hypothetical", {"op": op_def}, auth)
