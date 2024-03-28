@@ -33,6 +33,9 @@ pub mod aes256 {
     pub type Key = aes_gcm_siv::Key<Aes256GcmSiv>;
 }
 
+#[cfg(debug_assertions)]
+pub const DEFAULT_MAX_RETRIES: u8 = 1;
+#[cfg(not(debug_assertions))]
 pub const DEFAULT_MAX_RETRIES: u8 = 3;
 pub const DEFAULT_PORT: u16 = 8702;
 pub const DEFAULT_TTL: Duration = Duration::from_secs(3);

@@ -36,10 +36,10 @@ collection = ["btree", "table", "tensor"]
 service = ["tc-server/service"]
 opencl = ["tc-server/opencl"]
 default = ["collection", "service"]
-none = []
 
 [dependencies]
 async-trait = "0.1"
+bytes = "1.6"
 clap = { version = "4.4", features = ["derive"] }
 destream = "0.7"
 destream_json = { version = "0.12", features = ["tokio-io"] }

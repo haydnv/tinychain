@@ -59,17 +59,18 @@ impl Egress for ClusterEgress {
     fn is_authorized(&self, link: &ToUrl<'_>, is_write: bool) -> bool {
         debug_assert!(!link.path().is_empty(), "egress to / from a cluster");
 
+        let is_within_cluster = || {
+            link.host()
+                .map(|host| {
+                    host == &self.lead || self.replicas.keys().any(|replica| replica == host)
+                })
+                .unwrap_or(true)
+        };
+
         // TODO: replace label("state") with State::PREFIX
-        if link.path().starts_with(&[label("state").into()])
-            || link.path().starts_with(&self.path[..])
-        {
-            if let Some(host) = link.host() {
-                if host == &self.lead {
-                    return true;
-                } else if self.replicas.keys().any(|replica| replica == host) {
-                    return true;
-                }
-            } else {
+        let ns = &self.path[1..];
+        if link.path().starts_with(&[label("state").into()]) || link.path()[1..].starts_with(ns) {
+            if is_within_cluster() {
                 return true;
             }
         }
@@ -86,6 +87,16 @@ impl Egress for ClusterEgress {
         }
 
         true
+    }
+}
+
+impl fmt::Debug for ClusterEgress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "cluster at {}{} with replicas {:?}",
+            self.lead, self.path, self.replicas
+        )
     }
 }
 
@@ -534,6 +545,8 @@ where
         txn: Txn,
         peer: Host,
     ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<T>>> {
+        info!("replicating {} from {}...", self.path(), peer);
+
         let hash = self.state.replicate(&txn, peer.clone()).await?;
 
         let peer_link = Link::new(peer, self.path().clone()).append(REPLICAS);

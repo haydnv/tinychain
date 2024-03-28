@@ -1535,7 +1535,7 @@ where
     type Value = State<Txn>;
 
     fn expecting() -> &'static str {
-        "a State, e.g. 1 or [2] or \"three\" or {\"/state/scalar/value/number/complex\": [3.14, -1.414]"
+        r#"a State, e.g. 1 or [2] or "three" or {"/state/scalar/value/number/complex": [3.14, -1.414]}"#
     }
 
     async fn visit_array_u8<A: ArrayAccess<u8>>(self, array: A) -> Result<Self::Value, A::Error> {

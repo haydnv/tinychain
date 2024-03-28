@@ -84,10 +84,16 @@ struct Config {
     pub log_level: String,
 
     #[arg(
-        long = "symmetric key",
+        long = "symmetric_key",
         help = "a hexadecimal string representations of amn AES256 key used for replication at startup"
     )]
     pub keys: Vec<String>,
+
+    #[arg(
+        long = "peer",
+        help = "the address of one or more peers to replicate from"
+    )]
+    pub peers: Vec<Host>,
 
     #[arg(long, help = "a link to the cluster to replicate from on startup")]
     pub replicate: Option<Host>,
@@ -117,13 +123,21 @@ struct Config {
 }
 
 fn main() {
-    let config = Config::parse();
+    let mut config = Config::parse();
 
     let keys = config
         .keys
         .into_iter()
-        .map(|key| {
-            let key = hex::decode(key).expect("AES256 key");
+        .map(|hex_key| {
+            let key = hex::decode(&hex_key).expect("AES256 key");
+
+            assert_eq!(
+                key.len(),
+                32,
+                "invalid AES256 key: {hex_key} ({} bytes but should be 32)",
+                key.len()
+            );
+
             Key::from_slice(key.as_slice()).clone()
         })
         .collect::<Vec<Key>>();
@@ -167,23 +181,33 @@ fn main() {
         .set_secure(false);
 
     let mut broadcast = Broadcast::new();
-    let peers = broadcast.peers(Protocol::default());
 
-    if !peers.is_empty() {
-        info!("found mDNS peers: {:?}", peers);
-    }
+    let peers = if config.peers.is_empty() {
+        broadcast.peers(Protocol::default())
+    } else {
+        config.peers.drain(..).collect()
+    };
 
     let app_server = rt.block_on(builder.build());
-    let replicator = Replicator::from(&app_server).with_peers(peers);
     let address = app_server.address().clone();
 
-    let http_server = http::Server::new(app_server, config.request_ttl);
-    let http_io_task = rt.spawn(http_server.listen(config.http_port));
+    let http_io_task = {
+        let replicator = Replicator::from(&app_server);
 
-    assert!(
-        rt.block_on(replicator.replicate_and_join()),
-        "replication failed"
-    );
+        let http_server = http::Server::new(app_server, config.request_ttl);
+        let http_io_task = rt.spawn(http_server.listen(config.http_port));
+
+        if !peers.is_empty() {
+            info!("attempting to replicate from peers: {:?}", peers);
+
+            assert!(
+                rt.block_on(replicator.with_peers(peers).replicate_and_join()),
+                "replication failed"
+            );
+        };
+
+        http_io_task
+    };
 
     rt.block_on(broadcast.make_discoverable(&address))
         .expect("mDNS daemon");

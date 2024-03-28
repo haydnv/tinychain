@@ -298,18 +298,18 @@ where
     let body = BodyStream::new(body).map_ok(|frame| {
         frame
             .into_data()
-            .unwrap_or_else(|_err| Bytes::from_static(&[]))
+            .expect("frame")
     });
 
     match encoding {
         Encoding::Json => {
             destream_json::try_decode(txn, body)
-                .map_err(|cause| bad_request!("{}", ERR_DESERIALIZE).consume(cause))
+                .map_err(|cause| bad_request!("{ERR_DESERIALIZE}: {cause}").consume(cause))
                 .await
         }
         Encoding::Tbon => {
             tbon::de::try_decode(txn, body)
-                .map_err(|cause| bad_request!("{}", ERR_DESERIALIZE).consume(cause))
+                .map_err(|cause| bad_request!("{ERR_DESERIALIZE}: {cause}").consume(cause))
                 .await
         }
     }

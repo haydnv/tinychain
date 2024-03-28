@@ -1,6 +1,8 @@
+use std::fmt;
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use log::trace;
-use std::sync::Arc;
 
 use tc_error::*;
 use tc_transact::TxnId;
@@ -10,7 +12,7 @@ use tcgeneric::Map;
 use crate::kernel::Kernel;
 use crate::{Actor, State, Txn};
 
-pub trait Egress: Send + Sync {
+pub trait Egress: Send + Sync + fmt::Debug {
     fn is_authorized(&self, link: &ToUrl<'_>, write: bool) -> bool;
 }
 
@@ -155,8 +157,14 @@ impl Client {
 
         if egress.is_authorized(&link, write) {
             Ok(())
+        } else if let Some(policy) = &self.egress {
+            Err(unauthorized!(
+                "egress to {} (egress policy: {:?})",
+                link,
+                policy
+            ))
         } else {
-            Err(unauthorized!("egress to {link}"))
+            Err(unauthorized!("egress"))
         }
     }
 }

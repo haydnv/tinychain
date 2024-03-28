@@ -1,11 +1,15 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bytes::{Bytes, BytesMut};
 use destream::de;
-use futures::{StreamExt, TryFutureExt, TryStreamExt};
+use futures::future::{self, TryFutureExt};
+use futures::stream::{self, StreamExt, TryStreamExt};
 use http_body_util::{BodyStream, Empty, StreamBody};
-use hyper::body::{Body, Bytes, Frame, Incoming};
+use hyper::body::{Body, Frame, Incoming};
+use hyper::header;
 use hyper_util::rt::TokioIo;
+use log::{trace, warn};
 use tokio::net::TcpStream;
 
 use tc_error::*;
@@ -15,9 +19,7 @@ use tc_server::{
 use tc_value::{ToUrl, Value};
 use tcgeneric::Map;
 
-use super::Encoding;
-
-const ERR_NO_OWNER: &str = "an ownerless transaction may not make outgoing requests";
+use super::{Accept, Encoding};
 
 /// A TinyChain HTTP client. Should only be used through a `Gateway`.
 pub struct Client;
@@ -45,9 +47,12 @@ impl Client {
             .map_err(|cause| bad_gateway!("handshake failed").consume(cause))
             .await?;
 
-        // check that the connection succeeded
-        conn.map_err(|cause| bad_gateway!("connection refused").consume(cause))
-            .await?;
+        // check that the connection succeeded, without blocking this task
+        tokio::spawn(async move {
+            if let Err(cause) = conn.await {
+                warn!("connection refused: {cause}")
+            }
+        });
 
         let request = request
             .body(body)
@@ -98,19 +103,24 @@ impl Client {
 
         let request = hyper::Request::builder()
             .method(method)
-            .header(hyper::header::HOST, host)
-            .header(hyper::header::ACCEPT_ENCODING, Encoding::Tbon.as_str())
+            .header(header::HOST, host)
+            .header(header::ACCEPT_ENCODING, Encoding::Tbon.as_str())
+            .header(header::CONTENT_TYPE, Encoding::Tbon.as_str())
             .uri(url);
 
         let request = if let Some(token) = auth {
-            request.header(hyper::header::AUTHORIZATION, format!("Bearer {}", token))
+            request.header(header::AUTHORIZATION, format!("Bearer {}", token))
         } else {
             request
         };
 
-        let stream = TcpStream::connect(addr)
+        trace!("opening TCP connection to {addr}...");
+
+        let stream = TcpStream::connect(addr.clone())
             .map_err(|cause| bad_gateway!("connection refused").consume(cause))
             .await?;
+
+        trace!("sending outbound HTTP request to {addr}...");
 
         let response = if let Some(value) = value {
             let body = tbon::en::encode(value)
@@ -118,7 +128,7 @@ impl Client {
 
             let body = body
                 .map_ok(Frame::data)
-                .map_err(|cause| internal!("TBON encoding error").consume(cause));
+                .map_err(|cause| internal!("encoding error in outbound request").consume(cause));
 
             let body = StreamBody::new(body);
 
@@ -132,6 +142,8 @@ impl Client {
                 .map_err(|cause| bad_gateway!("upstream error").consume(cause))
                 .await?
         };
+
+        trace!("reading HTTP response from {addr}...");
 
         if response.status().is_success() {
             let body = BodyStream::new(response.into_body())
@@ -147,7 +159,7 @@ impl Client {
                 .await
         } else {
             let err = transform_error(&link, response).await;
-            Err(bad_gateway!("error from upstream host").consume(err))
+            Err(err)
         }
     }
 }
@@ -175,40 +187,34 @@ impl RPCClient for Client {
     }
 
     async fn put(&self, txn: &Txn, link: ToUrl<'_>, key: Value, value: State) -> TCResult<()> {
-        if txn.owner().map(|owner| owner.is_some())? {
-            let value = value.into_view(txn.subcontext_unique()).await?;
-            let token = self.extract_jwt(txn);
-            self.request("PUT", link, txn.id(), &key, Some(value), token, ())
-                .await
-        } else {
-            Err(bad_request!("{ERR_NO_OWNER}"))
-        }
+        let value_json = destream_json::en::encode(value.clone().into_view(txn.clone()).await.expect("view")).expect("json");
+        let value_json = value_json.try_collect::<BytesMut>().await.expect("json");
+        let value_json = String::from_utf8(value_json.into()).expect("json");
+        trace!("sending HTTP PUT request to {link} with key {key:?} and value {value:?}: {value_json:?}");
+
+
+        let value = value.into_view(txn.subcontext_unique()).await?;
+        let token = self.extract_jwt(txn);
+        self.request("PUT", link, txn.id(), &key, Some(value), token, ())
+            .await
     }
 
     async fn post(&self, txn: &Txn, link: ToUrl<'_>, params: Map<State>) -> TCResult<State> {
-        if txn.owner().map(|owner| owner.is_some())? {
-            let params = State::Map(params);
-            let params = params.into_view(txn.subcontext_unique()).await?;
-            let token = self.extract_jwt(txn);
-            let txn_id = txn.id();
-            let txn = txn.subcontext_unique();
+        let params = State::Map(params);
+        let params = params.into_view(txn.subcontext_unique()).await?;
+        let token = self.extract_jwt(txn);
+        let txn_id = txn.id();
+        let txn = txn.subcontext_unique();
 
-            self.request("POST", link, txn_id, &Value::None, Some(params), token, txn)
-                .await
-        } else {
-            Err(bad_request!("{ERR_NO_OWNER}"))
-        }
+        self.request("POST", link, txn_id, &Value::None, Some(params), token, txn)
+            .await
     }
 
     async fn delete(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<()> {
-        if txn.owner().map(|owner| owner.is_some())? {
-            let token = self.extract_jwt(txn);
+        let token = self.extract_jwt(txn);
 
-            self.request("DELETE", link, txn.id(), &key, None, token, ())
-                .await
-        } else {
-            Err(bad_request!("{ERR_NO_OWNER}"))
-        }
+        self.request("DELETE", link, txn.id(), &key, None, token, ())
+            .await
     }
 }
 
@@ -217,8 +223,14 @@ async fn transform_error(source: &ToUrl<'_>, response: hyper::Response<Incoming>
 
     let status = response.status();
 
+    let content_type = response.headers().get(header::CONTENT_TYPE);
+    let content_type = Encoding::parse_header(content_type)
+        .ok()
+        .unwrap_or_default();
+
     let mut body = BodyStream::new(response.into_body());
-    let mut err = Vec::new();
+
+    let mut err = BytesMut::with_capacity(1024);
     loop {
         if err.len() >= MAX_ERR_SIZE {
             break;
@@ -233,11 +245,20 @@ async fn transform_error(source: &ToUrl<'_>, response: hyper::Response<Incoming>
         }
     }
 
-    let message = if let Ok(message) = String::from_utf8(err) {
-        format!("error from upstream host {}: {}", source, message)
-    } else {
-        format!("error from upstream host {}", source)
+    let body = stream::once(future::ready(err.into()));
+
+    let cause = match content_type {
+        Encoding::Json => match destream_json::decode((), body).await {
+            Ok(err) => err,
+            Err(cause) => bad_gateway!("unable to parse upstream error: {cause}"),
+        },
+        Encoding::Tbon => match tbon::de::decode((), body).await {
+            Ok(err) => err,
+            Err(cause) => bad_gateway!("unable to parse upstream error: {cause}"),
+        },
     };
+
+    let message = format!("error from upstream host {source}: {cause}");
 
     use hyper::StatusCode;
     let code = match status {
@@ -254,5 +275,5 @@ async fn transform_error(source: &ToUrl<'_>, response: hyper::Response<Incoming>
         _ => ErrorKind::BadGateway,
     };
 
-    TCError::new(code, message)
+    TCError::new(code, message).consume(cause)
 }

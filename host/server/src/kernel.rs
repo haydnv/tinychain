@@ -38,6 +38,7 @@ const REPLICATION_TTL: Duration = Duration::from_secs(30);
 const STATE_MODE: Mode = Mode::new()
     .with_class_perm(umask::OTHERS, umask::READ)
     .with_class_perm(umask::OTHERS, umask::EXEC);
+
 #[cfg(not(feature = "service"))]
 const ERR_NOT_ENABLED: &str = "this binary was compiled without the 'service' feature";
 
@@ -51,6 +52,12 @@ impl Egress for KernelEgress {
     fn is_authorized(&self, link: &ToUrl<'_>, _write: bool) -> bool {
         link.host() == self.peer.host()
             && (link.path().is_empty() || link.path().starts_with(&self.peer.path()[..]))
+    }
+}
+
+impl fmt::Debug for KernelEgress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "kernel with authorized peer {}", self.peer)
     }
 }
 
@@ -256,6 +263,8 @@ impl Kernel {
         txn_server: &TxnServer,
         peers: &BTreeSet<Host>,
     ) -> Result<(), bool> {
+        debug!("Kernel::replicate_and_join {peers:?}");
+
         if peers.is_empty() {
             info!("not joining replica set since no peers were provided");
             return Ok(());
@@ -281,6 +290,12 @@ impl Kernel {
         T: Clone + fmt::Debug,
         Cluster<Dir<T>>: ReplicateAndJoin<State = T>,
     {
+        debug!(
+            "Kernel::replicate_and_join_dir {} with peers {:?}",
+            parent.path(),
+            peers
+        );
+
         let mut progress = false;
         let mut unvisited = VecDeque::new();
         unvisited.push_back(parent.clone());
@@ -299,6 +314,8 @@ impl Kernel {
                     .expect("txn")
                     .with_egress(egress.clone());
 
+                trace!("fetching replication token...");
+
                 let txn_id = *txn.id();
                 let txn = match get_token(&txn, peer, keys, cluster.path()).await {
                     Ok(token) => match txn_server
@@ -316,6 +333,8 @@ impl Kernel {
                         continue;
                     }
                 };
+
+                trace!("replicating...");
 
                 match cluster.replicate_and_join(txn, peer.clone()).await {
                     Ok(entries) => {
@@ -563,6 +582,8 @@ async fn get_token(
             Value::Bytes(nonce.into()),
             Value::Bytes(path_encrypted.into()),
         );
+
+        trace!("requesting replication token from {link}...");
 
         let nonce_and_token = txn.get(link.clone(), nonce_and_path).await?;
 
