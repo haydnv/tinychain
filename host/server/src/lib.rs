@@ -8,6 +8,7 @@ use tc_value::{Address, Host, Link, Protocol, Value};
 
 pub use rjwt::VerifyingKey;
 
+pub use tc_state::view::StateView;
 pub use tc_state::CacheBlock;
 
 pub use builder::{Broadcast, Builder, Replicator};
@@ -15,7 +16,7 @@ pub use claim::Claim;
 pub use client::RPCClient;
 pub use kernel::Endpoint;
 pub use server::Server;
-pub use txn::Txn;
+pub use txn::{IntoView, Transaction, Txn, TxnId};
 
 mod builder;
 mod claim;
@@ -32,6 +33,9 @@ pub mod aes256 {
     pub type Key = aes_gcm_siv::Key<Aes256GcmSiv>;
 }
 
+#[cfg(debug_assertions)]
+pub const DEFAULT_MAX_RETRIES: u8 = 1;
+#[cfg(not(debug_assertions))]
 pub const DEFAULT_MAX_RETRIES: u8 = 3;
 pub const DEFAULT_PORT: u16 = 8702;
 pub const DEFAULT_TTL: Duration = Duration::from_secs(3);
@@ -42,9 +46,9 @@ pub type SignedToken = rjwt::SignedToken<Link, Value, Claim>;
 pub type Token = rjwt::Token<Link, Value, Claim>;
 
 #[cfg(feature = "service")]
-pub type Chain<T> = tc_chain::Chain<State, Txn, CacheBlock, T>;
+pub type Chain<T> = tc_state::chain::Chain<Txn, T>;
 #[cfg(feature = "service")]
-pub type Collection = tc_collection::CollectionBase<Txn, CacheBlock>;
+pub type Collection = tc_state::collection::CollectionBase<Txn>;
 pub type State = tc_state::State<Txn>;
 
 pub trait Authorize {

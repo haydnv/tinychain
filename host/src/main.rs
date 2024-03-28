@@ -1,14 +1,19 @@
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use clap::Parser;
+use freqfs::Cache;
+use log::info;
 use tokio::time::Duration;
 
 use tc_error::*;
-use tc_value::Host;
+use tc_server::aes256::Key;
+use tc_server::{Broadcast, Builder, Replicator};
+use tc_value::{Host, Protocol};
 
-use tinychain::*;
+use tinychain::{http, MIN_CACHE_SIZE};
 
 fn data_size(flag: &str) -> TCResult<usize> {
     if flag.is_empty() || flag == "0" {
@@ -40,12 +45,8 @@ fn duration(flag: &str) -> TCResult<Duration> {
 
 #[derive(Clone, Parser)]
 struct Config {
-    #[arg(
-        long,
-        default_value = "127.0.0.1",
-        help = "the IP address of this host"
-    )]
-    pub address: IpAddr,
+    #[arg(long, help = "the IP address of this host")]
+    pub address: Option<IpAddr>,
 
     #[arg(
         long = "cache_size",
@@ -69,6 +70,12 @@ struct Config {
     pub http_port: u16,
 
     #[arg(
+        long = "insecure",
+        help = "disable security checks when installing new services"
+    )]
+    pub insecure: bool,
+
+    #[arg(
         long = "log_level",
         default_value = "info",
         value_parser = ["trace", "debug", "info", "warn", "error"],
@@ -77,10 +84,16 @@ struct Config {
     pub log_level: String,
 
     #[arg(
-        long = "public_key",
-        help = "a hexadecimal string representation of this host's clusters' public key"
+        long = "symmetric_key",
+        help = "a hexadecimal string representations of amn AES256 key used for replication at startup"
     )]
-    pub public_key: Option<String>,
+    pub keys: Vec<String>,
+
+    #[arg(
+        long = "peer",
+        help = "the address of one or more peers to replicate from"
+    )]
+    pub peers: Vec<Host>,
 
     #[arg(long, help = "a link to the cluster to replicate from on startup")]
     pub replicate: Option<Host>,
@@ -109,43 +122,97 @@ struct Config {
     pub workspace: PathBuf,
 }
 
-impl Config {
-    fn gateway(&self) -> gateway::Config {
-        gateway::Config {
-            addr: self.address,
-            http_port: self.http_port,
-            request_ttl: self.request_ttl,
-        }
-    }
-}
-
 fn main() {
-    let config = Config::parse();
+    let mut config = Config::parse();
+
+    let keys = config
+        .keys
+        .into_iter()
+        .map(|hex_key| {
+            let key = hex::decode(&hex_key).expect("AES256 key");
+
+            assert_eq!(
+                key.len(),
+                32,
+                "invalid AES256 key: {hex_key} ({} bytes but should be 32)",
+                key.len()
+            );
+
+            Key::from_slice(key.as_slice()).clone()
+        })
+        .collect::<Vec<Key>>();
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log_level))
         .init();
 
-    let gateway_config = config.gateway();
-
-    let runtime = tokio::runtime::Builder::new_multi_thread()
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
         .enable_time()
         .thread_stack_size(config.stack_size)
         .build()
         .expect("tokio runtime");
 
-    let builder = runtime
-        .block_on(Builder::load(
-            config.cache_size,
-            config.data_dir,
-            config.workspace,
-        ))
-        .with_public_key(config.public_key)
-        .with_gateway(gateway_config)
-        .with_lead(config.replicate);
-
-    match runtime.block_on(builder.replicate_and_serve()) {
-        Ok(_) => {}
-        Err(cause) => panic!("HTTP server failed: {}", cause),
+    if !config.workspace.exists() {
+        std::fs::create_dir_all(&config.workspace).expect("create workspace");
     }
+
+    if config.cache_size < MIN_CACHE_SIZE {
+        panic!(
+            "cache size {} is below the minimum of {}",
+            config.cache_size, MIN_CACHE_SIZE
+        );
+    }
+
+    let (data_dir, workspace) = rt
+        .block_on(async move {
+            let cache = Cache::new(config.cache_size, None);
+            let data_dir = cache.clone().load(config.data_dir)?;
+            let workspace = cache.clone().load(config.workspace)?;
+            TCResult::Ok((data_dir, workspace))
+        })
+        .expect("cache load");
+
+    let rpc_client = Arc::new(http::Client::new());
+
+    let builder = Builder::load(data_dir, workspace, rpc_client)
+        .detect_address()
+        .set_port(config.http_port)
+        .with_keys(keys)
+        .set_secure(false);
+
+    let mut broadcast = Broadcast::new();
+
+    let peers = if config.peers.is_empty() {
+        broadcast.peers(Protocol::default())
+    } else {
+        config.peers.drain(..).collect()
+    };
+
+    let app_server = rt.block_on(builder.build());
+    let address = app_server.address().clone();
+
+    let http_io_task = {
+        let replicator = Replicator::from(&app_server);
+
+        let http_server = http::Server::new(app_server, config.request_ttl);
+        let http_io_task = rt.spawn(http_server.listen(config.http_port));
+
+        if !peers.is_empty() {
+            info!("attempting to replicate from peers: {:?}", peers);
+
+            assert!(
+                rt.block_on(replicator.with_peers(peers).replicate_and_join()),
+                "replication failed"
+            );
+        };
+
+        http_io_task
+    };
+
+    rt.block_on(broadcast.make_discoverable(&address))
+        .expect("mDNS daemon");
+
+    rt.block_on(http_io_task)
+        .expect("server shutdown")
+        .expect("server");
 }

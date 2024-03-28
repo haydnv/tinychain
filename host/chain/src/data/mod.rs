@@ -2,9 +2,9 @@ use std::fmt;
 
 use freqfs::FileSave;
 use futures::TryFutureExt;
-use safecast::{AsType, TryCastFrom};
+use safecast::TryCastFrom;
 
-use tc_collection::{BTreeNode, Collection, DenseCacheFile, TensorNode};
+use tc_collection::{Collection, CollectionBlock};
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_transact::public::{Public, Route, StateInstance};
@@ -27,12 +27,10 @@ pub(super) async fn replay_all<State, T>(
 ) -> TCResult<()>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Scalar>,
-    State::FE:
-        for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    State::FE: for<'a> FileSave<'a> + CollectionBlock + Clone,
     T: Route<State> + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
-    BTreeNode: freqfs::FileLoad,
 {
     for op in mutations {
         replay(subject, txn, &store, op)
@@ -51,12 +49,10 @@ async fn replay<State, T>(
 ) -> TCResult<()>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Scalar>,
-    State::FE:
-        for<'a> FileSave<'a> + DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    State::FE: for<'a> FileSave<'a> + CollectionBlock + Clone,
     T: Route<State> + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
-    BTreeNode: freqfs::FileLoad,
 {
     match mutation {
         MutationRecord::Delete(key) => subject.delete(txn, &[], key.clone()).await,

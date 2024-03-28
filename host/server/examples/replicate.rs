@@ -57,7 +57,7 @@ use log::info;
 use tokio::sync::RwLock;
 
 use tc_error::*;
-use tc_scalar::{OpDef, Scalar};
+use tc_scalar::Scalar;
 use tc_server::aes256::{Aes256GcmSiv, Key, KeyInit, OsRng};
 use tc_server::*;
 use tc_state::object::InstanceClass;
@@ -68,7 +68,7 @@ use tcgeneric::{label, path_label, Id, Label, Map, PathLabel, TCPath, TCPathBuf}
 const CACHE_SIZE: usize = 1_000_000;
 const DATA_DIR: &'static str = "/tmp/tc/example_server/data";
 const WORKSPACE: &'static str = "/tmp/tc/example_server/workspace";
-const HYPOTHETICAL: PathLabel = path_label(&["txn", "hypothetical"]);
+const HYPOTHETICAL: PathLabel = path_label(&["transact", "hypothetical"]);
 
 const CLASS: Label = label("class");
 const TEST: Label = label("test");
@@ -116,7 +116,7 @@ impl RPCClient for Client {
     async fn fetch(&self, txn_id: TxnId, link: ToUrl<'_>, actor_id: Value) -> TCResult<Actor> {
         let servers = self.servers.read().await;
         let server = Self::get_server_for(&*servers, &link)?;
-        let txn = server.get_txn(Some(txn_id), None).await?;
+        let txn = server.get_txn(txn_id, None).await?;
 
         let public_key = self
             .get(&txn, link, actor_id.clone())
@@ -137,7 +137,7 @@ impl RPCClient for Client {
         let server = Self::get_server_for(&*servers, &link)?;
 
         let txn_id = *txn.id();
-        let txn = server.get_txn(Some(txn_id), self.extract_jwt(txn)).await?;
+        let txn = server.get_txn(txn_id, self.extract_jwt(txn)).await?;
 
         let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
         let handler = endpoint.get(key)?;
@@ -149,7 +149,7 @@ impl RPCClient for Client {
         let server = Self::get_server_for(&*servers, &link)?;
 
         let txn_id = *txn.id();
-        let txn = server.get_txn(Some(txn_id), self.extract_jwt(txn)).await?;
+        let txn = server.get_txn(txn_id, self.extract_jwt(txn)).await?;
 
         let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
         let handler = endpoint.put(key, value)?;
@@ -161,7 +161,7 @@ impl RPCClient for Client {
         let server = Self::get_server_for(&*servers, &link)?;
 
         let txn_id = *txn.id();
-        let txn = server.get_txn(Some(txn_id), self.extract_jwt(txn)).await?;
+        let txn = server.get_txn(txn_id, self.extract_jwt(txn)).await?;
 
         let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
         let handler = endpoint.post(params)?;
@@ -173,7 +173,7 @@ impl RPCClient for Client {
         let server = Self::get_server_for(&*servers, &link)?;
 
         let txn_id = *txn.id();
-        let txn = server.get_txn(Some(txn_id), self.extract_jwt(txn)).await?;
+        let txn = server.get_txn(txn_id, self.extract_jwt(txn)).await?;
 
         let endpoint = server.authorize_claim_and_route(link.path(), &txn)?;
         let handler = endpoint.delete(key)?;
@@ -237,14 +237,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let op_def = [(Id::from(label("_return")), hello_world.clone())]
         .into_iter()
+        .map(|(id, state)| State::Tuple(vec![id.into(), state.into()].into()))
         .collect();
 
-    let params = [(
-        label("op").into(),
-        State::Scalar(OpDef::Post(op_def).into()),
-    )]
-    .into_iter()
-    .collect();
+    let params: Map<State> = [(label("op").into(), State::Tuple(op_def))]
+        .into_iter()
+        .collect();
 
     let txn = client.get_txn(&host1)?;
     let response = client.post(&txn, link.into(), params).await?;

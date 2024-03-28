@@ -1,5 +1,6 @@
 use std::fmt;
 
+use log::debug;
 use safecast::TryCastInto;
 
 use tc_error::*;
@@ -89,7 +90,8 @@ where
         if path.is_empty() {
             Some(Box::new(DirHandler::from(self)))
         } else {
-            unreachable!("request to {} routed to parent dir", TCPath::from(path))
+            debug!("request to {} routed to parent dir", TCPath::from(path));
+            None
         }
     }
 }

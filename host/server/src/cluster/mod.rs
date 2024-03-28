@@ -14,12 +14,14 @@ use safecast::TryCastInto;
 use umask::Mode;
 
 use tc_error::*;
+#[cfg(feature = "service")]
+use tc_state::chain::Recover;
 use tc_transact::hash::{Output, Sha256};
 use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnMapLockIter};
 use tc_transact::{fs, Gateway};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Host, Link, ToUrl, Value};
-use tcgeneric::{label, Label, PathSegment, TCPath, TCPathBuf, Tuple};
+use tcgeneric::{label, Label, PathSegment, TCPathBuf, Tuple};
 
 use crate::claim::Claim;
 use crate::client::Egress;
@@ -57,17 +59,18 @@ impl Egress for ClusterEgress {
     fn is_authorized(&self, link: &ToUrl<'_>, is_write: bool) -> bool {
         debug_assert!(!link.path().is_empty(), "egress to / from a cluster");
 
+        let is_within_cluster = || {
+            link.host()
+                .map(|host| {
+                    host == &self.lead || self.replicas.keys().any(|replica| replica == host)
+                })
+                .unwrap_or(true)
+        };
+
         // TODO: replace label("state") with State::PREFIX
-        if link.path().starts_with(&[label("state").into()])
-            || link.path().starts_with(&self.path[..])
-        {
-            if let Some(host) = link.host() {
-                if host == &self.lead {
-                    return true;
-                } else if self.replicas.keys().any(|replica| replica == host) {
-                    return true;
-                }
-            } else {
+        let ns = &self.path[1..];
+        if link.path().starts_with(&[label("state").into()]) || link.path()[1..].starts_with(ns) {
+            if is_within_cluster() {
                 return true;
             }
         }
@@ -84,6 +87,16 @@ impl Egress for ClusterEgress {
         }
 
         true
+    }
+}
+
+impl fmt::Debug for ClusterEgress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "cluster at {}{} with replicas {:?}",
+            self.lead, self.path, self.replicas
+        )
     }
 }
 
@@ -176,7 +189,8 @@ impl<T> Cluster<T> {
         if path.is_empty() || path == [REPLICAS] {
             self.mode
         } else {
-            todo!("cluster subject umask for {}", TCPath::from(path))
+            // TODO: granular permissions
+            self.mode
         }
     }
 
@@ -355,12 +369,16 @@ impl<T: fmt::Debug> Cluster<T> {
 
 impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
     async fn replicate_commit(&self, txn: &Txn) -> TCResult<()> {
+        debug!("Cluster::replicate_commit");
+
+        // TODO: verify that the txn owner has permission to write to this cluster w/ a smart contract
+
         let leader = txn
             .leader(self.path())?
             .ok_or_else(|| bad_request!("cannot commit a leaderless transaction"))?;
 
         if leader == self.public_key() {
-            if txn.locked_by()? == Some(self.public_key()) {
+            if txn.locked_by()? == txn.owner()? {
                 let txn_id = *txn.id();
                 let notify = |link| txn.put(link, Value::default(), State::default());
                 self.replicate_txn_state(txn_id, notify).await?;
@@ -371,16 +389,22 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
 
         self.commit(*txn.id()).await;
 
+        debug!("Cluster::replicate_commit complete");
+
         Ok(())
     }
 
     pub async fn replicate_rollback(&self, txn: &Txn) -> TCResult<()> {
+        debug!("Cluster::replicate_rollback");
+
+        // TODO: verify that the txn owner has permission to write to this cluster w/ a smart contract
+
         let leader = txn
             .leader(self.path())?
             .ok_or_else(|| bad_request!("cannot roll back a leaderless transaction"))?;
 
         if leader == self.public_key() {
-            if txn.locked_by()? == Some(self.public_key()) {
+            if txn.locked_by()? == txn.owner()? {
                 let txn_id = *txn.id();
                 let notify = move |link| txn.delete(link, Value::default());
                 self.replicate_txn_state(txn_id, notify).await?;
@@ -390,6 +414,8 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
         }
 
         self.rollback(txn.id()).await;
+
+        debug!("Cluster::replicate_rollback complete");
 
         Ok(())
     }
@@ -424,16 +450,18 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
             });
 
             let updates = FuturesUnordered::new();
-            let mut last = downstream.pop().expect("link");
+
+            let mut last = Option::<Link>::None;
+
             for link in downstream {
-                if link.host() == last.host() {
+                if let Some(last) = &last {
                     if link.path().starts_with(last.path()) {
                         debug!("no need to notify {link} since {last} was already notified");
                         continue;
                     }
                 }
 
-                last = link.clone();
+                last = Some(link.clone());
 
                 updates.push(notify(link.clone()).map(move |r| (link, r)));
             }
@@ -455,6 +483,7 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
             .cloned()
             .map(|replica| async move {
                 let link = Link::new(replica.clone(), self.path().clone());
+                trace!("notify replica at {link}...");
                 notify(link).map(|result| (replica, result)).await
             })
             .collect();
@@ -516,6 +545,8 @@ where
         txn: Txn,
         peer: Host,
     ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<T>>> {
+        info!("replicating {} from {}...", self.path(), peer);
+
         let hash = self.state.replicate(&txn, peer.clone()).await?;
 
         let peer_link = Link::new(peer, self.path().clone()).append(REPLICAS);
@@ -618,9 +649,9 @@ where
 
 #[cfg(feature = "service")]
 #[async_trait]
-impl<T> tc_chain::Recover<CacheBlock> for Cluster<T>
+impl<T> Recover<CacheBlock> for Cluster<T>
 where
-    T: tc_chain::Recover<CacheBlock, Txn = Txn> + Send + Sync,
+    T: Recover<CacheBlock, Txn = Txn> + Send + Sync,
 {
     type Txn = Txn;
 

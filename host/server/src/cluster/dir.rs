@@ -14,6 +14,8 @@ use safecast::TryCastFrom;
 
 use tc_error::*;
 use tc_scalar::Scalar;
+#[cfg(feature = "service")]
+use tc_state::chain::Recover;
 use tc_state::object::InstanceClass;
 use tc_transact::hash::*;
 use tc_transact::lock::{TxnMapLock, TxnMapLockEntry, TxnMapLockIter};
@@ -21,7 +23,7 @@ use tc_transact::public::Route;
 use tc_transact::{fs, Gateway};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Host, Link, Value, Version as VersionNumber};
-use tcgeneric::{Id, Map, PathSegment, ThreadSafe};
+use tcgeneric::{Id, Map, PathSegment, TCPath, ThreadSafe};
 
 use crate::{CacheBlock, State, Txn};
 
@@ -78,9 +80,9 @@ pub enum DirEntryCommit<T: Transact + Clone + Send + Sync + fmt::Debug + 'static
 
 #[cfg(feature = "service")]
 #[async_trait]
-impl<T> tc_chain::Recover<CacheBlock> for DirEntry<T>
+impl<T> Recover<CacheBlock> for DirEntry<T>
 where
-    T: tc_chain::Recover<CacheBlock, Txn = Txn> + fmt::Debug + Send + Sync,
+    T: Recover<CacheBlock, Txn = Txn> + fmt::Debug + Clone + Send + Sync,
 {
     type Txn = Txn;
 
@@ -172,6 +174,8 @@ impl<T: Clone + fmt::Debug> Dir<T> {
         txn_id: TxnId,
         path: &'a [PathSegment],
     ) -> TCResult<Option<(&'a [PathSegment], DirEntry<T>)>> {
+        trace!("look up {} in {:?}", TCPath::from(path), self);
+
         if path.is_empty() {
             return Ok(None);
         }
@@ -276,9 +280,9 @@ where
 
 #[cfg(feature = "service")]
 #[async_trait]
-impl<T> tc_chain::Recover<CacheBlock> for Dir<T>
+impl<T> Recover<CacheBlock> for Dir<T>
 where
-    T: tc_chain::Recover<CacheBlock, Txn = Txn> + fmt::Debug + Send + Sync,
+    T: Recover<CacheBlock, Txn = Txn> + fmt::Debug + Clone + Send + Sync,
 {
     type Txn = Txn;
 
@@ -287,7 +291,7 @@ where
 
         let mut recovered = FuturesUnordered::new();
         for (_name, entry) in contents {
-            recovered.push(entry.recover(txn));
+            recovered.push(async move { entry.recover(txn).await });
         }
 
         while let Some(()) = recovered.try_next().await? {

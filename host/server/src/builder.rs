@@ -9,6 +9,8 @@ use gethostname::gethostname;
 use log::{debug, info, warn};
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 
+#[cfg(feature = "service")]
+use tc_state::chain::Recover;
 use tc_state::CacheBlock;
 use tc_transact::{fs, TxnId};
 use tc_value::{Host, Link, Protocol};
@@ -285,9 +287,7 @@ impl Builder {
                 .create_txn(NetworkTime::now())
                 .expect("transaction context");
 
-            tc_chain::Recover::recover(&*kernel, &txn)
-                .await
-                .expect("recover service state");
+            kernel.recover(&txn).await.expect("recover service state");
         }
 
         Server::new(kernel, txn_server).expect("server")

@@ -5,9 +5,6 @@ import unittest
 from .base import HostTest
 
 
-ENDPOINT = "/transact/hypothetical"
-
-
 class ComplexNumberTests(HostTest):
     def testReal(self):
         n = complex(1, 2)
@@ -15,7 +12,7 @@ class ComplexNumberTests(HostTest):
         cxt = tc.Context()
         cxt.z = tc.C64(n).real
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(actual, n.real)
 
     def testImag(self):
@@ -24,7 +21,7 @@ class ComplexNumberTests(HostTest):
         cxt = tc.Context()
         cxt.z = tc.C64(n).imag
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(actual, n.imag)
 
     def testAbs(self):
@@ -33,7 +30,7 @@ class ComplexNumberTests(HostTest):
         cxt = tc.Context()
         cxt.z = tc.C64(n).abs()
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(actual, abs(n))
 
     def testSum(self):
@@ -42,7 +39,7 @@ class ComplexNumberTests(HostTest):
         cxt = tc.Context()
         cxt.z = tc.C64(n) + tc.C64(n)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(expect_number(actual), n + n)
 
     def testSub(self):
@@ -52,7 +49,7 @@ class ComplexNumberTests(HostTest):
         cxt.n = n
         cxt.z = tc.C64(tc.URI('n')) - cxt.n
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(expect_number(actual), n - n)
 
     def testProdComplex(self):
@@ -66,7 +63,7 @@ class ComplexNumberTests(HostTest):
         cxt.z2 = tc.Complex(tc.URI('a')) * cxt.b
         cxt.check = cxt.z1 == cxt.z2
 
-        self.assertTrue(self.host.post(ENDPOINT, cxt))
+        self.assertTrue(self.host.hypothetical(cxt))
 
     def testProdReal(self):
         a = complex(1, 2)
@@ -75,7 +72,7 @@ class ComplexNumberTests(HostTest):
         cxt = tc.Context()
         cxt.z = tc.C64(a) * b
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(expect_number(actual), a * b)
 
     def testDivComplex(self):
@@ -85,7 +82,7 @@ class ComplexNumberTests(HostTest):
         cxt = tc.Context()
         cxt.z = tc.C64(a) / tc.C64(b)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(expect_number(actual), a / b)
 
     def testDivReal1(self):
@@ -95,7 +92,7 @@ class ComplexNumberTests(HostTest):
         cxt = tc.Context()
         cxt.z = tc.C64(a) / b
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(expect_number(actual), a / b)
 
     def testDivReal2(self):
@@ -106,7 +103,7 @@ class ComplexNumberTests(HostTest):
         cxt.z2 = cxt.a / tc.URI('b')
         cxt.check = cxt.z1 == cxt.z2
 
-        self.assertTrue(self.host.post(ENDPOINT, cxt))
+        self.assertTrue(self.host.hypothetical(cxt))
 
     def testPow(self):
         cxt = tc.Context()
@@ -115,7 +112,7 @@ class ComplexNumberTests(HostTest):
         cxt.z2 = tc.C32(tc.URI('n')) ** 3
         cxt.test = cxt.z1 == cxt.z2
 
-        self.assertTrue(self.host.post(ENDPOINT, cxt))
+        self.assertTrue(self.host.hypothetical(cxt))
 
     def testExp(self):
         cxt = tc.Context()
@@ -124,7 +121,7 @@ class ComplexNumberTests(HostTest):
         cxt.z2 = (tc.C64(tc.URI('n')) * np.pi).exp()
         cxt.test = cxt.z1 == cxt.z2
 
-        self.assertTrue(self.host.post(ENDPOINT, cxt))
+        self.assertTrue(self.host.hypothetical(cxt))
 
 
 class ComplexDenseTests(HostTest):
@@ -134,7 +131,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x, tc.C64)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x)
 
     def testSumComplexTensorComplexNumber(self):
@@ -144,7 +141,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x, tc.C64) + tc.C64(n)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x + n)
 
     def testSubComplexTensorComplexNumber(self):
@@ -154,7 +151,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x, tc.C64) - tc.C64(n)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x - n)
 
     def testProdComplexTensorComplexNumber(self):
@@ -164,7 +161,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x, tc.C64) * tc.C64(n)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x * n)
 
     def testDivComplexTensorComplexNumber(self):
@@ -174,7 +171,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x, tc.C64) / tc.C64(n)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, (x / n))
 
     def testMulRealTensorComplexNumber(self):
@@ -184,7 +181,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x, tc.F64) * n
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x * n)
 
     def testDivRealTensorComplexNumber(self):
@@ -194,7 +191,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x, tc.F32) / n
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, (x / n))
 
     def testAddComplexTensorRealNumber(self):
@@ -204,7 +201,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x, tc.C64) + n
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x + n)
 
     def testSubComplexTensorRealNumber(self):
@@ -214,7 +211,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x, tc.C64) - n
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x - n)
 
     def testProdComplexTensorRealNumber(self):
@@ -224,7 +221,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x, tc.C64) * n
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x * n)
 
     def testDivComplexTensorRealNumber(self):
@@ -234,7 +231,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x, tc.C64) / n
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, (x / n))
 
     def testAddComplexTensorComplexTensor(self):
@@ -244,7 +241,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x1, tc.C64) + load_dense(x2, tc.C64)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x1 + x2)
 
     def testSubComplexTensorComplexTensor(self):
@@ -254,7 +251,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x1, tc.C64) - load_dense(x2, tc.C64)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x1 - x2)
 
     def testProdComplexTensorComplexTensor(self):
@@ -264,7 +261,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x1, tc.C64) * load_dense(x2, tc.C64)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x1 * x2)
 
     def testDivComplexTensorComplexTensor(self):
@@ -274,7 +271,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x1, tc.C64) / load_dense(x2, tc.C64)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x1 / x2)
 
     def testAddComplexTensorRealTensor(self):
@@ -284,7 +281,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x1, tc.C64) + load_dense(x2, tc.I64)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x1 + x2)
 
     def testSubComplexTensorRealTensor(self):
@@ -294,7 +291,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x1, tc.C64) - load_dense(x2, tc.I64)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x1 - x2)
 
     def testMulComplexNumberRealTensor(self):
@@ -303,7 +300,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = (tc.C32(2j) * tc.tensor.Dense.arange([n], 0., float(n)))
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x1)
 
     def testMulComplexTensorRealTensor(self):
@@ -313,7 +310,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x1, tc.C64) * load_dense(x2, tc.I64)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x1 * x2)
 
     def testDivComplexTensorRealTensor(self):
@@ -323,7 +320,7 @@ class ComplexDenseTests(HostTest):
 
         cxt = tc.Context()
         cxt.x = load_dense(x1, tc.C64) / load_dense(x2, tc.I64)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self._expectDense(actual, x1 / x2)
 
     def _expectDense(self, actual, expected):
@@ -344,7 +341,7 @@ class ComplexSparseTests(HostTest):
         cxt = tc.Context()
         cxt.tensor = tc.tensor.Sparse.zeros(shape, tc.C32)
         cxt.result = tc.after(cxt.tensor[coord].write(value), cxt.tensor)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         expected = np.zeros(shape, dtype=complex)
         expected[tuple(coord)] = 3 + 4j
@@ -361,7 +358,7 @@ class ComplexSparseTests(HostTest):
             cxt.small[1].write(tc.C32(2 + 2j)),
         ], cxt.big + cxt.small)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         big = np.zeros(shape, dtype=complex)
         big[1, 0, 0] = 1 + 1j
@@ -382,7 +379,7 @@ class ComplexSparseTests(HostTest):
             cxt.small[1].write(2),
         ], cxt.big + cxt.small)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         big = np.zeros(shape, dtype=complex)
         big[1, 0, 0] = 1 + 1j
@@ -398,7 +395,7 @@ class ComplexSparseTests(HostTest):
         cxt.sparse = tc.tensor.Sparse.zeros([3, 2], tc.C32)
         cxt.result = tc.after(cxt.sparse[1, 0].write(tc.C32(2 + 2j)), cxt.sparse / cxt.dense)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         l = np.arange(1, 181).reshape([30, 3, 2])
         r = np.zeros([3, 2], complex)
         r[1, 0] = 2 + 2j
@@ -412,7 +409,7 @@ class ComplexSparseTests(HostTest):
         cxt.sparse = tc.tensor.Sparse.zeros([2, 3], tc.C32)
         cxt.result = tc.after(cxt.sparse[0, 2].write(tc.C32(2 + 2j)), cxt.sparse * cxt.dense)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = np.zeros([2, 3], dtype=complex)
         expected[0, 2] = 2 + 2j
         expected = expected * np.arange(0, 3)
@@ -425,7 +422,7 @@ class ComplexSparseTests(HostTest):
         cxt.x2 = tc.tensor.Sparse.zeros([2, 3], tc.C32)
         cxt.result = tc.after((cxt.x1[1].write(1j), cxt.x2[0, 2].write(2+2j)), cxt.x1 * cxt.x2)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         x1 = np.zeros([3], dtype=complex)
         x2 = np.zeros([2, 3], dtype=complex)

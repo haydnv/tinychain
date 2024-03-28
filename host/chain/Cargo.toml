@@ -8,6 +8,12 @@ license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/haydnv/tinychain.git"
 
+[features]
+btree = ["tc-collection/btree"]
+table = ["tc-collection/table"]
+tensor = ["tc-collection/tensor"]
+opencl = ["tc-collection/opencl"]
+
 [dependencies]
 async-trait = "0.1"
 bytes = "1.3"

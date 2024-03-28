@@ -4,6 +4,7 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::stream::FuturesOrdered;
 use futures::{TryFutureExt, TryStreamExt};
+use log::debug;
 
 use tc_error::*;
 use tc_scalar::Scalar;
@@ -125,14 +126,17 @@ impl Transact for Class {
     type Commit = ();
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
+        debug!("Class::commit {txn_id}");
         self.dir.commit(txn_id, true).await
     }
 
     async fn rollback(&self, txn_id: &TxnId) {
+        debug!("Class::rollback {txn_id}");
         self.dir.rollback(*txn_id, true).await
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
+        debug!("Class::finalize {txn_id}");
         self.dir.finalize(*txn_id).await
     }
 }

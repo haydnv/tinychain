@@ -165,7 +165,7 @@ class Local(tc.host.Local.Process):
             self.stop()
 
 
-def _start_local_host_process(ns, host_uri=None, public_key=None, wait_time=1, **flags):
+def _start_local_host_process(ns, host_uri=None, key=None, wait_time=1, **flags):
     assert ns.startswith('/'), f"namespace must be a URI path, not {ns}"
     name = str(ns)[1:].replace('/', '_')
 
@@ -180,8 +180,8 @@ def _start_local_host_process(ns, host_uri=None, public_key=None, wait_time=1, *
     elif host_uri is not None and host_uri.port():
         port = host_uri.port()
 
-    if public_key:
-        flags["public_key"] = public_key.hex()
+    if key:
+        flags["key"] = key.hex()
 
     data_dir = f"/tmp/tc/data/{port}/{name}"
     if os.path.exists(data_dir):
@@ -208,13 +208,13 @@ def _start_local_host_process(ns, host_uri=None, public_key=None, wait_time=1, *
 
     return process, port
 
-def start_local_host(ns, host_uri=None, public_key=None, wait_time=1, **flags):
-    process, port = _start_local_host_process(ns, host_uri, public_key, wait_time, **flags)
+def start_local_host(ns, host_uri=None, key=None, wait_time=1, **flags):
+    process, port = _start_local_host_process(ns, host_uri, key, wait_time, **flags)
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
-def start_local_host_async(ns, host_uri=None, public_key=None, wait_time=1, **flags):
-    process, port = _start_local_host_process(ns, host_uri, public_key, wait_time, **flags)
+def start_local_host_async(ns, host_uri=None, key=None, wait_time=1, **flags):
+    process, port = _start_local_host_process(ns, host_uri, key, wait_time, **flags)
     return tc_async.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 

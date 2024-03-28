@@ -47,13 +47,11 @@ impl Server {
             .await
     }
 
-    pub async fn get_txn(&self, txn_id: Option<TxnId>, token: Option<String>) -> TCResult<Txn> {
+    pub async fn get_txn(&self, txn_id: TxnId, token: Option<String>) -> TCResult<Txn> {
         if let Some(token) = token {
             let now = NetworkTime::now();
-            let txn_id = txn_id.unwrap_or_else(|| TxnId::new(now));
             self.txn_server.verify_txn(txn_id, now, token).await
         } else {
-            let txn_id = txn_id.unwrap_or_else(|| TxnId::new(NetworkTime::now()));
             self.txn_server.get_txn(txn_id)
         }
     }

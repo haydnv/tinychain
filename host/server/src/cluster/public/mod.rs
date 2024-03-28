@@ -11,7 +11,7 @@ use tc_transact::hash::AsyncHash;
 use tc_transact::public::*;
 use tc_transact::{Gateway, Transact, Transaction};
 use tc_value::{Host, Link, Value};
-use tcgeneric::{PathSegment, Tuple};
+use tcgeneric::{PathSegment, TCPath, Tuple};
 
 use crate::txn::Txn;
 use crate::State;
@@ -75,10 +75,15 @@ where
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
                 if txn.locked_by()?.is_some() {
-                    if key.is_some() {
-                        Err(TCError::unexpected(key, "empty commit message"))
-                    } else if value.is_some() {
-                        Err(TCError::unexpected(value, "empty commit message"))
+                    if key.is_some() || value.is_some() {
+                        return Err(TCError::unexpected((key, value), "empty commit message"));
+                    }
+
+                    debug!("received commit message for {:?}", self.cluster);
+
+                    if txn.leader(self.cluster.path())?.is_none() {
+                        let txn = self.cluster.claim(txn.clone())?;
+                        self.cluster.replicate_commit(&txn).await
                     } else {
                         self.cluster.replicate_commit(txn).await
                     }
@@ -89,6 +94,8 @@ where
                         .state
                         .put(&txn, &[], key.clone(), value.clone())
                         .await?;
+
+                    debug!("write to {:?} succeded, replicating...", self.cluster);
 
                     maybe_replicate(&self.cluster, &txn, |txn, link| {
                         let key = key.clone();
@@ -380,6 +387,8 @@ where
     where
         T: 'a,
     {
+        debug!("{:?} routing request to {}...", self, TCPath::from(path));
+
         if path.is_empty() {
             Some(Box::new(ClusterHandler::from(self)))
         } else if path == [REPLICAS] {

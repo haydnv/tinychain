@@ -1,7 +1,6 @@
 import typing
 import unittest
 
-import rjwt
 import tinychain as tc
 
 from ..process import start_host
@@ -77,11 +76,8 @@ class TestLib(tc.service.Library):
 class InheritanceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        actor = rjwt.Actor('/')
-
-        cls.host = start_host(NS, public_key=actor.public_key)
-        cls.host.create_namespace(actor, "/lib", NS)
-        cls.host.install(actor, TestLib())
+        cls.host = start_host(NS)
+        cls.host.install(TestLib())
 
     def _get(self, endpoint):
         return self.host.get(tc.URI(TestLib).append(endpoint))

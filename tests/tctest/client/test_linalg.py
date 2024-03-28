@@ -6,7 +6,6 @@ import unittest
 
 from .base import ClientTest
 
-ENDPOINT = "/transact/hypothetical"
 TENSOR_URI = str(tc.URI(tc.tensor.Dense))
 
 
@@ -19,7 +18,7 @@ class LinearAlgebraTests(ClientTest):
         cxt.diag = tc.math.linalg.diagonal(cxt.x)
 
         expected = np.diag(x)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(actual, expect_dense(expected, tc.I32))
 
     def testWithDiagonal(self):
@@ -34,7 +33,7 @@ class LinearAlgebraTests(ClientTest):
         cxt.result = tc.math.linalg.with_diagonal(cxt.x, cxt.diag)
 
         x[range(size), range(size)] = diag
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(actual, expect_dense(x, tc.I32))
 
 

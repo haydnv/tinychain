@@ -9,11 +9,11 @@ use futures::stream::{FuturesOrdered, TryStreamExt};
 use log::{debug, trace};
 use safecast::*;
 
-use tc_chain::{ChainType, Recover};
-use tc_collection::Schema as CollectionSchema;
 use tc_error::*;
 use tc_scalar::value::{Link, Value, Version as VersionNumber};
 use tc_scalar::{OpRef, Refer, Scalar, Subject, TCRef};
+use tc_state::chain::{ChainType, Recover};
+use tc_state::collection::Schema as CollectionSchema;
 use tc_state::object::InstanceClass;
 use tc_state::CacheBlock;
 use tc_transact::fs::{Dir, File, Persist};
@@ -160,7 +160,7 @@ impl AsyncHash for Version {
             .attrs
             .iter()
             .map(|(name, attr)| {
-                attr.hash(txn_id).map_ok(|attr_hash| {
+                attr.hash(txn_id).map_ok(move |attr_hash| {
                     let mut hasher = Sha256::new();
                     hasher.update(Hash::<Sha256>::hash(name));
                     hasher.update(attr_hash);
@@ -297,13 +297,16 @@ impl AsyncHash for Service {
     async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         let versions = self.versions.iter(txn_id).await?;
         let mut versions: FuturesOrdered<_> = versions
-            .map(|(number, version)| {
-                version.hash(txn_id).map_ok(|version_hash| {
-                    let mut hasher = Sha256::new();
-                    hasher.update(Hash::<Sha256>::hash(number));
-                    hasher.update(version_hash);
-                    hasher.finalize()
-                })
+            .map(|(number, version)| async move {
+                version
+                    .hash(txn_id)
+                    .map_ok(move |version_hash| {
+                        let mut hasher = Sha256::new();
+                        hasher.update(Hash::<Sha256>::hash(*number));
+                        hasher.update(version_hash);
+                        hasher.finalize()
+                    })
+                    .await
             })
             .collect();
 

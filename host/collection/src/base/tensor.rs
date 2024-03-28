@@ -14,13 +14,13 @@ use tc_transact::hash::{AsyncHash, Output, Sha256};
 use tc_transact::{fs, IntoView, Transact, Transaction, TxnId};
 use tcgeneric::{Instance, NativeClass, TCPathBuf, ThreadSafe};
 
-use super::btree::{BTree, BTreeFile, BTreeInstance};
-use super::table::{Table, TableFile, TableInstance};
-use super::tensor::{
+use crate::btree::{BTree, BTreeFile, BTreeInstance};
+use crate::table::{Table, TableFile, TableInstance};
+use crate::tensor::{
     Dense, DenseBase, DenseCacheFile, Sparse, SparseBase, Tensor, TensorBase, TensorInstance,
     TensorType,
 };
-use super::{BTreeNode, Collection, CollectionType, CollectionView, Schema, TensorNode};
+use crate::{BTreeNode, Collection, CollectionType, CollectionView, Schema, TensorNode};
 
 /// The base type of a mutable transactional collection of data.
 pub enum CollectionBase<Txn, FE> {

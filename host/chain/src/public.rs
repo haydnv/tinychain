@@ -2,10 +2,8 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use log::debug;
-use safecast::{AsType, TryCastFrom};
+use safecast::TryCastFrom;
 
-use tc_collection::btree::Node as BTreeNode;
-use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
 use tc_collection::Collection;
 use tc_scalar::Scalar;
 use tc_transact::fs;
@@ -13,7 +11,7 @@ use tc_transact::public::*;
 use tc_transact::Transaction;
 use tcgeneric::{PathSegment, TCPath};
 
-use super::{BlockChain, Chain, ChainBlock, ChainInstance, ChainType};
+use super::{BlockChain, CacheBlock, Chain, ChainInstance, ChainType};
 
 impl<State: StateInstance> Route<State> for ChainType {
     fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
@@ -118,11 +116,7 @@ where
 impl<State, T> Route<State> for BlockChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + Clone + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
