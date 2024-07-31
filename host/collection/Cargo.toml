@@ -19,13 +19,13 @@ opencl = ["ha-ndarray/opencl"]
 
 [dependencies]
 async-trait = "0.1"
-b-table = { version = "0.2", optional = true }
-b-tree = { version = "0.3", optional = true }
+b-table = { path = "../../../b-table", optional = true }
+b-tree = { path = "../../../b-tree", optional = true }
 collate = { version = "0.4", optional = true }
 destream = "0.7"
 ds-ext = { path = "../../../ds-ext" }
 futures = "0.3"
-freqfs = { version = "~0.9.1", features = ["logging"] }
+freqfs = { path = "../../../freqfs", features = ["logging"] }
 ha-ndarray = { version = "0.3", optional = true }
 itertools = { version = "0.12", optional = true }
 log = { version = "0.4", features = ["release_max_level_info"] }

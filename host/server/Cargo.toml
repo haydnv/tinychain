@@ -23,7 +23,7 @@ async-trait = "0.1"
 destream = "0.7"
 ds-ext = { path = "../../../ds-ext" }
 futures = "0.3"
-freqfs = "~0.9.1"
+freqfs = { path = "../../../freqfs" }
 gethostname = "0.4"
 local-ip-address = "0.6"
 log = "0.4"

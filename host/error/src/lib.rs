@@ -8,7 +8,6 @@ use std::{fmt, io};
 
 use async_trait::async_trait;
 use destream::{de, en};
-use destream::de::Error;
 
 /// A result of type `T`, or a [`TCError`]
 pub type TCResult<T> = Result<T, TCError>;
@@ -53,8 +52,11 @@ impl de::Visitor for DataVisitor {
         Ok(ErrorData { message, stack })
     }
 
-    fn visit_string<E: Error>(self, message: String) -> Result<Self::Value, E> {
-        Ok(ErrorData { message, stack: vec![] })
+    fn visit_string<E: de::Error>(self, message: String) -> Result<Self::Value, E> {
+        Ok(ErrorData {
+            message,
+            stack: vec![],
+        })
     }
 }
 
