@@ -267,37 +267,37 @@ pub(crate) trait ComplexMath: ComplexUnary + Clone {
         Ok((real, imag))
     }
 
-    fn const_div(this: Number, that: (Self, Self)) -> TCResult<(Self, Self)> {
-        if let Number::Complex(this) = this {
-            let (a, b) = this.into();
-            let (c, d) = that;
-
-            let denom = c
-                .clone()
-                .pow_const(2.into())?
-                .add(d.clone().pow_const(2.into())?)?;
-
-            let real_num = c
-                .clone()
-                .mul_const(a.into())?
-                .add(d.clone().mul_const(b.into())?)?;
-
-            let imag_num = c.mul_const(b.into())?.sub(d.mul_const(a.into())?)?;
-
-            let real = real_num.div(denom.clone())?;
-            let imag = imag_num.div(denom)?;
-
-            Ok((real, imag))
-        } else {
-            let (real, imag) = that;
-
-            let num_re = real.clone().mul_const(this)?;
-            let num_im = imag.clone().mul_const(this)?;
-            let denom = real.pow_const(2.into())?.add(imag.pow_const(2.into())?)?;
-
-            ComplexMath::div_real((num_re, num_im), denom)
-        }
-    }
+    // fn const_div(this: Number, that: (Self, Self)) -> TCResult<(Self, Self)> {
+    //     if let Number::Complex(this) = this {
+    //         let (a, b) = this.into();
+    //         let (c, d) = that;
+    //
+    //         let denom = c
+    //             .clone()
+    //             .pow_const(2.into())?
+    //             .add(d.clone().pow_const(2.into())?)?;
+    //
+    //         let real_num = c
+    //             .clone()
+    //             .mul_const(a.into())?
+    //             .add(d.clone().mul_const(b.into())?)?;
+    //
+    //         let imag_num = c.mul_const(b.into())?.sub(d.mul_const(a.into())?)?;
+    //
+    //         let real = real_num.div(denom.clone())?;
+    //         let imag = imag_num.div(denom)?;
+    //
+    //         Ok((real, imag))
+    //     } else {
+    //         let (real, imag) = that;
+    //
+    //         let num_re = real.clone().mul_const(this)?;
+    //         let num_im = imag.clone().mul_const(this)?;
+    //         let denom = real.pow_const(2.into())?.add(imag.pow_const(2.into())?)?;
+    //
+    //         ComplexMath::div_real((num_re, num_im), denom)
+    //     }
+    // }
 
     fn div(this: (Self, Self), that: (Self, Self)) -> TCResult<(Self, Self)> {
         let (a, b) = this;
@@ -355,9 +355,9 @@ pub(crate) trait ComplexMath: ComplexUnary + Clone {
         ComplexMath::div_const((num_re, num_im), denom.into())
     }
 
-    fn log(this: (Self, Self), that: (Self, Self)) -> TCResult<(Self, Self)> {
-        ComplexMath::div(ComplexUnary::ln(this)?, ComplexUnary::ln(that)?)
-    }
+    // fn log(this: (Self, Self), that: (Self, Self)) -> TCResult<(Self, Self)> {
+    //     ComplexMath::div(ComplexUnary::ln(this)?, ComplexUnary::ln(that)?)
+    // }
 
     fn log_const(this: (Self, Self), that: Number) -> TCResult<(Self, Self)> {
         ComplexMath::div_const(ComplexUnary::ln(this)?, that.ln())

@@ -227,15 +227,6 @@ impl<T> From<T> for LimitHandler<T> {
     }
 }
 
-struct LoadHandler;
-
-impl<'a, State> Handler<'a, State> for LoadHandler
-where
-    State: StateInstance,
-{
-    // TODO
-}
-
 struct OrderHandler<T> {
     table: T,
 }
