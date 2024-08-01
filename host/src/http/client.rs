@@ -187,11 +187,12 @@ impl RPCClient for Client {
     }
 
     async fn put(&self, txn: &Txn, link: ToUrl<'_>, key: Value, value: State) -> TCResult<()> {
-        let value_json = destream_json::en::encode(value.clone().into_view(txn.clone()).await.expect("view")).expect("json");
+        let value_json =
+            destream_json::en::encode(value.clone().into_view(txn.clone()).await.expect("view"))
+                .expect("json");
         let value_json = value_json.try_collect::<BytesMut>().await.expect("json");
         let value_json = String::from_utf8(value_json.into()).expect("json");
         trace!("sending HTTP PUT request to {link} with key {key:?} and value {value:?}: {value_json:?}");
-
 
         let value = value.into_view(txn.subcontext_unique()).await?;
         let token = self.extract_jwt(txn);

@@ -1,6 +1,7 @@
 """Utilities for communicating with a TinyChain host."""
 
 import abc
+import inspect
 
 import json
 import logging
@@ -9,7 +10,7 @@ import requests
 import urllib.parse
 
 from .service import Library, Model, Service
-from .context import to_json
+from .context import form_of, to_json
 from .error import *
 from .scalar.value import Nil
 from .uri import URI
@@ -163,11 +164,21 @@ class Host(object):
         assert service_uri.path()
         assert service_uri[:1] in [URI(Library), URI(Service)]
 
+        # TODO: replace this with a package manager
+        classes = {}
+        service_json = to_json(service)[service_uri[:-1]]
+        for name, item in inspect.getmembers(service):
+            if inspect.isclass(item):
+                if name in service_json:
+                    classes[name] = service_json[name]
+                else:
+                    logging.info(f"Host.install({service}) will skip dynamic class {name}")
+
         class_uri = URI(Model) + service_uri[1:]
+        self._create_namespace(class_uri[:-1])
+        self.put(class_uri[:-1], class_uri[-1], classes)
 
         self._create_namespace(service_uri[:-1])
-        self._create_namespace(class_uri[:-1])
-
         self.put(service_uri[:-1], service_uri[-1], service)
 
     def hypothetical(self, op_def, auth=None):

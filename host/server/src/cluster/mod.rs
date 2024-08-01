@@ -668,7 +668,7 @@ where
     type Commit = T::Commit;
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
-        debug!("Cluster::commit");
+        debug!("Cluster::commit {}", self.path());
 
         self.replicas.commit(txn_id);
         self.state.commit(txn_id).await

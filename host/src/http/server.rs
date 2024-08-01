@@ -295,11 +295,7 @@ where
 {
     const ERR_DESERIALIZE: &str = "error deserializing HTTP request body";
 
-    let body = BodyStream::new(body).map_ok(|frame| {
-        frame
-            .into_data()
-            .expect("frame")
-    });
+    let body = BodyStream::new(body).map_ok(|frame| frame.into_data().expect("frame"));
 
     match encoding {
         Encoding::Json => {

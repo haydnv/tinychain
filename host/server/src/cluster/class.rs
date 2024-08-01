@@ -89,6 +89,8 @@ pub struct Class {
 
 impl Class {
     pub async fn get_version(&self, txn_id: TxnId, number: &VersionNumber) -> TCResult<Version> {
+        debug!("Class::get_version {number}");
+
         self.dir
             .get_file(txn_id, &number.clone().into())
             .map_ok(|file| Version::with_file(file))

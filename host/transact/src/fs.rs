@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
+use log::debug;
 use get_size::GetSize;
 use safecast::AsType;
 
@@ -232,6 +233,7 @@ where
 impl<FE: ThreadSafe + Clone + for<'a> FileSave<'a>> Dir<FE> {
     /// Commit this [`Dir`] at `txn_id`.
     pub async fn commit(&self, txn_id: TxnId, recursive: bool) {
+        debug!("Dir::commit {:?} (recursive: {})", self.inner, recursive);
         self.inner.commit(txn_id, recursive).await
     }
 

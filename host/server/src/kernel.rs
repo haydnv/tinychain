@@ -217,6 +217,7 @@ impl Kernel {
                 .state
                 .route(path)
                 .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
+
             Ok(Endpoint {
                 mode: STATE_MODE,
                 txn,

@@ -138,6 +138,8 @@ impl<'a> Handler<'a, State> for VersionClassHandler<'a> {
                 if key.is_none() {
                     Ok(class.into())
                 } else {
+                    trace!("get attr {} of {:?}", self.name, self.class);
+
                     let attr_name: Id =
                         key.try_cast_into(|v| TCError::unexpected(v, "a class attribute name"))?;
 
