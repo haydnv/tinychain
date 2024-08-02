@@ -837,7 +837,6 @@ impl<Txn, FE> Restore<FE> for BTreeFile<Txn, FE>
 where
     Txn: Transaction<FE>,
     FE: AsType<Node> + ThreadSafe + Clone,
-    Node: freqfs::FileLoad,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         debug!("BTreeFile::restore");

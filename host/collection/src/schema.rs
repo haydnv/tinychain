@@ -10,7 +10,6 @@ use safecast::{as_type, CastInto};
 use tc_error::*;
 use tc_transact::hash::{Digest, Hash, Output};
 use tc_value::Value;
-#[cfg(feature = "btree")]
 use tcgeneric::NativeClass;
 use tcgeneric::TCPathBuf;
 
@@ -20,13 +19,12 @@ use crate::btree::{BTreeSchema, BTreeType};
 use crate::table::{TableSchema, TableType};
 #[cfg(feature = "tensor")]
 use crate::tensor::{Schema as TensorSchema, TensorType};
-#[cfg(feature = "btree")]
 use crate::CollectionType;
 
 /// The schema of a `Collection`.
-#[cfg(feature = "btree")]
 #[derive(Clone, Eq, PartialEq)]
 pub enum Schema {
+    Null,
     #[cfg(feature = "btree")]
     BTree(BTreeSchema),
     #[cfg(feature = "table")]
@@ -36,11 +34,6 @@ pub enum Schema {
     #[cfg(feature = "tensor")]
     Sparse(TensorSchema),
 }
-
-/// The schema of a `Collection`.
-#[cfg(not(feature = "btree"))]
-#[derive(Clone, Eq, PartialEq)]
-pub struct Schema;
 
 #[cfg(feature = "btree")]
 as_type!(Schema, BTree, BTreeSchema);
@@ -55,8 +48,9 @@ impl<D: Digest> Hash<D> for Schema {
 
 impl<'a, D: Digest> Hash<D> for &'a Schema {
     fn hash(self) -> Output<D> {
-        #[cfg(feature = "btree")]
         match self {
+            Schema::Null => tc_transact::hash::default_hash::<D>(),
+            #[cfg(feature = "btree")]
             Schema::BTree(schema) => Hash::<D>::hash((BTreeType::default().path(), schema)),
             #[cfg(feature = "table")]
             Schema::Table(schema) => Hash::<D>::hash((TableType::default().path(), schema)),
@@ -65,9 +59,6 @@ impl<'a, D: Digest> Hash<D> for &'a Schema {
             #[cfg(feature = "tensor")]
             Schema::Sparse(schema) => Hash::<D>::hash((TensorType::Sparse.path(), schema)),
         }
-
-        #[cfg(not(feature = "btree"))]
-        tc_transact::hash::default_hash::<D>()
     }
 }
 
@@ -75,15 +66,15 @@ impl TryFrom<(TCPathBuf, Value)> for Schema {
     type Error = TCError;
 
     fn try_from(value: (TCPathBuf, Value)) -> Result<Self, Self::Error> {
-        #[allow(unused)]
+        #[allow(unused_variables)]
         let (classpath, schema) = value;
 
-        #[cfg(feature = "btree")]
         let class = CollectionType::from_path(&classpath)
             .ok_or_else(|| bad_request!("invalid collection type: {}", classpath))?;
 
-        #[cfg(feature = "btree")]
         match class {
+            CollectionType::Null => Ok(Schema::Null),
+            #[cfg(feature = "btree")]
             CollectionType::BTree(_) => BTreeSchema::try_cast_from_value(schema).map(Self::BTree),
             #[cfg(feature = "table")]
             CollectionType::Table(_) => TableSchema::try_cast_from_value(schema).map(Self::Table),
@@ -99,9 +90,6 @@ impl TryFrom<(TCPathBuf, Value)> for Schema {
                 }
             }
         }
-
-        #[cfg(not(feature = "btree"))]
-        Ok(Self)
     }
 }
 
@@ -109,11 +97,14 @@ impl<'en> en::IntoStream<'en> for Schema {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         use destream::en::EncodeMap;
 
-        #[allow(unused_mut)]
         let mut map = encoder.encode_map(Some(1))?;
 
-        #[cfg(feature = "btree")]
         match self {
+            Self::Null => {
+                map.encode_entry(CollectionType::Null.path(), ())?;
+            }
+
+            #[cfg(feature = "btree")]
             Self::BTree(schema) => {
                 map.encode_entry(BTreeType::default().path(), (schema,))?;
             }
@@ -134,10 +125,10 @@ impl<'en> en::IntoStream<'en> for Schema {
 }
 
 impl CastFrom<Schema> for Value {
-    #[allow(unused)]
     fn cast_from(schema: Schema) -> Self {
-        #[cfg(feature = "btree")]
         match schema {
+            Schema::Null => Value::None,
+            #[cfg(feature = "btree")]
             Schema::BTree(schema) => schema.cast_into(),
             #[cfg(feature = "table")]
             Schema::Table(schema) => schema.cast_into(),
@@ -146,16 +137,14 @@ impl CastFrom<Schema> for Value {
             #[cfg(feature = "tensor")]
             Schema::Sparse(schema) => schema.cast_into(),
         }
-
-        #[cfg(not(feature = "btree"))]
-        Value::default()
     }
 }
 
 impl fmt::Debug for Schema {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        #[cfg(feature = "btree")]
         match self {
+            Schema::Null => f.write_str("null collection schema"),
+            #[cfg(feature = "btree")]
             Self::BTree(schema) => fmt::Debug::fmt(schema, f),
             #[cfg(feature = "table")]
             Self::Table(schema) => fmt::Debug::fmt(schema, f),
@@ -164,8 +153,5 @@ impl fmt::Debug for Schema {
             #[cfg(feature = "tensor")]
             Self::Sparse(schema) => fmt::Debug::fmt(schema, f),
         }
-
-        #[cfg(not(feature = "btree"))]
-        f.write_str("mock collection schema")
     }
 }

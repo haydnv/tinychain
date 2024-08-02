@@ -1,5 +1,5 @@
 use freqfs::FileSave;
-use safecast::{AsType, CastInto, TryCastFrom};
+use safecast::{AsType, CastFrom, TryCastFrom};
 
 use tc_error::TCError;
 use tc_scalar::Scalar;
@@ -10,7 +10,7 @@ use tcgeneric::{Map, PathSegment, TCPath, Tuple};
 
 use crate::btree::{BTree, BTreeFile, BTreeInstance, BTreeSchema, Node as BTreeNode};
 use crate::table::{TableFile, TableInstance, TableSchema};
-use crate::{Collection, CollectionBase, CollectionType};
+use crate::{Collection, CollectionBase, CollectionType, Schema};
 
 impl<State> Route<State> for CollectionType
 where
@@ -23,6 +23,7 @@ where
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         match self {
+            Self::Null => None,
             Self::BTree(btt) => btt.route(path),
             Self::Table(tt) => tt.route(path),
         }
@@ -46,12 +47,13 @@ where
             Box::pin(async move {
                 key.expect_none()?;
 
-                let schema: Value = match self.collection {
-                    Collection::BTree(btree) => btree.schema().clone().cast_into(),
-                    Collection::Table(table) => table.schema().clone().cast_into(),
+                let schema = match self.collection {
+                    Collection::Null(_, _) => Schema::Null,
+                    Collection::BTree(btree) => btree.schema().clone().into(),
+                    Collection::Table(table) => table.schema().clone().into(),
                 };
 
-                Ok(schema.into())
+                Ok(Value::cast_from(schema).into())
             })
         }))
     }
@@ -78,6 +80,7 @@ where
         log::debug!("Collection::route {}", TCPath::from(path));
 
         let child_handler: Option<Box<dyn Handler<'a, State> + 'a>> = match self {
+            Self::Null(_, _) => None,
             Self::BTree(btree) => btree.route(path),
             Self::Table(table) => table.route(path),
         };
@@ -111,6 +114,7 @@ where
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         match self {
+            Self::Null(_, _) => None,
             Self::BTree(btree) => btree.route(path),
             Self::Table(table) => table.route(path),
         }
