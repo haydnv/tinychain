@@ -334,10 +334,10 @@ where
     }
 }
 
+#[cfg(feature = "btree")]
 impl<Txn, FE> TryCastFrom<Collection<Txn, FE>> for BTree<Txn, FE> {
     fn can_cast_from(collection: &Collection<Txn, FE>) -> bool {
         match collection {
-            #[cfg(feature = "btree")]
             Collection::BTree(_) => true,
             _ => false,
         }
@@ -345,7 +345,6 @@ impl<Txn, FE> TryCastFrom<Collection<Txn, FE>> for BTree<Txn, FE> {
 
     fn opt_cast_from(collection: Collection<Txn, FE>) -> Option<Self> {
         match collection {
-            #[cfg(feature = "btree")]
             Collection::BTree(btree) => Some(btree),
             _ => None,
         }

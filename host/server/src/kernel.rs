@@ -9,6 +9,7 @@ use aes_gcm_siv::{Aes256GcmSiv, KeyInit};
 use async_trait::async_trait;
 use futures::join;
 use log::{debug, info, trace, warn};
+use rand::prelude::IteratorRandom;
 use rjwt::VerifyingKey;
 use safecast::TryCastInto;
 use umask::Mode;
@@ -289,7 +290,7 @@ impl Kernel {
     ) -> Result<(), bool>
     where
         T: Clone + fmt::Debug,
-        Cluster<Dir<T>>: ReplicateAndJoin<State = T>,
+        Cluster<Dir<T>>: ReplicateAndJoin,
     {
         debug!(
             "Kernel::replicate_and_join_dir {} with peers {:?}",
@@ -304,7 +305,7 @@ impl Kernel {
         while let Some(cluster) = unvisited.pop_front() {
             let mut joined = false;
 
-            for peer in peers {
+            for peer in peers.iter().choose_multiple(&mut OsRng, peers.len()) {
                 let egress = Arc::new(KernelEgress::from(Link::new(
                     peer.clone(),
                     cluster.path().clone(),
@@ -318,7 +319,7 @@ impl Kernel {
                 trace!("fetching replication token...");
 
                 let txn_id = *txn.id();
-                let txn = match get_token(&txn, peer, keys, cluster.path()).await {
+                let txn = match get_token_from_peer(&txn, peer, keys, cluster.path()).await {
                     Ok(token) => match txn_server
                         .verify_txn(txn_id, NetworkTime::now(), token)
                         .await
@@ -338,9 +339,11 @@ impl Kernel {
                 trace!("replicating...");
 
                 match cluster.replicate_and_join(txn, peer.clone()).await {
-                    Ok(entries) => {
+                    Ok(()) => {
                         joined = true;
                         progress = true;
+
+                        let entries = cluster.entries(txn_id).await.expect("dir entry list");
 
                         for (_name, entry) in entries {
                             match &*entry {
@@ -564,7 +567,7 @@ where
     Ok(endpoint)
 }
 
-async fn get_token(
+async fn get_token_from_peer(
     txn: &Txn,
     peer: &Host,
     keys: &HashSet<aes256::Key>,

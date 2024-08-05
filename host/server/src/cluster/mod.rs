@@ -520,31 +520,15 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
 
 #[async_trait]
 pub(crate) trait ReplicateAndJoin {
-    type State;
-
-    async fn replicate_and_join(
-        &self,
-        txn: Txn,
-        peer: Host,
-    ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<Self::State>>>;
+    async fn replicate_and_join(&self, txn: Txn, peer: Host) -> TCResult<()>;
 }
 
 #[async_trait]
-impl<T> ReplicateAndJoin for Cluster<Dir<T>>
+impl<T> ReplicateAndJoin for Cluster<T>
 where
-    T: Transact + Send + Sync + fmt::Debug,
-    Dir<T>: Transact,
-    Cluster<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
-    Cluster<Dir<T>>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
-    DirEntry<T>: Clone,
+    T: Replicate + Transact + fmt::Debug,
 {
-    type State = T;
-
-    async fn replicate_and_join(
-        &self,
-        txn: Txn,
-        peer: Host,
-    ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<T>>> {
+    async fn replicate_and_join(&self, txn: Txn, peer: Host) -> TCResult<()> {
         info!("replicating {} from {}...", self.path(), peer);
 
         let hash = self.state.replicate(&txn, peer.clone()).await?;
@@ -625,9 +609,7 @@ where
         let txn = txn.claim(self.link().clone(), &self.inner.actor)?;
         let txn = txn.lock(&self.inner.actor)?;
 
-        self.replicate_commit(&txn).await?;
-
-        self.state.entries(*txn.id()).await
+        self.replicate_commit(&txn).await
     }
 }
 
@@ -644,6 +626,15 @@ where
             Some((path, entry)) => Ok((path, entry)),
             None => Ok((path, DirEntry::Dir(self.clone()))),
         }
+    }
+}
+
+impl<T: Clone + fmt::Debug> Cluster<Dir<T>> {
+    pub(crate) async fn entries(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<T>>> {
+        self.state.entries(txn_id).await
     }
 }
 

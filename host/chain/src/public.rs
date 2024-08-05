@@ -57,8 +57,10 @@ where
                 Some(put_handler) => Some(Box::new(|txn, key, value| {
                     Box::pin(async move {
                         debug!("Chain::put {} <- {:?}", key, value);
+
                         self.chain
                             .append_put(txn.clone(), key.clone(), value.clone())?;
+
                         put_handler(txn, key, value).await
                     })
                 })),
