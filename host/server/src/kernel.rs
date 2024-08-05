@@ -28,7 +28,7 @@ use tcgeneric::{label, Label, Map, NetworkTime, PathSegment, TCPath, TCPathBuf, 
 use crate::client::Egress;
 #[cfg(feature = "service")]
 use crate::cluster::Service;
-use crate::cluster::{Class, Cluster, Dir, DirEntry, Library, ReplicateAndJoin};
+use crate::cluster::{Class, Cluster, Dir, DirEntry, Library, Replicate, ReplicateAndJoin};
 use crate::txn::{Hypothetical, Txn, TxnServer};
 use crate::{aes256, cluster, Authorize, SignedToken, State};
 
@@ -47,6 +47,14 @@ type Nonce = [u8; 12];
 
 struct KernelEgress {
     peer: Link,
+}
+
+impl KernelEgress {
+    fn new_arc(host: Host, path: TCPathBuf) -> Arc<Self> {
+        Arc::new(Self {
+            peer: Link::from((host, path)),
+        })
+    }
 }
 
 impl Egress for KernelEgress {
@@ -277,6 +285,7 @@ impl Kernel {
         #[cfg(feature = "service")]
         Self::replicate_and_join_dir(&self.keys, &self.service, txn_server, peers).await?;
 
+        // Self::replicate_and_join_items(&self.keys, &self.class, txn_server, peers).await?;
         // TODO: replicate services in the /services dir
 
         Ok(())
@@ -306,10 +315,7 @@ impl Kernel {
             let mut joined = false;
 
             for peer in peers.iter().choose_multiple(&mut OsRng, peers.len()) {
-                let egress = Arc::new(KernelEgress::from(Link::new(
-                    peer.clone(),
-                    cluster.path().clone(),
-                )));
+                let egress = KernelEgress::new_arc(peer.clone(), cluster.path().clone());
 
                 let txn = txn_server
                     .create_txn(NetworkTime::now())
@@ -318,26 +324,25 @@ impl Kernel {
 
                 trace!("fetching replication token...");
 
-                let txn_id = *txn.id();
-                let txn = match get_token_from_peer(&txn, peer, keys, cluster.path()).await {
-                    Ok(token) => match txn_server
-                        .verify_txn(txn_id, NetworkTime::now(), token)
-                        .await
-                    {
-                        Ok(txn) => txn.with_egress(egress.clone()),
-                        Err(cause) => {
-                            warn!("failed to verify token from {peer}: {cause}");
-                            continue;
-                        }
-                    },
+                let txn = match get_and_verify_token_from_peer(
+                    &txn_server,
+                    &txn,
+                    peer,
+                    keys,
+                    cluster.path(),
+                )
+                .await
+                {
+                    Ok(txn) => txn.with_egress(egress.clone()),
                     Err(cause) => {
-                        warn!("failed to fetch token from {peer}: {cause}");
+                        warn!("failed to fetch and verify token from {peer}: {cause}");
                         continue;
                     }
                 };
 
                 trace!("replicating...");
 
+                let txn_id = *txn.id();
                 match cluster.replicate_and_join(txn, peer.clone()).await {
                     Ok(()) => {
                         joined = true;
@@ -351,6 +356,84 @@ impl Kernel {
                                 DirEntry::Item(_) => {}
                             }
                         }
+                    }
+                    Err(cause) => warn!("failed to replicate from {peer}: {cause}"),
+                }
+            }
+
+            if !joined {
+                return Err(progress);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn replicate_and_join_items<T>(
+        keys: &HashSet<aes256::Key>,
+        parent: &Cluster<Dir<T>>,
+        txn_server: &TxnServer,
+        peers: &BTreeSet<Host>,
+    ) -> Result<(), bool>
+    where
+        T: Replicate + Transact + Clone + fmt::Debug,
+    {
+        debug!(
+            "Kernel::replicate_and_join_dir {} with peers {:?}",
+            parent.path(),
+            peers
+        );
+
+        let mut progress = false;
+        let mut unvisited = VecDeque::new();
+        unvisited.push_back(DirEntry::Dir(parent.clone()));
+
+        while let Some(cluster) = unvisited.pop_front() {
+            let txn = txn_server.create_txn(NetworkTime::now()).expect("txn");
+            let txn_id = *txn.id();
+
+            let item = match cluster {
+                DirEntry::Dir(dir) => {
+                    let entries = dir.entries(txn_id).await.expect("dir entry list");
+
+                    for (_name, entry) in entries {
+                        unvisited.push_back(DirEntry::clone(&*entry));
+                    }
+
+                    continue;
+                }
+                DirEntry::Item(item) => item,
+            };
+
+            let mut joined = false;
+            for peer in peers.iter().choose_multiple(&mut OsRng, peers.len()) {
+                let egress = KernelEgress::new_arc(peer.clone(), item.path().clone());
+                let txn = txn.clone().with_egress(egress.clone());
+
+                trace!("fetching replication token...");
+
+                let txn = match get_and_verify_token_from_peer(
+                    &txn_server,
+                    &txn,
+                    peer,
+                    keys,
+                    item.path(),
+                )
+                .await
+                {
+                    Ok(txn) => txn.with_egress(egress.clone()),
+                    Err(cause) => {
+                        warn!("failed to fetch and verify token from {peer}: {cause}");
+                        continue;
+                    }
+                };
+
+                trace!("replicating...");
+
+                match item.replicate_and_join(txn, peer.clone()).await {
+                    Ok(()) => {
+                        joined = true;
+                        progress = true;
                     }
                     Err(cause) => warn!("failed to replicate from {peer}: {cause}"),
                 }
@@ -565,6 +648,20 @@ where
     };
 
     Ok(endpoint)
+}
+
+async fn get_and_verify_token_from_peer(
+    txn_server: &TxnServer,
+    txn: &Txn,
+    peer: &Host,
+    keys: &HashSet<aes256::Key>,
+    path: &TCPathBuf,
+) -> TCResult<Txn> {
+    let token = get_token_from_peer(&txn, peer, keys, path).await?;
+
+    txn_server
+        .verify_txn(*txn.id(), NetworkTime::now(), token)
+        .await
 }
 
 async fn get_token_from_peer(
