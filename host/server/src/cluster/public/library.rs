@@ -9,6 +9,7 @@ use tc_scalar::{OpRef, Scalar, TCRef};
 use tc_state::object::InstanceClass;
 use tc_transact::public::{GetHandler, Handler, PostHandler, PutHandler, Route};
 use tc_transact::{Transaction, TxnId};
+use tc_value::Value;
 use tcgeneric::{Id, Map, PathSegment, TCPath};
 
 use crate::cluster::dir::DirItem;
@@ -26,15 +27,17 @@ impl<'a> Handler<'a, State> for LibraryHandler<'a> {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                if key.is_none() {
-                    self.library.to_state(*txn.id()).await
-                } else {
+                if key.is_some() {
                     let number: VersionNumber =
                         key.try_cast_into(|v| TCError::unexpected(v, "a semantic version number"))?;
 
                     let version = self.library.get_version(*txn.id(), &number).await?;
 
                     Ok(State::Scalar(version.clone().into()))
+                } else {
+                    let version_numbers = self.library.list_versions(*txn.id()).await?;
+                    let version_numbers = version_numbers.into_iter().map(Id::from).collect();
+                    Ok(Value::Tuple(version_numbers).into())
                 }
             })
         }))

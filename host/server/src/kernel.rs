@@ -286,8 +286,8 @@ impl Kernel {
         Self::replicate_and_join_dir(&self.keys, &self.service, txn_server, peers).await?;
 
         Self::replicate_and_join_items(&self.keys, &self.class, txn_server, peers).await?;
+        Self::replicate_and_join_items(&self.keys, &self.library, txn_server, peers).await?;
 
-        // TODO: replicate services in the /lib dir
         // TODO: replicate services in the /services dir
 
         Ok(())
@@ -397,10 +397,11 @@ impl Kernel {
             let item = match cluster {
                 DirEntry::Dir(dir) => {
                     let entries = dir.entries(txn_id).await.expect("dir entry list");
+                    let entries = entries
+                        .into_iter()
+                        .map(|(_name, entry)| DirEntry::clone(&*entry));
 
-                    for (_name, entry) in entries {
-                        unvisited.push_back(DirEntry::clone(&*entry));
-                    }
+                    unvisited.extend(entries);
 
                     continue;
                 }

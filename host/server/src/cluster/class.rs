@@ -12,8 +12,7 @@ use tc_error::*;
 use tc_scalar::Scalar;
 use tc_state::object::InstanceClass;
 use tc_transact::hash::*;
-use tc_transact::{fs, Gateway};
-use tc_transact::{Transact, Transaction, TxnId};
+use tc_transact::{fs, Gateway, Transact, Transaction, TxnId};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{Id, Map};
 
