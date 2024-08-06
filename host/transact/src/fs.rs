@@ -86,6 +86,11 @@ impl<FE: ThreadSafe + Clone> Dir<FE> {
             .await
     }
 
+    /// Delete the given entry from this [`Dir`], if present at `txn_id`.
+    pub async fn delete(&self, txn_id: TxnId, name: Id) -> TCResult<bool> {
+        self.inner.delete(txn_id, name).map_err(TCError::from).await
+    }
+
     /// Iterate over the names of the entries in this [`Dir`] at `txn_id`.
     pub async fn entry_names(&self, txn_id: TxnId) -> TCResult<impl Iterator<Item = Key>> {
         self.inner.dir_names(txn_id).map_err(TCError::from).await

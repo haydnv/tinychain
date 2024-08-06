@@ -22,7 +22,7 @@ use tc_transact::lock::{TxnMapLock, TxnMapLockEntry, TxnMapLockIter};
 use tc_transact::public::Route;
 use tc_transact::{fs, Gateway};
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Host, Link, Value, Version as VersionNumber};
+use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{Id, Map, PathSegment, TCPath, ThreadSafe};
 
 use crate::{CacheBlock, State, Txn};
@@ -373,9 +373,10 @@ where
     Cluster<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
     Cluster<Dir<T>>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
 {
-    async fn replicate(&self, txn: &Txn, peer: Host) -> TCResult<Output<Sha256>> {
-        let link = Link::new(peer, self.schema.link.path().clone());
-        let state = txn.get(link, Value::default()).await?;
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<Output<Sha256>> {
+        assert_eq!(self.schema.link.path(), source.path());
+
+        let state = txn.get(source, Value::default()).await?;
         let state = state.try_into_map(|dir| bad_request!("invalid dir state: {dir:?}"))?;
         let state = state
             .into_iter()

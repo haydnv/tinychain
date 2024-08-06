@@ -285,7 +285,9 @@ impl Kernel {
         #[cfg(feature = "service")]
         Self::replicate_and_join_dir(&self.keys, &self.service, txn_server, peers).await?;
 
-        // Self::replicate_and_join_items(&self.keys, &self.class, txn_server, peers).await?;
+        Self::replicate_and_join_items(&self.keys, &self.class, txn_server, peers).await?;
+
+        // TODO: replicate services in the /lib dir
         // TODO: replicate services in the /services dir
 
         Ok(())

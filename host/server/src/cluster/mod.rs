@@ -130,7 +130,7 @@ impl Schema {
 
 #[async_trait]
 pub trait Replicate: Send + Sync {
-    async fn replicate(&self, txn: &Txn, peer: Host) -> TCResult<Output<Sha256>>;
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<Output<Sha256>>;
 }
 
 struct Inner {
@@ -531,10 +531,10 @@ where
     async fn replicate_and_join(&self, txn: Txn, peer: Host) -> TCResult<()> {
         info!("replicating {} from {}...", self.path(), peer);
 
-        let hash = self.state.replicate(&txn, peer.clone()).await?;
+        let peer_link = Link::new(peer, self.path().clone());
+        let hash = self.state.replicate(&txn, peer_link.clone()).await?;
 
-        let peer_link = Link::new(peer, self.path().clone()).append(REPLICAS);
-
+        let peer_link = peer_link.append(REPLICAS);
         let host = self
             .inner
             .schema
