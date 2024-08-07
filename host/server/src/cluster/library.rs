@@ -16,7 +16,7 @@ use tc_transact::{fs, Gateway, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::Map;
 
-use crate::cluster::Replicate;
+use crate::cluster::{IsDir, Replicate};
 use crate::Txn;
 
 use super::dir::DirItem;
@@ -70,6 +70,8 @@ impl DirItem for Library {
         Ok(version.into())
     }
 }
+
+impl IsDir for Library {}
 
 #[async_trait]
 impl Replicate for Library {

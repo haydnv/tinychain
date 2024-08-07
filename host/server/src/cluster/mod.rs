@@ -1,7 +1,6 @@
-use std::collections::hash_map::{Entry, HashMap};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -52,40 +51,11 @@ pub(crate) struct ClusterEgress {
     lead: Host,
     path: TCPathBuf,
     replicas: TxnLockReadGuard<HashMap<Host, VerifyingKey>>,
-    external: Arc<Mutex<HashMap<Link, bool>>>,
 }
 
 impl Egress for ClusterEgress {
-    fn is_authorized(&self, link: &ToUrl<'_>, is_write: bool) -> bool {
-        debug_assert!(!link.path().is_empty(), "egress to / from a cluster");
-
-        let is_within_cluster = || {
-            link.host()
-                .map(|host| {
-                    host == &self.lead || self.replicas.keys().any(|replica| replica == host)
-                })
-                .unwrap_or(true)
-        };
-
-        // TODO: replace label("state") with State::PREFIX
-        let ns = &self.path[1..];
-        if link.path().starts_with(&[label("state").into()]) || link.path()[1..].starts_with(ns) {
-            if is_within_cluster() {
-                return true;
-            }
-        }
-
-        let mut external = self.external.lock().expect("authorized external services");
-        // TODO: only allow egress to whitelisted services, i.e. don't allow inserting a new entry here
-        match external.entry(link.to_link()) {
-            Entry::Occupied(mut entry) => {
-                *entry.get_mut() |= is_write;
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(is_write);
-            }
-        }
-
+    fn is_authorized(&self, _link: &ToUrl<'_>, _is_write: bool) -> bool {
+        // TODO: implement egress control
         true
     }
 }
@@ -131,6 +101,29 @@ impl Schema {
 #[async_trait]
 pub trait Replicate: Send + Sync {
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<Output<Sha256>>;
+}
+
+#[async_trait]
+pub(super) trait IsDir {
+    fn is_dir(&self) -> bool {
+        false
+    }
+
+    async fn get_dir_item_key(
+        &self,
+        _txn_id: TxnId,
+        _name: &PathSegment,
+    ) -> TCResult<Option<(Output<Sha256>, VerifyingKey)>> {
+        Ok(None)
+    }
+
+    async fn get_dir_item_keyring(
+        &self,
+        _txn_id: TxnId,
+        _name: &PathSegment,
+    ) -> TCResult<Option<TxnLockReadGuard<HashMap<Host, VerifyingKey>>>> {
+        Ok(None)
+    }
 }
 
 struct Inner {
@@ -202,7 +195,6 @@ impl<T> Cluster<T> {
             lead: self.inner.schema.lead.clone(),
             path: self.path().clone(),
             replicas: self.replicas.try_read(*txn.id())?,
-            external: whitelist.clone(),
         };
 
         let mut claimed = self.claimed.lock().expect("claimed");
@@ -250,7 +242,7 @@ impl<T: fmt::Debug> Cluster<T> {
     pub fn keyring(
         &self,
         txn_id: TxnId,
-    ) -> TCResult<impl Deref<Target = HashMap<Host, VerifyingKey>>> {
+    ) -> TCResult<TxnLockReadGuard<HashMap<Host, VerifyingKey>>> {
         trace!("read {self:?} keyring");
         self.replicas.try_read(txn_id).map_err(TCError::from)
     }
@@ -373,11 +365,11 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
 
         // TODO: verify that the txn owner has permission to write to this cluster w/ a smart contract
 
-        let leader = txn
+        let (_leader, leader_pk) = txn
             .leader(self.path())?
             .ok_or_else(|| bad_request!("cannot commit a leaderless transaction"))?;
 
-        if leader == self.public_key() {
+        if leader_pk == self.public_key() {
             if txn.locked_by()? == txn.owner()? {
                 let txn_id = *txn.id();
                 let notify = |link| txn.put(link, Value::default(), State::default());
@@ -399,11 +391,11 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
 
         // TODO: verify that the txn owner has permission to write to this cluster w/ a smart contract
 
-        let leader = txn
+        let (_leader, leader_pk) = txn
             .leader(self.path())?
             .ok_or_else(|| bad_request!("cannot roll back a leaderless transaction"))?;
 
-        if leader == self.public_key() {
+        if leader_pk == self.public_key() {
             if txn.locked_by()? == txn.owner()? {
                 let txn_id = *txn.id();
                 let notify = move |link| txn.delete(link, Value::default());
@@ -610,6 +602,29 @@ where
         let txn = txn.lock(&self.inner.actor)?;
 
         self.replicate_commit(&txn).await
+    }
+}
+
+#[async_trait]
+impl<T: IsDir + Send + Sync> IsDir for Cluster<T> {
+    fn is_dir(&self) -> bool {
+        self.state.is_dir()
+    }
+
+    async fn get_dir_item_key(
+        &self,
+        txn_id: TxnId,
+        name: &PathSegment,
+    ) -> TCResult<Option<(Output<Sha256>, VerifyingKey)>> {
+        self.state.get_dir_item_key(txn_id, name).await
+    }
+
+    async fn get_dir_item_keyring(
+        &self,
+        txn_id: TxnId,
+        name: &PathSegment,
+    ) -> TCResult<Option<TxnLockReadGuard<HashMap<Host, VerifyingKey>>>> {
+        self.state.get_dir_item_keyring(txn_id, name).await
     }
 }
 

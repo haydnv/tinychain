@@ -16,7 +16,7 @@ use tc_transact::{fs, Gateway, Transact, Transaction, TxnId};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{Id, Map};
 
-use crate::cluster::Replicate;
+use crate::cluster::{IsDir, Replicate};
 use crate::{CacheBlock, State, Txn};
 
 use super::dir::DirItem;
@@ -140,6 +140,8 @@ impl DirItem for Class {
         Ok(schema)
     }
 }
+
+impl IsDir for Class {}
 
 #[async_trait]
 impl Replicate for Class {

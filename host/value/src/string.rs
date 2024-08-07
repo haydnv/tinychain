@@ -19,7 +19,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::json;
 
 use tc_error::*;
-use tcgeneric::Id;
+use tcgeneric::{Id, Label};
 
 use super::{Link, Number};
 
@@ -93,6 +93,12 @@ impl From<String> for TCString {
 impl From<Id> for TCString {
     fn from(id: Id) -> Self {
         Self(id.into_inner())
+    }
+}
+
+impl From<Label> for TCString {
+    fn from(label: Label) -> Self {
+        Self::from((*label).to_string())
     }
 }
 

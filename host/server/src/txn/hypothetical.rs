@@ -7,6 +7,7 @@ use tc_transact::public::{Handler, PostHandler, Route};
 use tc_transact::{Transact, TxnId};
 use tcgeneric::{path_label, Id, PathLabel, PathSegment};
 
+use crate::cluster::IsDir;
 use crate::State;
 
 use super::Txn;
@@ -21,6 +22,8 @@ impl Hypothetical {
         Self {}
     }
 }
+
+impl IsDir for Hypothetical {}
 
 #[async_trait]
 impl AsyncHash for Hypothetical {

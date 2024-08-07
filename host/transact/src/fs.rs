@@ -4,8 +4,8 @@ use std::marker::PhantomData;
 use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
-use log::debug;
 use get_size::GetSize;
+use log::debug;
 use safecast::AsType;
 
 use tc_error::*;

@@ -23,6 +23,7 @@ use tc_transact::public::ToState;
 use tc_transact::{Transact, Transaction, TxnId};
 use tcgeneric::{label, Id, Label, Map, NativeClass, TCPathBuf};
 
+use crate::cluster::IsDir;
 use crate::{Chain, Collection, State, Txn};
 
 use super::dir::DirItem;
@@ -291,6 +292,8 @@ impl DirItem for Service {
         Ok(version)
     }
 }
+
+impl IsDir for Service {}
 
 #[async_trait]
 impl AsyncHash for Service {

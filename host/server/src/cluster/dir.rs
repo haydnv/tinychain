@@ -1,6 +1,6 @@
 //! A directory of [`Cluster`]s
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::ops::Deref;
 
@@ -18,16 +18,16 @@ use tc_scalar::Scalar;
 use tc_state::chain::Recover;
 use tc_state::object::InstanceClass;
 use tc_transact::hash::*;
-use tc_transact::lock::{TxnMapLock, TxnMapLockEntry, TxnMapLockIter};
+use tc_transact::lock::{TxnLockReadGuard, TxnMapLock, TxnMapLockEntry, TxnMapLockIter};
 use tc_transact::public::Route;
 use tc_transact::{fs, Gateway};
 use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Link, Value, Version as VersionNumber};
+use tc_value::{Host, Link, Value, Version as VersionNumber};
 use tcgeneric::{Id, Map, PathSegment, TCPath, ThreadSafe};
 
-use crate::{CacheBlock, State, Txn};
+use crate::{CacheBlock, State, Txn, VerifyingKey};
 
-use super::{Class, Cluster, Library, Replicate, Schema};
+use super::{Class, Cluster, IsDir, Library, Replicate, Schema};
 
 #[async_trait]
 pub trait DirCreate: Sized {
@@ -274,6 +274,49 @@ where
                 DirEntry::Item(item) => Ok(item.clone()),
                 DirEntry::Dir(_) => Err(bad_request!("there is already a directory at {name}")),
             },
+        }
+    }
+}
+
+#[async_trait]
+impl<T: AsyncHash + fmt::Debug> IsDir for Dir<T> {
+    fn is_dir(&self) -> bool {
+        true
+    }
+
+    async fn get_dir_item_key(
+        &self,
+        txn_id: TxnId,
+        name: &PathSegment,
+    ) -> TCResult<Option<(Output<Sha256>, VerifyingKey)>> {
+        if let Some(entry) = self.contents.get(txn_id, name).await? {
+            match &*entry {
+                DirEntry::Dir(cluster) => {
+                    let hash = AsyncHash::hash(cluster.state(), txn_id).await?;
+                    Ok(Some((hash, cluster.public_key())))
+                }
+                DirEntry::Item(cluster) => {
+                    let hash = AsyncHash::hash(cluster.state(), txn_id).await?;
+                    Ok(Some((hash, cluster.public_key())))
+                }
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn get_dir_item_keyring(
+        &self,
+        txn_id: TxnId,
+        name: &PathSegment,
+    ) -> TCResult<Option<TxnLockReadGuard<HashMap<Host, VerifyingKey>>>> {
+        if let Some(entry) = self.contents.get(txn_id, name).await? {
+            match &*entry {
+                DirEntry::Dir(cluster) => cluster.keyring(txn_id).map(Some),
+                DirEntry::Item(cluster) => cluster.keyring(txn_id).map(Some),
+            }
+        } else {
+            Ok(None)
         }
     }
 }

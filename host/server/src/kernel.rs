@@ -28,7 +28,7 @@ use tcgeneric::{label, Label, Map, NetworkTime, PathSegment, TCPath, TCPathBuf, 
 use crate::client::Egress;
 #[cfg(feature = "service")]
 use crate::cluster::Service;
-use crate::cluster::{Class, Cluster, Dir, DirEntry, Library, Replicate, ReplicateAndJoin};
+use crate::cluster::{Class, Cluster, Dir, DirEntry, IsDir, Library, Replicate, ReplicateAndJoin};
 use crate::txn::{Hypothetical, Txn, TxnServer};
 use crate::{aes256, cluster, Authorize, SignedToken, State};
 
@@ -45,34 +45,18 @@ const ERR_NOT_ENABLED: &str = "this binary was compiled without the 'service' fe
 
 type Nonce = [u8; 12];
 
-struct KernelEgress {
-    peer: Link,
-}
-
-impl KernelEgress {
-    fn new_arc(host: Host, path: TCPathBuf) -> Arc<Self> {
-        Arc::new(Self {
-            peer: Link::from((host, path)),
-        })
-    }
-}
+struct KernelEgress;
 
 impl Egress for KernelEgress {
-    fn is_authorized(&self, link: &ToUrl<'_>, _write: bool) -> bool {
-        link.host() == self.peer.host()
-            && (link.path().is_empty() || link.path().starts_with(&self.peer.path()[..]))
+    fn is_authorized(&self, _link: &ToUrl<'_>, _write: bool) -> bool {
+        // TODO: implement authorization logic
+        true
     }
 }
 
 impl fmt::Debug for KernelEgress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "kernel with authorized peer {}", self.peer)
-    }
-}
-
-impl From<Link> for KernelEgress {
-    fn from(peer: Link) -> Self {
-        Self { peer }
+        f.write_str("kernel egress policy")
     }
 }
 
@@ -317,7 +301,7 @@ impl Kernel {
             let mut joined = false;
 
             for peer in peers.iter().choose_multiple(&mut OsRng, peers.len()) {
-                let egress = KernelEgress::new_arc(peer.clone(), cluster.path().clone());
+                let egress = Arc::new(KernelEgress);
 
                 let txn = txn_server
                     .create_txn(NetworkTime::now())
@@ -410,7 +394,7 @@ impl Kernel {
 
             let mut joined = false;
             for peer in peers.iter().choose_multiple(&mut OsRng, peers.len()) {
-                let egress = KernelEgress::new_arc(peer.clone(), item.path().clone());
+                let egress = Arc::new(KernelEgress);
                 let txn = txn.clone().with_egress(egress.clone());
 
                 trace!("fetching replication token...");
@@ -617,7 +601,7 @@ fn auth_claim_route<'a, T>(
     txn: &'a Txn,
 ) -> TCResult<Endpoint<'a>>
 where
-    T: AsyncHash + Route<State> + Transact + Send + Sync + fmt::Debug + 'a,
+    T: AsyncHash + Route<State> + IsDir + Transact + Send + Sync + fmt::Debug + 'a,
 {
     debug!("auth, claim, and route request to {}", TCPath::from(path));
 
@@ -625,7 +609,8 @@ where
     let mode = {
         let resource_mode = cluster.umask(txn_id, path);
         let request_mode = if txn.has_claims() {
-            txn.mode(cluster.keyring(txn_id)?, path)
+            let keyring = cluster.keyring(txn_id)?;
+            txn.mode(keyring, path)
         } else {
             Txn::DEFAULT_MODE
         };

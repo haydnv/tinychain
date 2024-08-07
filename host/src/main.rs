@@ -95,9 +95,6 @@ struct Config {
     )]
     pub peers: Vec<Host>,
 
-    #[arg(long, help = "a link to the cluster to replicate from on startup")]
-    pub replicate: Option<Host>,
-
     #[arg(
         long = "request_ttl",
         value_parser = duration,
@@ -183,6 +180,9 @@ fn main() {
     let mut broadcast = Broadcast::new();
 
     let peers = if config.peers.is_empty() {
+        rt.block_on(broadcast.discover())
+            .expect("mDNS peer discovery");
+
         broadcast.peers(Protocol::default())
     } else {
         config.peers.drain(..).collect()

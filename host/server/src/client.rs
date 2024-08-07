@@ -150,21 +150,19 @@ impl Client {
 
     #[inline]
     fn authorize(&self, link: &ToUrl<'_>, write: bool) -> TCResult<()> {
-        let egress = self
-            .egress
-            .as_ref()
-            .ok_or_else(|| unauthorized!("egress (attempted RPC to {link})"))?;
-
-        if egress.is_authorized(&link, write) {
-            Ok(())
-        } else if let Some(policy) = &self.egress {
-            Err(unauthorized!(
-                "egress to {} (egress policy: {:?})",
-                link,
-                policy
-            ))
+        if let Some(policy) = &self.egress {
+            if policy.is_authorized(&link, write) {
+                Ok(())
+            } else {
+                Err(unauthorized!(
+                    "egress to {} (egress policy: {:?})",
+                    link,
+                    policy
+                ))
+            }
         } else {
-            Err(unauthorized!("egress"))
+            // TODO: enforce egress whitelist
+            Ok(())
         }
     }
 }

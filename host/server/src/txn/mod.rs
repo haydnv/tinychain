@@ -305,7 +305,7 @@ impl Txn {
         self.token.is_some()
     }
 
-    pub fn leader(&self, path: &[PathSegment]) -> TCResult<Option<VerifyingKey>> {
+    pub fn leader(&self, path: &[PathSegment]) -> TCResult<Option<(Link, VerifyingKey)>> {
         if let Some(token) = &self.token {
             for (host, actor_id, claim) in token.claims() {
                 if host.path() == path
@@ -316,7 +316,7 @@ impl Txn {
                     let public_key = VerifyingKey::try_from(&*public_key)
                         .map_err(|cause| bad_request!("invalid leader key: {cause}"))?;
 
-                    return Ok(Some(public_key));
+                    return Ok(Some((host.clone(), public_key)));
                 }
             }
         }
