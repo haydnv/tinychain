@@ -135,7 +135,7 @@ pub(crate) struct Kernel {
 }
 
 impl Kernel {
-    fn issue_token(&self, txn_id: TxnId, path: &[PathSegment]) -> TCResult<SignedToken> {
+    async fn issue_token(&self, txn_id: TxnId, path: &[PathSegment]) -> TCResult<SignedToken> {
         if path.is_empty() {
             Err(bad_request!(
                 "cannot issue a token for {}",
@@ -144,7 +144,7 @@ impl Kernel {
         } else if path[0] == SERVICE {
             #[cfg(feature = "service")]
             {
-                issue_token(txn_id, &self.service, &path[1..])
+                issue_token(txn_id, self.service.clone(), &path[1..]).await
             }
 
             #[cfg(not(feature = "service"))]
@@ -152,9 +152,9 @@ impl Kernel {
                 Err(not_implemented!("{ERR_NOT_ENABLED}"))
             }
         } else if path[0] == LIB {
-            issue_token(txn_id, &self.library, &path[1..])
+            issue_token(txn_id, self.library.clone(), &path[1..]).await
         } else if path[0] == CLASS {
-            issue_token(txn_id, &self.class, &path[1..])
+            issue_token(txn_id, self.class.clone(), &path[1..]).await
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
             Err(bad_request!(
                 "cannot issue a token for {}",
@@ -168,13 +168,13 @@ impl Kernel {
         }
     }
 
-    pub fn public_key(&self, txn_id: TxnId, path: &[PathSegment]) -> TCResult<VerifyingKey> {
+    pub async fn public_key(&self, txn_id: TxnId, path: &[PathSegment]) -> TCResult<VerifyingKey> {
         if path.is_empty() {
             Err(bad_request!("{} has no public key", TCPath::from(path)))
         } else if path[0] == SERVICE {
             #[cfg(feature = "service")]
             {
-                public_key(txn_id, &self.service, &path[1..])
+                public_key(txn_id, self.service.clone(), &path[1..]).await
             }
 
             #[cfg(not(feature = "service"))]
@@ -182,9 +182,9 @@ impl Kernel {
                 Err(not_implemented!("{ERR_NOT_ENABLED}"))
             }
         } else if path[0] == LIB {
-            public_key(txn_id, &self.library, &path[1..])
+            public_key(txn_id, self.library.clone(), &path[1..]).await
         } else if path[0] == CLASS {
-            public_key(txn_id, &self.class, &path[1..])
+            public_key(txn_id, self.class.clone(), &path[1..]).await
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
             if path.len() == Hypothetical::PATH.len() {
                 Err(bad_request!("{} has no public key", TCPath::from(path)))
@@ -196,7 +196,11 @@ impl Kernel {
         }
     }
 
-    pub fn route<'a>(&'a self, path: &'a [PathSegment], txn: &'a Txn) -> TCResult<Endpoint<'a>> {
+    pub async fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+        txn: &'a Txn,
+    ) -> TCResult<Endpoint<'a>> {
         if path.is_empty() {
             Ok(Endpoint {
                 mode: Mode::new().with_class_perm(umask::OTHERS, umask::READ),
@@ -220,7 +224,7 @@ impl Kernel {
         } else if path[0] == SERVICE {
             #[cfg(feature = "service")]
             {
-                let (path, dir_entry) = self.service.lookup(*txn.id(), &path[1..])?;
+                let (path, dir_entry) = self.service.clone().lookup(*txn.id(), &path[1..]).await?;
 
                 match dir_entry {
                     DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn),
@@ -233,14 +237,14 @@ impl Kernel {
                 Err(not_implemented!("{ERR_NOT_ENABLED}"))
             }
         } else if path[0] == LIB {
-            let (path, dir_entry) = self.library.lookup(*txn.id(), &path[1..])?;
+            let (path, dir_entry) = self.library.clone().lookup(*txn.id(), &path[1..]).await?;
 
             match dir_entry {
                 DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn),
                 DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn),
             }
         } else if path[0] == CLASS {
-            let (path, dir_entry) = self.class.lookup(*txn.id(), &path[1..])?;
+            let (path, dir_entry) = self.class.clone().lookup(*txn.id(), &path[1..]).await?;
 
             match dir_entry {
                 DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn),
@@ -609,7 +613,7 @@ where
     let mode = {
         let resource_mode = cluster.umask(txn_id, path);
         let request_mode = if txn.has_claims() {
-            let keyring = cluster.keyring(txn_id)?;
+            let keyring = cluster.try_keyring(txn_id)?;
             txn.mode(keyring, path)
         } else {
             Txn::DEFAULT_MODE
@@ -692,12 +696,15 @@ async fn get_token_from_peer(
     ))
 }
 
-fn issue_token<T: Clone + fmt::Debug>(
+async fn issue_token<T>(
     txn_id: TxnId,
-    cluster: &Cluster<Dir<T>>,
+    cluster: Cluster<Dir<T>>,
     path: &[PathSegment],
-) -> TCResult<SignedToken> {
-    match cluster.lookup(txn_id, path)? {
+) -> TCResult<SignedToken>
+where
+    T: Clone + Send + Sync + fmt::Debug,
+{
+    match cluster.lookup(txn_id, path).await? {
         (suffix, entry) if suffix.is_empty() => match entry {
             DirEntry::Dir(dir) => dir.issue_token(Mode::all(), REPLICATION_TTL),
             DirEntry::Item(item) => item.issue_token(Mode::all(), REPLICATION_TTL),
@@ -706,12 +713,15 @@ fn issue_token<T: Clone + fmt::Debug>(
     }
 }
 
-fn public_key<T: Clone + fmt::Debug>(
+async fn public_key<T>(
     txn_id: TxnId,
-    cluster: &Cluster<Dir<T>>,
+    cluster: Cluster<Dir<T>>,
     path: &[PathSegment],
-) -> TCResult<VerifyingKey> {
-    match cluster.lookup(txn_id, path)? {
+) -> TCResult<VerifyingKey>
+where
+    T: Clone + Send + Sync + fmt::Debug,
+{
+    match cluster.lookup(txn_id, path).await? {
         (suffix, entry) if suffix.is_empty() => match entry {
             DirEntry::Dir(dir) => Ok(dir.public_key()),
             DirEntry::Item(item) => Ok(item.public_key()),
@@ -750,7 +760,7 @@ impl<'a> Handler<'a, State> for KernelHandler<'a> {
                             let mut nonce = [0u8; 12];
                             OsRng.fill_bytes(&mut nonce);
 
-                            let signed_token = self.kernel.issue_token(*txn.id(), &path)?;
+                            let signed_token = self.kernel.issue_token(*txn.id(), &path).await?;
                             let token = signed_token.into_jwt();
                             let encrypted_token = encrypt_token(&cipher, &nonce, token)?;
 

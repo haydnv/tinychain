@@ -23,7 +23,7 @@ use tc_transact::public::Route;
 use tc_transact::{fs, Gateway};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Host, Link, Value, Version as VersionNumber};
-use tcgeneric::{Id, Map, PathSegment, TCPath, ThreadSafe};
+use tcgeneric::{Id, Map, PathSegment, TCBoxTryFuture, TCPath, ThreadSafe};
 
 use crate::{CacheBlock, State, Txn, VerifyingKey};
 
@@ -142,7 +142,7 @@ pub struct Dir<T> {
     contents: TxnMapLock<PathSegment, DirEntry<T>>,
 }
 
-impl<T: Clone + fmt::Debug> Dir<T> {
+impl<T: fmt::Debug> Dir<T> {
     fn new(txn_id: TxnId, schema: Schema, dir: fs::Dir<CacheBlock>) -> TCResult<Self> {
         let contents = TxnMapLock::new(txn_id);
 
@@ -167,35 +167,35 @@ impl<T: Clone + fmt::Debug> Dir<T> {
             contents,
         })
     }
+}
 
-    /// Recursive synchronous [`Dir`] entry lookup
+impl<T: Clone + Send + Sync + fmt::Debug> Dir<T> {
+    /// Recursive [`Dir`] entry lookup
     pub fn lookup<'a>(
-        &self,
+        self,
         txn_id: TxnId,
         path: &'a [PathSegment],
-    ) -> TCResult<Option<(&'a [PathSegment], DirEntry<T>)>> {
-        trace!("look up {} in {:?}", TCPath::from(path), self);
+    ) -> TCBoxTryFuture<'a, Option<(&'a [PathSegment], DirEntry<T>)>>
+    where
+        T: 'a,
+    {
+        Box::pin(async move {
+            trace!("look up {} in {:?}", TCPath::from(path), self);
 
-        if path.is_empty() {
-            return Ok(None);
-        }
+            if path.is_empty() {
+                return Ok(None);
+            }
 
-        let entry = self.contents.try_get(txn_id, &path[0]).map_err(|cause| {
-            conflict!(
-                "for a directory lookup of {} in {}",
-                &path[0],
-                self.schema.link
-            )
-            .consume(cause)
-        })?;
+            let entry = self.contents.get(txn_id, &path[0]).await?;
 
-        match entry {
-            Some(entry) => match &*entry {
-                DirEntry::Item(item) => Ok(Some((&path[1..], DirEntry::Item(item.clone())))),
-                DirEntry::Dir(dir) => dir.lookup(txn_id, &path[1..]).map(Some),
-            },
-            None => Ok(None),
-        }
+            match entry {
+                Some(entry) => match &*entry {
+                    DirEntry::Item(item) => Ok(Some((&path[1..], DirEntry::Item(item.clone())))),
+                    DirEntry::Dir(dir) => dir.clone().lookup(txn_id, &path[1..]).map_ok(Some).await,
+                },
+                None => Ok(None),
+            }
+        })
     }
 }
 
@@ -312,8 +312,8 @@ impl<T: AsyncHash + fmt::Debug> IsDir for Dir<T> {
     ) -> TCResult<Option<TxnLockReadGuard<HashMap<Host, VerifyingKey>>>> {
         if let Some(entry) = self.contents.get(txn_id, name).await? {
             match &*entry {
-                DirEntry::Dir(cluster) => cluster.keyring(txn_id).map(Some),
-                DirEntry::Item(cluster) => cluster.keyring(txn_id).map(Some),
+                DirEntry::Dir(cluster) => cluster.keyring(txn_id).map_ok(Some).await,
+                DirEntry::Item(cluster) => cluster.keyring(txn_id).map_ok(Some).await,
             }
         } else {
             Ok(None)

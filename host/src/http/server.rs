@@ -108,7 +108,7 @@ impl Server {
 
         let txn = self.server.get_txn(txn_id, token).await?;
 
-        let endpoint = self.server.authorize_claim_and_route(&path, &txn)?;
+        let endpoint = self.server.authorize_claim_and_route(&path, &txn).await?;
 
         let state = match http_request.method() {
             &hyper::Method::GET => {

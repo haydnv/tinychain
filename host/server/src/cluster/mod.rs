@@ -20,7 +20,7 @@ use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnMapLockIter};
 use tc_transact::{fs, Gateway};
 use tc_transact::{Transact, Transaction, TxnId};
 use tc_value::{Host, Link, ToUrl, Value};
-use tcgeneric::{label, Label, PathSegment, TCPathBuf, Tuple};
+use tcgeneric::{label, Label, PathSegment, TCBoxTryFuture, TCPathBuf, Tuple};
 
 use crate::claim::Claim;
 use crate::client::Egress;
@@ -239,7 +239,15 @@ impl<T> Cluster<T> {
 }
 
 impl<T: fmt::Debug> Cluster<T> {
-    pub fn keyring(
+    pub async fn keyring(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<TxnLockReadGuard<HashMap<Host, VerifyingKey>>> {
+        trace!("read {self:?} keyring");
+        self.replicas.read(txn_id).map_err(TCError::from).await
+    }
+
+    pub fn try_keyring(
         &self,
         txn_id: TxnId,
     ) -> TCResult<TxnLockReadGuard<HashMap<Host, VerifyingKey>>> {
@@ -247,12 +255,12 @@ impl<T: fmt::Debug> Cluster<T> {
         self.replicas.try_read(txn_id).map_err(TCError::from)
     }
 
-    fn keyring_mut(
+    async fn keyring_mut(
         &self,
         txn_id: TxnId,
     ) -> TCResult<impl DerefMut<Target = HashMap<Host, VerifyingKey>>> {
         trace!("write {self:?} keyring");
-        self.replicas.try_write(txn_id).map_err(TCError::from)
+        self.replicas.write(txn_id).map_err(TCError::from).await
     }
 
     async fn replicate_write<Write, Fut>(
@@ -630,17 +638,22 @@ impl<T: IsDir + Send + Sync> IsDir for Cluster<T> {
 
 impl<T> Cluster<Dir<T>>
 where
-    T: Clone + fmt::Debug,
+    T: Clone + Send + Sync + fmt::Debug,
 {
     pub fn lookup<'a>(
-        &self,
+        self,
         txn_id: TxnId,
         path: &'a [PathSegment],
-    ) -> TCResult<(&'a [PathSegment], DirEntry<T>)> {
-        match self.state().lookup(txn_id, path)? {
-            Some((path, entry)) => Ok((path, entry)),
-            None => Ok((path, DirEntry::Dir(self.clone()))),
-        }
+    ) -> TCBoxTryFuture<'a, (&'a [PathSegment], DirEntry<T>)>
+    where
+        T: 'a,
+    {
+        Box::pin(async move {
+            match self.state().clone().lookup(txn_id, path).await? {
+                Some((path, entry)) => Ok((path, entry)),
+                None => Ok((path, DirEntry::Dir(self.clone()))),
+            }
+        })
     }
 }
 

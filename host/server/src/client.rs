@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::TryFutureExt;
 use log::trace;
 
 use tc_error::*;
@@ -61,13 +62,17 @@ impl ClientInner {
 #[async_trait]
 impl RPCClient for ClientInner {
     async fn fetch(&self, txn_id: TxnId, link: ToUrl<'_>, actor_id: Value) -> TCResult<Actor> {
-        trace!("fetch actor {actor_id:?} at {link}");
+        trace!(
+            "fetch actor {actor_id:?} at {link} (loopback: {})",
+            self.is_loopback(&link)
+        );
 
         if self.is_loopback(&link) {
             let public_key = self
                 .kernel
                 .public_key(txn_id, link.path())
-                .map_err(rjwt::Error::fetch)?;
+                .map_err(rjwt::Error::fetch)
+                .await?;
 
             Ok(Actor::with_public_key(actor_id.clone(), public_key))
         } else {
@@ -77,7 +82,7 @@ impl RPCClient for ClientInner {
 
     async fn get(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<State> {
         if self.is_loopback(&link) {
-            let endpoint = self.kernel.route(link.path(), txn)?;
+            let endpoint = self.kernel.route(link.path(), txn).await?;
             let handler = endpoint.get(key)?;
             handler.await
         } else {
@@ -87,7 +92,7 @@ impl RPCClient for ClientInner {
 
     async fn put(&self, txn: &Txn, link: ToUrl<'_>, key: Value, value: State) -> TCResult<()> {
         if self.is_loopback(&link) {
-            let endpoint = self.kernel.route(link.path(), txn)?;
+            let endpoint = self.kernel.route(link.path(), txn).await?;
             let handler = endpoint.put(key, value)?;
             handler.await
         } else {
@@ -97,7 +102,7 @@ impl RPCClient for ClientInner {
 
     async fn post(&self, txn: &Txn, link: ToUrl<'_>, params: Map<State>) -> TCResult<State> {
         if self.is_loopback(&link) {
-            let endpoint = self.kernel.route(link.path(), txn)?;
+            let endpoint = self.kernel.route(link.path(), txn).await?;
             let handler = endpoint.post(params)?;
             handler.await
         } else {
@@ -107,7 +112,7 @@ impl RPCClient for ClientInner {
 
     async fn delete(&self, txn: &Txn, link: ToUrl<'_>, key: Value) -> TCResult<()> {
         if self.is_loopback(&link) {
-            let endpoint = self.kernel.route(link.path(), txn)?;
+            let endpoint = self.kernel.route(link.path(), txn).await?;
             let handler = endpoint.delete(key)?;
             handler.await
         } else {

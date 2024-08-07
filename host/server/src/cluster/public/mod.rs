@@ -45,7 +45,7 @@ where
                 if txn.has_claims() {
                     self.cluster.state().get(txn, &[], key).await
                 } else {
-                    let keyring = self.cluster.keyring(*txn.id())?;
+                    let keyring = self.cluster.keyring(*txn.id()).await?;
 
                     if key.is_none() {
                         let keyring = keyring
@@ -142,11 +142,7 @@ where
                             .get_dir_item_keyring(*txn.id(), &entry_name)
                             .await?
                         {
-                            keyring
-                                .keys()
-                                .filter(|host| host != &this_host)
-                                .cloned()
-                                .collect()
+                            keyring.keys().cloned().collect()
                         } else {
                             vec![]
                         };
@@ -271,7 +267,7 @@ where
             Box::pin(async move {
                 debug!("GET {:?} replicas", self.cluster);
 
-                let keyring = self.cluster.keyring(*txn.id())?;
+                let keyring = self.cluster.keyring(*txn.id()).await?;
 
                 if key.is_some() {
                     let key = Arc::<[u8]>::try_from(key)?;
@@ -318,7 +314,7 @@ where
                     return Err(bad_request!("the provided cluster state hash is incorrect"));
                 }
 
-                let mut keyring = self.cluster.keyring_mut(*txn.id())?;
+                let mut keyring = self.cluster.keyring_mut(*txn.id()).await?;
 
                 let (host, public_key): (Host, Arc<[u8]>) =
                     key.try_cast_into(|v| TCError::unexpected(v, "a host address and key"))?;
@@ -410,7 +406,7 @@ where
             Box::pin(async move {
                 debug!("DELETE {:?} replicas {key}", self.cluster);
 
-                let mut keyring = self.cluster.keyring_mut(*txn.id())?;
+                let mut keyring = self.cluster.keyring_mut(*txn.id()).await?;
 
                 let hosts = Tuple::<Value>::try_from(key)?;
 
