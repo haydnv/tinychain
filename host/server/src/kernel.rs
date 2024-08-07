@@ -330,7 +330,7 @@ impl Kernel {
                     }
                 };
 
-                trace!("replicating...");
+                trace!("replicating {cluster:?}...");
 
                 let txn_id = *txn.id();
                 match cluster.replicate_and_join(txn, peer.clone()).await {
@@ -368,7 +368,7 @@ impl Kernel {
     where
         T: Replicate + Transact + Clone + fmt::Debug,
     {
-        debug!(
+        info!(
             "Kernel::replicate_and_join_dir {} with peers {:?}",
             parent.path(),
             peers
@@ -396,6 +396,8 @@ impl Kernel {
                 DirEntry::Item(item) => item,
             };
 
+            trace!("replicating {item:?}...");
+
             let mut joined = false;
             for peer in peers.iter().choose_multiple(&mut OsRng, peers.len()) {
                 let egress = Arc::new(KernelEgress);
@@ -419,7 +421,7 @@ impl Kernel {
                     }
                 };
 
-                trace!("replicating...");
+                info!("replicating {item:?} from {peer}...");
 
                 match item.replicate_and_join(txn, peer.clone()).await {
                     Ok(()) => {
@@ -607,8 +609,6 @@ fn auth_claim_route<'a, T>(
 where
     T: AsyncHash + Route<State> + IsDir + Transact + Send + Sync + fmt::Debug + 'a,
 {
-    debug!("auth, claim, and route request to {}", TCPath::from(path));
-
     let txn_id = *txn.id();
     let mode = {
         let resource_mode = cluster.umask(txn_id, path);
@@ -624,8 +624,6 @@ where
 
     if mode == Mode::new() {
         return Err(unauthorized!("access to {}", TCPath::from(path)));
-    } else {
-        debug!("request permissions are {mode}");
     }
 
     let handler = cluster

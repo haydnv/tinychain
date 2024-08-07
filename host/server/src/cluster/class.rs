@@ -154,9 +154,8 @@ impl Replicate for Class {
         let version_ids = version_ids
             .into_iter()
             .map(|id| {
-                Value::try_from(id).and_then(|v| {
-                    v.try_cast_into(|v| TCError::unexpected(v, "a class set version number"))
-                })
+                let id = Value::try_from(id)?;
+                id.try_cast_into(|v| TCError::unexpected(v, "a class set version number"))
             })
             .collect::<TCResult<BTreeSet<VersionNumber>>>()?;
 

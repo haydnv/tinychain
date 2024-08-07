@@ -860,6 +860,7 @@ impl TryCastFrom<Value> for Uuid {
 impl TryCastFrom<Value> for Version {
     fn can_cast_from(value: &Value) -> bool {
         match value {
+            Value::Id(id) => Self::can_cast_from(id),
             Value::String(s) => Version::from_str(s.as_str()).is_ok(),
             Value::Tuple(t) => <(u32, u32, u32) as TryCastFrom<Tuple<Value>>>::can_cast_from(t),
             Value::Version(_) => true,
@@ -869,6 +870,8 @@ impl TryCastFrom<Value> for Version {
 
     fn opt_cast_from(value: Value) -> Option<Self> {
         match value {
+            Value::Id(id) => Self::opt_cast_from(id),
+
             Value::String(s) => Version::from_str(s.as_str()).ok(),
 
             Value::Tuple(t) => t

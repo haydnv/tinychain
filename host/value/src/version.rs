@@ -141,6 +141,16 @@ impl TryCastFrom<&str> for Version {
     }
 }
 
+impl TryCastFrom<Id> for Version {
+    fn can_cast_from(value: &Id) -> bool {
+        Self::from_str(value.as_str()).is_ok()
+    }
+
+    fn opt_cast_from(value: Id) -> Option<Self> {
+        Self::from_str(value.as_str()).ok()
+    }
+}
+
 impl From<Version> for Id {
     fn from(version: Version) -> Id {
         version.to_string().parse().expect("version id")

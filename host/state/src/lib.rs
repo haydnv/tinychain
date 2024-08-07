@@ -1624,17 +1624,25 @@ where
                 return ScalarVisitor::visit_subject(subject, params).map(State::Scalar);
             }
 
-            let mut map = Map::new();
+            let mut map = Map::<State<Txn>>::new();
 
             let id = Id::from_str(&key).map_err(de::Error::custom)?;
             let txn = self.txn.subcontext(id.clone());
             let value = access.next_value(txn).await?;
-            map.insert(id, value);
+            map.insert(id.clone(), value);
 
             while let Some(id) = access.next_key::<Id>(()).await? {
                 let txn = self.txn.subcontext(id.clone());
                 let state = access.next_value(txn).await?;
                 map.insert(id, state);
+            }
+
+            debug!("deserialize map {map:?}");
+            if map.len() == 1 {
+                let value = map.as_ref().get(&id).expect("map value");
+                if value.is_none() && !value.is_map() {
+                    return Ok(State::from(id));
+                }
             }
 
             Ok(State::Map(map))

@@ -6,7 +6,7 @@ use std::time::Duration;
 use freqfs::DirLock;
 use futures::TryFutureExt;
 use gethostname::gethostname;
-use log::{debug, info, warn};
+use log::{info, trace, warn};
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 
 #[cfg(feature = "service")]
@@ -78,15 +78,15 @@ impl Broadcast {
             match receiver.recv_async().await {
                 Ok(event) => match event {
                     ServiceEvent::SearchStarted(_params) if search_started => {
-                        info!("mDNS discovered {} peers", self.peers.len());
+                        trace!("mDNS discovered {} peers", self.peers.len());
                         break Ok(());
                     }
                     ServiceEvent::SearchStarted(params) => {
-                        info!("searching for peers of {params}");
+                        trace!("searching for peers of {params}");
                         search_started = true;
                     }
                     ServiceEvent::ServiceFound(name, addr) => {
-                        info!("discovered peer of {name} at {addr}")
+                        trace!("discovered peer of {name} at {addr}")
                     }
                     ServiceEvent::ServiceResolved(info) => {
                         let full_name = info.get_fullname();
@@ -95,11 +95,11 @@ impl Broadcast {
 
                         self.peers.insert(full_name.to_string(), (addresses, port));
 
-                        info!("resolved peer: {full_name}")
+                        trace!("resolved peer: {full_name}")
                     }
-                    other => debug!("ignoring mDNS event: {:?}", other),
+                    other => trace!("ignoring mDNS event: {:?}", other),
                 },
-                Err(cause) => warn!("mDNS error: {cause}"),
+                Err(cause) => trace!("mDNS error: {cause}"),
             }
         }
     }

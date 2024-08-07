@@ -5,6 +5,7 @@ use std::ops::Deref;
 use async_trait::async_trait;
 use futures::stream::FuturesUnordered;
 use futures::{TryFutureExt, TryStreamExt};
+use log::{debug, trace};
 use safecast::{AsType, TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -76,19 +77,22 @@ impl IsDir for Library {}
 #[async_trait]
 impl Replicate for Library {
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<Output<Sha256>> {
+        debug!("replicate {self:?} from {source}...");
+
         let txn_id = *txn.id();
         let version_ids = txn.get(source.clone(), Value::None).await?;
         let version_ids =
-            version_ids.try_into_tuple(|s| TCError::unexpected(s, "class set version numbers"))?;
+            version_ids.try_into_tuple(|s| TCError::unexpected(s, "library version numbers"))?;
 
         let version_ids = version_ids
             .into_iter()
             .map(|id| {
-                Value::try_from(id).and_then(|v| {
-                    v.try_cast_into(|v| TCError::unexpected(v, "a class set version number"))
-                })
+                let id = Value::try_from(id)?;
+                id.try_cast_into(|v| TCError::unexpected(v, "a library version number"))
             })
             .collect::<TCResult<BTreeSet<VersionNumber>>>()?;
+
+        trace!("version IDs to replicate are {version_ids:?}");
 
         version_ids
             .iter()
@@ -98,15 +102,13 @@ impl Replicate for Library {
                 async move {
                     let version = txn.get(source, number).await?;
                     let version =
-                        version.try_into_map(|s| TCError::unexpected(s, "a class set version"))?;
+                        version.try_into_map(|s| TCError::unexpected(s, "a library version"))?;
 
                     let version = version
                         .into_iter()
                         .map(move |(name, class)| {
-                            Scalar::try_cast_from(class, |s| {
-                                TCError::unexpected(s, "a Class definition")
-                            })
-                            .map(|class| (name, class))
+                            Scalar::try_cast_from(class, |s| TCError::unexpected(s, "a Library"))
+                                .map(|class| (name, class))
                         })
                         .collect::<TCResult<Map<Scalar>>>()?;
 
@@ -126,6 +128,8 @@ impl Replicate for Library {
                 to_delete.push(version_id);
             }
         }
+
+        trace!("version IDs to delete are {to_delete:?}");
 
         to_delete
             .into_iter()

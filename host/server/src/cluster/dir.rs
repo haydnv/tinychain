@@ -417,6 +417,8 @@ where
     Cluster<Dir<T>>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
 {
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<Output<Sha256>> {
+        debug!("replicate {self:?} from {source}...");
+
         assert_eq!(self.schema.link.path(), source.path());
 
         let state = txn.get(source, Value::default()).await?;
