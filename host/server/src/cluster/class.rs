@@ -5,7 +5,7 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::stream::{FuturesOrdered, FuturesUnordered};
 use futures::{TryFutureExt, TryStreamExt};
-use log::debug;
+use log::{debug, trace};
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -128,10 +128,18 @@ impl DirItem for Class {
         number: VersionNumber,
         schema: Map<InstanceClass>,
     ) -> TCResult<Map<InstanceClass>> {
+        if schema.is_empty() {
+            return Err(bad_request!(
+                "cannot create an empty class set version at {number}"
+            ));
+        }
+
         let txn_id = *txn.id();
         let blocks = self.dir.create_file(txn_id, number.into()).await?;
 
         for (name, class) in &schema {
+            trace!("create Class version {number} block {name}");
+
             blocks
                 .create_block(txn_id, name.clone(), class.clone().into_inner())
                 .await?;
@@ -221,7 +229,7 @@ impl Transact for Class {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        debug!("Class::finalize {txn_id}");
+        trace!("Class::finalize {txn_id}");
         self.dir.finalize(*txn_id).await
     }
 }

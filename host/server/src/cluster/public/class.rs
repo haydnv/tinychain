@@ -66,6 +66,8 @@ impl<'a> Handler<'a, State> for ClassHandler<'a> {
                     })
                     .collect::<TCResult<Map<InstanceClass>>>()?;
 
+                debug!("create new class set version {version_number}: {schema:?}");
+
                 self.class
                     .create_version(txn, version_number, schema)
                     .await?;
