@@ -15,12 +15,14 @@ use tc_state::CacheBlock;
 use tc_transact::hash::*;
 use tc_transact::{fs, Gateway, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
-use tcgeneric::Map;
+use tcgeneric::{label, Label, Map};
 
 use crate::cluster::{IsDir, Replicate};
 use crate::Txn;
 
 use super::dir::DirItem;
+
+pub(super) const LIB: Label = label("lib");
 
 /// A versioned collection of [`Scalar`]s
 #[derive(Clone)]
@@ -187,6 +189,7 @@ impl fs::Persist<CacheBlock> for Library {
 
     async fn create(txn_id: TxnId, schema: (), dir: fs::Dir<CacheBlock>) -> TCResult<Self> {
         if dir.is_empty(txn_id).await? {
+            dir.create_file::<Map<Scalar>>(txn_id, LIB.into()).await?;
             Self::load(txn_id, schema, dir).await
         } else {
             Err(bad_request!(
@@ -196,7 +199,7 @@ impl fs::Persist<CacheBlock> for Library {
     }
 
     async fn load(txn_id: TxnId, _schema: (), dir: fs::Dir<CacheBlock>) -> TCResult<Self> {
-        fs::File::load(dir.into_inner(), txn_id)
+        dir.get_file(txn_id, &LIB.into())
             .map_ok(|versions| Self { versions })
             .await
     }

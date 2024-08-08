@@ -13,7 +13,6 @@ use log::*;
 use safecast::TryCastFrom;
 
 use tc_error::*;
-use tc_scalar::Scalar;
 #[cfg(feature = "service")]
 use tc_state::chain::Recover;
 use tc_state::object::InstanceClass;
@@ -117,7 +116,7 @@ impl<T: Transact + Clone + Send + Sync + fmt::Debug + 'static> Transact for DirE
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        debug!("finalize {:?} at {}", self, txn_id);
+        trace!("finalize {:?} at {}", self, txn_id);
 
         match self {
             Self::Dir(dir) => dir.finalize(txn_id).await,
@@ -537,38 +536,58 @@ impl fs::Persist<CacheBlock> for Dir<Library> {
     }
 
     async fn load(txn_id: TxnId, schema: Schema, dir: fs::Dir<CacheBlock>) -> TCResult<Self> {
-        let mut loaded = BTreeMap::new();
+        let mut contents = BTreeMap::new();
 
-        let mut entries = dir.entries::<Map<Scalar>>(txn_id).await?;
+        let mut entries = dir.entries::<Library>(txn_id).await?;
+
         while let Some((name, entry)) = entries.try_next().await? {
-            let entry = match entry {
-                fs::DirEntry::Dir(dir) => {
-                    let is_lib = {
-                        let mut names = dir.entry_names(txn_id).await?;
-                        names.any(|name| VersionNumber::can_cast_from(&name.as_str()))
-                    };
+            // first, test if this is a directory or a library entry
+            // if it's a library entry, it will contain exactly one file called "lib"
+            // otherwise, load it as a directory
 
-                    let schema = schema.clone().append(Id::clone(&*name));
+            let dir = match entry {
+                fs::DirEntry::Dir(dir) => dir,
+                fs::DirEntry::File(file) => {
+                    return Err(internal!(
+                        "tried to load a library file {name}: {file:?} as a cluster directory"
+                    ));
+                }
+            };
 
-                    if is_lib {
-                        Cluster::load(txn_id, schema, dir)
-                            .map_ok(DirEntry::Item)
-                            .await
+            let is_lib = {
+                let mut is_lib = !dir.is_empty(txn_id).await?;
+
+                let mut entries = dir.entries::<Library>(txn_id).await?;
+                while let Some((name, entry)) = entries.try_next().await? {
+                    if &*name == &*super::library::LIB && entry.is_file() {
+                        is_lib = true;
                     } else {
-                        Cluster::load(txn_id, schema, dir)
-                            .map_ok(DirEntry::Dir)
-                            .await
+                        is_lib = false;
                     }
                 }
-                fs::DirEntry::File(file) => Err(internal!("invalid Class dir entry: {:?}", file)),
+
+                is_lib
+            };
+
+            let name = Id::clone(&*name);
+            let schema = schema.clone().append(name.clone());
+
+            let entry = if is_lib {
+                Cluster::load(txn_id, schema, dir)
+                    .map_ok(DirEntry::Item)
+                    .await
+            } else {
+                Cluster::load(txn_id, schema, dir)
+                    .map_ok(DirEntry::Dir)
+                    .await
             }?;
 
-            loaded.insert((*name).clone(), entry);
+            contents.insert(name, entry);
         }
 
         std::mem::drop(entries); // needed because `entries` borrows `dir`
 
-        Self::with_contents(txn_id, schema, dir, loaded)
+        Self::with_contents(txn_id, schema, dir, contents)
     }
 
     fn dir(&self) -> fs::Inner<CacheBlock> {
