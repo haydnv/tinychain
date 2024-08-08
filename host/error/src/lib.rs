@@ -381,7 +381,11 @@ impl From<io::Error> for TCError {
     fn from(cause: io::Error) -> Self {
         match cause.kind() {
             io::ErrorKind::AlreadyExists => {
-                bad_request!("tried to create an entry that already exists: {}", cause)
+                #[cfg(debug_assertions)]
+                panic!("tried to create an entry that already exists: {}", cause);
+
+                #[cfg(not(debug_assertions))]
+                bad_request!("tried to create an entry that already exists: {}", cause);
             }
             io::ErrorKind::InvalidInput => bad_request!("{}", cause),
             io::ErrorKind::NotFound => TCError::not_found(cause),

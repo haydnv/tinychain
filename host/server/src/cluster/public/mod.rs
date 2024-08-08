@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use futures::stream::{FuturesUnordered, TryStreamExt};
 use futures::Future;
-use log::{debug, trace};
+use log::debug;
 use rjwt::VerifyingKey;
 use safecast::{TryCastFrom, TryCastInto};
 
@@ -58,7 +58,10 @@ where
                     } else {
                         let key = Arc::<[u8]>::try_from(key)?;
 
-                        if keyring.values().any(|public_key| public_key.as_bytes() == &key[..]) {
+                        if keyring
+                            .values()
+                            .any(|public_key| public_key.as_bytes() == &key[..])
+                        {
                             Ok(State::from(Value::from(key)))
                         } else {
                             Err(not_found!(

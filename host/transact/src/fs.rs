@@ -339,6 +339,14 @@ where
         self.inner.delete(txn_id, name).map_err(TCError::from).await
     }
 
+    /// Return `true` if this [`File`] contains a block with the given `name` at `txn_id`.
+    pub async fn contains_block(&self, txn_id: TxnId, name: &Id) -> TCResult<bool> {
+        self.inner
+            .contains(txn_id, name)
+            .map_err(TCError::from)
+            .await
+    }
+
     /// Iterate over the blocks in this [`File`].
     pub async fn iter(
         &self,

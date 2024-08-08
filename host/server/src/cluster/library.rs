@@ -64,13 +64,27 @@ impl DirItem for Library {
         schema: Map<Scalar>,
     ) -> TCResult<Map<Scalar>> {
         let version = validate(schema)?;
+        let number = number.into();
+        let txn_id = *txn.id();
 
-        self.versions
-            .create_block(*txn.id(), number.into(), version.clone())
-            .map_ok(|_| ())
-            .await?;
+        // TODO: is there a better/less error-prone way to implement this idempotency check?
+        if self.versions.contains_block(txn_id, &number).await? {
+            let existing = self.versions.read_block(txn_id, &number).await?;
+            if version == *existing {
+                Ok(version)
+            } else {
+                Err(bad_request!(
+                    "{self:?} cannot overwrite existing version {number}"
+                ))
+            }
+        } else {
+            self.versions
+                .create_block(*txn.id(), number.into(), version.clone())
+                .map_ok(|_| ())
+                .await?;
 
-        Ok(version.into())
+            Ok(version)
+        }
     }
 }
 
