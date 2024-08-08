@@ -576,6 +576,10 @@ where
 
             let mut participants = HashMap::with_capacity(replica_set.len());
             for (host, public_key) in replica_set {
+                if self.link().host() == Some(&host) {
+                    continue;
+                }
+
                 let public_key = VerifyingKey::try_from(&*public_key)
                     .map_err(|v| TCError::unexpected(v, "a public key"))?;
 

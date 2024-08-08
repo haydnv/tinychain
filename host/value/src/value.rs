@@ -1049,7 +1049,7 @@ impl<T: Clone + TryCastFrom<Value>> TryCastFrom<Value> for Tuple<T> {
 impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Bytes(bytes) => write!(f, "({} bytes)", bytes.len()),
+            Self::Bytes(bytes) => write!(f, "0x{}", hex::encode(bytes)),
             Self::Id(id) => write!(f, "{:?} ({})", id.as_str(), ValueType::Id),
             Self::Email(email) => write!(f, "{:?} ({})", email, ValueType::Email),
             Self::Link(link) => write!(f, "{:?} ({})", link, ValueType::Link),
@@ -1077,7 +1077,7 @@ impl fmt::Debug for Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Bytes(bytes) => write!(f, "({} bytes)", bytes.len()),
+            Self::Bytes(bytes) => write!(f, "0x{}", hex::encode(bytes)),
             Self::Email(email) => fmt::Display::fmt(email, f),
             Self::Id(id) => f.write_str(id.as_str()),
             Self::Link(link) => fmt::Display::fmt(link, f),

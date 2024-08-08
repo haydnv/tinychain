@@ -6,6 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use freqfs::DirLock;
 use futures::Future;
+use log::debug;
 use rjwt::{Token, VerifyingKey};
 use safecast::CastInto;
 use umask::Mode;
@@ -187,6 +188,12 @@ impl Txn {
     /// Grant `mode` permissions on the resource at `path` to the bearer of this [`Txn`]'s token.
     /// `path` is relative to the cluster at `link` whose `actor` will sign the token.
     pub fn grant(&self, actor: &Actor, link: Link, path: TCPathBuf, mode: Mode) -> TCResult<Self> {
+        #[cfg(debug_assertions)]
+        {
+            let expected = Value::Bytes((*actor.public_key().as_bytes()).into());
+            debug!("grant {mode} on {path} to {actor:?} at {link} with public key {expected}");
+        }
+
         let now = NetworkTime::now();
         let claim = Claim::new(path, mode);
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use futures::stream::{FuturesUnordered, TryStreamExt};
 use futures::Future;
-use log::debug;
+use log::{debug, trace};
 use rjwt::VerifyingKey;
 use safecast::{TryCastFrom, TryCastInto};
 
@@ -58,13 +58,14 @@ where
                     } else {
                         let key = Arc::<[u8]>::try_from(key)?;
 
-                        if keyring
-                            .values()
-                            .any(|public_key| public_key.as_bytes() == &key[..])
-                        {
+                        if keyring.values().any(|public_key| public_key.as_bytes() == &key[..]) {
                             Ok(State::from(Value::from(key)))
                         } else {
-                            Err(not_found!("{key:?} (of {} keys)", keyring.len()))
+                            Err(not_found!(
+                                "{:?} (of {} keys)",
+                                Value::Bytes(key),
+                                keyring.len()
+                            ))
                         }
                     }
                 }
@@ -318,6 +319,13 @@ where
 
                 let (host, public_key): (Host, Arc<[u8]>) =
                     key.try_cast_into(|v| TCError::unexpected(v, "a host address and key"))?;
+
+                if self.cluster.link().host() == Some(&host) {
+                    return Err(bad_request!(
+                        "cannot overwrite the public key of {:?}",
+                        self.cluster
+                    ));
+                }
 
                 let public_key = VerifyingKey::try_from(&*public_key)
                     .map_err(|cause| bad_request!("invalid public key: {cause}"))?;
