@@ -50,7 +50,6 @@ const REPLICAS: Label = label("replicas");
 pub(crate) struct ClusterEgress {
     lead: Host,
     path: TCPathBuf,
-    replicas: TxnLockReadGuard<HashMap<Host, VerifyingKey>>,
 }
 
 impl Egress for ClusterEgress {
@@ -62,11 +61,7 @@ impl Egress for ClusterEgress {
 
 impl fmt::Debug for ClusterEgress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "cluster at {}{} with replicas {:?}",
-            self.lead, self.path, self.replicas
-        )
+        write!(f, "cluster at {}{}", self.lead, self.path)
     }
 }
 
@@ -194,7 +189,6 @@ impl<T> Cluster<T> {
         let egress = ClusterEgress {
             lead: self.inner.schema.lead.clone(),
             path: self.path().clone(),
-            replicas: self.replicas.try_read(*txn.id())?,
         };
 
         let mut claimed = self.claimed.lock().expect("claimed");
@@ -279,11 +273,16 @@ impl<T: fmt::Debug> Cluster<T> {
         uri.extend(path.into_iter().cloned());
 
         let (num_replicas, mut failed) = {
-            let replicas = self.replicas.read(*txn.id()).await?;
-            let failed =
-                Self::replicate_write_inner(&txn, &this_host, &*replicas, &uri, op).await?;
+            let replicas = {
+                let replicas = self.replicas.read(*txn.id()).await?;
+                replicas.clone()
+            };
 
-            (replicas.len(), failed)
+            let num_replicas = replicas.len();
+
+            let failed = Self::replicate_write_inner(&txn, &this_host, replicas, &uri, op).await?;
+
+            (num_replicas, failed)
         };
 
         if failed.is_empty() {
@@ -299,23 +298,26 @@ impl<T: fmt::Debug> Cluster<T> {
 
         let uri = self.path().clone().append(REPLICAS);
 
-        trace!("lock replica set of {self:?} in order to replicate a write operation");
-        let mut replicas = self.replicas.write(*txn.id()).await?;
         let mut num_failed = failed.len();
-
         while !failed.is_empty() && num_failed * 2 < num_replicas {
-            let mut to_remove = Tuple::<Value>::with_capacity(failed.len());
-            for host in failed {
-                replicas.remove(&host);
-                to_remove.push(host.into());
-            }
+            let (replicas, to_remove) = {
+                trace!("lock replica set of {self:?} in order to replicate a write operation");
+                let mut replicas = self.replicas.write(*txn.id()).await?;
 
-            failed =
-                Self::replicate_write_inner(&txn, &this_host, &*replicas, &uri, |txn, link| {
-                    let to_remove = to_remove.clone();
-                    async move { txn.delete(link, to_remove).await }
-                })
-                .await?;
+                let mut to_remove = Tuple::<Value>::with_capacity(failed.len());
+                for host in failed {
+                    replicas.remove(&host);
+                    to_remove.push(host.into());
+                }
+
+                (replicas.clone(), to_remove)
+            };
+
+            failed = Self::replicate_write_inner(&txn, &this_host, replicas, &uri, |txn, link| {
+                let to_remove = to_remove.clone();
+                async move { txn.delete(link, to_remove).await }
+            })
+            .await?;
 
             num_failed += failed.len();
         }
@@ -330,7 +332,7 @@ impl<T: fmt::Debug> Cluster<T> {
     async fn replicate_write_inner<Write, Fut>(
         txn: &Txn,
         this_host: &Host,
-        replicas: &HashMap<Host, VerifyingKey>,
+        replicas: HashMap<Host, VerifyingKey>,
         uri: &TCPathBuf,
         op: Write,
     ) -> TCResult<Vec<Host>>
@@ -339,9 +341,9 @@ impl<T: fmt::Debug> Cluster<T> {
         Fut: Future<Output = TCResult<()>>,
     {
         let mut writes: FuturesUnordered<_> = replicas
-            .keys()
+            .into_keys()
             .filter(|host| !(host.is_localhost() && host.port() == this_host.port()))
-            .filter(|host| *host != this_host)
+            .filter(|host| host != this_host)
             .map(|host| {
                 op(txn.clone(), Link::new(host.clone(), uri.clone()))
                     .map(move |result| (host, result))
