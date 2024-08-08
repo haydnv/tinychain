@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use log::{debug, trace};
+use log::{debug, info};
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
@@ -8,12 +8,13 @@ use tc_scalar::value::{Link, Version as VersionNumber};
 use tc_scalar::{OpRef, Scalar, TCRef};
 use tc_state::object::InstanceClass;
 use tc_transact::public::{GetHandler, Handler, PostHandler, PutHandler, Route};
-use tc_transact::{Transaction, TxnId};
+use tc_transact::{Gateway, Transaction, TxnId};
 use tc_value::Value;
-use tcgeneric::{Id, Map, PathSegment, TCPath};
+use tcgeneric::{Id, Map, PathSegment, TCPath, TCPathBuf};
 
 use crate::cluster::dir::DirItem;
 use crate::cluster::Library;
+use crate::kernel::CLASS;
 use crate::{State, Txn};
 
 struct LibraryHandler<'a> {
@@ -52,8 +53,9 @@ impl<'a> Handler<'a, State> for LibraryHandler<'a> {
                 let number: VersionNumber =
                     key.try_cast_into(|v| TCError::unexpected(v, "a semantic version number"))?;
 
-                let (_link, schema) = expect_version(value)?;
+                let (link, schema) = expect_version(value)?;
 
+                let mut classes = Map::<InstanceClass>::new();
                 let mut version = Map::<Scalar>::new();
 
                 fn is_dep(scalar: &Scalar) -> bool {
@@ -72,17 +74,23 @@ impl<'a> Handler<'a, State> for LibraryHandler<'a> {
                     let scalar = Scalar::try_from(state)?;
 
                     if is_dep(&scalar) {
-                        if !InstanceClass::can_cast_from(&scalar) {
-                            return Err(TCError::unexpected(scalar, "a class definition"));
-                        }
+                        let class = scalar
+                            .try_cast_into(|s| TCError::unexpected(s, "a class definition"))?;
 
-                        trace!("TODO: validate that class {name} is already installed");
+                        classes.insert(name, class);
                     } else {
                         version.insert(name, scalar);
                     }
                 }
 
                 self.library.create_version(txn, number, version).await?;
+
+                if !classes.is_empty() {
+                    let mut class_path = TCPathBuf::from(CLASS);
+                    class_path.extend(link.path()[1..].iter().cloned());
+                    info!("installing a class set at {class_path}");
+                    txn.put(class_path, number.clone(), classes).await?;
+                }
 
                 Ok(())
             })
