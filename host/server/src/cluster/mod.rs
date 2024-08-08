@@ -241,14 +241,6 @@ impl<T: fmt::Debug> Cluster<T> {
         self.replicas.read(txn_id).map_err(TCError::from).await
     }
 
-    pub fn try_keyring(
-        &self,
-        txn_id: TxnId,
-    ) -> TCResult<TxnLockReadGuard<HashMap<Host, VerifyingKey>>> {
-        trace!("read {self:?} keyring");
-        self.replicas.try_read(txn_id).map_err(TCError::from)
-    }
-
     async fn keyring_mut(
         &self,
         txn_id: TxnId,
@@ -703,7 +695,7 @@ where
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        debug!("Cluster::finalize");
+        trace!("Cluster::finalize");
 
         self.replicas.finalize(*txn_id);
         self.state.finalize(txn_id).await

@@ -227,8 +227,8 @@ impl Kernel {
                 let (path, dir_entry) = self.service.clone().lookup(*txn.id(), &path[1..]).await?;
 
                 match dir_entry {
-                    DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn),
-                    DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn),
+                    DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn).await,
+                    DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn).await,
                 }
             }
 
@@ -240,18 +240,18 @@ impl Kernel {
             let (path, dir_entry) = self.library.clone().lookup(*txn.id(), &path[1..]).await?;
 
             match dir_entry {
-                DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn),
-                DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn),
+                DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn).await,
+                DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn).await,
             }
         } else if path[0] == CLASS {
             let (path, dir_entry) = self.class.clone().lookup(*txn.id(), &path[1..]).await?;
 
             match dir_entry {
-                DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn),
-                DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn),
+                DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn).await,
+                DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn).await,
             }
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
-            auth_claim_route(self.hypothetical.clone(), &path[2..], txn)
+            auth_claim_route(self.hypothetical.clone(), &path[2..], txn).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -453,7 +453,7 @@ impl Kernel {
     }
 
     pub async fn finalize(&self, txn_id: &TxnId) {
-        debug!("Kernel::finalize");
+        trace!("Kernel::finalize");
 
         join!(
             self.class.finalize(txn_id),
@@ -601,7 +601,7 @@ impl Recover<CacheBlock> for Kernel {
     }
 }
 
-fn auth_claim_route<'a, T>(
+async fn auth_claim_route<'a, T>(
     cluster: Cluster<T>,
     path: &'a [PathSegment],
     txn: &'a Txn,
@@ -613,7 +613,7 @@ where
     let mode = {
         let resource_mode = cluster.umask(txn_id, path);
         let request_mode = if txn.has_claims() {
-            let keyring = cluster.try_keyring(txn_id)?;
+            let keyring = cluster.keyring(txn_id).await?;
             txn.mode(keyring, path)
         } else {
             Txn::DEFAULT_MODE
