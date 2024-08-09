@@ -96,18 +96,18 @@ impl<'a> From<&'a Library> for LibraryHandler<'a> {
     }
 }
 
-struct LibraryVersionHandler<'a> {
+struct VersionHandler<'a> {
     library: &'a Library,
     version: &'a PathSegment,
 }
 
-impl<'a> LibraryVersionHandler<'a> {
+impl<'a> VersionHandler<'a> {
     fn new(library: &'a Library, version: &'a PathSegment) -> Self {
         Self { library, version }
     }
 }
 
-impl<'a> Handler<'a, State> for LibraryVersionHandler<'a> {
+impl<'a> Handler<'a, State> for VersionHandler<'a> {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
@@ -137,16 +137,25 @@ impl<'a> Handler<'a, State> for LibraryVersionHandler<'a> {
 
 struct LibraryAttrHandler<'a> {
     library: &'a Library,
+    version: &'a Id,
     path: &'a [PathSegment],
 }
 
 impl<'a> LibraryAttrHandler<'a> {
-    fn new(library: &'a Library, path: &'a [PathSegment]) -> LibraryAttrHandler<'a> {
-        Self { library, path }
+    fn new(
+        library: &'a Library,
+        version: &'a Id,
+        path: &'a [PathSegment],
+    ) -> LibraryAttrHandler<'a> {
+        Self {
+            library,
+            version,
+            path,
+        }
     }
 
     async fn get_version(&self, txn_id: TxnId) -> TCResult<impl Deref<Target = Map<Scalar>>> {
-        let number: VersionNumber = self.path[0].as_str().parse()?;
+        let number: VersionNumber = self.version.as_str().parse()?;
         self.library.get_version(txn_id, &number).await
     }
 }
@@ -162,11 +171,11 @@ impl<'a> Handler<'a, State> for LibraryAttrHandler<'a> {
 
                 debug!(
                     "execute GET {}: {} from library version",
-                    TCPath::from(&self.path[1..]),
+                    TCPath::from(self.path),
                     key
                 );
 
-                tc_transact::public::Public::get(&*version, txn, &self.path[1..], key).await
+                tc_transact::public::Public::get(&*version, txn, &self.path, key).await
             })
         }))
     }
@@ -178,7 +187,7 @@ impl<'a> Handler<'a, State> for LibraryAttrHandler<'a> {
         Some(Box::new(move |txn, params| {
             Box::pin(async move {
                 let version = self.get_version(*txn.id()).await?;
-                tc_transact::public::Public::post(&*version, txn, &self.path[1..], params).await
+                tc_transact::public::Public::post(&*version, txn, &self.path, params).await
             })
         }))
     }
@@ -191,9 +200,13 @@ impl Route<State> for Library {
         if path.is_empty() {
             Some(Box::new(LibraryHandler::from(self)))
         } else if path.len() == 1 {
-            Some(Box::new(LibraryVersionHandler::new(self, &path[0])))
+            Some(Box::new(VersionHandler::new(self, &path[0])))
         } else {
-            Some(Box::new(LibraryAttrHandler::new(self, path)))
+            Some(Box::new(LibraryAttrHandler::new(
+                self,
+                &path[0],
+                &path[1..],
+            )))
         }
     }
 }

@@ -59,6 +59,15 @@ impl fmt::Debug for Attr {
     }
 }
 
+impl From<Attr> for State {
+    fn from(attr: Attr) -> Self {
+        match attr {
+            Attr::Chain(chain) => State::Chain(chain),
+            Attr::Scalar(scalar) => State::Scalar(scalar),
+        }
+    }
+}
+
 /// A version of a [`Service`]
 #[derive(Clone)]
 pub struct Version {
@@ -67,6 +76,7 @@ pub struct Version {
 }
 
 impl Version {
+    #[inline]
     pub fn get_attribute(&self, name: &Id) -> Option<&Attr> {
         self.attrs.get(name)
     }
@@ -277,6 +287,25 @@ impl Service {
     ) -> TCResult<impl Deref<Target = Version>> {
         let version = self.versions.get(txn_id, number).await?;
         version.ok_or_else(|| TCError::not_found(number))
+    }
+
+    pub async fn get_version_proto(&self, txn_id: TxnId, number: &Id) -> TCResult<Map<Scalar>> {
+        let block = self.schema.read_block(txn_id, number).await?;
+        let (_link, proto) = &*block;
+        Ok(proto.clone())
+    }
+
+    pub async fn list_versions(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<impl Iterator<Item = VersionNumber>> {
+        self.versions
+            .iter(txn_id)
+            .map_err(TCError::from)
+            .map_ok(|versions| {
+                versions.map(|(version_id, _version)| VersionNumber::clone(&*version_id))
+            })
+            .await
     }
 }
 

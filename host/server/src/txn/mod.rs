@@ -181,6 +181,10 @@ impl Txn {
         })
     }
 
+    pub(crate) fn host(&self) -> &Host {
+        self.client.host()
+    }
+
     pub(crate) fn token(&self) -> Option<&SignedToken> {
         self.token.as_ref().map(|token| &**token)
     }
