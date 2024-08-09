@@ -8,7 +8,7 @@ use freqfs::DirLock;
 use safecast::CastInto;
 
 use tc_error::*;
-use tc_value::{ToUrl, Value};
+use tc_value::{Link, ToUrl, Value};
 use tcgeneric::{Id, Map};
 
 use public::StateInstance;
@@ -205,4 +205,11 @@ pub trait Gateway<State: StateInstance<Txn = Self>>: Transaction<State::FE> {
     where
         L: Into<ToUrl<'a>> + Send,
         V: CastInto<Value> + Send;
+}
+
+/// Trait to define synchronization of a mutable state
+#[async_trait]
+pub trait Replicate<Txn>: Send + Sync {
+    /// Update the state of this replica from the given `source`.
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<hash::Output<hash::Sha256>>;
 }

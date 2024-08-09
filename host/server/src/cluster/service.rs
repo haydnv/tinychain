@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
-use futures::future::{join_all, try_join_all, TryFutureExt};
+use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
 use futures::join;
-use futures::stream::{FuturesOrdered, TryStreamExt};
+use futures::stream::{FuturesOrdered, FuturesUnordered, TryStreamExt};
 use log::{debug, trace};
 use safecast::*;
 
@@ -20,7 +20,7 @@ use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::hash::*;
 use tc_transact::lock::TxnMapLock;
 use tc_transact::public::ToState;
-use tc_transact::{Transact, Transaction, TxnId};
+use tc_transact::{Gateway, Replicate, Transact, Transaction, TxnId};
 use tcgeneric::{label, Id, Label, Map, NativeClass, TCPathBuf};
 
 use crate::cluster::IsDir;
@@ -69,6 +69,24 @@ pub struct Version {
 impl Version {
     pub fn get_attribute(&self, name: &Id) -> Option<&Attr> {
         self.attrs.get(name)
+    }
+}
+
+#[async_trait]
+impl Replicate<Txn> for Version {
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<Output<Sha256>> {
+        debug!("replicate {self:?} from {source}...");
+
+        for (name, attr) in self.attrs.iter() {
+            if let Attr::Chain(chain) = attr {
+                let source = source.clone().append(name.clone());
+                let txn = txn.subcontext(name.clone());
+                // TODO: parallelize
+                chain.replicate(&txn, source).await?;
+            }
+        }
+
+        AsyncHash::hash(self, *txn.id()).await
     }
 }
 
@@ -239,7 +257,7 @@ impl Recover<CacheBlock> for Version {
 
 impl fmt::Debug for Version {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a hosted Service")
+        f.write_str("a hosted Service version")
     }
 }
 
@@ -273,27 +291,98 @@ impl DirItem for Service {
         number: VersionNumber,
         class: InstanceClass,
     ) -> TCResult<Version> {
+        let version_id = number.into();
         let (link, proto) = class.into_inner();
         let proto = validate(&link, &number, proto)?;
 
         let txn_id = *txn.id();
 
-        self.schema
-            .create_block(txn_id, number.into(), (link.clone(), proto.clone()))
-            .await?;
+        if self.schema.contains_block(txn_id, &version_id).await? {
+            let existing = self.schema.read_block(txn_id, &version_id).await?;
+            let (existing_link, existing_proto) = &*existing;
+            if existing_link == &link && existing_proto == &proto {
+                let version = self
+                    .versions
+                    .get(txn_id, &number)
+                    .map_err(TCError::from)
+                    .map(|result| {
+                        result.and_then(|version| {
+                            version.ok_or_else(|| internal!("missing Service version {number}"))
+                        })
+                    })
+                    .await?;
 
-        let store = self.dir.create_dir(txn_id, number.clone().into()).await?;
-        let version = Version::create(txn_id, (link, proto), store).await?;
+                // dropping the TxnMapReadLock is safe because the Version itself is transactional
+                Ok(Version::clone(&*version))
+            } else {
+                Err(bad_request!(
+                    "{self:?} cannot overwrite existing service version {number}"
+                ))
+            }
+        } else {
+            self.schema
+                .create_block(txn_id, number.into(), (link.clone(), proto.clone()))
+                .await?;
 
-        self.versions
-            .insert(txn_id, number, version.clone())
-            .await?;
+            let store = self.dir.create_dir(txn_id, number.clone().into()).await?;
+            let version = Version::create(txn_id, (link, proto), store).await?;
 
-        Ok(version)
+            self.versions
+                .insert(txn_id, number, version.clone())
+                .await?;
+
+            Ok(version)
+        }
     }
 }
 
 impl IsDir for Service {}
+
+#[async_trait]
+impl Replicate<Txn> for Service {
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<Output<Sha256>> {
+        debug!("replicate {self:?} from {source}...");
+
+        let txn_id = *txn.id();
+        let version_ids = txn.get(source.clone(), Value::None).await?;
+        let version_ids =
+            version_ids.try_into_tuple(|s| TCError::unexpected(s, "service version numbers"))?;
+
+        let version_ids = version_ids
+            .into_iter()
+            .map(|id| {
+                let id = Value::try_from(id)?;
+                id.try_cast_into(|v| TCError::unexpected(v, "a service version number"))
+            })
+            .collect::<TCResult<BTreeSet<VersionNumber>>>()?;
+
+        trace!("version IDs to replicate are {version_ids:?}");
+
+        version_ids
+            .iter()
+            .copied()
+            .map(|number| {
+                let source = source.clone();
+                async move {
+                    let version = txn.get(source, number).await?;
+                    let version = InstanceClass::try_cast_from(version, |s| {
+                        TCError::unexpected(s, "a Service")
+                    })?;
+
+                    self.create_version(txn, number, version).await?;
+
+                    TCResult::Ok(())
+                }
+            })
+            .collect::<FuturesUnordered<_>>()
+            .try_fold((), |(), ()| futures::future::ready(Ok(())))
+            .await?;
+
+        // TODO: delete old versions
+
+        self.hash(txn_id).await
+    }
+}
 
 #[async_trait]
 impl AsyncHash for Service {

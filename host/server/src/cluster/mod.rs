@@ -18,7 +18,7 @@ use tc_state::chain::Recover;
 use tc_transact::hash::{Output, Sha256};
 use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnMapLockIter};
 use tc_transact::{fs, Gateway};
-use tc_transact::{Transact, Transaction, TxnId};
+use tc_transact::{Replicate, Transact, Transaction, TxnId};
 use tc_value::{Host, Link, ToUrl, Value};
 use tcgeneric::{label, Label, PathSegment, TCBoxTryFuture, TCPathBuf, Tuple};
 
@@ -91,11 +91,6 @@ impl Schema {
             group: self.group,
         }
     }
-}
-
-#[async_trait]
-pub trait Replicate: Send + Sync {
-    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<Output<Sha256>>;
 }
 
 #[async_trait]
@@ -520,7 +515,7 @@ pub(crate) trait ReplicateAndJoin {
 #[async_trait]
 impl<T> ReplicateAndJoin for Cluster<T>
 where
-    T: Replicate + Transact + fmt::Debug,
+    T: Replicate<Txn> + Transact + fmt::Debug,
 {
     async fn replicate_and_join(&self, txn: Txn, peer: Host) -> TCResult<()> {
         info!("replicating {} from {}...", self.path(), peer);

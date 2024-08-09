@@ -20,13 +20,13 @@ use tc_transact::hash::*;
 use tc_transact::lock::{TxnLockReadGuard, TxnMapLock, TxnMapLockEntry, TxnMapLockIter};
 use tc_transact::public::Route;
 use tc_transact::{fs, Gateway};
-use tc_transact::{Transact, Transaction, TxnId};
+use tc_transact::{Replicate, Transact, Transaction, TxnId};
 use tc_value::{Host, Link, Value, Version as VersionNumber};
 use tcgeneric::{Id, Map, PathSegment, TCBoxTryFuture, TCPath, ThreadSafe};
 
 use crate::{CacheBlock, State, Txn, VerifyingKey};
 
-use super::{Class, Cluster, IsDir, Library, Replicate, Schema};
+use super::{Class, Cluster, IsDir, Library, Schema};
 
 #[async_trait]
 pub trait DirCreate: Sized {
@@ -409,7 +409,7 @@ where
 }
 
 #[async_trait]
-impl<T> Replicate for Dir<T>
+impl<T> Replicate<Txn> for Dir<T>
 where
     T: Send + Sync + fmt::Debug,
     Cluster<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,

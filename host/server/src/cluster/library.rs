@@ -13,11 +13,11 @@ use tc_scalar::value::Version as VersionNumber;
 use tc_scalar::{OpDef, Scalar};
 use tc_state::CacheBlock;
 use tc_transact::hash::*;
-use tc_transact::{fs, Gateway, Transact, Transaction, TxnId};
+use tc_transact::{fs, Gateway, Replicate, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Label, Map};
 
-use crate::cluster::{IsDir, Replicate};
+use crate::cluster::IsDir;
 use crate::Txn;
 
 use super::dir::DirItem;
@@ -91,7 +91,7 @@ impl DirItem for Library {
 impl IsDir for Library {}
 
 #[async_trait]
-impl Replicate for Library {
+impl Replicate<Txn> for Library {
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<Output<Sha256>> {
         debug!("replicate {self:?} from {source}...");
 
@@ -137,22 +137,7 @@ impl Replicate for Library {
             .try_fold((), |(), ()| futures::future::ready(Ok(())))
             .await?;
 
-        let mut to_delete = vec![];
-        for version_id in self.versions.block_ids(txn_id).await? {
-            let version_id = version_id.as_str().parse()?;
-            if !version_ids.contains(&version_id) {
-                to_delete.push(version_id);
-            }
-        }
-
-        trace!("version IDs to delete are {to_delete:?}");
-
-        to_delete
-            .into_iter()
-            .map(|number| self.versions.delete_block(txn_id, number.into()))
-            .collect::<FuturesUnordered<_>>()
-            .try_fold((), |(), _| futures::future::ready(Ok(())))
-            .await?;
+        // TODO: delete old versions
 
         self.hash(txn_id).await
     }

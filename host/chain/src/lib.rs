@@ -11,15 +11,15 @@ use freqfs::FileSave;
 use futures::future::TryFutureExt;
 use safecast::{AsType, TryCastFrom};
 
-use tc_collection::{Collection, CollectionBlock};
+use tc_collection::{Collection, CollectionBase, CollectionBlock};
 use tc_error::*;
 use tc_scalar::Scalar;
-use tc_transact::fs;
 use tc_transact::hash::{AsyncHash, GenericArray, Output, Sha256};
 use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Route, StateInstance};
+use tc_transact::{fs, Replicate};
 use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::Value;
+use tc_value::{Link, Value};
 use tcgeneric::*;
 
 use data::{MutationPending, MutationRecord};
@@ -173,6 +173,27 @@ where
         match self {
             Self::Block(chain) => chain.subject(),
             Self::Sync(chain) => chain.subject(),
+        }
+    }
+}
+
+#[async_trait]
+impl<State> Replicate<State::Txn>
+    for Chain<State, State::Txn, State::FE, CollectionBase<State::Txn, State::FE>>
+where
+    State: StateInstance,
+    State::FE: CacheBlock,
+    State: From<Collection<State::Txn, State::FE>> + From<Scalar>,
+    Collection<State::Txn, State::FE>: TryCastFrom<State>,
+    CollectionBase<State::Txn, State::FE>: Route<State> + TryCastFrom<State>,
+    Scalar: TryCastFrom<State>,
+    BlockChain<State, State::Txn, State::FE, CollectionBase<State::Txn, State::FE>>:
+        TryCastFrom<State>,
+{
+    async fn replicate(&self, txn: &State::Txn, source: Link) -> TCResult<Output<Sha256>> {
+        match self {
+            Self::Block(chain) => chain.replicate(txn, source).await,
+            Self::Sync(chain) => chain.replicate(txn, source).await,
         }
     }
 }

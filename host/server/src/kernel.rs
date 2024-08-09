@@ -21,14 +21,14 @@ use tc_state::chain::Recover;
 use tc_state::CacheBlock;
 use tc_transact::hash::AsyncHash;
 use tc_transact::public::*;
-use tc_transact::{fs, Gateway, Transact, Transaction, TxnId};
+use tc_transact::{fs, Gateway, Replicate, Transact, Transaction, TxnId};
 use tc_value::{Host, Link, ToUrl, Value};
 use tcgeneric::{label, Label, Map, NetworkTime, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::client::Egress;
 #[cfg(feature = "service")]
 use crate::cluster::Service;
-use crate::cluster::{Class, Cluster, Dir, DirEntry, IsDir, Library, Replicate, ReplicateAndJoin};
+use crate::cluster::{Class, Cluster, Dir, DirEntry, IsDir, Library, ReplicateAndJoin};
 use crate::txn::{Hypothetical, Txn, TxnServer};
 use crate::{aes256, cluster, Authorize, SignedToken, State};
 
@@ -366,7 +366,7 @@ impl Kernel {
         peers: &BTreeSet<Host>,
     ) -> Result<(), bool>
     where
-        T: Replicate + Transact + Clone + fmt::Debug,
+        T: Replicate<Txn> + Transact + Clone + fmt::Debug,
     {
         info!(
             "Kernel::replicate_and_join_dir {} with peers {:?}",

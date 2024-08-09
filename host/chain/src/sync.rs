@@ -15,10 +15,10 @@ use safecast::{AsType, TryCastFrom, TryCastInto};
 use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
-use tc_transact::fs;
 use tc_transact::hash::{AsyncHash, Output, Sha256};
 use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Route, StateInstance};
+use tc_transact::{fs, Replicate};
 use tc_transact::{Gateway, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
 use tcgeneric::{label, Label};
@@ -134,6 +134,24 @@ where
 
     fn subject(&self) -> &T {
         &self.subject
+    }
+}
+
+#[async_trait]
+impl<State, T> Replicate<State::Txn> for SyncChain<State, State::Txn, State::FE, T>
+where
+    State: StateInstance,
+    State::FE: AsType<ChainBlock>,
+    T: fs::Persist<State::FE, Txn = State::Txn>
+        + fs::Restore<State::FE>
+        + TryCastFrom<State>
+        + AsyncHash
+        + Send
+        + Sync,
+{
+    async fn replicate(&self, txn: &State::Txn, source: Link) -> TCResult<Output<Sha256>> {
+        self.restore_from(txn, source).await?;
+        AsyncHash::hash(self, *txn.id()).await
     }
 }
 

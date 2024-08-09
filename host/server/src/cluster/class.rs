@@ -12,11 +12,11 @@ use tc_error::*;
 use tc_scalar::Scalar;
 use tc_state::object::InstanceClass;
 use tc_transact::hash::*;
-use tc_transact::{fs, Gateway, Transact, Transaction, TxnId};
+use tc_transact::{fs, Gateway, Replicate, Transact, Transaction, TxnId};
 use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{Id, Map};
 
-use crate::cluster::{IsDir, Replicate};
+use crate::cluster::IsDir;
 use crate::{CacheBlock, State, Txn};
 
 use super::dir::DirItem;
@@ -152,7 +152,7 @@ impl DirItem for Class {
 impl IsDir for Class {}
 
 #[async_trait]
-impl Replicate for Class {
+impl Replicate<Txn> for Class {
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<Output<Sha256>> {
         let txn_id = *txn.id();
         let version_ids = txn.get(source.clone(), Value::None).await?;
