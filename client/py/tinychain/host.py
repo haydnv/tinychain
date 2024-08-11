@@ -145,7 +145,7 @@ class Host(object):
 
         return self._handle(request)
 
-    def _create_namespace(self, path):
+    def create_namespace(self, path):
         exists = 1
         while exists < len(path):
             try:
@@ -170,7 +170,7 @@ class Host(object):
         assert install_path[:1] in [URI(Library), URI(Service)]
 
         class_uri = URI(Model) + install_path[1:]
-        self._create_namespace(class_uri[:-1])
+        self.create_namespace(class_uri[:-1])
 
         # TODO: replace this with a package manager
         class_set = {}
@@ -182,7 +182,7 @@ class Host(object):
         if class_set:
             self.put(class_uri[:-1], class_uri[-1], class_set)
 
-        self._create_namespace(install_path[:-1])
+        self.create_namespace(install_path[:-1])
         self.put(install_path[:-1], install_path[-1], lib_or_service)
 
     def update(self, lib_or_service):

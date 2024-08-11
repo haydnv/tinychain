@@ -272,6 +272,7 @@ impl fmt::Debug for Version {
 }
 
 /// A stateful collection of [`Chain`]s and [`Scalar`] methods ([`Attr`]s)
+// TODO: remove the Link from the service prototype
 #[derive(Clone)]
 pub struct Service {
     dir: Dir<CacheBlock>,
@@ -289,10 +290,10 @@ impl Service {
         version.ok_or_else(|| TCError::not_found(number))
     }
 
-    pub async fn get_version_proto(&self, txn_id: TxnId, number: &Id) -> TCResult<Map<Scalar>> {
+    pub async fn get_version_proto(&self, txn_id: TxnId, number: &Id) -> TCResult<InstanceClass> {
         let block = self.schema.read_block(txn_id, number).await?;
-        let (_link, proto) = &*block;
-        Ok(proto.clone())
+        let (link, proto) = &*block;
+        Ok(InstanceClass::extend(link.clone(), proto.clone()))
     }
 
     pub async fn list_versions(
@@ -345,7 +346,7 @@ impl DirItem for Service {
                 Ok(Version::clone(&*version))
             } else {
                 Err(bad_request!(
-                    "{self:?} cannot overwrite existing service version {number}"
+                    "{self:?} cannot overwrite existing Service version {number}"
                 ))
             }
         } else {
@@ -375,13 +376,13 @@ impl Replicate<Txn> for Service {
         let txn_id = *txn.id();
         let version_ids = txn.get(source.clone(), Value::None).await?;
         let version_ids =
-            version_ids.try_into_tuple(|s| TCError::unexpected(s, "service version numbers"))?;
+            version_ids.try_into_tuple(|s| TCError::unexpected(s, "Service version numbers"))?;
 
         let version_ids = version_ids
             .into_iter()
             .map(|id| {
                 let id = Value::try_from(id)?;
-                id.try_cast_into(|v| TCError::unexpected(v, "a service version number"))
+                id.try_cast_into(|v| TCError::unexpected(v, "a Service version number"))
             })
             .collect::<TCResult<BTreeSet<VersionNumber>>>()?;
 

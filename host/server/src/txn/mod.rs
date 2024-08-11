@@ -6,7 +6,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use freqfs::DirLock;
 use futures::Future;
-use log::debug;
 use rjwt::{Token, VerifyingKey};
 use safecast::CastInto;
 use umask::Mode;
@@ -181,6 +180,7 @@ impl Txn {
         })
     }
 
+    #[cfg(feature = "service")]
     pub(crate) fn host(&self) -> &Host {
         self.client.host()
     }
@@ -195,7 +195,7 @@ impl Txn {
         #[cfg(debug_assertions)]
         {
             let expected = Value::Bytes((*actor.public_key().as_bytes()).into());
-            debug!("grant {mode} on {path} to {actor:?} at {link} with public key {expected}");
+            log::debug!("grant {mode} on {path} to {actor:?} at {link} with public key {expected}");
         }
 
         let now = NetworkTime::now();

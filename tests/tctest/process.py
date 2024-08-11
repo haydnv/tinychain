@@ -80,7 +80,7 @@ class Docker(tc.host.Local.Process):
         self.stop()
 
 
-def start_docker(ns, host_uri=None, public_key=None, wait_time=3, **flags):
+def start_docker(ns, host_uri=None, public_key=None, wait_time=4, **flags):
     assert ns.startswith('/'), f"namespace must be a URI path, not {ns}"
 
     if not os.path.exists(DOCKERFILE):
@@ -165,7 +165,7 @@ class Local(tc.host.Local.Process):
             self.stop()
 
 
-def _start_local_host_process(ns, host_uri=None, symmetric_key=None, wait_time=3, **flags):
+def _start_local_host_process(ns, host_uri=None, symmetric_key=None, wait_time=4, **flags):
     assert ns.startswith('/'), f"namespace must be a URI path, not {ns}"
     name = str(ns)[1:].replace('/', '_')
 
@@ -209,12 +209,12 @@ def _start_local_host_process(ns, host_uri=None, symmetric_key=None, wait_time=3
     return process, port
 
 
-def start_local_host(ns, host_uri=None, symmetric_key=None, wait_time=2, **flags):
+def start_local_host(ns, host_uri=None, symmetric_key=None, wait_time=4, **flags):
     process, port = _start_local_host_process(ns, host_uri, symmetric_key, wait_time, **flags)
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
-def start_local_host_async(ns, host_uri=None, key=None, wait_time=2, **flags):
+def start_local_host_async(ns, host_uri=None, key=None, wait_time=4, **flags):
     process, port = _start_local_host_process(ns, host_uri, key, wait_time, **flags)
     return tc_async.host.Local(process, f"http://{process.ADDRESS}:{port}")
 

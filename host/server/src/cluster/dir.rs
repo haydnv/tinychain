@@ -444,14 +444,14 @@ where
         for (name, is_dir) in state {
             if !self.contents.contains_key(txn_id, &name).await? {
                 let schema = self.schema.clone().append(name.clone());
-                let store = self.dir.create_dir(txn_id, name.clone()).await?;
+                let store = self.dir.get_or_create_dir(txn_id, name.clone()).await?;
 
                 let entry = if is_dir {
-                    fs::Persist::create(txn_id, schema, store)
+                    fs::Persist::load_or_create(txn_id, schema, store)
                         .map_ok(DirEntry::Dir)
                         .await
                 } else {
-                    fs::Persist::create(txn_id, schema, store)
+                    fs::Persist::load_or_create(txn_id, schema, store)
                         .map_ok(DirEntry::Item)
                         .await
                 }?;

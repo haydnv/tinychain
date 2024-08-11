@@ -1,8 +1,6 @@
-import time
-import unittest
-
 import os
 import tinychain as tc
+import unittest
 
 from ..process import start_host
 
@@ -36,15 +34,15 @@ class LibraryVersionTests(unittest.TestCase):
         key = os.urandom(32)
         hosts = []
 
-        hosts.append(start_host(NS, http_port=8702, symmetric_key=key, wait_time=5))
-        hosts.append(start_host(NS, http_port=8703, symmetric_key=key, wait_time=5))
+        hosts.append(start_host(NS, http_port=8702, symmetric_key=key))
+        hosts.append(start_host(NS, http_port=8703, symmetric_key=key))
 
         for i in range(len(hosts)):
             print()
             print(f"host {i} replicas", hosts[i].get("/lib/replicas"))
             print()
 
-        hosts.append(start_host(NS, http_port=8704, symmetric_key=key, wait_time=5))
+        hosts.append(start_host(NS, http_port=8704, symmetric_key=key))
 
         for i in range(len(hosts)):
             print()
@@ -70,7 +68,7 @@ class LibraryVersionTests(unittest.TestCase):
         print()
 
         print("starting additional host...")
-        hosts.append(start_host(NS, [], http_port=8705, symmetric_key=key, wait_time=5))
+        hosts.append(start_host(NS, [], http_port=8705, symmetric_key=key))
         print("started")
 
         for i in range(len(hosts)):
@@ -95,7 +93,7 @@ class LibraryVersionTests(unittest.TestCase):
         print(f"restarting {hosts[1]}...")
         print()
 
-        hosts[1].start(wait_time=5)
+        hosts[1].start()
 
         print()
         print("host started")
@@ -108,7 +106,7 @@ class LibraryVersionTests(unittest.TestCase):
 
         print()
         print("starting additional host...")
-        hosts.append(start_host(NS, http_port=8706, symmetric_key=key, wait_time=5))
+        hosts.append(start_host(NS, http_port=8706, symmetric_key=key))
         print("started")
         print()
 

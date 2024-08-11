@@ -105,7 +105,12 @@ impl Broadcast {
     }
 
     pub async fn make_discoverable(&mut self, host: &Host) -> mdns_sd::Result<()> {
-        let hostname = self.hostname();
+        let hostname = if self.hostname().ends_with(".local") {
+            self.hostname().to_string()
+        } else {
+            format!("{}.local.", self.hostname())
+        };
+
         let address = host.address().as_ip().expect("IP address");
 
         let my_service = ServiceInfo::new(
@@ -117,7 +122,7 @@ impl Broadcast {
             HashMap::<String, String>::default(),
         )?;
 
-        info!("registering mDNS service at {}", host);
+        info!("registering mDNS service for {} at {}", host, hostname);
 
         self.daemon.register(my_service)?;
 

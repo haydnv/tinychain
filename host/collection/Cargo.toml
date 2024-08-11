@@ -26,17 +26,17 @@ destream = "0.7"
 ds-ext = { path = "../../../ds-ext" }
 futures = "0.3"
 freqfs = { path = "../../../freqfs", features = ["logging"] }
-ha-ndarray = { version = "0.3", optional = true }
-itertools = { version = "0.12", optional = true }
+ha-ndarray = { path = "../../../ha-ndarray", optional = true }
+itertools = { version = "0.13", optional = true }
 log = { version = "0.4", features = ["release_max_level_info"] }
 num_cpus = "1.16"
 smallvec = { version = "1.13", optional = true }
 pin-project = "1.1"
-rayon = { version = "1.8", optional = true }
+rayon = { version = "1.10", optional = true }
 safecast = "0.2"
 tc-error = { path = "../error" }
 tc-scalar = { path = "../scalar" }
 tc-transact = { path = "../transact" }
 tc-value = { path = "../value" }
 tcgeneric = { path = "../generic" }
-tokio = { version = "1.36", optional = true }
+tokio = { version = "1.39", optional = true }

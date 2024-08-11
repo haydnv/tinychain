@@ -41,7 +41,7 @@ impl<'a> Handler<'a, State> for ServiceHandler<'a> {
 
                     let version = self.service.get_version_proto(*txn.id(), &number).await?;
 
-                    Ok(State::Scalar(version.into()))
+                    Ok(version.into())
                 } else {
                     let version_numbers = self.service.list_versions(*txn.id()).await?;
                     let version_numbers = version_numbers.into_iter().map(Id::from).collect();
@@ -140,7 +140,7 @@ impl<'a> Handler<'a, State> for VersionHandler<'a> {
                         .get_version_proto(*txn.id(), self.version)
                         .await?;
 
-                    Ok(State::Scalar(version.clone().into()))
+                    Ok(version.into())
                 } else {
                     let attr_name: Id =
                         key.try_cast_into(|v| TCError::unexpected(v, "a library attribute name"))?;

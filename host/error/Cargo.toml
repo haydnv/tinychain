@@ -14,7 +14,7 @@ categories = ["rust-patterns"]
 [dependencies]
 async-trait = "0.1"
 destream = "0.7"
-ha-ndarray = { version = "0.3", optional = true }
+ha-ndarray = { path = "../../../ha-ndarray", optional = true }
 log = { version = "0.4", features = ["release_max_level_info"] }
 pathlink = { path = "../../../pathlink" }
 rjwt = { path = "../../../rjwt/rust", optional = true }

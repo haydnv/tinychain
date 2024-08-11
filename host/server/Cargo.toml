@@ -24,10 +24,10 @@ destream = "0.7"
 ds-ext = { path = "../../../ds-ext" }
 futures = "0.3"
 freqfs = { path = "../../../freqfs" }
-gethostname = "0.4"
+gethostname = "0.5"
 local-ip-address = "0.6"
 log = "0.4"
-mdns-sd = "0.10"
+mdns-sd = "0.11"
 rand = "0.8"
 rjwt = { path = "../../../rjwt/rust" }
 safecast = "0.2"
@@ -39,10 +39,10 @@ tc-state = { path = "../state" }
 tc-value = { path = "../value" }
 tc-transact = { path = "../transact" }
 tcgeneric = { path = "../generic" }
-tokio = { version = "1.36", features = ["sync", "time"] }
+tokio = { version = "1.39", features = ["sync", "time"] }
 umask = "2.1"
-uuid = { version = "1.7", features = ["v4"] }
+uuid = { version = "1.10", features = ["v4"] }
 
 [dev-dependencies]
 env_logger = "0.11"
-tokio = { version = "1.36", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.39", features = ["macros", "rt-multi-thread"] }
