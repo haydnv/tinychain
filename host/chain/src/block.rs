@@ -88,8 +88,13 @@ where
     Scalar: TryCastFrom<State>,
     Self: TryCastFrom<State>,
 {
-    async fn replicate(&self, txn: &State::Txn, source: Link) -> TCResult<Output<Sha256>> {
-        let chain = txn.get(source, Value::default()).await?;
+    async fn replicate(&self, txn: &State::Txn, mut source: Link) -> TCResult<Output<Sha256>> {
+        let attr = source
+            .path_mut()
+            .pop()
+            .ok_or_else(|| bad_request!("invalid replica link: {source}"))?;
+
+        let chain = txn.get(source, attr).await?;
         let chain: Self = chain.try_cast_into(|s| {
             bad_request!("expected to replicate a chain of blocks but found {:?}", s,)
         })?;

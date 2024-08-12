@@ -96,12 +96,21 @@ impl<'a> Handler<'a, State> for ServiceHandler<'a> {
                     .create_version(txn, number.clone(), schema)
                     .await?;
 
-                if link.host() == Some(txn.host()) {
-                    debug!("no need to replicate from {link}");
-                } else {
-                    let source = link.append(number);
-                    debug!("replicating new service version from {source}...");
-                    version.replicate(txn, source).await?;
+                if let Some(source_host) = link.host() {
+                    if source_host == txn.host()
+                        || (source_host.is_localhost() && source_host.port() == txn.host().port())
+                    {
+                        debug!("no need to replicate from {link}");
+                    } else {
+                        let source = link.append(number);
+
+                        debug!(
+                            "{} will replicate a new Service version {number} from {source}...",
+                            txn.host()
+                        );
+
+                        version.replicate(txn, source).await?;
+                    }
                 }
 
                 Ok(())

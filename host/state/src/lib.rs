@@ -1040,6 +1040,23 @@ impl<Txn> TryCastFrom<State<Txn>> for BlockChain<Txn, CollectionBase<Txn>> {
     }
 }
 
+#[cfg(feature = "chain")]
+impl<Txn> TryCastFrom<State<Txn>> for SyncChain<Txn, CollectionBase<Txn>> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
+        match state {
+            State::Chain(Chain::Sync(_)) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
+        match state {
+            State::Chain(Chain::Sync(chain)) => Some(chain),
+            _ => None,
+        }
+    }
+}
+
 impl<Txn> TryCastFrom<State<Txn>> for Closure<Txn> {
     fn can_cast_from(state: &State<Txn>) -> bool {
         match state {

@@ -1,3 +1,4 @@
+import os
 import rjwt
 import tinychain as tc
 
@@ -14,7 +15,7 @@ class PersistenceTest(object):
     def service(self, chain_type):
         raise NotImplementedError
 
-    def execute(self, actor, hosts):
+    def execute(self, hosts):
         raise NotImplementedError
 
     def testBlockChain(self):
@@ -26,14 +27,9 @@ class PersistenceTest(object):
     def _execute(self, chain_type):
         service = self.service(chain_type)
 
-        lead = tc.URI(service)[0]
-        if lead.host() is None:
-            print(f"cannot test replication of a service with no lead replica", service)
-            return
-
         namespace = tc.URI(service).path()[1:-2]
 
-        actor = rjwt.Actor('/')
+        key = os.urandom(32)
 
         hosts = []
         for i in range(self.NUM_HOSTS):
@@ -42,20 +38,14 @@ class PersistenceTest(object):
             host = start_host(
                 namespace,
                 host_uri=host_uri,
-                public_key=actor.public_key,
-                cache_size=self.CACHE_SIZE,
-                replicate=lead)
+                symmetric_key=key,
+                cache_size=self.CACHE_SIZE)
 
             hosts.append(host)
 
-        print()
-        hosts[0].create_namespace(actor, tc.URI(tc.service.Service), namespace, lead)
+        hosts[0].install(service)
 
-        print()
-        hosts[0].install(actor, service)
-        print()
-
-        self.execute(actor, hosts)
+        self.execute(hosts)
 
         for host in hosts:
             host.stop()

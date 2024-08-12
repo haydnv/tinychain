@@ -247,7 +247,7 @@ impl<T: fmt::Debug> Cluster<T> {
     async fn replicate_write<Write, Fut>(
         &self,
         txn: &Txn,
-        path: &[PathSegment],
+        suffix: &[PathSegment],
         op: Write,
     ) -> TCResult<()>
     where
@@ -256,8 +256,8 @@ impl<T: fmt::Debug> Cluster<T> {
     {
         let this_host = self.link().host().cloned().unwrap_or_else(default_host);
 
-        let mut uri = self.path().clone();
-        uri.extend(path.into_iter().cloned());
+        let mut path = self.path().clone();
+        path.extend(suffix.into_iter().cloned());
 
         let (num_replicas, mut failed) = {
             let replicas = {
@@ -267,7 +267,7 @@ impl<T: fmt::Debug> Cluster<T> {
 
             let num_replicas = replicas.len();
 
-            let failed = Self::replicate_write_inner(&txn, &this_host, replicas, &uri, op).await?;
+            let failed = Self::replicate_write_inner(&txn, &this_host, replicas, &path, op).await?;
 
             (num_replicas, failed)
         };
@@ -283,7 +283,7 @@ impl<T: fmt::Debug> Cluster<T> {
             umask::USER_WRITE,
         )?;
 
-        let uri = self.path().clone().append(REPLICAS);
+        let path = self.path().clone().append(REPLICAS);
 
         let mut num_failed = failed.len();
         while !failed.is_empty() && num_failed * 2 < num_replicas {
@@ -300,7 +300,7 @@ impl<T: fmt::Debug> Cluster<T> {
                 (replicas.clone(), to_remove)
             };
 
-            failed = Self::replicate_write_inner(&txn, &this_host, replicas, &uri, |txn, link| {
+            failed = Self::replicate_write_inner(&txn, &this_host, replicas, &path, |txn, link| {
                 let to_remove = to_remove.clone();
                 async move { txn.delete(link, to_remove).await }
             })
@@ -320,7 +320,7 @@ impl<T: fmt::Debug> Cluster<T> {
         txn: &Txn,
         this_host: &Host,
         replicas: HashMap<Host, VerifyingKey>,
-        uri: &TCPathBuf,
+        path: &TCPathBuf,
         op: Write,
     ) -> TCResult<Vec<Host>>
     where
@@ -332,7 +332,7 @@ impl<T: fmt::Debug> Cluster<T> {
             .filter(|host| !(host.is_localhost() && host.port() == this_host.port()))
             .filter(|host| host != this_host)
             .map(|host| {
-                op(txn.clone(), Link::new(host.clone(), uri.clone()))
+                op(txn.clone(), Link::new(host.clone(), path.clone()))
                     .map(move |result| (host, result))
             })
             .collect();

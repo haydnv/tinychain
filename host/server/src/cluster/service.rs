@@ -3,7 +3,7 @@ use std::fmt;
 use std::ops::Deref;
 
 use async_trait::async_trait;
-use futures::future::{join_all, try_join_all, FutureExt, TryFutureExt};
+use futures::future::{join_all, try_join_all, Future, FutureExt, TryFutureExt};
 use futures::join;
 use futures::stream::{FuturesOrdered, FuturesUnordered, TryStreamExt};
 use log::{debug, trace};
@@ -373,7 +373,6 @@ impl Replicate<Txn> for Service {
     async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<Output<Sha256>> {
         debug!("replicate {self:?} from {source}...");
 
-        let txn_id = *txn.id();
         let version_ids = txn.get(source.clone(), Value::None).await?;
         let version_ids =
             version_ids.try_into_tuple(|s| TCError::unexpected(s, "Service version numbers"))?;
@@ -410,7 +409,23 @@ impl Replicate<Txn> for Service {
 
         // TODO: delete old versions
 
-        self.hash(txn_id).await
+        let versions = self.versions.iter(*txn.id()).await?;
+
+        let versions: FuturesOrdered<_> = versions
+            .map(|(number, version)| {
+                let source = source.clone().append((*number).clone());
+
+                async move {
+                    let version_hash = version.replicate(txn, source).await?;
+                    let mut hasher = Sha256::new();
+                    hasher.update(Hash::<Sha256>::hash(*number));
+                    hasher.update(version_hash);
+                    Ok(hasher.finalize())
+                }
+            })
+            .collect();
+
+        construct_hash(versions).await
     }
 }
 
@@ -418,7 +433,7 @@ impl Replicate<Txn> for Service {
 impl AsyncHash for Service {
     async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         let versions = self.versions.iter(txn_id).await?;
-        let mut versions: FuturesOrdered<_> = versions
+        let versions: FuturesOrdered<_> = versions
             .map(|(number, version)| async move {
                 version
                     .hash(txn_id)
@@ -432,18 +447,25 @@ impl AsyncHash for Service {
             })
             .collect();
 
-        let mut is_empty = true;
-        let mut hasher = Sha256::new();
-        while let Some(hash) = versions.try_next().await? {
-            hasher.update(hash);
-            is_empty = false;
-        }
+        construct_hash(versions).await
+    }
+}
 
-        if is_empty {
-            Ok(default_hash::<Sha256>())
-        } else {
-            Ok(hasher.finalize())
-        }
+async fn construct_hash<Fut>(mut versions: FuturesOrdered<Fut>) -> TCResult<Output<Sha256>>
+where
+    Fut: Future<Output = TCResult<Output<Sha256>>>,
+{
+    let mut is_empty = true;
+    let mut hasher = Sha256::new();
+    while let Some(hash) = versions.try_next().await? {
+        hasher.update(hash);
+        is_empty = false;
+    }
+
+    if is_empty {
+        Ok(default_hash::<Sha256>())
+    } else {
+        Ok(hasher.finalize())
     }
 }
 

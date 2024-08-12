@@ -1,8 +1,8 @@
 use std::fmt;
 use std::sync::Arc;
 
+use futures::future::{Future, TryFutureExt};
 use futures::stream::{FuturesUnordered, TryStreamExt};
-use futures::Future;
 use log::debug;
 use rjwt::VerifyingKey;
 use safecast::{TryCastFrom, TryCastInto};
@@ -239,7 +239,7 @@ where
                 let txn = self.cluster.claim(txn.clone())?;
                 self.cluster.state.delete(&txn, &[], key.clone()).await?;
 
-                maybe_replicate(&self.cluster, &txn, |txn, link| {
+                maybe_replicate(&self.cluster, &txn, &[], |txn, link| {
                     let key = key.clone();
                     async move { txn.delete(link, key).await }
                 })
@@ -311,11 +311,14 @@ where
             Box::pin(async move {
                 debug!("PUT {:?} replica {key}: {value:?}", self.cluster);
 
-                let new_replica_hash = Value::try_from(value).and_then(Arc::<[u8]>::try_from)?;
-                let this_replica_hash = AsyncHash::hash(self.cluster.state(), *txn.id()).await?;
+                let new_replica_hash = Value::try_from(value)?;
+                let this_replica_hash = AsyncHash::hash(self.cluster.state(), *txn.id())
+                    .map_ok(|hash| Arc::<[u8]>::from(hash.as_slice()))
+                    .map_ok(Value::Bytes)
+                    .await?;
 
-                if &new_replica_hash[..] != &this_replica_hash[..] {
-                    return Err(bad_request!("the provided cluster state hash is incorrect"));
+                if new_replica_hash != this_replica_hash {
+                    return Err(bad_request!("the provided cluster state hash {new_replica_hash} differs from the hash of this cluster {this_replica_hash}"));
                 }
 
                 let mut keyring = self.cluster.keyring_mut(*txn.id()).await?;
@@ -483,7 +486,7 @@ where
                     .put(&txn, path, key.clone(), value.clone())
                     .await?;
 
-                maybe_replicate(&cluster, &txn, |txn, link| {
+                maybe_replicate(&cluster, &txn, path, |txn, link| {
                     let key = key.clone();
                     let value = value.clone();
                     async move { txn.put(link, key, value).await }
@@ -516,7 +519,7 @@ where
             Box::pin(async move {
                 let txn = cluster.claim(txn.clone())?;
                 cluster.state().delete(&txn, path, key.clone()).await?;
-                maybe_replicate(&cluster, &txn, |txn, link| {
+                maybe_replicate(&cluster, &txn, path, |txn, link| {
                     let key = key.clone();
 
                     async move { txn.delete(link, key).await }
@@ -527,7 +530,12 @@ where
     }
 }
 
-async fn maybe_replicate<T, Op, Fut>(cluster: &Cluster<T>, txn: &Txn, op: Op) -> TCResult<()>
+async fn maybe_replicate<T, Op, Fut>(
+    cluster: &Cluster<T>,
+    txn: &Txn,
+    path: &[PathSegment],
+    op: Op,
+) -> TCResult<()>
 where
     T: Transact + Send + Sync + fmt::Debug,
     Op: Fn(Txn, Link) -> Fut,
@@ -538,7 +546,7 @@ where
         .ok_or_else(|| internal!("leaderless transaction"))?;
 
     if leader_pk == cluster.public_key() {
-        cluster.replicate_write(txn, &[], op).await?;
+        cluster.replicate_write(txn, path, op).await?;
     }
 
     let owner = txn

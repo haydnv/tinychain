@@ -95,6 +95,16 @@ struct Config {
     )]
     pub peers: Vec<Host>,
 
+    #[cfg(debug_assertions)]
+    #[arg(
+        long = "request_ttl",
+        value_parser = duration,
+        default_value = "10",
+        help = "maximum allowed request duration (in seconds)",
+    )]
+    pub request_ttl: Duration,
+
+    #[cfg(not(debug_assertions))]
     #[arg(
         long = "request_ttl",
         value_parser = duration,

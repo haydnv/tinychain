@@ -189,6 +189,8 @@ where
     Scalar: TryCastFrom<State>,
     BlockChain<State, State::Txn, State::FE, CollectionBase<State::Txn, State::FE>>:
         TryCastFrom<State>,
+    SyncChain<State, State::Txn, State::FE, CollectionBase<State::Txn, State::FE>>:
+        TryCastFrom<State>,
 {
     async fn replicate(&self, txn: &State::Txn, source: Link) -> TCResult<Output<Sha256>> {
         match self {

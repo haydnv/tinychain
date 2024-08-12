@@ -385,7 +385,7 @@ impl From<io::Error> for TCError {
                 panic!("tried to create an entry that already exists: {}", cause);
 
                 #[cfg(not(debug_assertions))]
-                bad_request!("tried to create an entry that already exists").consume(cause);
+                bad_request!("tried to create an entry that already exists").consume(cause)
             }
             io::ErrorKind::InvalidInput => bad_request!("{}", cause),
             io::ErrorKind::NotFound => TCError::not_found(cause),

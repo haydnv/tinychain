@@ -169,9 +169,6 @@ class Host(object):
         assert install_path
         assert install_path[:1] in [URI(Library), URI(Service)]
 
-        class_uri = URI(Model) + install_path[1:]
-        self.create_namespace(class_uri[:-1])
-
         # TODO: replace this with a package manager
         class_set = {}
         lib_or_service_json = to_json(lib_or_service)[URI(lib_or_service)[:-1]]
@@ -180,6 +177,8 @@ class Host(object):
                 class_set[name] = lib_or_service_json[name]
 
         if class_set:
+            class_uri = URI(Model) + install_path[1:]
+            self.create_namespace(class_uri[:-1])
             self.put(class_uri[:-1], class_uri[-1], class_set)
 
         self.create_namespace(install_path[:-1])
