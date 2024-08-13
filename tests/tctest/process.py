@@ -215,8 +215,8 @@ def start_local_host(ns, host_uri=None, symmetric_key=None, wait_time=HOST_START
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
-def start_local_host_async(ns, host_uri=None, key=None, wait_time=HOST_START_WAIT_TIME, **flags):
-    process, port = _start_local_host_process(ns, host_uri, key, wait_time, **flags)
+def start_local_host_async(ns, host_uri=None, symmetric_key=None, wait_time=HOST_START_WAIT_TIME, **flags):
+    process, port = _start_local_host_process(ns, host_uri, symmetric_key, wait_time, **flags)
     return tc_async.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
