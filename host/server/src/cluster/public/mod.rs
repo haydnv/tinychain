@@ -213,6 +213,32 @@ where
         }))
     }
 
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, params| {
+            Box::pin(async move {
+                // This handler can only execute a hypothetical transaction
+
+                let should_rollback = txn.leader(self.cluster.path())?.is_none();
+                let txn = self.cluster.claim(txn.clone())?;
+                let response = self.cluster.state.post(&txn, &[], params).await?;
+
+                if should_rollback {
+                    if let Some(owner) = txn.owner()? {
+                        if owner == self.cluster.public_key() {
+                            let txn = self.cluster.lock(txn.clone())?;
+                            self.cluster.replicate_rollback(&txn).await?;
+                        }
+                    }
+                }
+
+                Ok(response)
+            })
+        }))
+    }
+
     fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
     where
         'b: 'a,
