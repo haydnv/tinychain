@@ -4,14 +4,13 @@ import abc
 import inspect
 
 import json
-import logging
 
 import requests
 import urllib.parse
 
 from .service import Library, Model, Service
-from .context import form_of, to_json
-from .error import *
+from .context import to_json
+from .error import BadRequest, Conflict, Forbidden, MethodNotAllowed, NotFound, Timeout, Unauthorized, UnknownError
 from .scalar.value import Nil
 from .uri import URI
 
@@ -146,6 +145,8 @@ class Host(object):
         return self._handle(request)
 
     def create_namespace(self, path):
+        """Create a directory at the given `path`."""
+
         exists = 1
         while exists < len(path):
             try:
@@ -160,6 +161,8 @@ class Host(object):
         self.put(path[:-1], path[-1], False)
 
     def hypothetical(self, op_def, auth=None):
+        """Execute the given `op_def` without committing any writes."""
+
         return self.post("/transact/hypothetical", {"op": op_def}, auth)
 
     def install(self, lib_or_service):
