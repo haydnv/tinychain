@@ -58,12 +58,12 @@ impl Server {
 }
 
 impl Server {
-    pub fn authorize_claim_and_route<'a>(
+    pub async fn authorize_claim_and_route<'a>(
         &'a self,
         path: &'a [PathSegment],
         txn: &'a Txn,
     ) -> TCResult<Endpoint<'a>> {
-        self.kernel.route(path, txn)
+        self.kernel.route(path, txn).await
     }
 }
 

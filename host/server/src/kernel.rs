@@ -9,6 +9,7 @@ use aes_gcm_siv::{Aes256GcmSiv, KeyInit};
 use async_trait::async_trait;
 use futures::join;
 use log::{debug, info, trace, warn};
+use rand::prelude::IteratorRandom;
 use rjwt::VerifyingKey;
 use safecast::TryCastInto;
 use umask::Mode;
@@ -20,14 +21,14 @@ use tc_state::chain::Recover;
 use tc_state::CacheBlock;
 use tc_transact::hash::AsyncHash;
 use tc_transact::public::*;
-use tc_transact::{fs, Gateway, Transact, Transaction, TxnId};
+use tc_transact::{fs, Gateway, Replicate, Transact, Transaction, TxnId};
 use tc_value::{Host, Link, ToUrl, Value};
 use tcgeneric::{label, Label, Map, NetworkTime, PathSegment, TCPath, TCPathBuf, Tuple};
 
 use crate::client::Egress;
 #[cfg(feature = "service")]
 use crate::cluster::Service;
-use crate::cluster::{Class, Cluster, Dir, DirEntry, Library, ReplicateAndJoin};
+use crate::cluster::{Class, Cluster, Dir, DirEntry, IsDir, Library, ReplicateAndJoin};
 use crate::txn::{Hypothetical, Txn, TxnServer};
 use crate::{aes256, cluster, Authorize, SignedToken, State};
 
@@ -44,26 +45,18 @@ const ERR_NOT_ENABLED: &str = "this binary was compiled without the 'service' fe
 
 type Nonce = [u8; 12];
 
-struct KernelEgress {
-    peer: Link,
-}
+struct KernelEgress;
 
 impl Egress for KernelEgress {
-    fn is_authorized(&self, link: &ToUrl<'_>, _write: bool) -> bool {
-        link.host() == self.peer.host()
-            && (link.path().is_empty() || link.path().starts_with(&self.peer.path()[..]))
+    fn is_authorized(&self, _link: &ToUrl<'_>, _write: bool) -> bool {
+        // TODO: implement authorization logic
+        true
     }
 }
 
 impl fmt::Debug for KernelEgress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "kernel with authorized peer {}", self.peer)
-    }
-}
-
-impl From<Link> for KernelEgress {
-    fn from(peer: Link) -> Self {
-        Self { peer }
+        f.write_str("kernel egress policy")
     }
 }
 
@@ -142,7 +135,7 @@ pub(crate) struct Kernel {
 }
 
 impl Kernel {
-    fn issue_token(&self, txn_id: TxnId, path: &[PathSegment]) -> TCResult<SignedToken> {
+    async fn issue_token(&self, txn_id: TxnId, path: &[PathSegment]) -> TCResult<SignedToken> {
         if path.is_empty() {
             Err(bad_request!(
                 "cannot issue a token for {}",
@@ -151,7 +144,7 @@ impl Kernel {
         } else if path[0] == SERVICE {
             #[cfg(feature = "service")]
             {
-                issue_token(txn_id, &self.service, &path[1..])
+                issue_token(txn_id, self.service.clone(), &path[1..]).await
             }
 
             #[cfg(not(feature = "service"))]
@@ -159,9 +152,9 @@ impl Kernel {
                 Err(not_implemented!("{ERR_NOT_ENABLED}"))
             }
         } else if path[0] == LIB {
-            issue_token(txn_id, &self.library, &path[1..])
+            issue_token(txn_id, self.library.clone(), &path[1..]).await
         } else if path[0] == CLASS {
-            issue_token(txn_id, &self.class, &path[1..])
+            issue_token(txn_id, self.class.clone(), &path[1..]).await
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
             Err(bad_request!(
                 "cannot issue a token for {}",
@@ -175,13 +168,13 @@ impl Kernel {
         }
     }
 
-    pub fn public_key(&self, txn_id: TxnId, path: &[PathSegment]) -> TCResult<VerifyingKey> {
+    pub async fn public_key(&self, txn_id: TxnId, path: &[PathSegment]) -> TCResult<VerifyingKey> {
         if path.is_empty() {
             Err(bad_request!("{} has no public key", TCPath::from(path)))
         } else if path[0] == SERVICE {
             #[cfg(feature = "service")]
             {
-                public_key(txn_id, &self.service, &path[1..])
+                public_key(txn_id, self.service.clone(), &path[1..]).await
             }
 
             #[cfg(not(feature = "service"))]
@@ -189,9 +182,9 @@ impl Kernel {
                 Err(not_implemented!("{ERR_NOT_ENABLED}"))
             }
         } else if path[0] == LIB {
-            public_key(txn_id, &self.library, &path[1..])
+            public_key(txn_id, self.library.clone(), &path[1..]).await
         } else if path[0] == CLASS {
-            public_key(txn_id, &self.class, &path[1..])
+            public_key(txn_id, self.class.clone(), &path[1..]).await
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
             if path.len() == Hypothetical::PATH.len() {
                 Err(bad_request!("{} has no public key", TCPath::from(path)))
@@ -203,7 +196,11 @@ impl Kernel {
         }
     }
 
-    pub fn route<'a>(&'a self, path: &'a [PathSegment], txn: &'a Txn) -> TCResult<Endpoint<'a>> {
+    pub async fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+        txn: &'a Txn,
+    ) -> TCResult<Endpoint<'a>> {
         if path.is_empty() {
             Ok(Endpoint {
                 mode: Mode::new().with_class_perm(umask::OTHERS, umask::READ),
@@ -217,6 +214,7 @@ impl Kernel {
                 .state
                 .route(path)
                 .ok_or_else(|| TCError::not_found(TCPath::from(path)))?;
+
             Ok(Endpoint {
                 mode: STATE_MODE,
                 txn,
@@ -226,11 +224,11 @@ impl Kernel {
         } else if path[0] == SERVICE {
             #[cfg(feature = "service")]
             {
-                let (path, dir_entry) = self.service.lookup(*txn.id(), &path[1..])?;
+                let (path, dir_entry) = self.service.clone().lookup(*txn.id(), &path[1..]).await?;
 
                 match dir_entry {
-                    DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn),
-                    DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn),
+                    DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn).await,
+                    DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn).await,
                 }
             }
 
@@ -239,21 +237,21 @@ impl Kernel {
                 Err(not_implemented!("{ERR_NOT_ENABLED}"))
             }
         } else if path[0] == LIB {
-            let (path, dir_entry) = self.library.lookup(*txn.id(), &path[1..])?;
+            let (path, dir_entry) = self.library.clone().lookup(*txn.id(), &path[1..]).await?;
 
             match dir_entry {
-                DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn),
-                DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn),
+                DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn).await,
+                DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn).await,
             }
         } else if path[0] == CLASS {
-            let (path, dir_entry) = self.class.lookup(*txn.id(), &path[1..])?;
+            let (path, dir_entry) = self.class.clone().lookup(*txn.id(), &path[1..]).await?;
 
             match dir_entry {
-                DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn),
-                DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn),
+                DirEntry::Dir(cluster) => auth_claim_route(cluster, path, txn).await,
+                DirEntry::Item(cluster) => auth_claim_route(cluster, path, txn).await,
             }
         } else if path.len() >= 2 && &path[..2] == &Hypothetical::PATH[..] {
-            auth_claim_route(self.hypothetical.clone(), &path[2..], txn)
+            auth_claim_route(self.hypothetical.clone(), &path[2..], txn).await
         } else {
             Err(TCError::not_found(TCPath::from(path)))
         }
@@ -275,7 +273,10 @@ impl Kernel {
         #[cfg(feature = "service")]
         Self::replicate_and_join_dir(&self.keys, &self.service, txn_server, peers).await?;
 
-        // TODO: replicate services in the /services dir
+        Self::replicate_and_join_items(&self.keys, &self.class, txn_server, peers).await?;
+        Self::replicate_and_join_items(&self.keys, &self.library, txn_server, peers).await?;
+        #[cfg(feature = "service")]
+        Self::replicate_and_join_items(&self.keys, &self.service, txn_server, peers).await?;
 
         Ok(())
     }
@@ -288,7 +289,7 @@ impl Kernel {
     ) -> Result<(), bool>
     where
         T: Clone + fmt::Debug,
-        Cluster<Dir<T>>: ReplicateAndJoin<State = T>,
+        Cluster<Dir<T>>: ReplicateAndJoin,
     {
         debug!(
             "Kernel::replicate_and_join_dir {} with peers {:?}",
@@ -303,11 +304,8 @@ impl Kernel {
         while let Some(cluster) = unvisited.pop_front() {
             let mut joined = false;
 
-            for peer in peers {
-                let egress = Arc::new(KernelEgress::from(Link::new(
-                    peer.clone(),
-                    cluster.path().clone(),
-                )));
+            for peer in peers.iter().choose_multiple(&mut OsRng, peers.len()) {
+                let egress = Arc::new(KernelEgress);
 
                 let txn = txn_server
                     .create_txn(NetworkTime::now())
@@ -316,30 +314,31 @@ impl Kernel {
 
                 trace!("fetching replication token...");
 
-                let txn_id = *txn.id();
-                let txn = match get_token(&txn, peer, keys, cluster.path()).await {
-                    Ok(token) => match txn_server
-                        .verify_txn(txn_id, NetworkTime::now(), token)
-                        .await
-                    {
-                        Ok(txn) => txn.with_egress(egress.clone()),
-                        Err(cause) => {
-                            warn!("failed to verify token from {peer}: {cause}");
-                            continue;
-                        }
-                    },
+                let txn = match get_and_verify_token_from_peer(
+                    &txn_server,
+                    &txn,
+                    peer,
+                    keys,
+                    cluster.path(),
+                )
+                .await
+                {
+                    Ok(txn) => txn.with_egress(egress.clone()),
                     Err(cause) => {
-                        warn!("failed to fetch token from {peer}: {cause}");
+                        warn!("failed to fetch and verify token from {peer}: {cause}");
                         continue;
                     }
                 };
 
-                trace!("replicating...");
+                trace!("replicating {cluster:?}...");
 
+                let txn_id = *txn.id();
                 match cluster.replicate_and_join(txn, peer.clone()).await {
-                    Ok(entries) => {
+                    Ok(()) => {
                         joined = true;
                         progress = true;
+
+                        let entries = cluster.entries(txn_id).await.expect("dir entry list");
 
                         for (_name, entry) in entries {
                             match &*entry {
@@ -347,6 +346,87 @@ impl Kernel {
                                 DirEntry::Item(_) => {}
                             }
                         }
+                    }
+                    Err(cause) => warn!("failed to replicate from {peer}: {cause}"),
+                }
+            }
+
+            if !joined {
+                return Err(progress);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn replicate_and_join_items<T>(
+        keys: &HashSet<aes256::Key>,
+        parent: &Cluster<Dir<T>>,
+        txn_server: &TxnServer,
+        peers: &BTreeSet<Host>,
+    ) -> Result<(), bool>
+    where
+        T: Replicate<Txn> + Transact + Clone + fmt::Debug,
+    {
+        info!(
+            "Kernel::replicate_and_join_dir {} with peers {:?}",
+            parent.path(),
+            peers
+        );
+
+        let mut progress = false;
+        let mut unvisited = VecDeque::new();
+        unvisited.push_back(DirEntry::Dir(parent.clone()));
+
+        while let Some(cluster) = unvisited.pop_front() {
+            let txn = txn_server.create_txn(NetworkTime::now()).expect("txn");
+            let txn_id = *txn.id();
+
+            let item = match cluster {
+                DirEntry::Dir(dir) => {
+                    let entries = dir.entries(txn_id).await.expect("dir entry list");
+                    let entries = entries
+                        .into_iter()
+                        .map(|(_name, entry)| DirEntry::clone(&*entry));
+
+                    unvisited.extend(entries);
+
+                    continue;
+                }
+                DirEntry::Item(item) => item,
+            };
+
+            trace!("replicating {item:?}...");
+
+            let mut joined = false;
+            for peer in peers.iter().choose_multiple(&mut OsRng, peers.len()) {
+                let egress = Arc::new(KernelEgress);
+                let txn = txn.clone().with_egress(egress.clone());
+
+                trace!("fetching replication token...");
+
+                let txn = match get_and_verify_token_from_peer(
+                    &txn_server,
+                    &txn,
+                    peer,
+                    keys,
+                    item.path(),
+                )
+                .await
+                {
+                    Ok(txn) => txn.with_egress(egress.clone()),
+                    Err(cause) => {
+                        warn!("failed to fetch and verify token from {peer}: {cause}");
+                        continue;
+                    }
+                };
+
+                info!("replicating {item:?} from {peer}...");
+
+                match item.replicate_and_join(txn, peer.clone()).await {
+                    Ok(()) => {
+                        joined = true;
+                        progress = true;
                     }
                     Err(cause) => warn!("failed to replicate from {peer}: {cause}"),
                 }
@@ -373,7 +453,7 @@ impl Kernel {
     }
 
     pub async fn finalize(&self, txn_id: &TxnId) {
-        debug!("Kernel::finalize");
+        trace!("Kernel::finalize");
 
         join!(
             self.class.finalize(txn_id),
@@ -521,21 +601,20 @@ impl Recover<CacheBlock> for Kernel {
     }
 }
 
-fn auth_claim_route<'a, T>(
+async fn auth_claim_route<'a, T>(
     cluster: Cluster<T>,
     path: &'a [PathSegment],
     txn: &'a Txn,
 ) -> TCResult<Endpoint<'a>>
 where
-    T: AsyncHash + Route<State> + Transact + Send + Sync + fmt::Debug + 'a,
+    T: AsyncHash + Route<State> + IsDir + Transact + Send + Sync + fmt::Debug + 'a,
 {
-    debug!("auth, claim, and route request to {}", TCPath::from(path));
-
     let txn_id = *txn.id();
     let mode = {
         let resource_mode = cluster.umask(txn_id, path);
         let request_mode = if txn.has_claims() {
-            txn.mode(cluster.keyring(txn_id)?, path)
+            let keyring = cluster.keyring(txn_id).await?;
+            txn.mode(keyring, path)
         } else {
             Txn::DEFAULT_MODE
         };
@@ -545,8 +624,6 @@ where
 
     if mode == Mode::new() {
         return Err(unauthorized!("access to {}", TCPath::from(path)));
-    } else {
-        debug!("request permissions are {mode}");
     }
 
     let handler = cluster
@@ -563,7 +640,21 @@ where
     Ok(endpoint)
 }
 
-async fn get_token(
+async fn get_and_verify_token_from_peer(
+    txn_server: &TxnServer,
+    txn: &Txn,
+    peer: &Host,
+    keys: &HashSet<aes256::Key>,
+    path: &TCPathBuf,
+) -> TCResult<Txn> {
+    let token = get_token_from_peer(&txn, peer, keys, path).await?;
+
+    txn_server
+        .verify_txn(*txn.id(), NetworkTime::now(), token)
+        .await
+}
+
+async fn get_token_from_peer(
     txn: &Txn,
     peer: &Host,
     keys: &HashSet<aes256::Key>,
@@ -603,12 +694,15 @@ async fn get_token(
     ))
 }
 
-fn issue_token<T: Clone + fmt::Debug>(
+async fn issue_token<T>(
     txn_id: TxnId,
-    cluster: &Cluster<Dir<T>>,
+    cluster: Cluster<Dir<T>>,
     path: &[PathSegment],
-) -> TCResult<SignedToken> {
-    match cluster.lookup(txn_id, path)? {
+) -> TCResult<SignedToken>
+where
+    T: Clone + Send + Sync + fmt::Debug,
+{
+    match cluster.lookup(txn_id, path).await? {
         (suffix, entry) if suffix.is_empty() => match entry {
             DirEntry::Dir(dir) => dir.issue_token(Mode::all(), REPLICATION_TTL),
             DirEntry::Item(item) => item.issue_token(Mode::all(), REPLICATION_TTL),
@@ -617,12 +711,15 @@ fn issue_token<T: Clone + fmt::Debug>(
     }
 }
 
-fn public_key<T: Clone + fmt::Debug>(
+async fn public_key<T>(
     txn_id: TxnId,
-    cluster: &Cluster<Dir<T>>,
+    cluster: Cluster<Dir<T>>,
     path: &[PathSegment],
-) -> TCResult<VerifyingKey> {
-    match cluster.lookup(txn_id, path)? {
+) -> TCResult<VerifyingKey>
+where
+    T: Clone + Send + Sync + fmt::Debug,
+{
+    match cluster.lookup(txn_id, path).await? {
         (suffix, entry) if suffix.is_empty() => match entry {
             DirEntry::Dir(dir) => Ok(dir.public_key()),
             DirEntry::Item(item) => Ok(item.public_key()),
@@ -661,7 +758,7 @@ impl<'a> Handler<'a, State> for KernelHandler<'a> {
                             let mut nonce = [0u8; 12];
                             OsRng.fill_bytes(&mut nonce);
 
-                            let signed_token = self.kernel.issue_token(*txn.id(), &path)?;
+                            let signed_token = self.kernel.issue_token(*txn.id(), &path).await?;
                             let token = signed_token.into_jwt();
                             let encrypted_token = encrypt_token(&cipher, &nonce, token)?;
 

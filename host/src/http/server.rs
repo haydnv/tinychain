@@ -108,7 +108,7 @@ impl Server {
 
         let txn = self.server.get_txn(txn_id, token).await?;
 
-        let endpoint = self.server.authorize_claim_and_route(&path, &txn)?;
+        let endpoint = self.server.authorize_claim_and_route(&path, &txn).await?;
 
         let state = match http_request.method() {
             &hyper::Method::GET => {
@@ -295,11 +295,7 @@ where
 {
     const ERR_DESERIALIZE: &str = "error deserializing HTTP request body";
 
-    let body = BodyStream::new(body).map_ok(|frame| {
-        frame
-            .into_data()
-            .expect("frame")
-    });
+    let body = BodyStream::new(body).map_ok(|frame| frame.into_data().expect("frame"));
 
     match encoding {
         Encoding::Json => {

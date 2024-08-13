@@ -95,9 +95,16 @@ struct Config {
     )]
     pub peers: Vec<Host>,
 
-    #[arg(long, help = "a link to the cluster to replicate from on startup")]
-    pub replicate: Option<Host>,
+    #[cfg(debug_assertions)]
+    #[arg(
+        long = "request_ttl",
+        value_parser = duration,
+        default_value = "10",
+        help = "maximum allowed request duration (in seconds)",
+    )]
+    pub request_ttl: Duration,
 
+    #[cfg(not(debug_assertions))]
     #[arg(
         long = "request_ttl",
         value_parser = duration,
@@ -109,7 +116,7 @@ struct Config {
     #[arg(
         long = "stack_size",
         value_parser = data_size,
-        default_value = "48M",
+        default_value = "96M",
         help = "the size of the stack of each worker thread (in bytes)",
     )]
     pub stack_size: usize,
@@ -183,6 +190,9 @@ fn main() {
     let mut broadcast = Broadcast::new();
 
     let peers = if config.peers.is_empty() {
+        rt.block_on(broadcast.discover())
+            .expect("mDNS peer discovery");
+
         broadcast.peers(Protocol::default())
     } else {
         config.peers.drain(..).collect()

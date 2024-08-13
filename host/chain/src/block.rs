@@ -12,16 +12,16 @@ use freqfs::FileSave;
 use futures::future::TryFutureExt;
 use futures::join;
 use log::debug;
-use safecast::{AsType, TryCastFrom};
+use safecast::{AsType, TryCastFrom, TryCastInto};
 
-use tc_collection::Collection;
+use tc_collection::{Collection, CollectionBase};
 use tc_error::*;
 use tc_scalar::Scalar;
-use tc_transact::fs;
 use tc_transact::hash::{AsyncHash, Output, Sha256};
 use tc_transact::public::{Route, StateInstance};
-use tc_transact::{IntoView, Transact, Transaction, TxnId};
-use tc_value::Value;
+use tc_transact::{fs, Replicate};
+use tc_transact::{Gateway, IntoView, Transact, Transaction, TxnId};
+use tc_value::{Link, Value};
 use tcgeneric::{Map, Tuple};
 
 use super::data::{ChainBlock, History};
@@ -73,6 +73,37 @@ where
 
     fn subject(&self) -> &T {
         &self.subject
+    }
+}
+
+#[async_trait]
+impl<State> Replicate<State::Txn>
+    for BlockChain<State, State::Txn, State::FE, CollectionBase<State::Txn, State::FE>>
+where
+    State: StateInstance,
+    State::FE: CacheBlock,
+    State: From<Collection<State::Txn, State::FE>> + From<Scalar>,
+    Collection<State::Txn, State::FE>: TryCastFrom<State>,
+    CollectionBase<State::Txn, State::FE>: Route<State>,
+    Scalar: TryCastFrom<State>,
+    Self: TryCastFrom<State>,
+{
+    async fn replicate(&self, txn: &State::Txn, mut source: Link) -> TCResult<Output<Sha256>> {
+        let attr = source
+            .path_mut()
+            .pop()
+            .ok_or_else(|| bad_request!("invalid replica link: {source}"))?;
+
+        let chain = txn.get(source, attr).await?;
+        let chain: Self = chain.try_cast_into(|s| {
+            bad_request!("expected to replicate a chain of blocks but found {:?}", s,)
+        })?;
+
+        self.history()
+            .replicate(txn, self.subject(), chain.history().clone())
+            .await?;
+
+        AsyncHash::hash(self, *txn.id()).await
     }
 }
 

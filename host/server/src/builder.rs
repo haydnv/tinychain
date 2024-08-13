@@ -6,7 +6,7 @@ use std::time::Duration;
 use freqfs::DirLock;
 use futures::TryFutureExt;
 use gethostname::gethostname;
-use log::{debug, info, warn};
+use log::{info, trace, warn};
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 
 #[cfg(feature = "service")]
@@ -78,15 +78,15 @@ impl Broadcast {
             match receiver.recv_async().await {
                 Ok(event) => match event {
                     ServiceEvent::SearchStarted(_params) if search_started => {
-                        info!("mDNS discovered {} peers", self.peers.len());
+                        trace!("mDNS discovered {} peers", self.peers.len());
                         break Ok(());
                     }
                     ServiceEvent::SearchStarted(params) => {
-                        info!("searching for peers of {params}");
+                        trace!("searching for peers of {params}");
                         search_started = true;
                     }
                     ServiceEvent::ServiceFound(name, addr) => {
-                        info!("discovered peer of {name} at {addr}")
+                        trace!("discovered peer of {name} at {addr}")
                     }
                     ServiceEvent::ServiceResolved(info) => {
                         let full_name = info.get_fullname();
@@ -95,17 +95,22 @@ impl Broadcast {
 
                         self.peers.insert(full_name.to_string(), (addresses, port));
 
-                        info!("resolved peer: {full_name}")
+                        trace!("resolved peer: {full_name}")
                     }
-                    other => debug!("ignoring mDNS event: {:?}", other),
+                    other => trace!("ignoring mDNS event: {:?}", other),
                 },
-                Err(cause) => warn!("mDNS error: {cause}"),
+                Err(cause) => trace!("mDNS error: {cause}"),
             }
         }
     }
 
     pub async fn make_discoverable(&mut self, host: &Host) -> mdns_sd::Result<()> {
-        let hostname = self.hostname();
+        let hostname = if self.hostname().ends_with(".local") {
+            self.hostname().to_string()
+        } else {
+            format!("{}.local.", self.hostname())
+        };
+
         let address = host.address().as_ip().expect("IP address");
 
         let my_service = ServiceInfo::new(
@@ -117,7 +122,7 @@ impl Broadcast {
             HashMap::<String, String>::default(),
         )?;
 
-        info!("registering mDNS service at {}", host);
+        info!("registering mDNS service for {} at {}", host, hostname);
 
         self.daemon.register(my_service)?;
 

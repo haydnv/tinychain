@@ -6,7 +6,7 @@ use tc_error::{not_found, TCError, TCResult};
 use tc_state::object::InstanceClass;
 use tc_transact::public::{GetHandler, Handler, PostHandler, PutHandler, Route};
 use tc_transact::Transaction;
-use tc_value::Version as VersionNumber;
+use tc_value::{Value, Version as VersionNumber};
 use tcgeneric::{Id, Map, PathSegment, TCPath};
 
 use crate::cluster::dir::DirItem;
@@ -24,12 +24,23 @@ impl<'a> Handler<'a, State> for ClassHandler<'a> {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let version_number: VersionNumber =
-                    key.try_cast_into(|v| TCError::unexpected(v, "a semantic version number"))?;
+                if key.is_some() {
+                    let version_number: VersionNumber =
+                        key.try_cast_into(|v| TCError::unexpected(v, "a semantic version number"))?;
 
-                let version = self.class.get_version(*txn.id(), &version_number).await?;
+                    let version = self.class.get_version(*txn.id(), &version_number).await?;
 
-                version.to_state(*txn.id()).await
+                    version.to_state(*txn.id()).await
+                } else {
+                    let versions = self.class.list_versions(*txn.id()).await?;
+
+                    let version_ids = versions
+                        .map(|(version_number, _)| version_number)
+                        .map(Id::from)
+                        .collect();
+
+                    Ok(Value::Tuple(version_ids).into())
+                }
             })
         }))
     }
@@ -54,6 +65,8 @@ impl<'a> Handler<'a, State> for ClassHandler<'a> {
                             .map(|class: InstanceClass| (name, class))
                     })
                     .collect::<TCResult<Map<InstanceClass>>>()?;
+
+                debug!("create new class set version {version_number}: {schema:?}");
 
                 self.class
                     .create_version(txn, version_number, schema)
@@ -138,6 +151,8 @@ impl<'a> Handler<'a, State> for VersionClassHandler<'a> {
                 if key.is_none() {
                     Ok(class.into())
                 } else {
+                    trace!("get attr {} of {:?}", self.name, self.class);
+
                     let attr_name: Id =
                         key.try_cast_into(|v| TCError::unexpected(v, "a class attribute name"))?;
 

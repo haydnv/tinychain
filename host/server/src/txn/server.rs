@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use ds_ext::OrdHashSet;
 use freqfs::DirLock;
 use futures::TryFutureExt;
-use log::debug;
+use log::trace;
 use rjwt::{Actor, Error, Resolve};
 use tokio::sync::mpsc;
 
@@ -160,7 +160,7 @@ impl TxnServer {
             return;
         }
 
-        debug!("TxnServer::finalize_expired");
+        trace!("TxnServer::finalize_expired");
 
         for txn_id in expired.iter() {
             kernel.finalize(txn_id).await;

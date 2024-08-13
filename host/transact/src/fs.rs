@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use get_size::GetSize;
+use log::debug;
 use safecast::AsType;
 
 use tc_error::*;
@@ -83,6 +84,11 @@ impl<FE: ThreadSafe + Clone> Dir<FE> {
             .contains(txn_id, name)
             .map_err(TCError::from)
             .await
+    }
+
+    /// Delete the given entry from this [`Dir`], if present at `txn_id`.
+    pub async fn delete(&self, txn_id: TxnId, name: Id) -> TCResult<bool> {
+        self.inner.delete(txn_id, name).map_err(TCError::from).await
     }
 
     /// Iterate over the names of the entries in this [`Dir`] at `txn_id`.
@@ -232,6 +238,7 @@ where
 impl<FE: ThreadSafe + Clone + for<'a> FileSave<'a>> Dir<FE> {
     /// Commit this [`Dir`] at `txn_id`.
     pub async fn commit(&self, txn_id: TxnId, recursive: bool) {
+        debug!("Dir::commit {:?} (recursive: {})", self.inner, recursive);
         self.inner.commit(txn_id, recursive).await
     }
 
@@ -330,6 +337,14 @@ where
     /// Delete the block with the given `name` at `txn_id` and return `true` if it was present.
     pub async fn delete_block(&self, txn_id: TxnId, name: Id) -> TCResult<bool> {
         self.inner.delete(txn_id, name).map_err(TCError::from).await
+    }
+
+    /// Return `true` if this [`File`] contains a block with the given `name` at `txn_id`.
+    pub async fn contains_block(&self, txn_id: TxnId, name: &Id) -> TCResult<bool> {
+        self.inner
+            .contains(txn_id, name)
+            .map_err(TCError::from)
+            .await
     }
 
     /// Iterate over the blocks in this [`File`].

@@ -180,6 +180,11 @@ impl Txn {
         })
     }
 
+    #[cfg(feature = "service")]
+    pub(crate) fn host(&self) -> &Host {
+        self.client.host()
+    }
+
     pub(crate) fn token(&self) -> Option<&SignedToken> {
         self.token.as_ref().map(|token| &**token)
     }
@@ -187,6 +192,12 @@ impl Txn {
     /// Grant `mode` permissions on the resource at `path` to the bearer of this [`Txn`]'s token.
     /// `path` is relative to the cluster at `link` whose `actor` will sign the token.
     pub fn grant(&self, actor: &Actor, link: Link, path: TCPathBuf, mode: Mode) -> TCResult<Self> {
+        #[cfg(debug_assertions)]
+        {
+            let expected = Value::Bytes((*actor.public_key().as_bytes()).into());
+            log::debug!("grant {mode} on {path} to {actor:?} at {link} with public key {expected}");
+        }
+
         let now = NetworkTime::now();
         let claim = Claim::new(path, mode);
 
@@ -305,7 +316,7 @@ impl Txn {
         self.token.is_some()
     }
 
-    pub fn leader(&self, path: &[PathSegment]) -> TCResult<Option<VerifyingKey>> {
+    pub fn leader(&self, path: &[PathSegment]) -> TCResult<Option<(Link, VerifyingKey)>> {
         if let Some(token) = &self.token {
             for (host, actor_id, claim) in token.claims() {
                 if host.path() == path
@@ -316,7 +327,7 @@ impl Txn {
                     let public_key = VerifyingKey::try_from(&*public_key)
                         .map_err(|cause| bad_request!("invalid leader key: {cause}"))?;
 
-                    return Ok(Some(public_key));
+                    return Ok(Some((host.clone(), public_key)));
                 }
             }
         }

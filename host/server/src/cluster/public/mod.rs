@@ -1,7 +1,8 @@
 use std::fmt;
 use std::sync::Arc;
 
-use futures::Future;
+use futures::future::{Future, TryFutureExt};
+use futures::stream::{FuturesUnordered, TryStreamExt};
 use log::debug;
 use rjwt::VerifyingKey;
 use safecast::{TryCastFrom, TryCastInto};
@@ -11,12 +12,15 @@ use tc_transact::hash::AsyncHash;
 use tc_transact::public::*;
 use tc_transact::{Gateway, Transact, Transaction};
 use tc_value::{Host, Link, Value};
-use tcgeneric::{PathSegment, TCPath, Tuple};
+use tcgeneric::{label, Id, Label, Map, PathSegment, TCPath, Tuple};
 
 use crate::txn::Txn;
 use crate::State;
 
-use super::{Cluster, REPLICAS};
+use super::{Cluster, IsDir, REPLICAS};
+
+const ACTION: Label = label("action");
+const JOIN: Label = label("join");
 
 mod class;
 mod dir;
@@ -30,7 +34,7 @@ struct ClusterHandler<T> {
 
 impl<'a, T> Handler<'a, State> for ClusterHandler<T>
 where
-    T: Public<State> + Transact + Send + Sync + fmt::Debug + 'a,
+    T: AsyncHash + Public<State> + IsDir + Transact + Send + Sync + fmt::Debug + 'a,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
@@ -41,7 +45,7 @@ where
                 if txn.has_claims() {
                     self.cluster.state().get(txn, &[], key).await
                 } else {
-                    let keyring = self.cluster.keyring(*txn.id())?;
+                    let keyring = self.cluster.keyring(*txn.id()).await?;
 
                     if key.is_none() {
                         let keyring = keyring
@@ -60,7 +64,11 @@ where
                         {
                             Ok(State::from(Value::from(key)))
                         } else {
-                            Err(not_found!("{key:?} (of {} keys)", keyring.len()))
+                            Err(not_found!(
+                                "{:?} (of {} keys)",
+                                Value::Bytes(key),
+                                keyring.len()
+                            ))
                         }
                     }
                 }
@@ -75,35 +83,132 @@ where
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
                 if txn.locked_by()?.is_some() {
-                    if key.is_some() || value.is_some() {
-                        return Err(TCError::unexpected((key, value), "empty commit message"));
-                    }
-
                     debug!("received commit message for {:?}", self.cluster);
 
-                    if txn.leader(self.cluster.path())?.is_none() {
+                    return if key.is_some() || value.is_some() {
+                        Err(TCError::unexpected((key, value), "empty commit message"))
+                    } else if txn.leader(self.cluster.path())?.is_none() {
                         let txn = self.cluster.claim(txn.clone())?;
                         self.cluster.replicate_commit(&txn).await
                     } else {
                         self.cluster.replicate_commit(txn).await
-                    }
-                } else {
-                    let txn = self.cluster.claim(txn.clone())?;
-
-                    self.cluster
-                        .state
-                        .put(&txn, &[], key.clone(), value.clone())
-                        .await?;
-
-                    debug!("write to {:?} succeded, replicating...", self.cluster);
-
-                    maybe_replicate(&self.cluster, &txn, |txn, link| {
-                        let key = key.clone();
-                        let value = value.clone();
-                        async move { txn.put(link, key, value).await }
-                    })
-                    .await
+                    };
                 }
+
+                let should_commit = txn.leader(self.cluster.path())?.is_none();
+                let txn = self.cluster.claim(txn.clone())?;
+
+                self.cluster
+                    .state
+                    .put(&txn, &[], key.clone(), value.clone())
+                    .await?;
+
+                debug!("write to {:?} succeeded", self.cluster);
+
+                let (_leader, leader_pk) = txn
+                    .leader(self.cluster.path())?
+                    .ok_or_else(|| internal!("leaderless transaction"))?;
+
+                if leader_pk == self.cluster.public_key() {
+                    self.cluster
+                        .replicate_write(&txn, &[], |txn, link| {
+                            debug!("replicating write to {:?} to {}...", self.cluster, link);
+
+                            let key = key.clone();
+                            let value = value.clone();
+                            async move { txn.put(link, key, value).await }
+                        })
+                        .await?;
+                }
+
+                if self.cluster.is_dir() {
+                    let this_host = if let Some(host) = self.cluster.link().host() {
+                        host
+                    } else {
+                        return Ok(());
+                    };
+
+                    let entry_name: PathSegment =
+                        key.try_cast_into(|v| TCError::unexpected(v, "a directory entry name"))?;
+
+                    let (this_replica_hash, this_replica_pk) = self
+                        .cluster
+                        .get_dir_item_key(*txn.id(), &entry_name)
+                        .await?
+                        .ok_or_else(|| {
+                            internal!("there is no directory entry {entry_name} to replicate")
+                        })?;
+
+                    let (leader, leader_pk) = txn.leader(self.cluster.path())?.expect("leader");
+
+                    if leader_pk == self.cluster.public_key() {
+                        let replica_set: Vec<Host> = if let Some(keyring) = self
+                            .cluster
+                            .get_dir_item_keyring(*txn.id(), &entry_name)
+                            .await?
+                        {
+                            keyring.keys().cloned().collect()
+                        } else {
+                            vec![]
+                        };
+
+                        let this_replica_path = self.cluster.path().clone().append(entry_name);
+
+                        replica_set
+                            .iter()
+                            .map(|host| {
+                                let replicas = replica_set
+                                    .iter()
+                                    .filter(|that_host| host != *that_host)
+                                    .cloned()
+                                    .map(Value::from)
+                                    .collect();
+
+                                let params: Map<State> = [
+                                    (Id::from(ACTION), Value::String(JOIN.into())),
+                                    (Id::from(REPLICAS), Value::Tuple(replicas)),
+                                ]
+                                .into_iter()
+                                .collect();
+
+                                txn.post(
+                                    Link::from((
+                                        host.clone(),
+                                        this_replica_path.clone().append(REPLICAS),
+                                    )),
+                                    params,
+                                )
+                            })
+                            .collect::<FuturesUnordered<_>>()
+                            .try_fold(State::default(), |_, _| {
+                                futures::future::ready(Ok(State::default()))
+                            })
+                            .await?;
+                    } else {
+                        let this_replica_hash = Value::Bytes(this_replica_hash.as_slice().into());
+                        let this_replica_pk = Value::Bytes(Arc::new(*this_replica_pk.as_bytes()));
+
+                        txn.put(
+                            leader.append(entry_name).append(REPLICAS),
+                            (this_host.clone(), this_replica_pk),
+                            this_replica_hash,
+                        )
+                        .await?;
+                    }
+                }
+
+                let owner = txn
+                    .owner()?
+                    .ok_or_else(|| internal!("ownerless transaction"))?;
+
+                if should_commit {
+                    if owner == self.cluster.public_key() {
+                        let txn = self.cluster.lock(txn)?;
+                        self.cluster.replicate_commit(&txn).await?;
+                    }
+                }
+
+                Ok(())
             })
         }))
     }
@@ -114,8 +219,22 @@ where
     {
         Some(Box::new(|txn, params| {
             Box::pin(async move {
+                // This handler can only execute a hypothetical transaction
+
+                let should_rollback = txn.leader(self.cluster.path())?.is_none();
                 let txn = self.cluster.claim(txn.clone())?;
-                self.cluster.state.post(&txn, &[], params).await
+                let response = self.cluster.state.post(&txn, &[], params).await?;
+
+                if should_rollback {
+                    if let Some(owner) = txn.owner()? {
+                        if owner == self.cluster.public_key() {
+                            let txn = self.cluster.lock(txn.clone())?;
+                            self.cluster.replicate_rollback(&txn).await?;
+                        }
+                    }
+                }
+
+                Ok(response)
             })
         }))
     }
@@ -127,21 +246,28 @@ where
         Some(Box::new(|txn, key| {
             Box::pin(async move {
                 if txn.locked_by()?.is_some() {
-                    if key.is_some() {
+                    return if key.is_some() {
                         Err(TCError::unexpected(key, "empty rollback message"))
                     } else {
                         self.cluster.replicate_rollback(txn).await
-                    }
-                } else {
-                    let txn = self.cluster.claim(txn.clone())?;
-                    self.cluster.state.delete(&txn, &[], key.clone()).await?;
+                    };
+                }
 
-                    maybe_replicate(&self.cluster, &txn, |txn, link| {
+                let should_commit = txn.leader(self.cluster.path())?.is_none();
+                let txn = self.cluster.claim(txn.clone())?;
+                self.cluster.state.delete(&txn, &[], key.clone()).await?;
+
+                maybe_replicate(
+                    &self.cluster,
+                    &txn,
+                    &[],
+                    |txn, link| {
                         let key = key.clone();
                         async move { txn.delete(link, key).await }
-                    })
-                    .await
-                }
+                    },
+                    should_commit,
+                )
+                .await
             })
         }))
     }
@@ -169,7 +295,7 @@ where
             Box::pin(async move {
                 debug!("GET {:?} replicas", self.cluster);
 
-                let keyring = self.cluster.keyring(*txn.id())?;
+                let keyring = self.cluster.keyring(*txn.id()).await?;
 
                 if key.is_some() {
                     let key = Arc::<[u8]>::try_from(key)?;
@@ -201,7 +327,6 @@ where
         }))
     }
 
-    // TODO: require a correct hash of the state of the cluster in order to join
     fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
@@ -210,17 +335,27 @@ where
             Box::pin(async move {
                 debug!("PUT {:?} replica {key}: {value:?}", self.cluster);
 
-                let new_replica_hash = Value::try_from(value).and_then(Arc::<[u8]>::try_from)?;
-                let this_replica_hash = AsyncHash::hash(self.cluster.state(), *txn.id()).await?;
+                let new_replica_hash = Value::try_from(value)?;
+                let this_replica_hash = AsyncHash::hash(self.cluster.state(), *txn.id())
+                    .map_ok(|hash| Arc::<[u8]>::from(hash.as_slice()))
+                    .map_ok(Value::Bytes)
+                    .await?;
 
-                if &new_replica_hash[..] != &this_replica_hash[..] {
-                    return Err(bad_request!("the provided cluster state hash is incorrect"));
+                if new_replica_hash != this_replica_hash {
+                    return Err(bad_request!("the provided cluster state hash {new_replica_hash} differs from the hash of this cluster {this_replica_hash}"));
                 }
 
-                let mut keyring = self.cluster.keyring_mut(*txn.id())?;
+                let mut keyring = self.cluster.keyring_mut(*txn.id()).await?;
 
                 let (host, public_key): (Host, Arc<[u8]>) =
                     key.try_cast_into(|v| TCError::unexpected(v, "a host address and key"))?;
+
+                if self.cluster.link().host() == Some(&host) {
+                    return Err(bad_request!(
+                        "cannot overwrite the public key of {:?}",
+                        self.cluster
+                    ));
+                }
 
                 let public_key = VerifyingKey::try_from(&*public_key)
                     .map_err(|cause| bad_request!("invalid public key: {cause}"))?;
@@ -228,6 +363,75 @@ where
                 keyring.insert(host, public_key);
 
                 Ok(())
+            })
+        }))
+    }
+
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|txn, mut params| {
+            Box::pin(async move {
+                let action: Id = params.require(&*ACTION)?;
+                if action != JOIN {
+                    return Err(bad_request!("unrecognized action: {action}"));
+                }
+
+                let replicas: Tuple<Link> = params.require(&*REPLICAS)?;
+
+                let this_host = self
+                    .cluster
+                    .link()
+                    .host()
+                    .cloned()
+                    .ok_or_else(|| bad_request!("{:?} cannot join a cluster", self.cluster))?;
+
+                let this_path = self.cluster.link().path();
+
+                let public_key = Value::Bytes((*self.cluster.public_key().as_bytes()).into());
+                let hash = AsyncHash::hash(self.cluster.state(), *txn.id()).await?;
+
+                replicas
+                    .into_iter()
+                    .map(|mut that_host| {
+                        that_host.extend(this_path.iter().cloned());
+
+                        let this_host = this_host.clone();
+                        let public_key = public_key.clone();
+
+                        async move {
+                            if that_host.host().is_none() {
+                                Err(bad_request!(
+                                    "{} received a join request with no host",
+                                    this_host
+                                ))
+                            } else if that_host.host() == Some(&this_host) {
+                                Err(bad_request!(
+                                    "{} received a join request for itself",
+                                    this_host
+                                ))
+                            } else if that_host.path() == this_path {
+                                txn.put(
+                                    that_host.append(REPLICAS),
+                                    (this_host, public_key),
+                                    Value::Bytes(hash.as_slice().into()),
+                                )
+                                .await
+                            } else {
+                                Err(bad_request!(
+                                    "{} received a request to join {}",
+                                    this_host,
+                                    that_host
+                                ))
+                            }
+                        }
+                    })
+                    .collect::<FuturesUnordered<_>>()
+                    .try_fold(State::default(), |_, _| {
+                        futures::future::ready(Ok(State::default()))
+                    })
+                    .await
             })
         }))
     }
@@ -240,7 +444,7 @@ where
             Box::pin(async move {
                 debug!("DELETE {:?} replicas {key}", self.cluster);
 
-                let mut keyring = self.cluster.keyring_mut(*txn.id())?;
+                let mut keyring = self.cluster.keyring_mut(*txn.id()).await?;
 
                 let hosts = Tuple::<Value>::try_from(key)?;
 
@@ -299,6 +503,7 @@ where
 
         Some(Box::new(move |txn, key, value| {
             Box::pin(async move {
+                let should_commit = txn.leader(cluster.path())?.is_none();
                 let txn = cluster.claim(txn.clone())?;
 
                 cluster
@@ -306,11 +511,17 @@ where
                     .put(&txn, path, key.clone(), value.clone())
                     .await?;
 
-                maybe_replicate(&cluster, &txn, |txn, link| {
-                    let key = key.clone();
-                    let value = value.clone();
-                    async move { txn.put(link, key, value).await }
-                })
+                maybe_replicate(
+                    &cluster,
+                    &txn,
+                    path,
+                    |txn, link| {
+                        let key = key.clone();
+                        let value = value.clone();
+                        async move { txn.put(link, key, value).await }
+                    },
+                    should_commit,
+                )
                 .await
             })
         }))
@@ -322,8 +533,20 @@ where
     {
         Some(Box::new(|txn, params| {
             Box::pin(async move {
+                let should_commit = txn.leader(self.cluster.path())?.is_none();
                 let txn = self.cluster.claim(txn.clone())?;
-                self.cluster.state().post(&txn, self.path, params).await
+                let response = self.cluster.state().post(&txn, self.path, params).await?;
+
+                if should_commit {
+                    if let Some(owner) = txn.owner()? {
+                        if owner == self.cluster.public_key() {
+                            let txn = self.cluster.lock(txn)?;
+                            self.cluster.replicate_commit(&txn).await?;
+                        }
+                    }
+                }
+
+                Ok(response)
             })
         }))
     }
@@ -337,48 +560,63 @@ where
 
         Some(Box::new(move |txn, key| {
             Box::pin(async move {
+                let should_commit = txn.leader(cluster.path())?.is_none();
                 let txn = cluster.claim(txn.clone())?;
-                cluster.state().delete(&txn, path, key.clone()).await?;
-                maybe_replicate(&cluster, &txn, |txn, link| {
-                    let key = key.clone();
 
-                    async move { txn.delete(link, key).await }
-                })
+                cluster.state().delete(&txn, path, key.clone()).await?;
+
+                maybe_replicate(
+                    &cluster,
+                    &txn,
+                    path,
+                    |txn, link| {
+                        let key = key.clone();
+
+                        async move { txn.delete(link, key).await }
+                    },
+                    should_commit,
+                )
                 .await
             })
         }))
     }
 }
 
-async fn maybe_replicate<T, Op, Fut>(cluster: &Cluster<T>, txn: &Txn, op: Op) -> TCResult<()>
+async fn maybe_replicate<T, Op, Fut>(
+    cluster: &Cluster<T>,
+    txn: &Txn,
+    path: &[PathSegment],
+    op: Op,
+    should_commit: bool,
+) -> TCResult<()>
 where
     T: Transact + Send + Sync + fmt::Debug,
     Op: Fn(Txn, Link) -> Fut,
     Fut: Future<Output = TCResult<()>>,
 {
-    let leader = txn
+    let (_leader, leader_pk) = txn
         .leader(cluster.path())?
         .ok_or_else(|| internal!("leaderless transaction"))?;
 
-    if leader == cluster.public_key() {
-        cluster.replicate_write(txn, &[], op).await?;
+    if leader_pk == cluster.public_key() {
+        cluster.replicate_write(txn, path, op).await?;
     }
 
-    let owner = txn
-        .owner()?
-        .ok_or_else(|| internal!("ownerless transaction"))?;
-
-    if owner == cluster.public_key() {
-        let txn = cluster.lock(txn.clone())?;
-        cluster.replicate_commit(&txn).await
-    } else {
-        Ok(())
+    if should_commit {
+        if let Some(owner) = txn.owner()? {
+            if owner == cluster.public_key() {
+                let txn = cluster.lock(txn.clone())?;
+                cluster.replicate_commit(&txn).await?;
+            }
+        }
     }
+
+    Ok(())
 }
 
 impl<T> Cluster<T>
 where
-    T: AsyncHash + Route<State> + Transact + Send + Sync + fmt::Debug,
+    T: AsyncHash + Route<State> + IsDir + Transact + Send + Sync + fmt::Debug,
 {
     pub fn route_owned<'a>(
         self,
@@ -401,7 +639,7 @@ where
 
 impl<T> Route<State> for Cluster<T>
 where
-    T: AsyncHash + Route<State> + Transact + Clone + Send + Sync + fmt::Debug,
+    T: AsyncHash + Route<State> + IsDir + Transact + Clone + Send + Sync + fmt::Debug,
 {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
         self.clone().route_owned(path)

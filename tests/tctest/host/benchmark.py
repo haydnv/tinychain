@@ -1,4 +1,5 @@
 import asyncio
+import os
 import random
 import time
 import tinychain as tc
@@ -69,48 +70,23 @@ class DataStructures(tc.service.Service):
         return cxt.optimizer.train(1, cxt.inputs)
 
 
-async def start_and_install_deps(chain_type, actor, **flags):
-    assert "replicate" not in flags
-    flags["replicate"] = LEAD
-
-    assert "public_key" not in flags
-    flags["public_key"] = actor.public_key
-
+async def start_and_install_deps(chain_type, **flags):
     host = start_local_host_async(NS, **flags)
 
     start = time.time()
-    response = await host.create_namespace(actor, tc.URI(tc.service.Library), tc.ml.NS, LEAD)
-    assert response.status == 200, await response.text()
-    elapsed = time.time() - start
-    print(f"created library directory in {elapsed:.4f}")
-
-    start = time.time()
-    response = await host.install(actor, tc.ml.NeuralNets())
-    assert response.status == 200, await response.text()
+    await host.install(tc.ml.NeuralNets())
     elapsed = time.time() - start
     print(f"installed library in {elapsed:.4f}")
 
     start = time.time()
-    response = await host.install(actor, tc.ml.Optimizers())
-    assert response.status == 200, await response.text()
+    await host.install(tc.ml.Optimizers())
     elapsed = time.time() - start
     print(f"installed library in {elapsed:.4f}")
 
     start = time.time()
-    uri = tc.URI(DataStructures).path()
-    response = await host.create_namespace(actor, uri[0], uri[1:-2], LEAD)
-    assert response.status == 200, await response.text()
-    elapsed = time.time() - start
-    print(f"created service directory in {elapsed:.4f}")
-
-    start = time.time()
-    response = await host.install(actor, DataStructures(chain_type))
-    assert response.status == 200, await response.text()
+    await host.install(DataStructures(chain_type))
     elapsed = time.time() - start
     print(f"installed service in {elapsed:.2f}")
-
-    check = await host.get(tc.URI(DataStructures).path()[:-2], '/')
-    assert check.status == 200, await check.text()
 
     return host
 
@@ -125,8 +101,8 @@ class ConcurrentWriteBenchmarks(benchmark.Benchmark):
     def __repr__(self):
         return "concurrent write benchmarks"
 
-    async def start(self, actor, **flags):
-        self.host = await start_and_install_deps(tc.chain.Sync, actor, **flags)
+    async def start(self, **flags):
+        self.host = await start_and_install_deps(tc.chain.Sync, **flags)
 
     def stop(self):
         if self.host:
@@ -186,8 +162,8 @@ class LoadBenchmarks(benchmark.Benchmark):
     def __repr__(self):
         return "load benchmarks"
 
-    async def start(self, actor, **flags):
-        self.host = await start_and_install_deps(tc.chain.Sync, actor, **flags)
+    async def start(self, **flags):
+        self.host = await start_and_install_deps(tc.chain.Sync, **flags)
 
     def stop(self):
         if self.host:
@@ -226,17 +202,18 @@ class ReplicationBenchmarks(benchmark.Benchmark):
     def __repr__(self):
         return f"replication benchmarks with {self.NUM_HOSTS} hosts"
 
-    async def start(self, actor, **flags):
+    async def start(self, **flags):
+        key = os.urandom(32)
         default_port = tc.URI(DataStructures).port()
         assert default_port
 
-        host = await start_and_install_deps(tc.chain.Block, actor, **flags)
+        host = await start_and_install_deps(tc.chain.Block, symmetric_key=key, **flags)
         self.hosts.append(host)
 
         for i in range(1, self.NUM_HOSTS):
             port = default_port + i
             host_uri = tc.URI(f"http://127.0.0.1:{port}/")
-            host = start_local_host_async(NS, host_uri, replicate="http://127.0.0.1:8702", wait_time=2)
+            host = start_local_host_async(NS, host_uri, symmetric_key=key)
 
             self.hosts.append(host)
 
@@ -260,11 +237,11 @@ class ReplicationBenchmarks(benchmark.Benchmark):
         print("stop replica...")
         self.hosts[1].stop()
 
-        print("modifying chain contents--you'll see a 'bad gateway' error as the cluster discovers the stopped replica")
+        print("modifying chain contents--you'll see errors as the cluster discovers the stopped replica")
         response = await self.hosts[0].put(self._link("/table_upsert"), value=random.randint(0, 10000))
         assert response.status == 200
 
-        wait_time = 2.
+        wait_time = 5.
         self.hosts[1].start(wait_time=wait_time)
 
         await self.hosts[0].delete(self._link("/"), "table")

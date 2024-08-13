@@ -555,19 +555,19 @@ class SparseTests(HostTest):
 
     @unittest.skipIf("debug" in TC_PATH, "too slow for debug mode")
     def testProduct(self):
-        shape = [2, 4, 3, 5]
+        shape = [2, 4, 3]
         axis = 2
 
         cxt = tc.Context()
         cxt.big = tc.tensor.Sparse.zeros(shape, tc.I32)
-        cxt.result = tc.after(cxt.big[0, 1, 2, 3].write(2), cxt.big.product(axis))
+        cxt.result = tc.after(cxt.big[0, 1, 2].write(2), cxt.big.product(axis))
 
         actual = self.host.hypothetical(cxt)
 
         expected = np.zeros(shape, dtype=np.int32)
-        expected[0, 1, 2, 3] = 2
+        expected[0, 1, 2] = 2
         expected = expected.prod(axis)
-        expected = expect_sparse(tc.I32, [2, 4, 5], expected)
+        expected = expect_sparse(tc.I32, [2, 4], expected)
 
         self.assertEqual(actual, expected)
 

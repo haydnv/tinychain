@@ -16,6 +16,7 @@ DEFAULT_WORKSPACE = "/tmp/tc/tmp"
 DOCKERFILE = os.getenv("TC_DOCKER", "tests/tctest/Dockerfile")
 DOCKER_NETWORK_MODE = os.getenv("DOCKER_MODE", "host")
 TC_PATH = os.getenv("TC_PATH", "host/target/debug/tinychain")
+HOST_START_WAIT_TIME = 10 if "debug" in TC_PATH else 3
 
 
 class Docker(tc.host.Local.Process):
@@ -80,7 +81,7 @@ class Docker(tc.host.Local.Process):
         self.stop()
 
 
-def start_docker(ns, host_uri=None, public_key=None, wait_time=1., **flags):
+def start_docker(ns, host_uri=None, public_key=None, wait_time=HOST_START_WAIT_TIME, **flags):
     assert ns.startswith('/'), f"namespace must be a URI path, not {ns}"
 
     if not os.path.exists(DOCKERFILE):
@@ -165,7 +166,7 @@ class Local(tc.host.Local.Process):
             self.stop()
 
 
-def _start_local_host_process(ns, host_uri=None, key=None, wait_time=1, **flags):
+def _start_local_host_process(ns, host_uri=None, symmetric_key=None, wait_time=HOST_START_WAIT_TIME, **flags):
     assert ns.startswith('/'), f"namespace must be a URI path, not {ns}"
     name = str(ns)[1:].replace('/', '_')
 
@@ -180,8 +181,8 @@ def _start_local_host_process(ns, host_uri=None, key=None, wait_time=1, **flags)
     elif host_uri is not None and host_uri.port():
         port = host_uri.port()
 
-    if key:
-        flags["key"] = key.hex()
+    if symmetric_key:
+        flags["symmetric_key"] = symmetric_key.hex()
 
     data_dir = f"/tmp/tc/data/{port}/{name}"
     if os.path.exists(data_dir):
@@ -208,13 +209,14 @@ def _start_local_host_process(ns, host_uri=None, key=None, wait_time=1, **flags)
 
     return process, port
 
-def start_local_host(ns, host_uri=None, key=None, wait_time=1, **flags):
-    process, port = _start_local_host_process(ns, host_uri, key, wait_time, **flags)
+
+def start_local_host(ns, host_uri=None, symmetric_key=None, wait_time=HOST_START_WAIT_TIME, **flags):
+    process, port = _start_local_host_process(ns, host_uri, symmetric_key, wait_time, **flags)
     return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
-def start_local_host_async(ns, host_uri=None, key=None, wait_time=1, **flags):
-    process, port = _start_local_host_process(ns, host_uri, key, wait_time, **flags)
+def start_local_host_async(ns, host_uri=None, symmetric_key=None, wait_time=HOST_START_WAIT_TIME, **flags):
+    process, port = _start_local_host_process(ns, host_uri, symmetric_key, wait_time, **flags)
     return tc_async.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 

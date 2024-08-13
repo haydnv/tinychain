@@ -1,7 +1,6 @@
-use std::collections::hash_map::{Entry, HashMap};
-use std::collections::BTreeMap;
+use std::collections::{hash_map, BTreeMap, HashMap};
 use std::fmt;
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -10,7 +9,7 @@ use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::*;
 use rjwt::{OsRng, SigningKey, Token, VerifyingKey};
-use safecast::TryCastInto;
+use safecast::{TryCastFrom, TryCastInto};
 use umask::Mode;
 
 use tc_error::*;
@@ -19,9 +18,9 @@ use tc_state::chain::Recover;
 use tc_transact::hash::{Output, Sha256};
 use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnMapLockIter};
 use tc_transact::{fs, Gateway};
-use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Host, Link, ToUrl, Value};
-use tcgeneric::{label, Label, PathSegment, TCPathBuf, Tuple};
+use tc_transact::{Replicate, Transact, Transaction, TxnId};
+use tc_value::{Host, Link, ToUrl, Value, Version as VersionNumber};
+use tcgeneric::{label, Label, PathSegment, TCBoxTryFuture, TCPathBuf, Tuple};
 
 use crate::claim::Claim;
 use crate::client::Egress;
@@ -51,52 +50,53 @@ const REPLICAS: Label = label("replicas");
 pub(crate) struct ClusterEgress {
     lead: Host,
     path: TCPathBuf,
-    replicas: TxnLockReadGuard<HashMap<Host, VerifyingKey>>,
-    external: Arc<Mutex<HashMap<Link, bool>>>,
+    deps: Arc<Mutex<HashMap<Link, bool>>>,
 }
 
 impl Egress for ClusterEgress {
     fn is_authorized(&self, link: &ToUrl<'_>, is_write: bool) -> bool {
-        debug_assert!(!link.path().is_empty(), "egress to / from a cluster");
+        debug!(
+            "authorize egress to {link} from {}{}?",
+            self.lead, self.path
+        );
 
-        let is_within_cluster = || {
-            link.host()
-                .map(|host| {
-                    host == &self.lead || self.replicas.keys().any(|replica| replica == host)
-                })
-                .unwrap_or(true)
-        };
+        if !link.path().is_empty() && link.path()[..1] == tc_state::PREFIX[..] {
+            return true;
+        } else if link.path().starts_with(&self.path) {
+            return true;
+        }
 
-        // TODO: replace label("state") with State::PREFIX
-        let ns = &self.path[1..];
-        if link.path().starts_with(&[label("state").into()]) || link.path()[1..].starts_with(ns) {
-            if is_within_cluster() {
-                return true;
+        let mut link = link.to_link();
+
+        // TODO: implement an explicit dependency whitelist for egress authorization
+        if link.path().iter().any(VersionNumber::can_cast_from) {
+            // assumption: the path is of the form /service/name/space/lib_name/<version>/...
+            // assumption: there is never any other case where the path will contain a version ID
+            while let Some(id) = link.path_mut().pop() {
+                if VersionNumber::can_cast_from(&id) {
+                    break;
+                }
             }
         }
 
-        let mut external = self.external.lock().expect("authorized external services");
-        // TODO: only allow egress to whitelisted services, i.e. don't allow inserting a new entry here
-        match external.entry(link.to_link()) {
-            Entry::Occupied(mut entry) => {
-                *entry.get_mut() |= is_write;
-            }
-            Entry::Vacant(entry) => {
+        let mut deps = self.deps.lock().expect("egress list");
+        match deps.entry(link) {
+            hash_map::Entry::Vacant(entry) => {
                 entry.insert(is_write);
             }
+            hash_map::Entry::Occupied(mut entry) => {
+                entry.insert(is_write || *entry.get());
+            }
         }
 
+        // TODO: implement egress authorization
         true
     }
 }
 
 impl fmt::Debug for ClusterEgress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "cluster at {}{} with replicas {:?}",
-            self.lead, self.path, self.replicas
-        )
+        write!(f, "cluster at {}{}", self.lead, self.path)
     }
 }
 
@@ -129,8 +129,26 @@ impl Schema {
 }
 
 #[async_trait]
-pub trait Replicate: Send + Sync {
-    async fn replicate(&self, txn: &Txn, peer: Host) -> TCResult<Output<Sha256>>;
+pub(super) trait IsDir {
+    fn is_dir(&self) -> bool {
+        false
+    }
+
+    async fn get_dir_item_key(
+        &self,
+        _txn_id: TxnId,
+        _name: &PathSegment,
+    ) -> TCResult<Option<(Output<Sha256>, VerifyingKey)>> {
+        Ok(None)
+    }
+
+    async fn get_dir_item_keyring(
+        &self,
+        _txn_id: TxnId,
+        _name: &PathSegment,
+    ) -> TCResult<Option<TxnLockReadGuard<HashMap<Host, VerifyingKey>>>> {
+        Ok(None)
+    }
 }
 
 struct Inner {
@@ -201,8 +219,7 @@ impl<T> Cluster<T> {
         let egress = ClusterEgress {
             lead: self.inner.schema.lead.clone(),
             path: self.path().clone(),
-            replicas: self.replicas.try_read(*txn.id())?,
-            external: whitelist.clone(),
+            deps: whitelist.clone(),
         };
 
         let mut claimed = self.claimed.lock().expect("claimed");
@@ -247,26 +264,26 @@ impl<T> Cluster<T> {
 }
 
 impl<T: fmt::Debug> Cluster<T> {
-    pub fn keyring(
+    pub async fn keyring(
         &self,
         txn_id: TxnId,
-    ) -> TCResult<impl Deref<Target = HashMap<Host, VerifyingKey>>> {
+    ) -> TCResult<TxnLockReadGuard<HashMap<Host, VerifyingKey>>> {
         trace!("read {self:?} keyring");
-        self.replicas.try_read(txn_id).map_err(TCError::from)
+        self.replicas.read(txn_id).map_err(TCError::from).await
     }
 
-    fn keyring_mut(
+    async fn keyring_mut(
         &self,
         txn_id: TxnId,
     ) -> TCResult<impl DerefMut<Target = HashMap<Host, VerifyingKey>>> {
         trace!("write {self:?} keyring");
-        self.replicas.try_write(txn_id).map_err(TCError::from)
+        self.replicas.write(txn_id).map_err(TCError::from).await
     }
 
     async fn replicate_write<Write, Fut>(
         &self,
         txn: &Txn,
-        path: &[PathSegment],
+        suffix: &[PathSegment],
         op: Write,
     ) -> TCResult<()>
     where
@@ -275,15 +292,20 @@ impl<T: fmt::Debug> Cluster<T> {
     {
         let this_host = self.link().host().cloned().unwrap_or_else(default_host);
 
-        let mut uri = self.path().clone();
-        uri.extend(path.into_iter().cloned());
+        let mut path = self.path().clone();
+        path.extend(suffix.into_iter().cloned());
 
         let (num_replicas, mut failed) = {
-            let replicas = self.replicas.read(*txn.id()).await?;
-            let failed =
-                Self::replicate_write_inner(&txn, &this_host, &*replicas, &uri, op).await?;
+            let replicas = {
+                let replicas = self.replicas.read(*txn.id()).await?;
+                replicas.clone()
+            };
 
-            (replicas.len(), failed)
+            let num_replicas = replicas.len();
+
+            let failed = Self::replicate_write_inner(&txn, &this_host, replicas, &path, op).await?;
+
+            (num_replicas, failed)
         };
 
         if failed.is_empty() {
@@ -297,25 +319,28 @@ impl<T: fmt::Debug> Cluster<T> {
             umask::USER_WRITE,
         )?;
 
-        let uri = self.path().clone().append(REPLICAS);
+        let path = self.path().clone().append(REPLICAS);
 
-        trace!("lock replica set of {self:?} in order to replicate a write operation");
-        let mut replicas = self.replicas.write(*txn.id()).await?;
         let mut num_failed = failed.len();
-
         while !failed.is_empty() && num_failed * 2 < num_replicas {
-            let mut to_remove = Tuple::<Value>::with_capacity(failed.len());
-            for host in failed {
-                replicas.remove(&host);
-                to_remove.push(host.into());
-            }
+            let (replicas, to_remove) = {
+                trace!("lock replica set of {self:?} in order to replicate a write operation");
+                let mut replicas = self.replicas.write(*txn.id()).await?;
 
-            failed =
-                Self::replicate_write_inner(&txn, &this_host, &*replicas, &uri, |txn, link| {
-                    let to_remove = to_remove.clone();
-                    async move { txn.delete(link, to_remove).await }
-                })
-                .await?;
+                let mut to_remove = Tuple::<Value>::with_capacity(failed.len());
+                for host in failed {
+                    replicas.remove(&host);
+                    to_remove.push(host.into());
+                }
+
+                (replicas.clone(), to_remove)
+            };
+
+            failed = Self::replicate_write_inner(&txn, &this_host, replicas, &path, |txn, link| {
+                let to_remove = to_remove.clone();
+                async move { txn.delete(link, to_remove).await }
+            })
+            .await?;
 
             num_failed += failed.len();
         }
@@ -330,8 +355,8 @@ impl<T: fmt::Debug> Cluster<T> {
     async fn replicate_write_inner<Write, Fut>(
         txn: &Txn,
         this_host: &Host,
-        replicas: &HashMap<Host, VerifyingKey>,
-        uri: &TCPathBuf,
+        replicas: HashMap<Host, VerifyingKey>,
+        path: &TCPathBuf,
         op: Write,
     ) -> TCResult<Vec<Host>>
     where
@@ -339,11 +364,11 @@ impl<T: fmt::Debug> Cluster<T> {
         Fut: Future<Output = TCResult<()>>,
     {
         let mut writes: FuturesUnordered<_> = replicas
-            .keys()
+            .into_keys()
             .filter(|host| !(host.is_localhost() && host.port() == this_host.port()))
-            .filter(|host| *host != this_host)
+            .filter(|host| host != this_host)
             .map(|host| {
-                op(txn.clone(), Link::new(host.clone(), uri.clone()))
+                op(txn.clone(), Link::new(host.clone(), path.clone()))
                     .map(move |result| (host, result))
             })
             .collect();
@@ -373,11 +398,13 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
 
         // TODO: verify that the txn owner has permission to write to this cluster w/ a smart contract
 
-        let leader = txn
+        let (_leader, leader_pk) = txn
             .leader(self.path())?
             .ok_or_else(|| bad_request!("cannot commit a leaderless transaction"))?;
 
-        if leader == self.public_key() {
+        if leader_pk == self.public_key() {
+            debug!("{self:?} will lead commit replication...");
+
             if txn.locked_by()? == txn.owner()? {
                 let txn_id = *txn.id();
                 let notify = |link| txn.put(link, Value::default(), State::default());
@@ -385,6 +412,8 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
             } else {
                 return Err(unauthorized!("commit {:?}", self));
             }
+        } else {
+            trace!("{self:?} will not lead commit replication...");
         }
 
         self.commit(*txn.id()).await;
@@ -399,11 +428,11 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
 
         // TODO: verify that the txn owner has permission to write to this cluster w/ a smart contract
 
-        let leader = txn
+        let (_leader, leader_pk) = txn
             .leader(self.path())?
             .ok_or_else(|| bad_request!("cannot roll back a leaderless transaction"))?;
 
-        if leader == self.public_key() {
+        if leader_pk == self.public_key() {
             if txn.locked_by()? == txn.owner()? {
                 let txn_id = *txn.id();
                 let notify = move |link| txn.delete(link, Value::default());
@@ -520,37 +549,21 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
 
 #[async_trait]
 pub(crate) trait ReplicateAndJoin {
-    type State;
-
-    async fn replicate_and_join(
-        &self,
-        txn: Txn,
-        peer: Host,
-    ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<Self::State>>>;
+    async fn replicate_and_join(&self, txn: Txn, peer: Host) -> TCResult<()>;
 }
 
 #[async_trait]
-impl<T> ReplicateAndJoin for Cluster<Dir<T>>
+impl<T> ReplicateAndJoin for Cluster<T>
 where
-    T: Transact + Send + Sync + fmt::Debug,
-    Dir<T>: Transact,
-    Cluster<T>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
-    Cluster<Dir<T>>: fs::Persist<CacheBlock, Txn = Txn, Schema = Schema>,
-    DirEntry<T>: Clone,
+    T: Replicate<Txn> + Transact + fmt::Debug,
 {
-    type State = T;
-
-    async fn replicate_and_join(
-        &self,
-        txn: Txn,
-        peer: Host,
-    ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<T>>> {
+    async fn replicate_and_join(&self, txn: Txn, peer: Host) -> TCResult<()> {
         info!("replicating {} from {}...", self.path(), peer);
 
-        let hash = self.state.replicate(&txn, peer.clone()).await?;
+        let peer_link = Link::new(peer, self.path().clone());
+        let hash = self.state.replicate(&txn, peer_link.clone()).await?;
 
-        let peer_link = Link::new(peer, self.path().clone()).append(REPLICAS);
-
+        let peer_link = peer_link.append(REPLICAS);
         let host = self
             .inner
             .schema
@@ -598,6 +611,10 @@ where
 
             let mut participants = HashMap::with_capacity(replica_set.len());
             for (host, public_key) in replica_set {
+                if self.link().host() == Some(&host) {
+                    continue;
+                }
+
                 let public_key = VerifyingKey::try_from(&*public_key)
                     .map_err(|v| TCError::unexpected(v, "a public key"))?;
 
@@ -625,25 +642,60 @@ where
         let txn = txn.claim(self.link().clone(), &self.inner.actor)?;
         let txn = txn.lock(&self.inner.actor)?;
 
-        self.replicate_commit(&txn).await?;
+        self.replicate_commit(&txn).await
+    }
+}
 
-        self.state.entries(*txn.id()).await
+#[async_trait]
+impl<T: IsDir + Send + Sync> IsDir for Cluster<T> {
+    fn is_dir(&self) -> bool {
+        self.state.is_dir()
+    }
+
+    async fn get_dir_item_key(
+        &self,
+        txn_id: TxnId,
+        name: &PathSegment,
+    ) -> TCResult<Option<(Output<Sha256>, VerifyingKey)>> {
+        self.state.get_dir_item_key(txn_id, name).await
+    }
+
+    async fn get_dir_item_keyring(
+        &self,
+        txn_id: TxnId,
+        name: &PathSegment,
+    ) -> TCResult<Option<TxnLockReadGuard<HashMap<Host, VerifyingKey>>>> {
+        self.state.get_dir_item_keyring(txn_id, name).await
     }
 }
 
 impl<T> Cluster<Dir<T>>
 where
-    T: Clone + fmt::Debug,
+    T: Clone + Send + Sync + fmt::Debug,
 {
     pub fn lookup<'a>(
-        &self,
+        self,
         txn_id: TxnId,
         path: &'a [PathSegment],
-    ) -> TCResult<(&'a [PathSegment], DirEntry<T>)> {
-        match self.state().lookup(txn_id, path)? {
-            Some((path, entry)) => Ok((path, entry)),
-            None => Ok((path, DirEntry::Dir(self.clone()))),
-        }
+    ) -> TCBoxTryFuture<'a, (&'a [PathSegment], DirEntry<T>)>
+    where
+        T: 'a,
+    {
+        Box::pin(async move {
+            match self.state().clone().lookup(txn_id, path).await? {
+                Some((path, entry)) => Ok((path, entry)),
+                None => Ok((path, DirEntry::Dir(self.clone()))),
+            }
+        })
+    }
+}
+
+impl<T: Clone + fmt::Debug> Cluster<Dir<T>> {
+    pub(crate) async fn entries(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<TxnMapLockIter<PathSegment, DirEntry<T>>> {
+        self.state.entries(txn_id).await
     }
 }
 
@@ -668,7 +720,7 @@ where
     type Commit = T::Commit;
 
     async fn commit(&self, txn_id: TxnId) -> Self::Commit {
-        debug!("Cluster::commit");
+        debug!("Cluster::commit {}", self.path());
 
         self.replicas.commit(txn_id);
         self.state.commit(txn_id).await
@@ -682,7 +734,7 @@ where
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        debug!("Cluster::finalize");
+        trace!("Cluster::finalize");
 
         self.replicas.finalize(*txn_id);
         self.state.finalize(txn_id).await

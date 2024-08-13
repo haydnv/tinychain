@@ -15,13 +15,13 @@ use safecast::{AsType, TryCastFrom, TryCastInto};
 use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
-use tc_transact::fs;
 use tc_transact::hash::{AsyncHash, Output, Sha256};
 use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Route, StateInstance};
+use tc_transact::{fs, Replicate};
 use tc_transact::{Gateway, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
-use tcgeneric::{label, Label};
+use tcgeneric::{label, Id, Label};
 
 use crate::data::{MutationPending, MutationRecord, StoreEntry};
 
@@ -93,15 +93,16 @@ where
     State: StateInstance,
     State::FE: AsType<ChainBlock>,
     T: fs::Persist<State::FE, Txn = State::Txn> + fs::Restore<State::FE> + TryCastFrom<State>,
+    Self: TryCastFrom<State>,
 {
-    pub async fn restore_from(&self, txn: &State::Txn, source: Link) -> TCResult<()> {
+    pub async fn restore_from(&self, txn: &State::Txn, source: Link, attr: Id) -> TCResult<()> {
         debug!("restore {self:?} from {source}");
 
-        let backup = txn.get(source, Value::default()).await?;
-        let backup =
+        let backup = txn.get(source, attr).await?;
+        let backup: Self =
             backup.try_cast_into(|backup| bad_request!("{:?} is not a valid backup", backup))?;
 
-        self.subject.restore(*txn.id(), &backup).await?;
+        self.subject.restore(*txn.id(), &backup.subject).await?;
 
         let mut committed = self.committed.write().await?;
 
@@ -134,6 +135,31 @@ where
 
     fn subject(&self) -> &T {
         &self.subject
+    }
+}
+
+#[async_trait]
+impl<State, T> Replicate<State::Txn> for SyncChain<State, State::Txn, State::FE, T>
+where
+    State: StateInstance,
+    State::FE: AsType<ChainBlock>,
+    T: fs::Persist<State::FE, Txn = State::Txn>
+        + fs::Restore<State::FE>
+        + TryCastFrom<State>
+        + AsyncHash
+        + Send
+        + Sync,
+    Self: TryCastFrom<State>,
+{
+    async fn replicate(&self, txn: &State::Txn, mut source: Link) -> TCResult<Output<Sha256>> {
+        let attr = source
+            .path_mut()
+            .pop()
+            .ok_or_else(|| bad_request!("invalid replica link: {source}"))?;
+
+        self.restore_from(txn, source, attr).await?;
+
+        AsyncHash::hash(self, *txn.id()).await
     }
 }
 

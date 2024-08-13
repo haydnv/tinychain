@@ -1,8 +1,9 @@
 use std::fmt;
+use std::marker::PhantomData;
 
 use async_trait::async_trait;
-use destream::de;
-use destream::en;
+use destream::{de, en};
+use freqfs::FileSave;
 use futures::TryFutureExt;
 #[cfg(feature = "btree")]
 use safecast::{as_type, AsType, TryCastFrom};
@@ -14,7 +15,9 @@ use tc_transact::hash::hash_try_stream;
 use tc_transact::hash::{AsyncHash, Digest, Hash, Output, Sha256};
 use tc_transact::IntoView;
 use tc_transact::{Transaction, TxnId};
-use tcgeneric::{path_label, Class, Instance, NativeClass, PathLabel, PathSegment, TCPathBuf};
+use tcgeneric::{
+    label, path_label, Class, Instance, Label, NativeClass, PathLabel, PathSegment, TCPathBuf,
+};
 
 #[cfg(feature = "btree")]
 use btree::{BTreeInstance, BTreeType};
@@ -50,41 +53,51 @@ pub mod public;
 /// The prefix of the absolute path to [`Collection`] data types
 pub const PREFIX: PathLabel = path_label(&["state", "collection"]);
 
+const NULL: Label = label("null");
+
 /// A block in a [`Collection`]
 
 #[cfg(all(feature = "btree", not(feature = "tensor")))]
-pub trait CollectionBlock: AsType<BTreeNode> + tcgeneric::ThreadSafe {}
+pub trait CollectionBlock:
+    AsType<BTreeNode> + tcgeneric::ThreadSafe + Clone + for<'a> FileSave<'a>
+{
+}
 
 #[cfg(all(feature = "btree", not(feature = "tensor")))]
-impl<T> CollectionBlock for T where T: AsType<BTreeNode> + tcgeneric::ThreadSafe {}
+impl<T> CollectionBlock for T where
+    T: AsType<BTreeNode> + tcgeneric::ThreadSafe + Clone + for<'a> FileSave<'a>
+{
+}
 
 #[cfg(feature = "tensor")]
-pub trait CollectionBlock: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> {}
+pub trait CollectionBlock:
+    DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone + for<'a> FileSave<'a>
+{
+}
 
 #[cfg(feature = "tensor")]
-impl<T> CollectionBlock for T where T: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> {}
+impl<T> CollectionBlock for T where
+    T: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone + for<'a> FileSave<'a>
+{
+}
 
 #[cfg(not(feature = "btree"))]
-pub trait CollectionBlock: tcgeneric::ThreadSafe {}
+pub trait CollectionBlock: tcgeneric::ThreadSafe + Clone + for<'a> FileSave<'a> {}
 
 #[cfg(not(feature = "btree"))]
-impl<T> CollectionBlock for T where T: tcgeneric::ThreadSafe {}
+impl<T> CollectionBlock for T where T: tcgeneric::ThreadSafe + Clone + for<'a> FileSave<'a> {}
 
-#[cfg(feature = "btree")]
 /// The [`Class`] of a `Collection`.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CollectionType {
+    Null,
+    #[cfg(feature = "btree")]
     BTree(BTreeType),
     #[cfg(feature = "table")]
     Table(TableType),
     #[cfg(feature = "tensor")]
     Tensor(TensorType),
 }
-
-#[cfg(not(feature = "btree"))]
-/// The [`Class`] of a `Collection`.
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub struct CollectionType;
 
 impl Class for CollectionType {}
 
@@ -106,17 +119,15 @@ impl NativeClass for CollectionType {
     }
 
     fn path(&self) -> TCPathBuf {
-        #[cfg(feature = "btree")]
         match self {
+            Self::Null => TCPathBuf::from(NULL),
+            #[cfg(feature = "btree")]
             Self::BTree(btt) => btt.path(),
             #[cfg(feature = "table")]
             Self::Table(tt) => tt.path(),
             #[cfg(feature = "tensor")]
             Self::Tensor(tt) => tt.path(),
         }
-
-        #[cfg(not(feature = "btree"))]
-        TCPathBuf::default()
     }
 }
 
@@ -129,23 +140,22 @@ as_type!(CollectionType, Tensor, TensorType);
 
 impl fmt::Debug for CollectionType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        #[cfg(feature = "btree")]
         match self {
+            Self::Null => f.write_str("null collection"),
+            #[cfg(feature = "btree")]
             Self::BTree(btt) => fmt::Debug::fmt(btt, f),
             #[cfg(feature = "table")]
             Self::Table(tt) => fmt::Debug::fmt(tt, f),
             #[cfg(feature = "tensor")]
             Self::Tensor(tt) => fmt::Debug::fmt(tt, f),
         }
-
-        #[cfg(not(feature = "btree"))]
-        f.write_str("mock collection type")
     }
 }
 
-#[cfg(feature = "btree")]
 /// A mutable transactional collection of data.
 pub enum Collection<Txn, FE> {
+    Null(fs::Dir<FE>, PhantomData<Txn>),
+    #[cfg(feature = "btree")]
     BTree(BTree<Txn, FE>),
     #[cfg(feature = "table")]
     Table(Table<Txn, FE>),
@@ -153,25 +163,16 @@ pub enum Collection<Txn, FE> {
     Tensor(Tensor<Txn, FE>),
 }
 
-#[cfg(not(feature = "btree"))]
-pub struct Collection<Txn, FE> {
-    phantom: std::marker::PhantomData<(Txn, FE)>,
-}
-
 impl<Txn, FE> Clone for Collection<Txn, FE> {
     fn clone(&self) -> Self {
-        #[cfg(feature = "btree")]
         match self {
+            Self::Null(dir, data) => Self::Null(dir.clone(), *data),
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => Self::BTree(btree.clone()),
             #[cfg(feature = "table")]
             Self::Table(table) => Self::Table(table.clone()),
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => Self::Tensor(tensor.clone()),
-        }
-
-        #[cfg(not(feature = "btree"))]
-        Self {
-            phantom: std::marker::PhantomData,
         }
     }
 }
@@ -183,7 +184,6 @@ as_type!(Collection<Txn, FE>, Table, Table<Txn, FE>);
 #[cfg(feature = "tensor")]
 as_type!(Collection<Txn, FE>, Tensor, Tensor<Txn, FE>);
 
-#[cfg(feature = "btree")]
 impl<Txn, FE> Collection<Txn, FE>
 where
     Txn: Transaction<FE>,
@@ -192,6 +192,8 @@ where
     /// Return the [`Schema`] of this [`Collection`].
     pub fn schema(&self) -> Schema {
         match self {
+            Self::Null(_, _) => Schema::Null,
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => btree.schema().clone().into(),
             #[cfg(feature = "table")]
             Self::Table(table) => table.schema().clone().into(),
@@ -204,18 +206,6 @@ where
     }
 }
 
-#[cfg(not(feature = "btree"))]
-impl<Txn, FE> Collection<Txn, FE>
-where
-    Txn: Transaction<FE>,
-    FE: CollectionBlock,
-{
-    /// Return the [`Schema`] of this [`Collection`].
-    pub fn schema(&self) -> Schema {
-        Schema
-    }
-}
-
 impl<Txn, FE> Instance for Collection<Txn, FE>
 where
     Txn: Send + Sync,
@@ -224,17 +214,15 @@ where
     type Class = CollectionType;
 
     fn class(&self) -> CollectionType {
-        #[cfg(feature = "btree")]
         match self {
+            Self::Null(_, _) => CollectionType::Null,
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => btree.class().into(),
             #[cfg(feature = "table")]
             Self::Table(table) => table.class().into(),
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => tensor.class().into(),
         }
-
-        #[cfg(not(feature = "btree"))]
-        CollectionType
     }
 }
 
@@ -248,8 +236,9 @@ where
     async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         let schema_hash = Hash::<Sha256>::hash(self.schema());
 
-        #[cfg(feature = "btree")]
         let contents_hash = match self {
+            Self::Null(_, _) => tc_transact::hash::default_hash::<Sha256>(),
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => {
                 let keys = btree.clone().keys(txn_id).await?;
                 hash_try_stream::<Sha256, _, _, _>(keys).await?
@@ -275,9 +264,6 @@ where
             },
         };
 
-        #[cfg(not(feature = "btree"))]
-        let contents_hash = tc_transact::hash::default_hash::<Sha256>();
-
         let mut hasher = Sha256::new();
         hasher.update(schema_hash);
         hasher.update(contents_hash);
@@ -287,18 +273,14 @@ where
 
 impl<Txn, FE> From<CollectionBase<Txn, FE>> for Collection<Txn, FE> {
     fn from(base: CollectionBase<Txn, FE>) -> Self {
-        #[cfg(feature = "btree")]
         match base {
+            CollectionBase::Null(dir, data) => Self::Null(dir, data),
+            #[cfg(feature = "btree")]
             CollectionBase::BTree(btree) => Self::BTree(btree.into()),
             #[cfg(feature = "table")]
             CollectionBase::Table(table) => Self::Table(table.into()),
             #[cfg(feature = "tensor")]
             CollectionBase::Tensor(tensor) => Self::Tensor(tensor.into()),
-        }
-
-        #[cfg(not(feature = "btree"))]
-        Self {
-            phantom: base.phantom,
         }
     }
 }
@@ -314,24 +296,22 @@ impl<Txn, FE> From<BTreeFile<Txn, FE>> for Collection<Txn, FE> {
 impl<'en, Txn, FE> IntoView<'en, FE> for Collection<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: CollectionBlock + Clone,
+    FE: CollectionBlock,
 {
     type Txn = Txn;
     type View = CollectionView<'en>;
 
     #[allow(unused_variables)]
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
-        #[cfg(feature = "btree")]
         match self {
+            Self::Null(_dir, data) => Ok(CollectionView::Null(PhantomData)),
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => btree.into_view(txn).map_ok(CollectionView::BTree).await,
             #[cfg(feature = "table")]
             Self::Table(table) => table.into_view(txn).map_ok(CollectionView::Table).await,
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => tensor.into_view(txn).map_ok(CollectionView::Tensor).await,
         }
-
-        #[cfg(not(feature = "btree"))]
-        Ok(CollectionView::default())
     }
 }
 
@@ -339,7 +319,7 @@ where
 impl<T, FE> de::FromStream for Collection<T, FE>
 where
     T: Transaction<FE>,
-    FE: for<'a> fs::FileSave<'a> + CollectionBlock + Clone,
+    FE: CollectionBlock,
 {
     type Context = T;
 
@@ -359,7 +339,6 @@ impl<Txn, FE> TryCastFrom<Collection<Txn, FE>> for BTree<Txn, FE> {
     fn can_cast_from(collection: &Collection<Txn, FE>) -> bool {
         match collection {
             Collection::BTree(_) => true,
-            #[cfg(feature = "table")]
             _ => false,
         }
     }
@@ -367,7 +346,6 @@ impl<Txn, FE> TryCastFrom<Collection<Txn, FE>> for BTree<Txn, FE> {
     fn opt_cast_from(collection: Collection<Txn, FE>) -> Option<Self> {
         match collection {
             Collection::BTree(btree) => Some(btree),
-            #[cfg(feature = "table")]
             _ => None,
         }
     }
@@ -409,23 +387,22 @@ impl<Txn, FE> TryCastFrom<Collection<Txn, FE>> for Tensor<Txn, FE> {
 
 impl<Txn, FE> fmt::Debug for Collection<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        #[cfg(feature = "btree")]
         match self {
+            Self::Null(_, _) => f.write_str("null collection"),
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => btree.fmt(f),
             #[cfg(feature = "table")]
             Self::Table(table) => table.fmt(f),
             #[cfg(feature = "tensor")]
             Self::Tensor(tensor) => tensor.fmt(f),
         }
-
-        #[cfg(not(feature = "btree"))]
-        f.write_str("mock collection")
     }
 }
 
-#[cfg(feature = "btree")]
 /// A view of a [`Collection`] within a single `Transaction`, used for serialization.
 pub enum CollectionView<'en> {
+    Null(PhantomData<&'en ()>),
+    #[cfg(feature = "btree")]
     BTree(btree::BTreeView<'en>),
     #[cfg(feature = "table")]
     Table(table::TableView<'en>),
@@ -433,22 +410,15 @@ pub enum CollectionView<'en> {
     Tensor(tensor::view::TensorView),
 }
 
-#[cfg(not(feature = "btree"))]
-/// A view of a [`Collection`] within a single `Transaction`, used for serialization.
-#[derive(Default)]
-pub struct CollectionView<'en> {
-    lt: std::marker::PhantomData<&'en ()>,
-}
-
 impl<'en> en::IntoStream<'en> for CollectionView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         use en::EncodeMap;
 
-        #[allow(unused_mut)]
         let mut map = encoder.encode_map(Some(1))?;
 
-        #[cfg(feature = "btree")]
         match self {
+            Self::Null(_) => map.encode_entry(CollectionType::Null.path(), ())?,
+            #[cfg(feature = "btree")]
             Self::BTree(btree) => {
                 let classpath = BTreeType::default().path();
                 map.encode_entry(classpath.to_string(), btree)?;

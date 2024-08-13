@@ -1,12 +1,10 @@
 import itertools
-import os
-
 import numpy as np
 import tinychain as tc
 import unittest
 
-from ..process import DEFAULT_PORT
 from .base import PersistenceTest
+from ..process import DEFAULT_PORT
 
 
 LEAD = f"http://127.0.0.1:{DEFAULT_PORT}"
@@ -41,7 +39,7 @@ class TensorChainTests(PersistenceTest, unittest.TestCase):
 
         return Persistent()
 
-    def execute(self, _actor, hosts):
+    def execute(self, hosts):
         endpoints = {"tensor": tc.URI("/service/test_tensor/tensor/0.0.0")}
 
         endpoints["dense"] = endpoints["tensor"].append("dense")
@@ -62,7 +60,7 @@ class TensorChainTests(PersistenceTest, unittest.TestCase):
 
         hosts[1].stop()
         hosts[2].put(endpoints["tensor"].append("overwrite"))
-        hosts[1].start()
+        hosts[1].start(wait_time=10)
 
         dense = expect_dense(tc.I32, [2, 3], [2] * 6)
 

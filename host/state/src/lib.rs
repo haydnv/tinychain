@@ -25,8 +25,8 @@ use tc_transact::public::{ClosureInstance, Public, StateInstance, ToState};
 use tc_transact::{Gateway, Transaction, TxnId};
 use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::{
-    label, path_label, Class, Id, Instance, Label, Map, NativeClass, PathSegment, TCPath,
-    TCPathBuf, Tuple,
+    label, path_label, Class, Id, Instance, Label, Map, NativeClass, PathLabel, PathSegment,
+    TCPath, TCPathBuf, Tuple,
 };
 
 use closure::*;
@@ -43,6 +43,9 @@ pub mod closure;
 pub mod object;
 pub mod public;
 pub mod view;
+
+/// The path prefix of all [`State`] types.
+pub const PREFIX: PathLabel = path_label(&["state"]);
 
 #[cfg(feature = "chain")]
 pub mod chain {
@@ -1040,6 +1043,23 @@ impl<Txn> TryCastFrom<State<Txn>> for BlockChain<Txn, CollectionBase<Txn>> {
     }
 }
 
+#[cfg(feature = "chain")]
+impl<Txn> TryCastFrom<State<Txn>> for SyncChain<Txn, CollectionBase<Txn>> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
+        match state {
+            State::Chain(Chain::Sync(_)) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
+        match state {
+            State::Chain(Chain::Sync(chain)) => Some(chain),
+            _ => None,
+        }
+    }
+}
+
 impl<Txn> TryCastFrom<State<Txn>> for Closure<Txn> {
     fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
@@ -1624,17 +1644,25 @@ where
                 return ScalarVisitor::visit_subject(subject, params).map(State::Scalar);
             }
 
-            let mut map = Map::new();
+            let mut map = Map::<State<Txn>>::new();
 
             let id = Id::from_str(&key).map_err(de::Error::custom)?;
             let txn = self.txn.subcontext(id.clone());
             let value = access.next_value(txn).await?;
-            map.insert(id, value);
+            map.insert(id.clone(), value);
 
             while let Some(id) = access.next_key::<Id>(()).await? {
                 let txn = self.txn.subcontext(id.clone());
                 let state = access.next_value(txn).await?;
                 map.insert(id, state);
+            }
+
+            debug!("deserialize map {map:?}");
+            if map.len() == 1 {
+                let value = map.as_ref().get(&id).expect("map value");
+                if value.is_none() && !value.is_map() {
+                    return Ok(State::from(id));
+                }
             }
 
             Ok(State::Map(map))

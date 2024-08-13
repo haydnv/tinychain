@@ -1,20 +1,22 @@
 /// A replicated, versioned set of [`InstanceClass`]es
+use std::collections::BTreeSet;
 use std::fmt;
 
 use async_trait::async_trait;
-use futures::stream::FuturesOrdered;
+use futures::stream::{FuturesOrdered, FuturesUnordered};
 use futures::{TryFutureExt, TryStreamExt};
-use log::debug;
+use log::{debug, trace};
+use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_state::object::InstanceClass;
-use tc_transact::fs;
 use tc_transact::hash::*;
-use tc_transact::{Transact, Transaction, TxnId};
-use tc_value::{Link, Version as VersionNumber};
+use tc_transact::{fs, Gateway, Replicate, Transact, Transaction, TxnId};
+use tc_value::{Link, Value, Version as VersionNumber};
 use tcgeneric::{Id, Map};
 
+use crate::cluster::IsDir;
 use crate::{CacheBlock, State, Txn};
 
 use super::dir::DirItem;
@@ -89,9 +91,28 @@ pub struct Class {
 
 impl Class {
     pub async fn get_version(&self, txn_id: TxnId, number: &VersionNumber) -> TCResult<Version> {
+        debug!("Class::get_version {number}");
+
         self.dir
             .get_file(txn_id, &number.clone().into())
             .map_ok(|file| Version::with_file(file))
+            .await
+    }
+
+    pub async fn list_versions(
+        &self,
+        txn_id: TxnId,
+    ) -> TCResult<impl Iterator<Item = (VersionNumber, Version)>> {
+        self.dir
+            .files(txn_id)
+            .map_ok(|files| {
+                files.map(|(number, file)| {
+                    (
+                        number.as_str().parse().expect("class set version number"),
+                        Version::with_file(file),
+                    )
+                })
+            })
             .await
     }
 }
@@ -107,17 +128,89 @@ impl DirItem for Class {
         number: VersionNumber,
         schema: Map<InstanceClass>,
     ) -> TCResult<Map<InstanceClass>> {
-        let txn_id = *txn.id();
+        if schema.is_empty() {
+            return Err(bad_request!(
+                "cannot create an empty class set version at {number}"
+            ));
+        }
 
+        let txn_id = *txn.id();
         let blocks = self.dir.create_file(txn_id, number.into()).await?;
 
         for (name, class) in &schema {
+            trace!("create Class version {number} block {name}");
+
             blocks
                 .create_block(txn_id, name.clone(), class.clone().into_inner())
                 .await?;
         }
 
         Ok(schema)
+    }
+}
+
+impl IsDir for Class {}
+
+#[async_trait]
+impl Replicate<Txn> for Class {
+    async fn replicate(&self, txn: &Txn, source: Link) -> TCResult<Output<Sha256>> {
+        let txn_id = *txn.id();
+        let version_ids = txn.get(source.clone(), Value::None).await?;
+        let version_ids =
+            version_ids.try_into_tuple(|s| TCError::unexpected(s, "class set version numbers"))?;
+
+        let version_ids = version_ids
+            .into_iter()
+            .map(|id| {
+                let id = Value::try_from(id)?;
+                id.try_cast_into(|v| TCError::unexpected(v, "a class set version number"))
+            })
+            .collect::<TCResult<BTreeSet<VersionNumber>>>()?;
+
+        version_ids
+            .iter()
+            .copied()
+            .map(|number| {
+                let source = source.clone();
+                async move {
+                    let version = txn.get(source, number).await?;
+                    let version =
+                        version.try_into_map(|s| TCError::unexpected(s, "a class set version"))?;
+
+                    let version = version
+                        .into_iter()
+                        .map(move |(name, class)| {
+                            InstanceClass::try_cast_from(class, |s| {
+                                TCError::unexpected(s, "a Class definition")
+                            })
+                            .map(|class| (name, class))
+                        })
+                        .collect::<TCResult<Map<InstanceClass>>>()?;
+
+                    self.create_version(txn, number, version).await?;
+
+                    TCResult::Ok(())
+                }
+            })
+            .collect::<FuturesUnordered<_>>()
+            .try_fold((), |(), ()| futures::future::ready(Ok(())))
+            .await?;
+
+        let mut to_delete = vec![];
+        for (number, _version) in self.list_versions(txn_id).await? {
+            if !version_ids.contains(&number) {
+                to_delete.push(number);
+            }
+        }
+
+        to_delete
+            .into_iter()
+            .map(|number| self.dir.delete(txn_id, number.into()))
+            .collect::<FuturesUnordered<_>>()
+            .try_fold((), |(), _| futures::future::ready(Ok(())))
+            .await?;
+
+        self.hash(txn_id).await
     }
 }
 
@@ -136,7 +229,7 @@ impl Transact for Class {
     }
 
     async fn finalize(&self, txn_id: &TxnId) {
-        debug!("Class::finalize {txn_id}");
+        trace!("Class::finalize {txn_id}");
         self.dir.finalize(*txn_id).await
     }
 }

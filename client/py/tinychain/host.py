@@ -1,16 +1,16 @@
 """Utilities for communicating with a TinyChain host."""
 
 import abc
+import inspect
 
 import json
-import logging
 
 import requests
 import urllib.parse
 
 from .service import Library, Model, Service
 from .context import to_json
-from .error import *
+from .error import BadRequest, Conflict, Forbidden, MethodNotAllowed, NotFound, Timeout, Unauthorized, UnknownError
 from .scalar.value import Nil
 from .uri import URI
 
@@ -144,7 +144,9 @@ class Host(object):
 
         return self._handle(request)
 
-    def _create_namespace(self, path):
+    def create_namespace(self, path):
+        """Create a directory at the given `path`."""
+
         exists = 1
         while exists < len(path):
             try:
@@ -158,20 +160,38 @@ class Host(object):
 
         self.put(path[:-1], path[-1], False)
 
-    def install(self, service):
-        service_uri = URI(service)
-        assert service_uri.path()
-        assert service_uri[:1] in [URI(Library), URI(Service)]
-
-        class_uri = URI(Model) + service_uri[1:]
-
-        self._create_namespace(service_uri[:-1])
-        self._create_namespace(class_uri[:-1])
-
-        self.put(service_uri[:-1], service_uri[-1], service)
-
     def hypothetical(self, op_def, auth=None):
+        """Execute the given `op_def` without committing any writes."""
+
         return self.post("/transact/hypothetical", {"op": op_def}, auth)
+
+    def install(self, lib_or_service):
+        """Install the given `lib_or_service` on this host"""
+
+        install_path = URI(lib_or_service).path()
+        assert install_path
+        assert install_path[:1] in [URI(Library), URI(Service)]
+
+        # TODO: replace this with a package manager
+        class_set = {}
+        lib_or_service_json = to_json(lib_or_service)[URI(lib_or_service)[:-1]]
+        for name, attr in inspect.getmembers(lib_or_service, inspect.isclass):
+            if name in lib_or_service_json:
+                class_set[name] = lib_or_service_json[name]
+
+        if class_set:
+            class_uri = URI(Model) + install_path[1:]
+            self.create_namespace(class_uri[:-1])
+            self.put(class_uri[:-1], class_uri[-1], class_set)
+
+        self.create_namespace(install_path[:-1])
+        self.put(install_path[:-1], install_path[-1], lib_or_service)
+
+    def update(self, lib_or_service):
+        """Update the version of given `lib_or_service` on this host"""
+
+        install_path = URI(lib_or_service).path()
+        return self.put(install_path[:-1], install_path[-1], lib_or_service)
 
 
 class Local(Host):
