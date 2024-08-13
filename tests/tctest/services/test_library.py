@@ -57,7 +57,6 @@ class LibraryVersionTests(unittest.TestCase):
         for i in range(len(hosts)):
             print()
             print(f"host {i} library replicas", hosts[i].get("/lib/test_library/replicas"))
-            print(f"host {i} class replicas", hosts[i].get("/class/test_library/replicas"))
             print()
 
         for host in hosts:
@@ -93,7 +92,7 @@ class LibraryVersionTests(unittest.TestCase):
         print(f"restarting {hosts[1]}...")
         print()
 
-        hosts[1].start()
+        hosts[1].start(wait_time=10)
 
         print()
         print("host started")

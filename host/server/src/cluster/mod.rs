@@ -55,6 +55,17 @@ pub(crate) struct ClusterEgress {
 
 impl Egress for ClusterEgress {
     fn is_authorized(&self, link: &ToUrl<'_>, is_write: bool) -> bool {
+        debug!(
+            "authorize egress to {link} from {}{}?",
+            self.lead, self.path
+        );
+
+        if !link.path().is_empty() && link.path()[..1] == tc_state::PREFIX[..] {
+            return true;
+        } else if link.path().starts_with(&self.path) {
+            return true;
+        }
+
         let mut link = link.to_link();
 
         // TODO: implement an explicit dependency whitelist for egress authorization

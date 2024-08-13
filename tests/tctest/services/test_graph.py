@@ -43,11 +43,8 @@ class TestService(tc.graph.Graph):
 class GraphTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        actor = rjwt.Actor("/")
-
-        cls.host = start_host(NS, replicate=LEAD, public_key=actor.public_key)
-        cls.host.create_namespace(actor, tc.URI(TestService).path()[0], NS, LEAD)
-        cls.host.install(actor, TestService())
+        cls.host = start_host(NS)
+        cls.host.install(TestService())
 
     def testCreateUser(self):
         uri = tc.URI(TestService).path()

@@ -25,8 +25,8 @@ use tc_transact::public::{ClosureInstance, Public, StateInstance, ToState};
 use tc_transact::{Gateway, Transaction, TxnId};
 use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::{
-    label, path_label, Class, Id, Instance, Label, Map, NativeClass, PathSegment, TCPath,
-    TCPathBuf, Tuple,
+    label, path_label, Class, Id, Instance, Label, Map, NativeClass, PathLabel, PathSegment,
+    TCPath, TCPathBuf, Tuple,
 };
 
 use closure::*;
@@ -43,6 +43,9 @@ pub mod closure;
 pub mod object;
 pub mod public;
 pub mod view;
+
+/// The path prefix of all [`State`] types.
+pub const PREFIX: PathLabel = path_label(&["state"]);
 
 #[cfg(feature = "chain")]
 pub mod chain {

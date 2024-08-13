@@ -54,7 +54,6 @@ impl<'a> Handler<'a, State> for LibraryHandler<'a> {
 
                 let (_link, schema) = expect_version(value)?;
 
-                let mut classes = Map::<InstanceClass>::new();
                 let mut version = Map::<Scalar>::new();
 
                 fn is_dep(scalar: &Scalar) -> bool {
@@ -73,10 +72,9 @@ impl<'a> Handler<'a, State> for LibraryHandler<'a> {
                     let scalar = Scalar::try_from(state)?;
 
                     if is_dep(&scalar) {
-                        let class = scalar
-                            .try_cast_into(|s| TCError::unexpected(s, "a class definition"))?;
-
-                        classes.insert(name, class);
+                        InstanceClass::try_cast_from(scalar, |s| {
+                            TCError::unexpected(s, "a class definition")
+                        })?;
                     } else {
                         version.insert(name, scalar);
                     }

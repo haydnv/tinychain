@@ -61,17 +61,15 @@ impl<'a> Handler<'a, State> for ServiceHandler<'a> {
 
                 let (link, version) = class.into_inner();
 
-                let mut classes = Map::new();
                 let mut schema = Map::new();
 
                 for (name, scalar) in version {
                     match scalar {
                         Scalar::Ref(tc_ref) => match *tc_ref {
-                            TCRef::Op(OpRef::Post((Subject::Link(classpath), proto)))
+                            TCRef::Op(OpRef::Post((Subject::Link(_classpath), proto)))
                                 if !proto.is_empty() =>
                             {
-                                let class = InstanceClass::extend(classpath, proto);
-                                classes.insert(name, class);
+                                // it's a class
                             }
                             tc_ref => {
                                 schema.insert(name, Scalar::from(tc_ref));
@@ -90,9 +88,7 @@ impl<'a> Handler<'a, State> for ServiceHandler<'a> {
                     .await?;
 
                 if let Some(source_host) = link.host() {
-                    if source_host == txn.host()
-                        || (source_host.is_localhost() && source_host.port() == txn.host().port())
-                    {
+                    if source_host.is_loopback(txn.host().into()) {
                         debug!("no need to replicate from {link}");
                     } else {
                         let source = link.append(number);

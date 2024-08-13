@@ -1,8 +1,6 @@
 import numpy as np
-import unittest
-
-import rjwt
 import tinychain as tc
+import unittest
 
 from ..process import start_host
 
@@ -48,15 +46,9 @@ class NeuralNetTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        actor = rjwt.Actor('/')
-
-        cls.host = start_host(NS, public_key=actor.public_key)
-
-        cls.host.create_namespace(actor, tc.URI(tc.service.Library), tc.ml.NS)
-        cls.host.install(actor, tc.ml.NeuralNets())
-
-        cls.host.create_namespace(actor, tc.URI(NeuralNetTester)[0], NS)
-        cls.host.install(actor, NeuralNetTester())
+        cls.host = start_host(NS)
+        cls.host.install(tc.ml.NeuralNets())
+        cls.host.install(NeuralNetTester())
 
     def testConvolution(self):
         inputs = np.ones([BATCH_SIZE, 3, 5, 5])
