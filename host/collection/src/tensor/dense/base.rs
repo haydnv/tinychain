@@ -469,7 +469,7 @@ where
                 panic!("cannot commit finalized version {}", txn_id);
             } else if !state.commits.insert(txn_id) {
                 // prevent any pending version being created at this txn
-                assert!(state.pending.contains_key(&txn_id));
+                assert!(!state.pending.contains_key(&txn_id));
                 warn!("duplicate commit at {}", txn_id);
                 None
             } else {

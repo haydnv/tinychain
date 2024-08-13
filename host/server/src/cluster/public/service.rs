@@ -1,28 +1,21 @@
-use log::debug;
+use log::{debug, trace};
 use safecast::{TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_scalar::{OpRef, Scalar, Subject, TCRef};
+use tc_state::object::public::method::route_attr;
 use tc_state::object::InstanceClass;
+use tc_transact::public::helpers::MethodNotAllowedHandler;
 use tc_transact::public::{
     DeleteHandler, GetHandler, Handler, PostHandler, Public, PutHandler, Route,
 };
-use tc_transact::{Replicate, Transaction, TxnId};
+use tc_transact::{Replicate, Transaction};
 use tc_value::{Value, Version as VersionNumber};
-use tcgeneric::{Id, Map, PathSegment};
+use tcgeneric::{Id, Map, PathSegment, TCPath};
 
 use crate::cluster::dir::DirItem;
-use crate::cluster::service::{Attr, Service};
+use crate::cluster::service::{Attr, Service, Version};
 use crate::{State, Txn};
-
-impl Route<State> for Attr {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
-        match self {
-            Self::Chain(chain) => chain.route(path),
-            Self::Scalar(scalar) => scalar.route(path),
-        }
-    }
-}
 
 struct ServiceHandler<'a> {
     service: &'a Service,
@@ -168,48 +161,32 @@ impl<'a> Handler<'a, State> for VersionHandler<'a> {
     }
 }
 
-struct ServiceAttrHandler<'a> {
+struct VersionAttrHandler<'a> {
     service: &'a Service,
     version: &'a Id,
-    attr_name: &'a Id,
     path: &'a [PathSegment],
 }
 
-impl<'a> ServiceAttrHandler<'a> {
-    fn new(
-        service: &'a Service,
-        version: &'a Id,
-        attr_name: &'a Id,
-        path: &'a [PathSegment],
-    ) -> Self {
+impl<'a> VersionAttrHandler<'a> {
+    fn new(service: &'a Service, version: &'a Id, path: &'a [PathSegment]) -> Self {
         Self {
             service,
             version,
-            attr_name,
             path,
         }
     }
-
-    async fn get_attr(&self, txn_id: TxnId) -> TCResult<Attr> {
-        let number = self.version.as_str().parse()?;
-        let version = self.service.get_version(txn_id, &number).await?;
-
-        version
-            .get_attribute(self.attr_name)
-            .cloned()
-            .ok_or_else(|| not_found!("Service attribute {}", self.attr_name))
-    }
 }
 
-impl<'a> Handler<'a, State> for ServiceAttrHandler<'a> {
+impl<'a> Handler<'a, State> for VersionAttrHandler<'a> {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
     where
         'b: 'a,
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let attr = self.get_attr(*txn.id()).await?;
-                attr.get(txn, self.path, key).await
+                let number = self.version.as_str().parse()?;
+                let version = self.service.get_version(*txn.id(), &number).await?;
+                version.get(txn, self.path, key).await
             })
         }))
     }
@@ -220,8 +197,9 @@ impl<'a> Handler<'a, State> for ServiceAttrHandler<'a> {
     {
         Some(Box::new(|txn, key, value| {
             Box::pin(async move {
-                let attr = self.get_attr(*txn.id()).await?;
-                attr.put(txn, self.path, key, value).await
+                let number = self.version.as_str().parse()?;
+                let version = self.service.get_version(*txn.id(), &number).await?;
+                version.put(txn, self.path, key, value).await
             })
         }))
     }
@@ -232,8 +210,9 @@ impl<'a> Handler<'a, State> for ServiceAttrHandler<'a> {
     {
         Some(Box::new(|txn, params| {
             Box::pin(async move {
-                let attr = self.get_attr(*txn.id()).await?;
-                attr.post(txn, self.path, params).await
+                let number = self.version.as_str().parse()?;
+                let version = self.service.get_version(*txn.id(), &number).await?;
+                version.post(txn, self.path, params).await
             })
         }))
     }
@@ -244,8 +223,9 @@ impl<'a> Handler<'a, State> for ServiceAttrHandler<'a> {
     {
         Some(Box::new(|txn, key| {
             Box::pin(async move {
-                let attr = self.get_attr(*txn.id()).await?;
-                attr.delete(txn, self.path, key).await
+                let number = self.version.as_str().parse()?;
+                let version = self.service.get_version(*txn.id(), &number).await?;
+                version.delete(txn, self.path, key).await
             })
         }))
     }
@@ -258,12 +238,32 @@ impl Route<State> for Service {
         } else if path.len() == 1 {
             Some(Box::new(VersionHandler::new(self, &path[0])))
         } else {
-            Some(Box::new(ServiceAttrHandler::new(
+            Some(Box::new(VersionAttrHandler::new(
                 self,
                 &path[0],
-                &path[1],
-                &path[2..],
+                &path[1..],
             )))
+        }
+    }
+}
+
+impl Route<State> for Version {
+    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
+        debug!("service::Version::route {}", TCPath::from(path));
+
+        if path.is_empty() {
+            return Some(Box::new(MethodNotAllowedHandler));
+        }
+
+        match self.get_attribute(&path[0]) {
+            Some(attr) => match attr {
+                Attr::Chain(chain) => chain.route(&path[1..]),
+                Attr::Scalar(scalar) => route_attr(self, &path[0], scalar, &path[1..]),
+            },
+            None => {
+                trace!("{:?} has no attr {}", self, &path[0]);
+                None
+            }
         }
     }
 }

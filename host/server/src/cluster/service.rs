@@ -14,14 +14,14 @@ use tc_scalar::value::{Link, Value, Version as VersionNumber};
 use tc_scalar::{OpRef, Refer, Scalar, Subject, TCRef};
 use tc_state::chain::{ChainType, Recover};
 use tc_state::collection::Schema as CollectionSchema;
-use tc_state::object::InstanceClass;
-use tc_state::CacheBlock;
+use tc_state::object::{InstanceClass, ObjectType};
+use tc_state::{CacheBlock, StateType};
 use tc_transact::fs::{Dir, File, Persist};
 use tc_transact::hash::*;
 use tc_transact::lock::TxnMapLock;
 use tc_transact::public::ToState;
 use tc_transact::{Gateway, Replicate, Transact, Transaction, TxnId};
-use tcgeneric::{label, Id, Label, Map, NativeClass, TCPathBuf};
+use tcgeneric::{label, Id, Instance, Label, Map, NativeClass, TCPathBuf};
 
 use crate::cluster::IsDir;
 use crate::{Chain, Collection, State, Txn};
@@ -39,6 +39,17 @@ pub enum Attr {
 
 as_type!(Attr, Chain, Chain<Collection>);
 as_type!(Attr, Scalar, Scalar);
+
+impl Instance for Attr {
+    type Class = StateType;
+
+    fn class(&self) -> Self::Class {
+        match self {
+            Self::Chain(chain) => StateType::Chain(chain.class()),
+            Self::Scalar(scalar) => StateType::Scalar(scalar.class()),
+        }
+    }
+}
 
 #[async_trait]
 impl AsyncHash for Attr {
@@ -79,6 +90,14 @@ impl Version {
     #[inline]
     pub fn get_attribute(&self, name: &Id) -> Option<&Attr> {
         self.attrs.get(name)
+    }
+}
+
+impl Instance for Version {
+    type Class = ObjectType;
+
+    fn class(&self) -> Self::Class {
+        ObjectType::Class
     }
 }
 
