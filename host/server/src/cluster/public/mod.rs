@@ -95,6 +95,7 @@ where
                     };
                 }
 
+                let should_commit = txn.leader(self.cluster.path())?.is_none();
                 let txn = self.cluster.claim(txn.clone())?;
 
                 self.cluster
@@ -200,24 +201,14 @@ where
                     .owner()?
                     .ok_or_else(|| internal!("ownerless transaction"))?;
 
-                if owner == self.cluster.public_key() {
-                    let txn = self.cluster.lock(txn.clone())?;
-                    self.cluster.replicate_commit(&txn).await
-                } else {
-                    Ok(())
+                if should_commit {
+                    if owner == self.cluster.public_key() {
+                        let txn = self.cluster.lock(txn)?;
+                        self.cluster.replicate_commit(&txn).await?;
+                    }
                 }
-            })
-        }))
-    }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
-    where
-        'b: 'a,
-    {
-        Some(Box::new(|txn, params| {
-            Box::pin(async move {
-                let txn = self.cluster.claim(txn.clone())?;
-                self.cluster.state.post(&txn, &[], params).await
+                Ok(())
             })
         }))
     }
@@ -236,13 +227,20 @@ where
                     };
                 }
 
+                let should_commit = txn.leader(self.cluster.path())?.is_none();
                 let txn = self.cluster.claim(txn.clone())?;
                 self.cluster.state.delete(&txn, &[], key.clone()).await?;
 
-                maybe_replicate(&self.cluster, &txn, &[], |txn, link| {
-                    let key = key.clone();
-                    async move { txn.delete(link, key).await }
-                })
+                maybe_replicate(
+                    &self.cluster,
+                    &txn,
+                    &[],
+                    |txn, link| {
+                        let key = key.clone();
+                        async move { txn.delete(link, key).await }
+                    },
+                    should_commit,
+                )
                 .await
             })
         }))
@@ -479,6 +477,7 @@ where
 
         Some(Box::new(move |txn, key, value| {
             Box::pin(async move {
+                let should_commit = txn.leader(cluster.path())?.is_none();
                 let txn = cluster.claim(txn.clone())?;
 
                 cluster
@@ -486,11 +485,17 @@ where
                     .put(&txn, path, key.clone(), value.clone())
                     .await?;
 
-                maybe_replicate(&cluster, &txn, path, |txn, link| {
-                    let key = key.clone();
-                    let value = value.clone();
-                    async move { txn.put(link, key, value).await }
-                })
+                maybe_replicate(
+                    &cluster,
+                    &txn,
+                    path,
+                    |txn, link| {
+                        let key = key.clone();
+                        let value = value.clone();
+                        async move { txn.put(link, key, value).await }
+                    },
+                    should_commit,
+                )
                 .await
             })
         }))
@@ -502,8 +507,20 @@ where
     {
         Some(Box::new(|txn, params| {
             Box::pin(async move {
+                let should_commit = txn.leader(self.cluster.path())?.is_none();
                 let txn = self.cluster.claim(txn.clone())?;
-                self.cluster.state().post(&txn, self.path, params).await
+                let response = self.cluster.state().post(&txn, self.path, params).await?;
+
+                if should_commit {
+                    if let Some(owner) = txn.owner()? {
+                        if owner == self.cluster.public_key() {
+                            let txn = self.cluster.lock(txn)?;
+                            self.cluster.replicate_commit(&txn).await?;
+                        }
+                    }
+                }
+
+                Ok(response)
             })
         }))
     }
@@ -517,13 +534,22 @@ where
 
         Some(Box::new(move |txn, key| {
             Box::pin(async move {
+                let should_commit = txn.leader(cluster.path())?.is_none();
                 let txn = cluster.claim(txn.clone())?;
-                cluster.state().delete(&txn, path, key.clone()).await?;
-                maybe_replicate(&cluster, &txn, path, |txn, link| {
-                    let key = key.clone();
 
-                    async move { txn.delete(link, key).await }
-                })
+                cluster.state().delete(&txn, path, key.clone()).await?;
+
+                maybe_replicate(
+                    &cluster,
+                    &txn,
+                    path,
+                    |txn, link| {
+                        let key = key.clone();
+
+                        async move { txn.delete(link, key).await }
+                    },
+                    should_commit,
+                )
                 .await
             })
         }))
@@ -535,6 +561,7 @@ async fn maybe_replicate<T, Op, Fut>(
     txn: &Txn,
     path: &[PathSegment],
     op: Op,
+    should_commit: bool,
 ) -> TCResult<()>
 where
     T: Transact + Send + Sync + fmt::Debug,
@@ -549,16 +576,16 @@ where
         cluster.replicate_write(txn, path, op).await?;
     }
 
-    let owner = txn
-        .owner()?
-        .ok_or_else(|| internal!("ownerless transaction"))?;
-
-    if owner == cluster.public_key() {
-        let txn = cluster.lock(txn.clone())?;
-        cluster.replicate_commit(&txn).await
-    } else {
-        Ok(())
+    if should_commit {
+        if let Some(owner) = txn.owner()? {
+            if owner == cluster.public_key() {
+                let txn = cluster.lock(txn.clone())?;
+                cluster.replicate_commit(&txn).await?;
+            }
+        }
     }
+
+    Ok(())
 }
 
 impl<T> Cluster<T>

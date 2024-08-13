@@ -1,6 +1,5 @@
+import os
 import time
-
-import rjwt
 import tinychain as tc
 import unittest
 
@@ -66,21 +65,19 @@ class Web(tc.service.Service):
 
 class TableDemoTests(unittest.TestCase):
     def setUp(self):
+        key = os.urandom(32)
         db = Database()
         web = Web()
-
-        actor = rjwt.Actor('/')
 
         self.hosts = []
         for i in range(3):
             port = DEFAULT_PORT + i
             host_uri = f"http://127.0.0.1:{port}" + tc.URI(Web).path()
-            host = start_host(NS, host_uri=host_uri, public_key=actor.public_key, replicate=LEAD)
+            host = start_host(NS, host_uri=host_uri, symmetric_key=key)
             self.hosts.append(host)
 
-        self.hosts[0].create_namespace(actor, tc.URI(tc.service.Service), NS, LEAD)
-        self.hosts[0].install(actor, db)
-        self.hosts[0].install(actor, web)
+        self.hosts[0].install(db)
+        self.hosts[0].install(web)
 
     def testCache(self):
         db = tc.URI(Database).path()
@@ -90,10 +87,13 @@ class TableDemoTests(unittest.TestCase):
         self.hosts[1].post(web.append("add_movie"), {"name": "Up", "year": 2009, "description": "Pixar, balloons"})
         elapsed = (time.time() - start) * 1000
 
+        print()
         print(f"settled database transaction between two clusters of three hosts each in {elapsed:.2f}ms")
+        print()
 
         for i in range(len(self.hosts)):
-            self.assertTrue(self.hosts[i].get(db.append("has_movie"), "Up"), f"host {i} failed to update")
+            actual = self.hosts[i].get(db.append("has_movie"), "Up")
+            self.assertTrue(actual, f"host {i} failed to update")
 
         self.assertEqual(self.hosts[0].get(web.append("views"), "Up"), 0)
 

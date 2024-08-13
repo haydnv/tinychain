@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{hash_map, BTreeMap, HashMap};
 use std::fmt;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
@@ -9,7 +9,7 @@ use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use log::*;
 use rjwt::{OsRng, SigningKey, Token, VerifyingKey};
-use safecast::TryCastInto;
+use safecast::{TryCastFrom, TryCastInto};
 use umask::Mode;
 
 use tc_error::*;
@@ -19,7 +19,7 @@ use tc_transact::hash::{Output, Sha256};
 use tc_transact::lock::{TxnLock, TxnLockReadGuard, TxnMapLockIter};
 use tc_transact::{fs, Gateway};
 use tc_transact::{Replicate, Transact, Transaction, TxnId};
-use tc_value::{Host, Link, ToUrl, Value};
+use tc_value::{Host, Link, ToUrl, Value, Version as VersionNumber};
 use tcgeneric::{label, Label, PathSegment, TCBoxTryFuture, TCPathBuf, Tuple};
 
 use crate::claim::Claim;
@@ -50,11 +50,35 @@ const REPLICAS: Label = label("replicas");
 pub(crate) struct ClusterEgress {
     lead: Host,
     path: TCPathBuf,
+    deps: Arc<Mutex<HashMap<Link, bool>>>,
 }
 
 impl Egress for ClusterEgress {
-    fn is_authorized(&self, _link: &ToUrl<'_>, _is_write: bool) -> bool {
-        // TODO: implement egress control
+    fn is_authorized(&self, link: &ToUrl<'_>, is_write: bool) -> bool {
+        let mut link = link.to_link();
+
+        // TODO: implement an explicit dependency whitelist for egress authorization
+        if link.path().iter().any(VersionNumber::can_cast_from) {
+            // assumption: the path is of the form /service/name/space/lib_name/<version>/...
+            // assumption: there is never any other case where the path will contain a version ID
+            while let Some(id) = link.path_mut().pop() {
+                if VersionNumber::can_cast_from(&id) {
+                    break;
+                }
+            }
+        }
+
+        let mut deps = self.deps.lock().expect("egress list");
+        match deps.entry(link) {
+            hash_map::Entry::Vacant(entry) => {
+                entry.insert(is_write);
+            }
+            hash_map::Entry::Occupied(mut entry) => {
+                entry.insert(is_write || *entry.get());
+            }
+        }
+
+        // TODO: implement egress authorization
         true
     }
 }
@@ -184,6 +208,7 @@ impl<T> Cluster<T> {
         let egress = ClusterEgress {
             lead: self.inner.schema.lead.clone(),
             path: self.path().clone(),
+            deps: whitelist.clone(),
         };
 
         let mut claimed = self.claimed.lock().expect("claimed");
@@ -367,6 +392,8 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
             .ok_or_else(|| bad_request!("cannot commit a leaderless transaction"))?;
 
         if leader_pk == self.public_key() {
+            debug!("{self:?} will lead commit replication...");
+
             if txn.locked_by()? == txn.owner()? {
                 let txn_id = *txn.id();
                 let notify = |link| txn.put(link, Value::default(), State::default());
@@ -374,6 +401,8 @@ impl<T: Transact + Send + Sync + fmt::Debug> Cluster<T> {
             } else {
                 return Err(unauthorized!("commit {:?}", self));
             }
+        } else {
+            trace!("{self:?} will not lead commit replication...");
         }
 
         self.commit(*txn.id()).await;
