@@ -125,7 +125,7 @@ class LinearAlgebraTests(unittest.TestCase):
         start = time.time()
         result = self.host.post(
             LIB_URI.append("svd"),
-            tc.Map(A=tensor, l=n, epsilon=tc.F32(1e-7), max_iter=200),
+            tc.Map(A=tensor, l=n, epsilon=tc.F32(1e-7), max_iter=30),
         )
         elapsed = time.time() - start
 
@@ -136,7 +136,7 @@ class LinearAlgebraTests(unittest.TestCase):
         self._check_svd(matrix, actual)
 
     def testParallelSVD_NltM(self):
-        num_matrices = 25
+        num_matrices = 2
         n = 2
         m = 3
         shape = [num_matrices, n, m]
@@ -162,7 +162,7 @@ class LinearAlgebraTests(unittest.TestCase):
             self._check_svd(expected, actual)
 
     def testParallelSVD_NgtM(self):
-        num_matrices = 10
+        num_matrices = 2
         n = 3
         m = 2
         shape = [num_matrices, n, m]

@@ -4,7 +4,7 @@ import inspect
 import json
 
 from tinychain.context import to_json
-from tinychain.error import BadRequest, Conflict, Forbidden, MethodNotAllowed, NotFound, Timeout, Unauthorized, UnknownError
+from tinychain.error import BadRequest, Conflict, Forbidden, MethodNotAllowed, NotFound, NotImplemented, Timeout, Unauthorized, UnknownError
 from tinychain.service import Library, Model, Service
 from tinychain.uri import URI
 
