@@ -20,25 +20,25 @@ opencl = ["tc-state/opencl"]
 [dependencies]
 aes-gcm-siv = "0.11"
 async-trait = "0.1"
-destream = "0.7"
-ds-ext = { path = "../../../ds-ext" }
+destream = "0.8"
+ds-ext = "0.2"
 futures = "0.3"
-freqfs = { path = "../../../freqfs" }
+freqfs = "0.10"
 gethostname = "0.5"
 local-ip-address = "0.6"
 log = "0.4"
 mdns-sd = "0.11"
 rand = "0.8"
-rjwt = { path = "../../../rjwt/rust" }
+rjwt = "0.6"
 safecast = "0.2"
 serde = "1.0"
-tc-collection = { path = "../collection", optional = true }
-tc-error = { path = "../error", features = ["rjwt"] }
-tc-scalar = { path = "../scalar" }
-tc-state = { path = "../state" }
-tc-value = { path = "../value" }
-tc-transact = { path = "../transact" }
-tcgeneric = { path = "../generic" }
+tc-collection = { version = "0.5", optional = true }
+tc-error = { version = "0.12", features = ["rjwt"] }
+tc-scalar = "0.5"
+tc-state = "0.5"
+tc-value = "0.13"
+tc-transact = "0.21"
+tcgeneric = "0.11"
 tokio = { version = "1.39", features = ["sync", "time"] }
 umask = "2.1"
 uuid = { version = "1.10", features = ["v4"] }
