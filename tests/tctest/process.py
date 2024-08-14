@@ -1,4 +1,3 @@
-import docker
 import logging
 import os
 import pathlib
@@ -13,94 +12,8 @@ import tinychain_async as tc_async
 CONFIG = "config"
 DEFAULT_PORT = 8702
 DEFAULT_WORKSPACE = "/tmp/tc/tmp"
-DOCKERFILE = os.getenv("TC_DOCKER", "tests/tctest/Dockerfile")
-DOCKER_NETWORK_MODE = os.getenv("DOCKER_MODE", "host")
 TC_PATH = os.getenv("TC_PATH", "host/target/debug/tinychain")
 HOST_START_WAIT_TIME = 10 if "debug" in TC_PATH else 3
-
-
-class Docker(tc.host.Local.Process):
-    ADDRESS = "127.0.0.1"
-
-    def __init__(self, **flags):
-        if "data_dir" in flags:
-            raise RuntimeError(f"the test Dockerfile does not support a custom data directory path {flags['data_dir']}")
-
-        if "log_level" not in flags:
-            flags["log_level"] = "debug"
-
-        self._flags = flags
-        self.container = None
-        self.client = docker.from_env()
-
-    def start(self, wait_time):
-        """Build and run a Docker image from the local repository."""
-
-        if self.container:
-            raise RuntimeError("tried to start a Docker container that's already running")
-
-        # build the Docker image
-        print("building Docker image")
-        try:
-            (image, _logs) = self.client.images.build(path=".", dockerfile=DOCKERFILE)
-        except Exception as e:
-            exit(f"building Docker image failed: {e}")
-
-        print("built Docker image")
-
-        # construct the TinyChain host arguments
-        cmd = ["/tinychain", "--data_dir=/data"]
-        for flag, value in self._flags.items():
-            cmd.append(f"--{flag}={value}")
-        cmd = ' '.join(cmd)
-
-        # run a Docker container
-        print(f"running new Docker container with image {image.id}...")
-        self.container = self.client.containers.run(
-            image.id, cmd,
-            network_mode=DOCKER_NETWORK_MODE,
-            detach=True)
-
-        time.sleep(wait_time)
-        print(self.container.logs().decode("utf-8"))
-
-    def stop(self, _wait_time=None):
-        """Stop this Docker container."""
-
-        if self.container:
-            print("stopping Docker container")
-            self.container.stop()
-            print("Docker container stopped")
-            print()
-        else:
-            logging.info(f"Docker container not running")
-
-        self.container = None
-
-    def __del__(self):
-        self.stop()
-
-
-def start_docker(ns, host_uri=None, public_key=None, wait_time=HOST_START_WAIT_TIME, **flags):
-    assert ns.startswith('/'), f"namespace must be a URI path, not {ns}"
-
-    if not os.path.exists(DOCKERFILE):
-        raise RuntimeError(
-            f"Dockerfile at {DOCKERFILE} not found--use the TC_DOCKER environment variable to set a different path")
-
-    port = DEFAULT_PORT
-    if flags.get("http_port"):
-        port = flags["http_port"]
-        del flags["http_port"]
-    elif host_uri is not None and host_uri.port():
-        port = host_uri.port()
-
-    if public_key:
-        flags["public_key"] = public_key.hex()
-
-    process = Docker(http_port=port, **flags)
-    process.start(wait_time)
-    return tc.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
 class Local(tc.host.Local.Process):
@@ -220,11 +133,7 @@ def start_local_host_async(ns, host_uri=None, symmetric_key=None, wait_time=HOST
     return tc_async.host.Local(process, f"http://{process.ADDRESS}:{port}")
 
 
-# use this alias to switch between Local and Docker host types
-if DOCKERFILE == "0":
-    start_host = start_local_host
-else:
-    start_host = start_docker
+start_host = start_local_host
 
 
 def _maybe_create_dir(path):

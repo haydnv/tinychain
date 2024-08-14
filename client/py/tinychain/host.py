@@ -10,7 +10,7 @@ import urllib.parse
 
 from .service import Library, Model, Service
 from .context import to_json
-from .error import BadRequest, Conflict, Forbidden, MethodNotAllowed, NotFound, Timeout, Unauthorized, UnknownError
+from .error import BadRequest, Conflict, Forbidden, MethodNotAllowed, NotFound, NotImplemented, Timeout, Unauthorized, UnknownError
 from .scalar.value import Nil
 from .uri import URI
 

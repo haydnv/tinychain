@@ -677,8 +677,8 @@ class TensorTests(HostTest):
 
     @unittest.skipIf("debug" in TC_PATH, "too slow for debug mode")
     def testSubAndSum(self):
-        x = 300
-        y = 250
+        x = 200
+        y = 150
         z = 2
 
         cxt = tc.Context()

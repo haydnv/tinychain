@@ -77,7 +77,7 @@ class OptimizerTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.host = start_host(NS)
+        cls.host = start_host(NS, request_ttl=10)
         cls.host.install(tc.ml.NeuralNets())
         cls.host.install(tc.ml.Optimizers())
         cls.host.install(OptimizerTester())
