@@ -5,7 +5,6 @@ import unittest
 from num2words import num2words
 from .base import HostTest
 
-ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.btree.Schema((tc.Column("number", tc.Int), tc.Column("word", tc.String, 100)))
 
 
@@ -15,7 +14,7 @@ class BTreeTests(HostTest):
         cxt.tree = tc.btree.BTree(SCHEMA)
         cxt.result = tc.after(cxt.tree.insert((1, "one")), cxt.tree.count())
 
-        count = self.host.post(ENDPOINT, cxt)
+        count = self.host.hypothetical(cxt)
         self.assertEqual(count, 1)
 
     def testInsert(self):
@@ -31,7 +30,7 @@ class BTreeTests(HostTest):
 
             cxt.result = tc.after(cxt.inserts, cxt.tree.count())
 
-            result = self.host.post(ENDPOINT, cxt)
+            result = self.host.hypothetical(cxt)
             self.assertEqual(result, x)
 
     def testSliceOne(self):
@@ -42,7 +41,7 @@ class BTreeTests(HostTest):
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
         cxt.result = tc.after(cxt.inserts, cxt.tree[(1,)])
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         self.assertEqual(result, expected([keys[1]]))
 
     def testReverse(self):
@@ -53,7 +52,7 @@ class BTreeTests(HostTest):
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
         cxt.result = tc.after(cxt.inserts, cxt.tree.reverse())
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         self.assertEqual(result, expected(list(reversed(keys))))
 
     def testSliceRange(self):
@@ -64,7 +63,7 @@ class BTreeTests(HostTest):
         cxt.inserts = [cxt.tree.insert(key) for key in keys]
         cxt.result = tc.after(cxt.inserts, cxt.tree[29:32])
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         self.assertEqual(result, expected(keys[29:32]))
 
     def testDeleteAll(self):
@@ -77,7 +76,7 @@ class BTreeTests(HostTest):
         cxt.delete = tc.after(cxt.inserts, cxt.tree.delete())
         cxt.result = tc.after(cxt.delete, cxt.tree)
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         self.assertEqual(result, expected([]))
 
     def testDeleteSlice(self):
@@ -91,7 +90,7 @@ class BTreeTests(HostTest):
         cxt.delete = cxt.tree.delete([slice(25, 35)])
         cxt.result = tc.after(cxt.delete, cxt.tree)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(actual, expected(ordered))
 
 

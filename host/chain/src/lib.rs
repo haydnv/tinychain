@@ -4,24 +4,22 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use async_hash::generic_array::GenericArray;
-use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
+use freqfs::FileSave;
 use futures::future::TryFutureExt;
 use safecast::{AsType, TryCastFrom};
 
-use tc_collection::btree::Node as BTreeNode;
-use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
-use tc_collection::Collection;
+use tc_collection::{Collection, CollectionBase, CollectionBlock};
 use tc_error::*;
 use tc_scalar::Scalar;
-use tc_transact::fs;
+use tc_transact::hash::{AsyncHash, GenericArray, Output, Sha256};
 use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Route, StateInstance};
-use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
-use tc_value::Value;
+use tc_transact::{fs, Replicate};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
+use tc_value::{Link, Value};
 use tcgeneric::*;
 
 use data::{MutationPending, MutationRecord};
@@ -42,9 +40,9 @@ const BLOCK_SIZE: usize = 1_000_000; // TODO: reduce to 4,096
 const PREFIX: PathLabel = path_label(&["state", "chain"]);
 
 /// A block in a file managed by a [`Chain`]
-pub trait ChainCacheFile: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> {}
+pub trait CacheBlock: AsType<ChainBlock> + CollectionBlock {}
 
-impl<FE> ChainCacheFile for FE where FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> {}
+impl<FE> CacheBlock for FE where FE: AsType<ChainBlock> + CollectionBlock {}
 
 /// Defines a method to recover the state of this [`Chain`] from a transaction failure.
 #[async_trait]
@@ -115,15 +113,28 @@ impl fmt::Debug for ChainType {
 }
 
 /// A data structure responsible for maintaining the integrity of a mutable subject.
-#[derive(Clone)]
-pub enum Chain<State: StateInstance, T> {
-    Block(block::BlockChain<State, T>),
-    Sync(sync::SyncChain<State, T>),
+pub enum Chain<State, Txn, FE, T> {
+    Block(block::BlockChain<State, Txn, FE, T>),
+    Sync(sync::SyncChain<State, Txn, FE, T>),
 }
 
-impl<State, T> Instance for Chain<State, T>
+impl<State, Txn, FE, T> Clone for Chain<State, Txn, FE, T>
 where
-    State: StateInstance,
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Block(chain) => Self::Block(chain.clone()),
+            Self::Sync(chain) => Self::Sync(chain.clone()),
+        }
+    }
+}
+
+impl<State, Txn, FE, T> Instance for Chain<State, Txn, FE, T>
+where
+    State: Send + Sync,
+    Txn: Send + Sync,
+    FE: Send + Sync,
     T: Send + Sync,
 {
     type Class = ChainType;
@@ -136,14 +147,10 @@ where
     }
 }
 
-impl<State, T> ChainInstance<State, T> for Chain<State, T>
+impl<State, T> ChainInstance<State, T> for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: for<'a> FileSave<'a> + CacheBlock,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
@@ -171,13 +178,36 @@ where
 }
 
 #[async_trait]
-impl<State, T> AsyncHash for Chain<State, T>
+impl<State> Replicate<State::Txn>
+    for Chain<State, State::Txn, State::FE, CollectionBase<State::Txn, State::FE>>
+where
+    State: StateInstance,
+    State::FE: CacheBlock,
+    State: From<Collection<State::Txn, State::FE>> + From<Scalar>,
+    Collection<State::Txn, State::FE>: TryCastFrom<State>,
+    CollectionBase<State::Txn, State::FE>: Route<State> + TryCastFrom<State>,
+    Scalar: TryCastFrom<State>,
+    BlockChain<State, State::Txn, State::FE, CollectionBase<State::Txn, State::FE>>:
+        TryCastFrom<State>,
+    SyncChain<State, State::Txn, State::FE, CollectionBase<State::Txn, State::FE>>:
+        TryCastFrom<State>,
+{
+    async fn replicate(&self, txn: &State::Txn, source: Link) -> TCResult<Output<Sha256>> {
+        match self {
+            Self::Block(chain) => chain.replicate(txn, source).await,
+            Self::Sync(chain) => chain.replicate(txn, source).await,
+        }
+    }
+}
+
+#[async_trait]
+impl<State, T> AsyncHash for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a> + ThreadSafe,
     T: AsyncHash + Send + Sync,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         match self {
             Self::Block(chain) => chain.hash(txn_id).await,
             Self::Sync(chain) => chain.hash(txn_id).await,
@@ -186,14 +216,10 @@ where
 }
 
 #[async_trait]
-impl<State, T> Transact for Chain<State, T>
+impl<State, T> Transact for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + Transact + fmt::Debug,
 {
     type Commit = T::Commit;
@@ -221,18 +247,13 @@ where
 }
 
 #[async_trait]
-impl<State, T> Recover<State::FE> for Chain<State, T>
+impl<State, T> Recover<State::FE> for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Scalar>,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<TensorNode>
-        + AsType<ChainBlock>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: Route<State> + fmt::Debug + Send + Sync,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
-    BTreeNode: freqfs::FileLoad,
 {
     type Txn = State::Txn;
 
@@ -245,14 +266,10 @@ where
 }
 
 #[async_trait]
-impl<State, T> fs::Persist<State::FE> for Chain<State, T>
+impl<State, T> fs::Persist<State::FE> for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + fmt::Debug,
 {
     type Txn = State::Txn;
@@ -308,14 +325,10 @@ where
 }
 
 #[async_trait]
-impl<State, T> fs::CopyFrom<State::FE, Self> for Chain<State, T>
+impl<State, T> fs::CopyFrom<State::FE, Self> for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + fmt::Debug,
 {
     async fn copy_from(
@@ -338,26 +351,17 @@ where
     }
 }
 
-impl<State, T> fmt::Debug for Chain<State, T>
-where
-    State: StateInstance,
-    T: Send + Sync,
-{
+impl<State, Txn, FE, T> fmt::Debug for Chain<State, Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "instance of {:?} with subject type {}",
-            self.class(),
-            std::any::type_name::<T>()
-        )
+        match self {
+            Self::Block(chain) => chain.fmt(f),
+            Self::Sync(chain) => chain.fmt(f),
+        }
     }
 }
 
-impl<State, T> From<BlockChain<State, T>> for Chain<State, T>
-where
-    State: StateInstance,
-{
-    fn from(chain: BlockChain<State, T>) -> Self {
+impl<State, Txn, FE, T> From<BlockChain<State, Txn, FE, T>> for Chain<State, Txn, FE, T> {
+    fn from(chain: BlockChain<State, Txn, FE, T>) -> Self {
         Self::Block(chain)
     }
 }
@@ -393,14 +397,15 @@ where
 }
 
 #[async_trait]
-impl<'en, State, T> IntoView<'en, State::FE> for Chain<State, T>
+impl<'en, State, T> IntoView<'en, State::FE> for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     T: IntoView<'en, State::FE, Txn = State::Txn> + Send + Sync + 'en,
-    BlockChain<State, T>: IntoView<'en, State::FE, View = (T::View, data::HistoryView<'en>), Txn = State::Txn>
+    BlockChain<State, State::Txn, State::FE, T>: IntoView<'en, State::FE, View = (T::View, data::HistoryView<'en>), Txn = State::Txn>
         + Send
         + Sync,
-    SyncChain<State, T>: IntoView<'en, State::FE, View = T::View, Txn = State::Txn> + Send + Sync,
+    SyncChain<State, State::Txn, State::FE, T>:
+        IntoView<'en, State::FE, View = T::View, Txn = State::Txn> + Send + Sync,
 {
     type Txn = State::Txn;
     type View = ChainView<'en, T::View>;
@@ -418,17 +423,13 @@ where
 }
 
 #[async_trait]
-impl<State, T> de::FromStream for Chain<State, T>
+impl<State, T> de::FromStream for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance
         + de::FromStream<Context = State::Txn>
         + From<Collection<State::Txn, State::FE>>
         + From<Scalar>,
-    State::FE: DenseCacheFile
-        + AsType<ChainBlock>
-        + AsType<BTreeNode>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: Route<State> + de::FromStream<Context = State::Txn> + fmt::Debug,
     (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
@@ -471,11 +472,7 @@ where
         + de::FromStream<Context = State::Txn>
         + From<Collection<State::Txn, State::FE>>
         + From<Scalar>,
-    State::FE: DenseCacheFile
-        + AsType<ChainBlock>
-        + AsType<BTreeNode>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: Route<State> + de::FromStream<Context = State::Txn> + fmt::Debug,
     (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
@@ -488,7 +485,7 @@ where
         self,
         class: ChainType,
         access: &mut A,
-    ) -> Result<Chain<State, T>, A::Error> {
+    ) -> Result<Chain<State, State::Txn, State::FE, T>, A::Error> {
         match class {
             ChainType::Block => {
                 access
@@ -509,11 +506,7 @@ where
         + de::FromStream<Context = State::Txn>
         + From<Collection<State::Txn, State::FE>>
         + From<Scalar>,
-    State::FE: DenseCacheFile
-        + AsType<ChainBlock>
-        + AsType<BTreeNode>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: Route<State> + de::FromStream<Context = State::Txn> + fmt::Debug,
     (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
@@ -522,7 +515,7 @@ where
     (Value,): TryCastFrom<State>,
     (Value, State): TryCastFrom<State>,
 {
-    type Value = Chain<State, T>;
+    type Value = Chain<State, State::Txn, State::FE, T>;
 
     fn expecting() -> &'static str {
         "a Chain"
@@ -545,7 +538,7 @@ fn new_queue<State>(
 ) -> TxnTaskQueue<MutationPending<State::Txn, State::FE>, TCResult<MutationRecord>>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode> + Clone,
+    State::FE: for<'a> FileSave<'a> + CacheBlock + Clone,
 {
     TxnTaskQueue::new(Arc::pin(move |mutation| {
         let store = store.clone();

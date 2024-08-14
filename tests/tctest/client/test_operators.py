@@ -11,7 +11,6 @@ from tinychain.math.operator import gradients as grad_tc
 from .base import ClientTest
 
 TENSOR_URI = str(tc.URI(Dense))
-ENDPOINT = "/transact/hypothetical"
 
 
 ones_like_torch = torch.ones_like
@@ -31,7 +30,7 @@ class ChainRuleTests(ClientTest):
         cxt.f_x_grad = tc.math.gradients(cxt.f_x, ones_like_tc(cxt.f_x), cxt.x)
         cxt.result = (cxt.f_x_grad == cxt.d_f_x).all()
 
-        passed = self.host.post(ENDPOINT, cxt)
+        passed = self.host.hypothetical(cxt)
         self.assertTrue(passed)
 
     def testExp_simple(self):
@@ -42,7 +41,7 @@ class ChainRuleTests(ClientTest):
         cxt.result = tc.math.derivative_of(cxt.h_x)
 
         expected = 4 * math.e**4
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertTrue(np.allclose(load_np(actual), np.array([expected])))
 
     def testExp_withOperatorExponent(self):
@@ -53,7 +52,7 @@ class ChainRuleTests(ClientTest):
 
         x = np.array([1])
         expected = 6 * x * math.e ** (3 * x**2 + 2)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         self.assertTrue(np.allclose(load_np(actual), expected))
 
@@ -65,7 +64,7 @@ class ChainRuleTests(ClientTest):
 
         x = np.array([1])
         expected = (2 * x) / (x**2 + 1)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         self.assertTrue(np.allclose(load_np(actual), expected))
 
@@ -79,7 +78,7 @@ class ChainRuleTests(ClientTest):
 
         t = np.array([1])
         expected = (10 * t**4) - (8 * t)
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         self.assertTrue(np.allclose(load_np(actual), expected))
 
@@ -115,7 +114,7 @@ class OperatorTests(ClientTest):
         cxt.y_2tc = cxt.y_tc + self.w2_tc + self.b2_tc
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -141,7 +140,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -160,7 +159,7 @@ class OperatorTests(ClientTest):
         cxt.y_2tc = cxt.y_tc - self.w2_tc + self.b2_tc
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -186,7 +185,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -213,7 +212,7 @@ class OperatorTests(ClientTest):
         cxt.y_2tc = cxt.y_tc / w2_tc + self.b2_tc
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -242,7 +241,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -261,7 +260,7 @@ class OperatorTests(ClientTest):
         cxt.y_2tc = cxt.y_tc**self.w2_tc + self.b2_tc
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -289,7 +288,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -308,7 +307,7 @@ class OperatorTests(ClientTest):
         cxt.y_2tc = cxt.y_tc * self.w2_tc + self.b2_tc
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -338,7 +337,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -357,7 +356,7 @@ class OperatorTests(ClientTest):
         cxt.y_2tc = cxt.y_tc @ self.w2_tc + self.b2_tc
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -386,7 +385,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -405,7 +404,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -435,7 +434,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -454,7 +453,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -484,7 +483,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -503,7 +502,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -531,7 +530,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -550,7 +549,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -578,7 +577,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -597,7 +596,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -625,7 +624,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -644,7 +643,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -672,7 +671,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -691,7 +690,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -719,7 +718,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -738,7 +737,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -766,7 +765,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -785,7 +784,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -813,7 +812,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -837,7 +836,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = (cxt.x_tc * cxt.w1_tc).acosh()
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), cxt.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -869,7 +868,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -888,7 +887,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -916,7 +915,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -935,7 +934,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -963,7 +962,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -982,7 +981,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -1010,7 +1009,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -1029,7 +1028,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = self.x_tc * cxt.w_tc
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -1057,7 +1056,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -1076,7 +1075,7 @@ class OperatorTests(ClientTest):
         cxt.y_2tc = cxt.y_tc @ self.w2_tc + self.b2_tc + cxt.y_tc.exp()
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
 
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
@@ -1109,7 +1108,7 @@ class OperatorTests(ClientTest):
             "the_second_derivative": cxt._d2y_dw2_tc,
         }
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 
@@ -1148,7 +1147,7 @@ class OperatorTests(ClientTest):
             "the_second_derivative": cxt._d2y_dw2_tc,
         }
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
 
         dy_dw1_tc = result["the_first_derivative"]
         # d2y_dw2_tc = result['the_second_derivative']
@@ -1169,7 +1168,7 @@ class OperatorTests(ClientTest):
         cxt.y_tc = tc.tensor.Dense.concatenate([self.w1_tc, self.b1_tc])
         cxt.result = grad_tc(cxt.y_tc, ones_like_tc(cxt.y_tc), [self.w1_tc, self.b1_tc])
 
-        tc_grad = self.host.post(ENDPOINT, cxt)
+        tc_grad = self.host.hypothetical(cxt)
 
         self.assertEqual(len(torch_grad), len(tc_grad))
         for (expected, actual) in zip(torch_grad, tc_grad):
@@ -1195,7 +1194,7 @@ class OperatorTests(ClientTest):
         expected_d = -2 * np.sum(x - mu)
         expected_d2 = 2 * n
 
-        actual_d, actual_d2 = self.host.post(ENDPOINT, cxt)
+        actual_d, actual_d2 = self.host.hypothetical(cxt)
         self.assertEqual(actual_d, expected_d)
         self.assertEqual(actual_d2, expected_d2)
 
@@ -1211,7 +1210,7 @@ class OperatorTests(ClientTest):
         cxt.y_2tc = cxt.y_tc.sum(0) ** 0.5
         cxt.result = grad_tc(cxt.y_2tc, ones_like_tc(cxt.y_2tc), self.w1_tc)
 
-        w1_tc_grad = self.host.post(ENDPOINT, cxt)
+        w1_tc_grad = self.host.hypothetical(cxt)
         self.assertAllClose(w1_torch_grad, w1_tc_grad)
 
     def testSum2ndDerivative(self):
@@ -1238,7 +1237,7 @@ class OperatorTests(ClientTest):
             {"the_first_derivative": _dy_dw1_tc, "the_second_derivative": _d2y_dw2_tc}
         )
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         dy_dw1_tc = result["the_first_derivative"]
         d2y_dw2_tc = result["the_second_derivative"]
 

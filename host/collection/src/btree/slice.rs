@@ -45,7 +45,7 @@ impl<Txn, FE> BTreeSlice<Txn, FE> {
 
 impl<Txn, FE> Instance for BTreeSlice<Txn, FE>
 where
-    Txn: Transaction<FE>,
+    Txn: Send + Sync,
     FE: Send + Sync,
 {
     type Class = BTreeType;

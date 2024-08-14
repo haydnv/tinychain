@@ -5,49 +5,99 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::str::FromStr;
 
-use async_hash::{Digest, Hash, Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de;
 use destream::ArrayAccess;
 use futures::future::TryFutureExt;
-use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::stream::{StreamExt, TryStreamExt};
 use log::debug;
 use safecast::*;
 
-use tc_chain::{ChainType, ChainVisitor};
-use tc_collection::btree::BTreeType;
-use tc_collection::table::TableType;
-use tc_collection::tensor::TensorType;
+#[cfg(feature = "chain")]
+use tc_chain::ChainVisitor;
+#[cfg(feature = "collection")]
 use tc_collection::{CollectionType, CollectionVisitor};
 use tc_error::*;
-use tc_fs::CacheBlock;
 use tc_scalar::*;
+use tc_transact::hash::{AsyncHash, Hash, Output, Sha256};
 use tc_transact::public::{ClosureInstance, Public, StateInstance, ToState};
-use tc_transact::{AsyncHash, Transaction, TxnId};
+use tc_transact::{Gateway, Transaction, TxnId};
 use tc_value::{Float, Host, Link, Number, NumberType, TCString, Value, ValueType};
 use tcgeneric::{
-    path_label, Class, Id, Instance, Map, NativeClass, PathSegment, TCPath, TCPathBuf, Tuple,
+    label, path_label, Class, Id, Instance, Label, Map, NativeClass, PathLabel, PathSegment,
+    TCPath, TCPathBuf, Tuple,
 };
 
-use chain::*;
 use closure::*;
-use collection::*;
 use object::{InstanceClass, Object, ObjectType, ObjectVisitor};
 
-pub mod chain;
+pub use block::CacheBlock;
+#[cfg(feature = "chain")]
+pub use chain::*;
+#[cfg(feature = "collection")]
+pub use collection::*;
+
+mod block;
 pub mod closure;
-pub mod collection;
 pub mod object;
 pub mod public;
 pub mod view;
 
-pub type Txn = tc_fs::Txn<State>;
+/// The path prefix of all [`State`] types.
+pub const PREFIX: PathLabel = path_label(&["state"]);
+
+#[cfg(feature = "chain")]
+pub mod chain {
+    use crate::{CacheBlock, State};
+
+    pub use tc_chain::{ChainType, Recover};
+
+    pub type Chain<Txn, T> = tc_chain::Chain<State<Txn>, Txn, CacheBlock, T>;
+    pub type BlockChain<Txn, T> = tc_chain::BlockChain<State<Txn>, Txn, CacheBlock, T>;
+    pub type SyncChain<Txn, T> = tc_chain::SyncChain<State<Txn>, Txn, CacheBlock, T>;
+}
+
+#[cfg(feature = "collection")]
+pub mod collection {
+    use crate::CacheBlock;
+
+    pub use tc_collection::Schema;
+
+    #[cfg(feature = "btree")]
+    pub use tc_collection::btree::{BTreeSchema, BTreeType};
+    #[cfg(all(feature = "table", not(feature = "btree")))]
+    pub(crate) use tc_collection::btree::{BTreeSchema, BTreeType};
+    #[cfg(feature = "table")]
+    pub use tc_collection::table::{TableSchema, TableType};
+    #[cfg(feature = "tensor")]
+    pub use tc_collection::tensor::TensorType;
+
+    pub type Collection<Txn> = tc_collection::Collection<Txn, CacheBlock>;
+    pub type CollectionBase<Txn> = tc_collection::CollectionBase<Txn, CacheBlock>;
+
+    #[cfg(feature = "btree")]
+    pub type BTree<Txn> = tc_collection::BTree<Txn, CacheBlock>;
+    #[cfg(feature = "btree")]
+    pub type BTreeFile<Txn> = tc_collection::BTreeFile<Txn, CacheBlock>;
+    #[cfg(all(any(feature = "table", feature = "tensor"), not(feature = "btree")))]
+    pub(crate) type BTree<Txn> = tc_collection::BTree<Txn, CacheBlock>;
+    #[cfg(all(feature = "table", not(feature = "btree")))]
+    pub(crate) type BTreeFile<Txn> = tc_collection::BTreeFile<Txn, CacheBlock>;
+    #[cfg(feature = "table")]
+    pub type Table<Txn> = tc_collection::Table<Txn, CacheBlock>;
+    #[cfg(feature = "table")]
+    pub type TableFile<Txn> = tc_collection::TableFile<Txn, CacheBlock>;
+    #[cfg(feature = "tensor")]
+    pub type Tensor<Txn> = tc_collection::Tensor<Txn, CacheBlock>;
+}
 
 /// The [`Class`] of a [`State`].
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum StateType {
+    #[cfg(feature = "chain")]
     Chain(ChainType),
+    #[cfg(feature = "collection")]
     Collection(CollectionType),
     Closure,
     Map,
@@ -74,8 +124,10 @@ impl NativeClass for StateType {
                 }
             } else if path.len() > 2 {
                 match path[1].as_str() {
-                    "collection" => CollectionType::from_path(path).map(Self::Collection),
+                    #[cfg(feature = "chain")]
                     "chain" => ChainType::from_path(path).map(Self::Chain),
+                    #[cfg(feature = "collection")]
+                    "collection" => CollectionType::from_path(path).map(Self::Collection),
                     "object" => ObjectType::from_path(path).map(Self::Object),
                     "scalar" => ScalarType::from_path(path).map(Self::Scalar),
                     _ => None,
@@ -90,8 +142,10 @@ impl NativeClass for StateType {
 
     fn path(&self) -> TCPathBuf {
         match self {
-            Self::Collection(ct) => ct.path(),
+            #[cfg(feature = "chain")]
             Self::Chain(ct) => ct.path(),
+            #[cfg(feature = "collection")]
+            Self::Collection(ct) => ct.path(),
             Self::Closure => path_label(&["state", "closure"]).into(),
             Self::Map => path_label(&["state", "map"]).into(),
             Self::Object(ot) => ot.path(),
@@ -101,12 +155,14 @@ impl NativeClass for StateType {
     }
 }
 
+#[cfg(any(feature = "btree", feature = "table"))]
 impl From<BTreeType> for StateType {
     fn from(btt: BTreeType) -> Self {
         CollectionType::BTree(btt).into()
     }
 }
 
+#[cfg(feature = "collection")]
 impl From<CollectionType> for StateType {
     fn from(ct: CollectionType) -> Self {
         Self::Collection(ct)
@@ -119,6 +175,7 @@ impl From<NumberType> for StateType {
     }
 }
 
+#[cfg(feature = "chain")]
 impl From<ChainType> for StateType {
     fn from(ct: ChainType) -> Self {
         Self::Chain(ct)
@@ -137,12 +194,14 @@ impl From<ScalarType> for StateType {
     }
 }
 
+#[cfg(feature = "table")]
 impl From<TableType> for StateType {
     fn from(tt: TableType) -> Self {
         Self::Collection(tt.into())
     }
 }
 
+#[cfg(feature = "tensor")]
 impl From<TensorType> for StateType {
     fn from(tt: TensorType) -> Self {
         Self::Collection(tt.into())
@@ -169,7 +228,9 @@ impl TryFrom<StateType> for ScalarType {
 impl fmt::Debug for StateType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            #[cfg(feature = "chain")]
             Self::Chain(ct) => fmt::Debug::fmt(ct, f),
+            #[cfg(feature = "collection")]
             Self::Collection(ct) => fmt::Debug::fmt(ct, f),
             Self::Closure => f.write_str("closure"),
             Self::Map => f.write_str("Map<State>"),
@@ -181,18 +242,38 @@ impl fmt::Debug for StateType {
 }
 
 /// An addressable state with a discrete value per-transaction.
-#[derive(Clone)]
-pub enum State {
-    Collection(Collection),
-    Chain(Chain<CollectionBase>),
-    Closure(Closure),
+pub enum State<Txn> {
+    #[cfg(feature = "chain")]
+    Chain(Chain<Txn, CollectionBase<Txn>>),
+    #[cfg(feature = "collection")]
+    Collection(Collection<Txn>),
+    Closure(Closure<Txn>),
     Map(Map<Self>),
-    Object(Object),
+    Object(Object<Txn>),
     Scalar(Scalar),
     Tuple(Tuple<Self>),
 }
 
-impl State {
+impl<Txn> Clone for State<Txn> {
+    fn clone(&self) -> Self {
+        match self {
+            #[cfg(feature = "chain")]
+            Self::Chain(chain) => Self::Chain(chain.clone()),
+            #[cfg(feature = "collection")]
+            Self::Collection(collection) => Self::Collection(collection.clone()),
+            Self::Closure(closure) => Self::Closure(closure.clone()),
+            Self::Map(map) => Self::Map(map.clone()),
+            Self::Object(obj) => Self::Object(obj.clone()),
+            Self::Scalar(scalar) => Self::Scalar(scalar.clone()),
+            Self::Tuple(tuple) => Self::Tuple(tuple.clone()),
+        }
+    }
+}
+
+impl<Txn> State<Txn> {
+    // TODO: make this an associated const of the NativeClass trait
+    pub const PREFIX: Label = label("state");
+
     /// Return true if this `State` is an empty [`Tuple`] or [`Map`], default [`Link`], or `Value::None`
     pub fn is_none(&self) -> bool {
         match self {
@@ -208,18 +289,8 @@ impl State {
         !self.is_none()
     }
 
-    /// Return true if this `State` is a reference that needs to be resolved.
-    pub fn is_ref(&self) -> bool {
-        match self {
-            Self::Map(map) => map.values().any(Self::is_ref),
-            Self::Scalar(scalar) => Refer::<State>::is_ref(scalar),
-            Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
-            _ => false,
-        }
-    }
-
     /// Return this `State` as a [`Map`] of [`State`]s, or an error if this is not possible.
-    pub fn try_into_map<Err, OnErr: Fn(State) -> Err>(self, err: OnErr) -> Result<Map<State>, Err> {
+    pub fn try_into_map<Err, OnErr: Fn(Self) -> Err>(self, err: OnErr) -> Result<Map<Self>, Err> {
         match self {
             State::Map(states) => Ok(states),
             State::Scalar(Scalar::Map(states)) => Ok(states
@@ -233,7 +304,7 @@ impl State {
 
     /// Return this `State` as a [`Map`] of [`State`]s, or an error if this is not possible.
     // TODO: allow specifying an output type other than `State`
-    pub fn try_into_tuple<Err: Fn(State) -> TCError>(self, err: Err) -> TCResult<Tuple<State>> {
+    pub fn try_into_tuple<Err: Fn(Self) -> TCError>(self, err: Err) -> TCResult<Tuple<Self>> {
         match self {
             State::Tuple(tuple) => Ok(tuple),
             State::Scalar(Scalar::Tuple(tuple)) => {
@@ -247,10 +318,28 @@ impl State {
     }
 }
 
-impl StateInstance for State {
+impl<Txn> State<Txn>
+where
+    Txn: Transaction<CacheBlock> + Gateway<Self>,
+{
+    /// Return true if this `State` is a reference that needs to be resolved.
+    pub fn is_ref(&self) -> bool {
+        match self {
+            Self::Map(map) => map.values().any(Self::is_ref),
+            Self::Scalar(scalar) => Refer::<Self>::is_ref(scalar),
+            Self::Tuple(tuple) => tuple.iter().any(Self::is_ref),
+            _ => false,
+        }
+    }
+}
+
+impl<Txn> StateInstance for State<Txn>
+where
+    Txn: Transaction<CacheBlock> + Gateway<Self>,
+{
     type FE = CacheBlock;
     type Txn = Txn;
-    type Closure = Closure;
+    type Closure = Closure<Txn>;
 
     fn is_map(&self) -> bool {
         match self {
@@ -270,7 +359,10 @@ impl StateInstance for State {
 }
 
 #[async_trait]
-impl Refer<State> for State {
+impl<Txn> Refer<Self> for State<Txn>
+where
+    Txn: Transaction<CacheBlock> + Gateway<Self>,
+{
     fn dereference_self(self, path: &TCPathBuf) -> Self {
         match self {
             Self::Closure(closure) => Self::Closure(closure.dereference_self(path)),
@@ -282,7 +374,7 @@ impl Refer<State> for State {
 
                 Self::Map(map)
             }
-            Self::Scalar(scalar) => Self::Scalar(Refer::<State>::dereference_self(scalar, path)),
+            Self::Scalar(scalar) => Self::Scalar(Refer::<Self>::dereference_self(scalar, path)),
             Self::Tuple(tuple) => {
                 let tuple = tuple
                     .into_iter()
@@ -298,7 +390,7 @@ impl Refer<State> for State {
     fn is_conditional(&self) -> bool {
         match self {
             Self::Map(map) => map.values().any(|state| state.is_conditional()),
-            Self::Scalar(scalar) => Refer::<State>::is_conditional(scalar),
+            Self::Scalar(scalar) => Refer::<Self>::is_conditional(scalar),
             Self::Tuple(tuple) => tuple.iter().any(|state| state.is_conditional()),
             _ => false,
         }
@@ -311,7 +403,7 @@ impl Refer<State> for State {
                 .values()
                 .any(|state| state.is_inter_service_write(cluster_path)),
 
-            Self::Scalar(scalar) => Refer::<State>::is_inter_service_write(scalar, cluster_path),
+            Self::Scalar(scalar) => Refer::<Self>::is_inter_service_write(scalar, cluster_path),
 
             Self::Tuple(tuple) => tuple
                 .iter()
@@ -324,7 +416,7 @@ impl Refer<State> for State {
     fn is_ref(&self) -> bool {
         match self {
             Self::Map(map) => map.values().any(|state| state.is_ref()),
-            Self::Scalar(scalar) => Refer::<State>::is_ref(scalar),
+            Self::Scalar(scalar) => Refer::<Self>::is_ref(scalar),
             Self::Tuple(tuple) => tuple.iter().any(|state| state.is_ref()),
             _ => false,
         }
@@ -341,7 +433,7 @@ impl Refer<State> for State {
 
                 Self::Map(map)
             }
-            Self::Scalar(scalar) => Self::Scalar(Refer::<State>::reference_self(scalar, path)),
+            Self::Scalar(scalar) => Self::Scalar(Refer::<Self>::reference_self(scalar, path)),
             Self::Tuple(tuple) => {
                 let tuple = tuple
                     .into_iter()
@@ -361,7 +453,7 @@ impl Refer<State> for State {
                     state.requires(deps);
                 }
             }
-            Self::Scalar(scalar) => Refer::<State>::requires(scalar, deps),
+            Self::Scalar(scalar) => Refer::<Self>::requires(scalar, deps),
             Self::Tuple(tuple) => {
                 for state in tuple.iter() {
                     state.requires(deps);
@@ -371,7 +463,7 @@ impl Refer<State> for State {
         }
     }
 
-    async fn resolve<'a, T: ToState<State> + Instance + Public<Self>>(
+    async fn resolve<'a, T: ToState<Self> + Instance + Public<Self>>(
         self,
         context: &'a Scope<'a, Self, T>,
         txn: &'a Txn,
@@ -410,19 +502,24 @@ impl Refer<State> for State {
     }
 }
 
-impl Default for State {
+impl<Txn> Default for State<Txn> {
     fn default() -> Self {
         Self::Scalar(Scalar::default())
     }
 }
 
-impl Instance for State {
+impl<Txn> Instance for State<Txn>
+where
+    Txn: Send + Sync,
+{
     type Class = StateType;
 
     fn class(&self) -> StateType {
         match self {
+            #[cfg(feature = "chain")]
             Self::Chain(chain) => StateType::Chain(chain.class()),
             Self::Closure(_) => StateType::Closure,
+            #[cfg(feature = "collection")]
             Self::Collection(collection) => StateType::Collection(collection.class()),
             Self::Map(_) => StateType::Map,
             Self::Object(object) => StateType::Object(object.class()),
@@ -433,118 +530,97 @@ impl Instance for State {
 }
 
 #[async_trait]
-impl AsyncHash for State {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+impl<Txn> AsyncHash for State<Txn>
+where
+    Txn: Transaction<CacheBlock> + Gateway<Self>,
+{
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         match self {
-            Self::Collection(collection) => collection.hash(txn_id).await,
+            #[cfg(feature = "chain")]
             Self::Chain(chain) => chain.hash(txn_id).await,
             Self::Closure(closure) => closure.hash(txn_id).await,
-            Self::Map(map) => {
-                let mut hashes = stream::iter(map)
-                    .map(|(id, state)| {
-                        state
-                            .hash(txn_id)
-                            .map_ok(|hash| (Hash::<Sha256>::hash(id), hash))
-                    })
-                    .buffered(num_cpus::get())
-                    .map_ok(|(id, state)| {
-                        let mut inner_hasher = Sha256::default();
-                        inner_hasher.update(&id);
-                        inner_hasher.update(&state);
-                        inner_hasher.finalize()
-                    });
-
-                let mut hasher = Sha256::default();
-                while let Some(hash) = hashes.try_next().await? {
-                    hasher.update(&hash);
-                }
-
-                Ok(hasher.finalize())
-            }
+            #[cfg(feature = "collection")]
+            Self::Collection(collection) => collection.hash(txn_id).await,
+            Self::Map(map) => map.hash(txn_id).await,
             Self::Object(object) => object.hash(txn_id).await,
             Self::Scalar(scalar) => Ok(Hash::<Sha256>::hash(scalar)),
-            Self::Tuple(tuple) => {
-                let mut hashes = stream::iter(tuple)
-                    .map(|state| state.hash(txn_id))
-                    .buffered(num_cpus::get());
-
-                let mut hasher = Sha256::default();
-                while let Some(hash) = hashes.try_next().await? {
-                    hasher.update(&hash);
-                }
-                Ok(hasher.finalize())
-            }
+            Self::Tuple(tuple) => tuple.hash(txn_id).await,
         }
     }
 }
 
-impl From<()> for State {
-    fn from(_: ()) -> State {
+impl<Txn> From<()> for State<Txn> {
+    fn from(_: ()) -> Self {
         State::Scalar(Scalar::Value(Value::None))
     }
 }
 
-impl From<BTree> for State {
-    fn from(btree: BTree) -> Self {
+#[cfg(feature = "btree")]
+impl<Txn> From<BTree<Txn>> for State<Txn> {
+    fn from(btree: BTree<Txn>) -> Self {
         Self::Collection(btree.into())
     }
 }
 
-impl From<Chain<CollectionBase>> for State {
-    fn from(chain: Chain<CollectionBase>) -> Self {
+#[cfg(feature = "chain")]
+impl<Txn> From<Chain<Txn, CollectionBase<Txn>>> for State<Txn> {
+    fn from(chain: Chain<Txn, CollectionBase<Txn>>) -> Self {
         Self::Chain(chain)
     }
 }
 
-impl From<BlockChain<CollectionBase>> for State {
-    fn from(chain: BlockChain<CollectionBase>) -> Self {
+#[cfg(feature = "chain")]
+impl<Txn> From<BlockChain<Txn, CollectionBase<Txn>>> for State<Txn> {
+    fn from(chain: BlockChain<Txn, CollectionBase<Txn>>) -> Self {
         Self::Chain(chain.into())
     }
 }
 
-impl From<Closure> for State {
-    fn from(closure: Closure) -> Self {
+impl<Txn> From<Closure<Txn>> for State<Txn> {
+    fn from(closure: Closure<Txn>) -> Self {
         Self::Closure(closure)
     }
 }
 
-impl From<Collection> for State {
-    fn from(collection: Collection) -> Self {
+#[cfg(feature = "collection")]
+impl<Txn> From<Collection<Txn>> for State<Txn> {
+    fn from(collection: Collection<Txn>) -> Self {
         Self::Collection(collection)
     }
 }
 
-impl From<CollectionBase> for State {
-    fn from(collection: CollectionBase) -> Self {
+#[cfg(feature = "collection")]
+impl<Txn> From<CollectionBase<Txn>> for State<Txn> {
+    fn from(collection: CollectionBase<Txn>) -> Self {
         Self::Collection(collection.into())
     }
 }
 
-impl From<Id> for State {
+impl<Txn> From<Id> for State<Txn> {
     fn from(id: Id) -> Self {
         Self::Scalar(id.into())
     }
 }
 
-impl From<InstanceClass> for State {
+impl<Txn> From<InstanceClass> for State<Txn> {
     fn from(class: InstanceClass) -> Self {
         Self::Object(class.into())
     }
 }
 
-impl From<Host> for State {
+impl<Txn> From<Host> for State<Txn> {
     fn from(host: Host) -> Self {
         Self::Scalar(Scalar::from(host))
     }
 }
 
-impl From<Link> for State {
+impl<Txn> From<Link> for State<Txn> {
     fn from(link: Link) -> Self {
         Self::Scalar(Scalar::from(link))
     }
 }
 
-impl From<Map<InstanceClass>> for State {
+impl<Txn> From<Map<InstanceClass>> for State<Txn> {
     fn from(map: Map<InstanceClass>) -> Self {
         Self::Map(
             map.into_iter()
@@ -554,45 +630,45 @@ impl From<Map<InstanceClass>> for State {
     }
 }
 
-impl From<Map<State>> for State {
-    fn from(map: Map<State>) -> Self {
+impl<Txn> From<Map<State<Txn>>> for State<Txn> {
+    fn from(map: Map<State<Txn>>) -> Self {
         State::Map(map)
     }
 }
 
-impl From<Map<Scalar>> for State {
+impl<Txn> From<Map<Scalar>> for State<Txn> {
     fn from(map: Map<Scalar>) -> Self {
         State::Scalar(map.into())
     }
 }
 
-impl From<Number> for State {
+impl<Txn> From<Number> for State<Txn> {
     fn from(n: Number) -> Self {
         Self::Scalar(n.into())
     }
 }
 
-impl From<Object> for State {
-    fn from(object: Object) -> Self {
+impl<Txn> From<Object<Txn>> for State<Txn> {
+    fn from(object: Object<Txn>) -> Self {
         State::Object(object)
     }
 }
 
-impl From<OpDef> for State {
+impl<Txn> From<OpDef> for State<Txn> {
     fn from(op_def: OpDef) -> Self {
         State::Scalar(Scalar::Op(op_def))
     }
 }
 
-impl From<OpRef> for State {
+impl<Txn> From<OpRef> for State<Txn> {
     fn from(op_ref: OpRef) -> Self {
         TCRef::Op(op_ref).into()
     }
 }
 
-impl<T> From<Option<T>> for State
+impl<Txn, T> From<Option<T>> for State<Txn>
 where
-    State: From<T>,
+    State<Txn>: From<T>,
 {
     fn from(state: Option<T>) -> Self {
         if let Some(state) = state {
@@ -603,114 +679,116 @@ where
     }
 }
 
-impl From<Scalar> for State {
+impl<Txn> From<Scalar> for State<Txn> {
     fn from(scalar: Scalar) -> Self {
         State::Scalar(scalar)
     }
 }
 
-impl From<StateType> for State {
+impl<Txn> From<StateType> for State<Txn> {
     fn from(class: StateType) -> Self {
         Self::Object(InstanceClass::from(class).into())
     }
 }
 
-impl From<Table> for State {
-    fn from(table: Table) -> Self {
+#[cfg(feature = "table")]
+impl<Txn> From<Table<Txn>> for State<Txn> {
+    fn from(table: Table<Txn>) -> Self {
         Self::Collection(table.into())
     }
 }
 
-impl From<Tensor> for State {
-    fn from(tensor: Tensor) -> Self {
+#[cfg(feature = "tensor")]
+impl<Txn> From<Tensor<Txn>> for State<Txn> {
+    fn from(tensor: Tensor<Txn>) -> Self {
         Self::Collection(tensor.into())
     }
 }
 
-impl From<Tuple<State>> for State {
-    fn from(tuple: Tuple<State>) -> Self {
+impl<Txn> From<Tuple<State<Txn>>> for State<Txn> {
+    fn from(tuple: Tuple<State<Txn>>) -> Self {
         Self::Tuple(tuple)
     }
 }
 
-impl From<Tuple<Scalar>> for State {
+impl<Txn> From<Tuple<Scalar>> for State<Txn> {
     fn from(tuple: Tuple<Scalar>) -> Self {
         Self::Scalar(tuple.into())
     }
 }
 
-impl From<Tuple<Value>> for State {
+impl<Txn> From<Tuple<Value>> for State<Txn> {
     fn from(tuple: Tuple<Value>) -> Self {
         Self::Scalar(tuple.into())
     }
 }
 
-impl From<TCRef> for State {
+impl<Txn> From<TCRef> for State<Txn> {
     fn from(tc_ref: TCRef) -> Self {
         Box::new(tc_ref).into()
     }
 }
 
-impl From<Box<TCRef>> for State {
+impl<Txn> From<Box<TCRef>> for State<Txn> {
     fn from(tc_ref: Box<TCRef>) -> Self {
         Self::Scalar(Scalar::Ref(tc_ref))
     }
 }
 
-impl From<Value> for State {
+impl<Txn> From<Value> for State<Txn> {
     fn from(value: Value) -> Self {
         Self::Scalar(value.into())
     }
 }
 
-impl From<bool> for State {
+impl<Txn> From<bool> for State<Txn> {
     fn from(b: bool) -> Self {
         Self::Scalar(b.into())
     }
 }
 
-impl From<i64> for State {
+impl<Txn> From<i64> for State<Txn> {
     fn from(n: i64) -> Self {
         Self::Scalar(n.into())
     }
 }
 
-impl From<usize> for State {
+impl<Txn> From<usize> for State<Txn> {
     fn from(n: usize) -> Self {
         Self::Scalar(n.into())
     }
 }
 
-impl From<u64> for State {
+impl<Txn> From<u64> for State<Txn> {
     fn from(n: u64) -> Self {
         Self::Scalar(n.into())
     }
 }
 
-impl<T1> CastFrom<(T1,)> for State
+impl<Txn, T1> CastFrom<(T1,)> for State<Txn>
 where
-    State: CastFrom<T1>,
+    Self: CastFrom<T1>,
 {
     fn cast_from(value: (T1,)) -> Self {
         State::Tuple(vec![value.0.cast_into()].into())
     }
 }
 
-impl<T1, T2> CastFrom<(T1, T2)> for State
+impl<Txn, T1, T2> CastFrom<(T1, T2)> for State<Txn>
 where
-    State: CastFrom<T1>,
-    State: CastFrom<T2>,
+    Self: CastFrom<T1>,
+    Self: CastFrom<T2>,
 {
     fn cast_from(value: (T1, T2)) -> Self {
         State::Tuple(vec![value.0.cast_into(), value.1.cast_into()].into())
     }
 }
 
-impl<T1, T2, T3> CastFrom<(T1, T2, T3)> for State
+impl<Txn, T1, T2, T3> CastFrom<(T1, T2, T3)> for State<Txn>
 where
-    State: CastFrom<T1>,
-    State: CastFrom<T2>,
-    State: CastFrom<T3>,
+    Self: CastFrom<T1>,
+    Self: CastFrom<T2>,
+    Self: CastFrom<T3>,
 {
     fn cast_from(value: (T1, T2, T3)) -> Self {
         State::Tuple(
@@ -724,12 +802,12 @@ where
     }
 }
 
-impl<T1, T2, T3, T4> CastFrom<(T1, T2, T3, T4)> for State
+impl<Txn, T1, T2, T3, T4> CastFrom<(T1, T2, T3, T4)> for State<Txn>
 where
-    State: CastFrom<T1>,
-    State: CastFrom<T2>,
-    State: CastFrom<T3>,
-    State: CastFrom<T4>,
+    Self: CastFrom<T1>,
+    Self: CastFrom<T2>,
+    Self: CastFrom<T3>,
+    Self: CastFrom<T4>,
 {
     fn cast_from(value: (T1, T2, T3, T4)) -> Self {
         State::Tuple(
@@ -744,10 +822,10 @@ where
     }
 }
 
-impl TryFrom<State> for bool {
+impl<Txn> TryFrom<State<Txn>> for bool {
     type Error = TCError;
 
-    fn try_from(state: State) -> Result<Self, Self::Error> {
+    fn try_from(state: State<Txn>) -> Result<Self, Self::Error> {
         match state {
             State::Scalar(scalar) => scalar.try_into(),
             other => Err(TCError::unexpected(other, "a boolean")),
@@ -755,10 +833,10 @@ impl TryFrom<State> for bool {
     }
 }
 
-impl TryFrom<State> for Id {
+impl<Txn> TryFrom<State<Txn>> for Id {
     type Error = TCError;
 
-    fn try_from(state: State) -> TCResult<Id> {
+    fn try_from(state: State<Txn>) -> TCResult<Id> {
         match state {
             State::Scalar(scalar) => scalar.try_into(),
             other => Err(TCError::unexpected(other, "an Id")),
@@ -766,10 +844,11 @@ impl TryFrom<State> for Id {
     }
 }
 
-impl TryFrom<State> for Collection {
+#[cfg(feature = "collection")]
+impl<Txn> TryFrom<State<Txn>> for Collection<Txn> {
     type Error = TCError;
 
-    fn try_from(state: State) -> TCResult<Collection> {
+    fn try_from(state: State<Txn>) -> TCResult<Collection<Txn>> {
         match state {
             State::Collection(collection) => Ok(collection),
             other => Err(TCError::unexpected(other, "a Collection")),
@@ -777,10 +856,10 @@ impl TryFrom<State> for Collection {
     }
 }
 
-impl TryFrom<State> for Scalar {
+impl<Txn> TryFrom<State<Txn>> for Scalar {
     type Error = TCError;
 
-    fn try_from(state: State) -> TCResult<Self> {
+    fn try_from(state: State<Txn>) -> TCResult<Self> {
         match state {
             State::Map(map) => map
                 .into_iter()
@@ -801,10 +880,10 @@ impl TryFrom<State> for Scalar {
     }
 }
 
-impl TryFrom<State> for Map<Scalar> {
+impl<Txn> TryFrom<State<Txn>> for Map<Scalar> {
     type Error = TCError;
 
-    fn try_from(state: State) -> TCResult<Map<Scalar>> {
+    fn try_from(state: State<Txn>) -> TCResult<Map<Scalar>> {
         match state {
             State::Map(map) => map
                 .into_iter()
@@ -823,10 +902,10 @@ impl TryFrom<State> for Map<Scalar> {
     }
 }
 
-impl TryFrom<State> for Map<State> {
+impl<Txn> TryFrom<State<Txn>> for Map<State<Txn>> {
     type Error = TCError;
 
-    fn try_from(state: State) -> TCResult<Map<State>> {
+    fn try_from(state: State<Txn>) -> TCResult<Map<State<Txn>>> {
         match state {
             State::Map(map) => Ok(map),
 
@@ -837,7 +916,7 @@ impl TryFrom<State> for Map<State> {
 
             State::Tuple(tuple) => tuple
                 .into_iter()
-                .map(|item| -> TCResult<(Id, State)> { item.try_into() })
+                .map(|item| -> TCResult<(Id, State<Txn>)> { item.try_into() })
                 .collect(),
 
             other => Err(TCError::unexpected(other, "a Map")),
@@ -845,10 +924,10 @@ impl TryFrom<State> for Map<State> {
     }
 }
 
-impl TryFrom<State> for Map<Value> {
+impl<Txn> TryFrom<State<Txn>> for Map<Value> {
     type Error = TCError;
 
-    fn try_from(state: State) -> TCResult<Map<Value>> {
+    fn try_from(state: State<Txn>) -> TCResult<Map<Value>> {
         match state {
             State::Map(map) => map
                 .into_iter()
@@ -867,10 +946,13 @@ impl TryFrom<State> for Map<Value> {
     }
 }
 
-impl TryFrom<State> for Tuple<State> {
+impl<Txn> TryFrom<State<Txn>> for Tuple<State<Txn>>
+where
+    Txn: Send + Sync,
+{
     type Error = TCError;
 
-    fn try_from(state: State) -> Result<Self, Self::Error> {
+    fn try_from(state: State<Txn>) -> Result<Self, Self::Error> {
         match state {
             State::Map(map) => Ok(map
                 .into_iter()
@@ -889,13 +971,14 @@ impl TryFrom<State> for Tuple<State> {
     }
 }
 
-impl<T: TryFrom<State> + TryFrom<Scalar>> TryFrom<State> for (Id, T)
+impl<Txn, T> TryFrom<State<Txn>> for (Id, T)
 where
-    TCError: From<<T as TryFrom<State>>::Error> + From<<T as TryFrom<Scalar>>::Error>,
+    T: TryFrom<State<Txn>> + TryFrom<Scalar>,
+    TCError: From<<T as TryFrom<State<Txn>>>::Error> + From<<T as TryFrom<Scalar>>::Error>,
 {
     type Error = TCError;
 
-    fn try_from(state: State) -> TCResult<Self> {
+    fn try_from(state: State<Txn>) -> TCResult<Self> {
         match state {
             State::Scalar(scalar) => scalar.try_into().map_err(TCError::from),
             State::Tuple(mut tuple) if tuple.len() == 2 => {
@@ -908,10 +991,10 @@ where
     }
 }
 
-impl TryFrom<State> for Value {
+impl<Txn> TryFrom<State<Txn>> for Value {
     type Error = TCError;
 
-    fn try_from(state: State) -> TCResult<Value> {
+    fn try_from(state: State<Txn>) -> TCResult<Value> {
         match state {
             State::Scalar(scalar) => scalar.try_into(),
 
@@ -926,15 +1009,16 @@ impl TryFrom<State> for Value {
     }
 }
 
-impl TryCastFrom<State> for Chain<CollectionBase> {
-    fn can_cast_from(state: &State) -> bool {
+#[cfg(feature = "chain")]
+impl<Txn> TryCastFrom<State<Txn>> for Chain<Txn, CollectionBase<Txn>> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Chain(_) => true,
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Chain(chain) => Some(chain),
             _ => None,
@@ -942,15 +1026,16 @@ impl TryCastFrom<State> for Chain<CollectionBase> {
     }
 }
 
-impl TryCastFrom<State> for BlockChain<CollectionBase> {
-    fn can_cast_from(state: &State) -> bool {
+#[cfg(feature = "chain")]
+impl<Txn> TryCastFrom<State<Txn>> for BlockChain<Txn, CollectionBase<Txn>> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Chain(Chain::Block(_)) => true,
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Chain(Chain::Block(chain)) => Some(chain),
             _ => None,
@@ -958,8 +1043,25 @@ impl TryCastFrom<State> for BlockChain<CollectionBase> {
     }
 }
 
-impl TryCastFrom<State> for Closure {
-    fn can_cast_from(state: &State) -> bool {
+#[cfg(feature = "chain")]
+impl<Txn> TryCastFrom<State<Txn>> for SyncChain<Txn, CollectionBase<Txn>> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
+        match state {
+            State::Chain(Chain::Sync(_)) => true,
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
+        match state {
+            State::Chain(Chain::Sync(chain)) => Some(chain),
+            _ => None,
+        }
+    }
+}
+
+impl<Txn> TryCastFrom<State<Txn>> for Closure<Txn> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Closure(_) => true,
             State::Scalar(scalar) => Self::can_cast_from(scalar),
@@ -967,7 +1069,7 @@ impl TryCastFrom<State> for Closure {
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Closure(closure) => Some(closure),
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
@@ -976,21 +1078,24 @@ impl TryCastFrom<State> for Closure {
     }
 }
 
-impl TryCastFrom<State> for Box<dyn ClosureInstance<State>> {
-    fn can_cast_from(state: &State) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for Box<dyn ClosureInstance<State<Txn>>>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+{
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Closure(_) => true,
-            State::Scalar(scalar) => Closure::can_cast_from(scalar),
+            State::Scalar(scalar) => Closure::<Txn>::can_cast_from(scalar),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Closure(closure) => Some(Box::new(closure)),
             State::Scalar(scalar) => {
-                if let Some(closure) = Closure::opt_cast_from(scalar) {
-                    let closure: Box<dyn ClosureInstance<State>> = Box::new(closure);
+                if let Some(closure) = Closure::<Txn>::opt_cast_from(scalar) {
+                    let closure: Box<dyn ClosureInstance<State<Txn>>> = Box::new(closure);
                     Some(closure)
                 } else {
                     None
@@ -1001,15 +1106,16 @@ impl TryCastFrom<State> for Box<dyn ClosureInstance<State>> {
     }
 }
 
-impl TryCastFrom<State> for Collection {
-    fn can_cast_from(state: &State) -> bool {
+#[cfg(feature = "collection")]
+impl<Txn> TryCastFrom<State<Txn>> for Collection<Txn> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Collection(_) => true,
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Collection(collection) => Some(collection),
             _ => None,
@@ -1017,15 +1123,16 @@ impl TryCastFrom<State> for Collection {
     }
 }
 
-impl TryCastFrom<State> for CollectionBase {
-    fn can_cast_from(state: &State) -> bool {
+#[cfg(feature = "collection")]
+impl<Txn> TryCastFrom<State<Txn>> for CollectionBase<Txn> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Collection(collection) => CollectionBase::can_cast_from(collection),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Collection(collection) => CollectionBase::opt_cast_from(collection),
             _ => None,
@@ -1033,15 +1140,16 @@ impl TryCastFrom<State> for CollectionBase {
     }
 }
 
-impl TryCastFrom<State> for BTree {
-    fn can_cast_from(state: &State) -> bool {
+#[cfg(any(feature = "btree", feature = "table", feature = "tensor"))]
+impl<Txn> TryCastFrom<State<Txn>> for BTree<Txn> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Collection(collection) => BTree::can_cast_from(collection),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Collection(collection) => BTree::opt_cast_from(collection),
             _ => None,
@@ -1049,15 +1157,16 @@ impl TryCastFrom<State> for BTree {
     }
 }
 
-impl TryCastFrom<State> for Table {
-    fn can_cast_from(state: &State) -> bool {
+#[cfg(feature = "table")]
+impl<Txn> TryCastFrom<State<Txn>> for Table<Txn> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Collection(collection) => Table::can_cast_from(collection),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Collection(collection) => Table::opt_cast_from(collection),
             _ => None,
@@ -1065,15 +1174,16 @@ impl TryCastFrom<State> for Table {
     }
 }
 
-impl TryCastFrom<State> for Tensor {
-    fn can_cast_from(state: &State) -> bool {
+#[cfg(feature = "tensor")]
+impl<Txn> TryCastFrom<State<Txn>> for Tensor<Txn> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Collection(collection) => Tensor::can_cast_from(collection),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Collection(collection) => Tensor::opt_cast_from(collection),
             _ => None,
@@ -1081,49 +1191,18 @@ impl TryCastFrom<State> for Tensor {
     }
 }
 
-impl<T: TryCastFrom<State>> TryCastFrom<State> for (T,) {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Tuple(tuple) => Self::can_cast_from(tuple),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Tuple(tuple) => Self::opt_cast_from(tuple),
-            _ => None,
-        }
-    }
-}
-
-impl<T1: TryCastFrom<State>, T2: TryCastFrom<State>> TryCastFrom<State> for (T1, T2) {
-    fn can_cast_from(state: &State) -> bool {
-        match state {
-            State::Tuple(tuple) => Self::can_cast_from(tuple),
-            _ => false,
-        }
-    }
-
-    fn opt_cast_from(state: State) -> Option<Self> {
-        match state {
-            State::Tuple(tuple) => Self::opt_cast_from(tuple),
-            _ => None,
-        }
-    }
-}
-
-impl<T1: TryCastFrom<State>, T2: TryCastFrom<State>, T3: TryCastFrom<State>> TryCastFrom<State>
-    for (T1, T2, T3)
+impl<Txn, T> TryCastFrom<State<Txn>> for (T,)
+where
+    T: TryCastFrom<State<Txn>>,
 {
-    fn can_cast_from(state: &State) -> bool {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Tuple(tuple) => Self::can_cast_from(tuple),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Tuple(tuple) => Self::opt_cast_from(tuple),
             _ => None,
@@ -1131,15 +1210,57 @@ impl<T1: TryCastFrom<State>, T2: TryCastFrom<State>, T3: TryCastFrom<State>> Try
     }
 }
 
-impl<T: TryCastFrom<State>> TryCastFrom<State> for Vec<T> {
-    fn can_cast_from(state: &State) -> bool {
+impl<Txn, T1, T2> TryCastFrom<State<Txn>> for (T1, T2)
+where
+    T1: TryCastFrom<State<Txn>>,
+    T2: TryCastFrom<State<Txn>>,
+{
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Tuple(tuple) => Self::can_cast_from(tuple),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
+        match state {
+            State::Tuple(tuple) => Self::opt_cast_from(tuple),
+            _ => None,
+        }
+    }
+}
+
+impl<Txn, T1, T2, T3> TryCastFrom<State<Txn>> for (T1, T2, T3)
+where
+    T1: TryCastFrom<State<Txn>>,
+    T2: TryCastFrom<State<Txn>>,
+    T3: TryCastFrom<State<Txn>>,
+{
+    fn can_cast_from(state: &State<Txn>) -> bool {
+        match state {
+            State::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
+        match state {
+            State::Tuple(tuple) => Self::opt_cast_from(tuple),
+            _ => None,
+        }
+    }
+}
+
+// TODO: delete
+impl<Txn, T: TryCastFrom<State<Txn>>> TryCastFrom<State<Txn>> for Vec<T> {
+    fn can_cast_from(state: &State<Txn>) -> bool {
+        match state {
+            State::Tuple(tuple) => Self::can_cast_from(tuple),
+            _ => false,
+        }
+    }
+
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Tuple(source) => Self::opt_cast_from(source),
             _ => None,
@@ -1147,15 +1268,19 @@ impl<T: TryCastFrom<State>> TryCastFrom<State> for Vec<T> {
     }
 }
 
-impl<T: TryCastFrom<State>> TryCastFrom<State> for Tuple<T> {
-    fn can_cast_from(state: &State) -> bool {
+// TODO: delete
+impl<Txn, T> TryCastFrom<State<Txn>> for Tuple<T>
+where
+    T: TryCastFrom<State<Txn>>,
+{
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Tuple(tuple) => Vec::<T>::can_cast_from(tuple),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Tuple(tuple) => Vec::<T>::opt_cast_from(tuple).map(Tuple::from),
             _ => None,
@@ -1163,8 +1288,8 @@ impl<T: TryCastFrom<State>> TryCastFrom<State> for Tuple<T> {
     }
 }
 
-impl TryCastFrom<State> for InstanceClass {
-    fn can_cast_from(state: &State) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for InstanceClass {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Object(Object::Class(_)) => true,
             State::Scalar(scalar) => Self::can_cast_from(scalar),
@@ -1173,7 +1298,7 @@ impl TryCastFrom<State> for InstanceClass {
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<InstanceClass> {
+    fn opt_cast_from(state: State<Txn>) -> Option<InstanceClass> {
         match state {
             State::Object(Object::Class(class)) => Some(class),
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
@@ -1186,16 +1311,19 @@ impl TryCastFrom<State> for InstanceClass {
     }
 }
 
-impl<T: TryCastFrom<State>> TryCastFrom<State> for Map<T> {
-    fn can_cast_from(state: &State) -> bool {
+impl<Txn, T> TryCastFrom<State<Txn>> for Map<T>
+where
+    T: TryCastFrom<State<Txn>>,
+{
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Map(map) => map.values().all(T::can_cast_from),
-            State::Tuple(tuple) => tuple.iter().all(|item| item.matches::<(Id, State)>()),
+            State::Tuple(tuple) => tuple.iter().all(|item| item.matches::<(Id, State<Txn>)>()),
             _ => false,
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Map(map) => {
                 let mut dest = Map::new();
@@ -1222,8 +1350,8 @@ impl<T: TryCastFrom<State>> TryCastFrom<State> for Map<T> {
     }
 }
 
-impl TryCastFrom<State> for Scalar {
-    fn can_cast_from(state: &State) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for Scalar {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Map(map) => map.values().all(Scalar::can_cast_from),
             State::Object(object) => Self::can_cast_from(object),
@@ -1233,7 +1361,7 @@ impl TryCastFrom<State> for Scalar {
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Map(map) => {
                 let mut dest = Map::new();
@@ -1263,8 +1391,8 @@ impl TryCastFrom<State> for Scalar {
     }
 }
 
-impl TryCastFrom<State> for Value {
-    fn can_cast_from(state: &State) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for Value {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Object(object) => Self::can_cast_from(object),
             State::Scalar(scalar) => Self::can_cast_from(scalar),
@@ -1273,7 +1401,7 @@ impl TryCastFrom<State> for Value {
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Object(object) => Self::opt_cast_from(object),
             State::Scalar(scalar) => Self::opt_cast_from(scalar),
@@ -1293,8 +1421,8 @@ impl TryCastFrom<State> for Value {
     }
 }
 
-impl TryCastFrom<State> for Link {
-    fn can_cast_from(state: &State) -> bool {
+impl<Txn> TryCastFrom<State<Txn>> for Link {
+    fn can_cast_from(state: &State<Txn>) -> bool {
         match state {
             State::Object(Object::Class(class)) => Self::can_cast_from(class),
             State::Scalar(scalar) => Self::can_cast_from(scalar),
@@ -1302,7 +1430,7 @@ impl TryCastFrom<State> for Link {
         }
     }
 
-    fn opt_cast_from(state: State) -> Option<Self> {
+    fn opt_cast_from(state: State<Txn>) -> Option<Self> {
         match state {
             State::Object(Object::Class(class)) => Self::opt_cast_from(class).map(Self::from),
             State::Scalar(scalar) => Self::opt_cast_from(scalar).map(Self::from),
@@ -1313,15 +1441,15 @@ impl TryCastFrom<State> for Link {
 
 macro_rules! from_scalar {
     ($t:ty) => {
-        impl TryCastFrom<State> for $t {
-            fn can_cast_from(state: &State) -> bool {
+        impl<Txn> TryCastFrom<State<Txn>> for $t {
+            fn can_cast_from(state: &State<Txn>) -> bool {
                 match state {
                     State::Scalar(scalar) => Self::can_cast_from(scalar),
                     _ => false,
                 }
             }
 
-            fn opt_cast_from(state: State) -> Option<Self> {
+            fn opt_cast_from(state: State<Txn>) -> Option<Self> {
                 match state {
                     State::Scalar(scalar) => Self::opt_cast_from(scalar),
                     _ => None,
@@ -1345,11 +1473,13 @@ from_scalar!(bool);
 from_scalar!(usize);
 from_scalar!(u64);
 
-impl fmt::Debug for State {
+impl<Txn> fmt::Debug for State<Txn> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            #[cfg(feature = "chain")]
             Self::Chain(chain) => fmt::Debug::fmt(chain, f),
             Self::Closure(closure) => fmt::Debug::fmt(closure, f),
+            #[cfg(feature = "collection")]
             Self::Collection(collection) => fmt::Debug::fmt(collection, f),
             Self::Map(map) => fmt::Debug::fmt(map, f),
             Self::Object(object) => fmt::Debug::fmt(object, f),
@@ -1359,20 +1489,24 @@ impl fmt::Debug for State {
     }
 }
 
-struct StateVisitor {
+struct StateVisitor<Txn> {
     txn: Txn,
     scalar: ScalarVisitor,
 }
 
-impl StateVisitor {
+impl<Txn> StateVisitor<Txn>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+{
     async fn visit_map_value<A: de::MapAccess>(
         &self,
         class: StateType,
         access: &mut A,
-    ) -> Result<State, A::Error> {
+    ) -> Result<State<Txn>, A::Error> {
         debug!("decode instance of {:?}", class);
 
         match class {
+            #[cfg(feature = "chain")]
             StateType::Chain(ct) => {
                 ChainVisitor::new(self.txn.clone())
                     .visit_map_value(ct, access)
@@ -1385,6 +1519,7 @@ impl StateVisitor {
                     .map_ok(State::Closure)
                     .await
             }
+            #[cfg(feature = "collection")]
             StateType::Collection(ct) => {
                 CollectionVisitor::new(self.txn.clone())
                     .visit_map_value(ct, access)
@@ -1412,13 +1547,15 @@ impl StateVisitor {
     }
 }
 
-// TODO: guard against a DoS attack using an infinite request stream
 #[async_trait]
-impl<'a> de::Visitor for StateVisitor {
-    type Value = State;
+impl<'a, Txn> de::Visitor for StateVisitor<Txn>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+{
+    type Value = State<Txn>;
 
     fn expecting() -> &'static str {
-        "a State, e.g. 1 or [2] or \"three\" or {\"/state/scalar/value/number/complex\": [3.14, -1.414]"
+        r#"a State, e.g. 1 or [2] or "three" or {"/state/scalar/value/number/complex": [3.14, -1.414]}"#
     }
 
     async fn visit_array_u8<A: ArrayAccess<u8>>(self, array: A) -> Result<Self::Value, A::Error> {
@@ -1507,17 +1644,25 @@ impl<'a> de::Visitor for StateVisitor {
                 return ScalarVisitor::visit_subject(subject, params).map(State::Scalar);
             }
 
-            let mut map = Map::new();
+            let mut map = Map::<State<Txn>>::new();
 
             let id = Id::from_str(&key).map_err(de::Error::custom)?;
             let txn = self.txn.subcontext(id.clone());
             let value = access.next_value(txn).await?;
-            map.insert(id, value);
+            map.insert(id.clone(), value);
 
             while let Some(id) = access.next_key::<Id>(()).await? {
                 let txn = self.txn.subcontext(id.clone());
                 let state = access.next_value(txn).await?;
                 map.insert(id, state);
+            }
+
+            debug!("deserialize map {map:?}");
+            if map.len() == 1 {
+                let value = map.as_ref().get(&id).expect("map value");
+                if value.is_none() && !value.is_map() {
+                    return Ok(State::from(id));
+                }
             }
 
             Ok(State::Map(map))
@@ -1550,7 +1695,10 @@ impl<'a> de::Visitor for StateVisitor {
 }
 
 #[async_trait]
-impl de::FromStream for State {
+impl<Txn> de::FromStream for State<Txn>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+{
     type Context = Txn;
 
     async fn from_stream<D: de::Decoder>(txn: Txn, decoder: &mut D) -> Result<Self, D::Error> {

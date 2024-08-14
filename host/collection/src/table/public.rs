@@ -6,6 +6,7 @@ use std::fmt;
 use std::ops::Bound;
 
 use b_table::{IndexSchema, Schema};
+use freqfs::FileSave;
 use futures::TryFutureExt;
 use log::debug;
 use safecast::*;
@@ -18,7 +19,7 @@ use tc_transact::public::{
 };
 use tc_transact::Transaction;
 use tc_value::{Value, ValueCollator};
-use tcgeneric::{label, Id, Map, PathSegment, ThreadSafe, Tuple};
+use tcgeneric::{Id, Map, PathSegment, ThreadSafe, Tuple};
 
 use crate::btree::{BTreeSchema, Node};
 use crate::table::TableUpdate;
@@ -32,6 +33,7 @@ use super::{
 impl<State> Route<State> for TableType
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
+    State::FE: for<'a> FileSave<'a>,
     TableFile<State::Txn, State::FE>: Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
     Value: TryCastFrom<State>,
 {
@@ -57,10 +59,10 @@ where
     {
         Some(Box::new(|_txn, mut params| {
             Box::pin(async move {
-                let schema: Value = params.require(&label("schema").into())?;
+                let schema: Value = params.require("schema")?;
                 let _schema = TableSchema::try_cast_from_value(schema)?;
 
-                // let _source = params.require(&label("source").into())?;
+                // let _source = params.require("source")?;
                 // params.expect_empty()?;
                 //
                 // let _store = {
@@ -81,6 +83,7 @@ struct CreateHandler;
 impl<'a, State> Handler<'a, State> for CreateHandler
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
+    State::FE: for<'b> FileSave<'b>,
     TableFile<State::Txn, State::FE>: Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
@@ -208,7 +211,7 @@ where
         Some(Box::new(|_txn, key| {
             Box::pin(async move {
                 let limit = key.try_cast_into(|v| {
-                    bad_request!("limit must be a positive integer, not {}", v)
+                    bad_request!("limit must be a positive integer, not {v:?}")
                 })?;
 
                 let table = self.table.limit(limit)?;
@@ -222,15 +225,6 @@ impl<T> From<T> for LimitHandler<T> {
     fn from(table: T) -> Self {
         Self { table }
     }
-}
-
-struct LoadHandler;
-
-impl<'a, State> Handler<'a, State> for LoadHandler
-where
-    State: StateInstance,
-{
-    // TODO
 }
 
 struct OrderHandler<T> {
@@ -256,7 +250,7 @@ where
                     let order = key.opt_cast_into().unwrap();
                     self.table.order_by(order, false)?
                 } else {
-                    return Err(bad_request!("invalid column list to order by: {}", key));
+                    return Err(bad_request!("invalid column list to order by: {key:?}"));
                 };
 
                 Ok(Collection::Table(ordered.into()).into())
@@ -557,6 +551,7 @@ pub struct Static;
 impl<State> Route<State> for Static
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>>,
+    State::FE: for<'a> FileSave<'a>,
     TableFile<State::Txn, State::FE>: Persist<State::FE, Schema = TableSchema, Txn = State::Txn>,
     Value: TryCastFrom<State>,
 {

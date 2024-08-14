@@ -198,9 +198,8 @@ where
 
     pub async fn load(dir: DirLock<FE>, shape: Shape) -> TCResult<Self> {
         let contents = dir.write().await;
-        let num_blocks = contents.len();
 
-        if num_blocks == 0 {
+        if contents.is_empty() {
             #[cfg(debug_assertions)]
             panic!(
                 "cannot load a dense tensor from an empty directory {}",
@@ -225,6 +224,7 @@ where
             block.len()
         };
 
+        let num_blocks = shape.size().div_ceil(block_size as u64);
         let block_axis = block_axis_for(&shape, block_size);
         let block_shape = block_shape_for(block_axis, &shape, block_size);
 

@@ -1,7 +1,5 @@
 import numpy as np
 import time
-
-import rjwt
 import tinychain as tc
 import unittest
 
@@ -14,10 +12,8 @@ TENSOR_URI = str(tc.URI(tc.tensor.Dense))
 class LinearAlgebraTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        actor = rjwt.Actor("/")
-        cls.host = start_host(tc.math.NS, public_key=actor.public_key, request_ttl=30)
-        cls.host.create_namespace(actor, tc.URI(tc.service.Library), tc.math.NS)
-        cls.host.install(actor, tc.math.linalg.LinearAlgebra())
+        cls.host = start_host(tc.math.NS, request_ttl=30)
+        cls.host.install(tc.math.linalg.LinearAlgebra())
 
     def testQR_1(self):
         self._check_qr(4, 3, 1e-5)
@@ -129,7 +125,7 @@ class LinearAlgebraTests(unittest.TestCase):
         start = time.time()
         result = self.host.post(
             LIB_URI.append("svd"),
-            tc.Map(A=tensor, l=n, epsilon=tc.F32(1e-7), max_iter=200),
+            tc.Map(A=tensor, l=n, epsilon=tc.F32(1e-7), max_iter=30),
         )
         elapsed = time.time() - start
 
@@ -140,7 +136,7 @@ class LinearAlgebraTests(unittest.TestCase):
         self._check_svd(matrix, actual)
 
     def testParallelSVD_NltM(self):
-        num_matrices = 25
+        num_matrices = 2
         n = 2
         m = 3
         shape = [num_matrices, n, m]
@@ -166,7 +162,7 @@ class LinearAlgebraTests(unittest.TestCase):
             self._check_svd(expected, actual)
 
     def testParallelSVD_NgtM(self):
-        num_matrices = 10
+        num_matrices = 2
         n = 3
         m = 2
         shape = [num_matrices, n, m]

@@ -1,4 +1,5 @@
 use std::fmt;
+use std::marker::PhantomData;
 
 use log::debug;
 
@@ -8,29 +9,36 @@ use tc_scalar::Scalar;
 use tc_transact::public::{
     DeleteHandler, GetHandler, Handler, PostHandler, PutHandler, Route, ToState,
 };
+use tc_transact::{Gateway, Transaction};
 use tc_value::Value;
 use tcgeneric::{Id, Instance, Map, PathSegment};
 
-use crate::{State, Txn};
+use crate::{CacheBlock, State};
 
-struct GetMethod<'a, T: Instance> {
+struct GetMethod<'a, Txn, T: Instance> {
     subject: &'a T,
     name: &'a Id,
     method: GetOp,
+    phantom: PhantomData<Txn>,
 }
 
-impl<'a, T: Instance> GetMethod<'a, T> {
+impl<'a, Txn, T: Instance> GetMethod<'a, Txn, T> {
     pub fn new(subject: &'a T, name: &'a Id, method: GetOp) -> Self {
         Self {
             subject,
             name,
             method,
+            phantom: PhantomData,
         }
     }
 }
 
-impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> GetMethod<'a, T> {
-    async fn call(self, txn: &Txn, key: Value) -> TCResult<State> {
+impl<'a, Txn, T> GetMethod<'a, Txn, T>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
+{
+    async fn call(self, txn: &Txn, key: Value) -> TCResult<State<Txn>> {
         let (key_name, op_def) = self.method;
 
         let mut context = Map::new();
@@ -45,10 +53,12 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> GetMetho
     }
 }
 
-impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<'a, State>
-    for GetMethod<'a, T>
+impl<'a, Txn, T> Handler<'a, State<Txn>> for GetMethod<'a, Txn, T>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -56,24 +66,30 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<
     }
 }
 
-struct PutMethod<'a, T: Instance> {
+struct PutMethod<'a, Txn, T: Instance> {
     subject: &'a T,
     name: &'a Id,
     method: PutOp,
+    phantom: PhantomData<Txn>,
 }
 
-impl<'a, T: Instance> PutMethod<'a, T> {
+impl<'a, Txn, T: Instance> PutMethod<'a, Txn, T> {
     pub fn new(subject: &'a T, name: &'a Id, method: PutOp) -> Self {
         Self {
             subject,
             name,
             method,
+            phantom: PhantomData,
         }
     }
 }
 
-impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> PutMethod<'a, T> {
-    async fn call(self, txn: &Txn, key: Value, value: State) -> TCResult<()> {
+impl<'a, Txn, T> PutMethod<'a, Txn, T>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
+{
+    async fn call(self, txn: &Txn, key: Value, value: State<Txn>) -> TCResult<()> {
         let (key_name, value_name, op_def) = self.method;
 
         let mut context = Map::new();
@@ -89,10 +105,12 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> PutMetho
     }
 }
 
-impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<'a, State>
-    for PutMethod<'a, T>
+impl<'a, Txn, T> Handler<'a, State<Txn>> for PutMethod<'a, Txn, T>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
 {
-    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State>>
+    fn put<'b>(self: Box<Self>) -> Option<PutHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -102,24 +120,30 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<
     }
 }
 
-struct PostMethod<'a, T: Instance> {
+struct PostMethod<'a, Txn, T: Instance> {
     subject: &'a T,
     name: &'a Id,
     method: PostOp,
+    phantom: PhantomData<Txn>,
 }
 
-impl<'a, T: Instance> PostMethod<'a, T> {
+impl<'a, Txn, T: Instance> PostMethod<'a, Txn, T> {
     pub fn new(subject: &'a T, name: &'a Id, method: PostOp) -> Self {
         Self {
             subject,
             name,
             method,
+            phantom: PhantomData,
         }
     }
 }
 
-impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> PostMethod<'a, T> {
-    async fn call(self, txn: &Txn, params: Map<State>) -> TCResult<State> {
+impl<'a, Txn, T> PostMethod<'a, Txn, T>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
+{
+    async fn call(self, txn: &Txn, params: Map<State<Txn>>) -> TCResult<State<Txn>> {
         match call_method(txn, self.subject, params, self.method).await {
             Ok(state) => Ok(state),
             Err(cause) => {
@@ -129,10 +153,12 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> PostMeth
     }
 }
 
-impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<'a, State>
-    for PostMethod<'a, T>
+impl<'a, Txn, T> Handler<'a, State<Txn>> for PostMethod<'a, Txn, T>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
 {
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -142,23 +168,29 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> Handler<
     }
 }
 
-struct DeleteMethod<'a, T: Instance> {
+struct DeleteMethod<'a, Txn, T: Instance> {
     subject: &'a T,
     name: &'a Id,
     method: DeleteOp,
+    phantom: PhantomData<Txn>,
 }
 
-impl<'a, T: Instance> DeleteMethod<'a, T> {
+impl<'a, Txn, T: Instance> DeleteMethod<'a, Txn, T> {
     pub fn new(subject: &'a T, name: &'a Id, method: DeleteOp) -> Self {
         Self {
             subject,
             name,
             method,
+            phantom: PhantomData,
         }
     }
 }
 
-impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> DeleteMethod<'a, T> {
+impl<'a, Txn, T> DeleteMethod<'a, Txn, T>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
+{
     async fn call(self, txn: &Txn, key: Value) -> TCResult<()> {
         let (key_name, op_def) = self.method;
 
@@ -175,9 +207,10 @@ impl<'a, T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a> DeleteMe
     }
 }
 
-impl<'a, T> Handler<'a, State> for DeleteMethod<'a, T>
+impl<'a, Txn, T> Handler<'a, State<Txn>> for DeleteMethod<'a, Txn, T>
 where
-    T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
 {
     fn delete<'b>(self: Box<Self>) -> Option<DeleteHandler<'a, 'b, Txn>>
     where
@@ -188,14 +221,15 @@ where
 }
 
 #[inline]
-pub fn route_attr<'a, T>(
+pub fn route_attr<'a, Txn, T>(
     subject: &'a T,
     name: &'a Id,
     attr: &'a Scalar,
     path: &'a [PathSegment],
-) -> Option<Box<dyn Handler<'a, State> + 'a>>
+) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>>
 where
-    T: ToState<State> + Instance + Route<State> + fmt::Debug + 'a,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug + 'a,
 {
     match attr {
         Scalar::Op(OpDef::Get(get_op)) if path.is_empty() => {
@@ -226,14 +260,15 @@ where
     }
 }
 
-async fn call_method<T>(
+async fn call_method<Txn, T>(
     txn: &Txn,
     subject: &T,
-    context: Map<State>,
+    context: Map<State<Txn>>,
     form: Vec<(Id, Scalar)>,
-) -> TCResult<State>
+) -> TCResult<State<Txn>>
 where
-    T: ToState<State> + Route<State> + Instance + fmt::Debug,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Route<State<Txn>> + Instance + fmt::Debug,
 {
     debug!(
         "call method with form {}",
@@ -246,7 +281,7 @@ where
     let capture = if let Some((capture, _)) = form.last() {
         capture.clone()
     } else {
-        return Ok(State::default());
+        return Ok(State::<Txn>::default());
     };
 
     Executor::with_context(txn, Some(subject), context.into(), form)

@@ -6,10 +6,11 @@ use log::{debug, info};
 use tc_error::*;
 use tc_transact::public::generic::COPY;
 use tc_transact::public::{GetHandler, Handler, Route, ToState};
+use tc_transact::{Gateway, Transaction};
 use tcgeneric::{Instance, PathSegment, TCPath};
 
 use crate::object::InstanceExt;
-use crate::{State, Txn};
+use crate::{CacheBlock, State};
 
 use super::method::route_attr;
 
@@ -17,11 +18,12 @@ struct CopyHandler<'a, T> {
     instance: &'a T,
 }
 
-impl<'a, T> Handler<'a, State> for CopyHandler<'a, T>
+impl<'a, Txn, T> Handler<'a, State<Txn>> for CopyHandler<'a, T>
 where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
     T: Instance + fmt::Debug + 'a,
 {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -40,11 +42,16 @@ impl<'a, T> From<&'a T> for CopyHandler<'a, T> {
     }
 }
 
-impl<T: ToState<State> + Instance + Route<State> + fmt::Debug> Route<State> for InstanceExt<T>
+impl<Txn, T> Route<State<Txn>> for InstanceExt<Txn, T>
 where
-    Self: ToState<State>,
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: ToState<State<Txn>> + Instance + Route<State<Txn>> + fmt::Debug,
+    Self: ToState<State<Txn>>,
 {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
+    fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>> {
         debug!(
             "{:?} with members {:?} route {} (parent is {} {:?})",
             self,

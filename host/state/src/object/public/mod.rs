@@ -1,16 +1,20 @@
 use tc_transact::public::generic::COPY;
 use tc_transact::public::helpers::AttributeHandler;
 use tc_transact::public::{GetHandler, Handler, PostHandler, Route};
+use tc_transact::{Gateway, Transaction};
 use tcgeneric::PathSegment;
 
 use crate::object::{InstanceClass, InstanceExt, Object, ObjectType};
-use crate::{State, Txn};
+use crate::{CacheBlock, State};
 
 mod instance;
 pub mod method;
 
-impl Route<State> for ObjectType {
-    fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
+impl<Txn> Route<State<Txn>> for ObjectType {
+    fn route<'a>(
+        &'a self,
+        _path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>> {
         None
     }
 }
@@ -19,8 +23,11 @@ struct ClassHandler<'a> {
     class: &'a InstanceClass,
 }
 
-impl<'a> Handler<'a, State> for ClassHandler<'a> {
-    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State>>
+impl<'a, Txn> Handler<'a, State<Txn>> for ClassHandler<'a>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+{
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -33,7 +40,7 @@ impl<'a> Handler<'a, State> for ClassHandler<'a> {
         }))
     }
 
-    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State>>
+    fn post<'b>(self: Box<Self>) -> Option<PostHandler<'a, 'b, Txn, State<Txn>>>
     where
         'b: 'a,
     {
@@ -48,8 +55,14 @@ impl<'a> Handler<'a, State> for ClassHandler<'a> {
     }
 }
 
-impl Route<State> for InstanceClass {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
+impl<Txn> Route<State<Txn>> for InstanceClass
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+{
+    fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>> {
         if path == &COPY[..] {
             return Some(Box::new(AttributeHandler::from(Object::Class(
                 self.clone(),
@@ -66,8 +79,14 @@ impl Route<State> for InstanceClass {
     }
 }
 
-impl Route<State> for Object {
-    fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
+impl<Txn> Route<State<Txn>> for Object<Txn>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+{
+    fn route<'a>(
+        &'a self,
+        path: &'a [PathSegment],
+    ) -> Option<Box<dyn Handler<'a, State<Txn>> + 'a>> {
         match self {
             Self::Class(class) => class.route(path),
             Self::Instance(instance) => instance.route(path),

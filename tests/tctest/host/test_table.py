@@ -5,7 +5,6 @@ import unittest
 from num2words import num2words
 from .base import HostTest
 
-ENDPOINT = "/transact/hypothetical"
 SCHEMA = tc.table.Schema(
     [tc.Column("name", tc.String, 512)], [tc.Column("views", tc.UInt)]).create_index("views", ["views"])
 
@@ -15,7 +14,7 @@ class TableTests(HostTest):
         cxt = tc.Context()
         cxt.table = tc.table.Table(SCHEMA)
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         self.assertEqual(result, expected(SCHEMA, []))
 
     def testDelete(self):
@@ -29,7 +28,7 @@ class TableTests(HostTest):
         cxt.delete = tc.after(cxt.inserts, cxt.table.delete(("one",)))
         cxt.result = tc.after(cxt.delete, cxt.table.count())
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         self.assertEqual(result, count - 1)
 
     def testInsert(self):
@@ -38,7 +37,7 @@ class TableTests(HostTest):
         cxt.upsert = cxt.table.upsert((num2words(1),), (1,))
         cxt.result = tc.after(cxt.upsert, cxt.table.count())
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         self.assertEqual(result, 1)
 
         for x in range(0, 20, 5):
@@ -53,7 +52,7 @@ class TableTests(HostTest):
 
             cxt.result = tc.after(cxt.inserts, cxt.table.count())
 
-            result = self.host.post(ENDPOINT, cxt)
+            result = self.host.hypothetical(cxt)
             self.assertEqual(result, x)
 
     def testLimit(self):
@@ -66,7 +65,7 @@ class TableTests(HostTest):
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
         cxt.result = tc.after(cxt.inserts, cxt.table.limit(1))
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         first_row = sorted(list(k + v) for k, v in zip(keys, values))[0]
         self.assertEqual(result, expected(SCHEMA, [first_row]))
 
@@ -87,7 +86,7 @@ class TableTests(HostTest):
             ]
         }
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
 
         self.assertEqual(actual, expected)
 
@@ -101,7 +100,7 @@ class TableTests(HostTest):
         cxt.table = tc.table.Table.load(SCHEMA, [k + v for k, v in zip(keys, values)])
         cxt.result = cxt.table.aggregate(["views"], lambda group: tc.Tuple(group.count()))
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         self.assertEqual(actual, [[[0], 5], [[1], 5]])
 
     def testTruncateSlice(self):
@@ -116,7 +115,7 @@ class TableTests(HostTest):
         cxt.delete = tc.after(cxt.inserts, cxt.table.where(views=slice(40)).truncate())
         cxt.result = tc.after(cxt.delete, cxt.table)
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         self.assertEqual(result, expected(SCHEMA, remaining))
 
     def testUpdateSlice(self):
@@ -129,7 +128,7 @@ class TableTests(HostTest):
         cxt.update = cxt.table.where(views=slice(10)).update(views=0)
         cxt.result = tc.after(cxt.update, cxt.table.where(views=slice(1)).count())
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         self.assertEqual(result, 10)
 
     def testOrderBy(self):
@@ -143,7 +142,7 @@ class TableTests(HostTest):
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
         cxt.result = tc.after(cxt.inserts, cxt.table.order_by(["views"], True))
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         self.assertEqual(result, expected(SCHEMA, rows))
 
     def testSlice(self):
@@ -156,7 +155,7 @@ class TableTests(HostTest):
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
         cxt.result = tc.after(cxt.inserts, cxt.table.where(name="one"))
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         self.assertEqual(result, expected(SCHEMA, [["one", 1]]))
 
     def testSliceAuxiliaryIndex(self):
@@ -169,7 +168,7 @@ class TableTests(HostTest):
         cxt.inserts = [cxt.table.insert(k, v) for k, v in zip(keys, values)]
         cxt.result = tc.after(cxt.inserts, cxt.table.where(views=slice(10, 20)))
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
         self.assertEqual(result, expected(SCHEMA, list([[num2words(i), i] for i in range(10, 20)])))
 
 

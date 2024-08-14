@@ -91,10 +91,7 @@ class URI(object):
         segments = self.split()
 
         if isinstance(item, int):
-            if item == 0:
-                return URI(segments[0])
-            else:
-                return URI('/').append(segments[item])
+            return segments[item]
         elif isinstance(item, slice):
             if not segments[item]:
                 return URI('/')
@@ -303,11 +300,11 @@ class URI(object):
         """
 
         if self.startswith('/'):
-            segments = str(self)[1:].split('/')
-            segments[0] = f"/{segments[0]}"
-            return segments
+            return str(self)[1:].split('/')
         elif self.startswith('$'):
-            return str(self).split('/')
+            segments = str(self).split('/')
+            segments[0] = URI(segments[0])
+            return segments
         else:
             host = f"{self.host()}:{self.port()}" if self.port() else self.host()
             return [f"{self.protocol()}://{host}"] + str(self.path()).split('/')[1:]

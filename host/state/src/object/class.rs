@@ -3,7 +3,6 @@
 use std::fmt;
 use std::ops::Deref;
 
-use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::{de, en};
 use get_size::GetSize;
@@ -11,6 +10,7 @@ use get_size_derive::*;
 use safecast::*;
 
 use tc_scalar::*;
+use tc_transact::hash::{Digest, Hash, Output};
 use tc_value::{Link, Value};
 use tcgeneric::{path_label, Map, NativeClass, PathLabel};
 
@@ -192,7 +192,7 @@ impl CastFrom<InstanceClass> for Scalar {
     }
 }
 
-impl CastFrom<InstanceClass> for (Link, Map<State>) {
+impl<Txn> CastFrom<InstanceClass> for (Link, Map<State<Txn>>) {
     fn cast_from(class: InstanceClass) -> Self {
         let proto = class
             .proto

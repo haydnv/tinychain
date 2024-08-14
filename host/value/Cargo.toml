@@ -1,6 +1,6 @@
 [package]
 name = "tc-value"
-version = "0.12.0"
+version = "0.13.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "TinyChain's representation of a value which can be collated and stored."
@@ -14,23 +14,22 @@ categories = ["data-structures"]
 [dependencies]
 async-hash = { version = "0.5", features = ["smallvec"] }
 async-trait = "0.1"
-base64 = "0.21"
-bytes = "1.0"
+base64 = "0.22"
+bytes = "1.7"
 collate = "0.4"
-destream = { version = "~0.7.2", features = ["smallvec"] }
+destream = { version = "0.8", features = ["smallvec"] }
 email-address-parser = "2.0"
 futures = "0.3"
 get-size = "0.1"
 get-size-derive = "0.1"
-handlebars = "4.3"
+handlebars = "6.0"
 hex = "0.4"
 log = { version = "0.4", features = [] }
-number-general = { version = "0.11", features = ["all"] }
-pathlink = { version = "0.2", features = ["all"] }
+number-general = { version = "0.12", features = ["all"] }
 safecast = "0.2"
 serde = { version = "1.0", features = [] }
 serde_json = { version = "1.0", features = [] }
-smallvec = { version = "1.11", features = ["serde"] }
-tc-error = "0.11"
-tcgeneric = "0.10"
-uuid = { version = "1.6", features = ["v4"] }
+smallvec = { version = "1.13", features = ["serde"] }
+tc-error = "0.12"
+tcgeneric = "0.11"
+uuid = { version = "1.10", features = ["v4"] }

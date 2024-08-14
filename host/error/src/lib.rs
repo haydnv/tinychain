@@ -3,9 +3,11 @@
 //! This crate is a part of TinyChain: [http://github.com/haydnv/tinychain](http://github.com/haydnv/tinychain)
 
 use std::convert::Infallible;
+use std::str::FromStr;
 use std::{fmt, io};
 
-use destream::en;
+use async_trait::async_trait;
+use destream::{de, en};
 
 /// A result of type `T`, or a [`TCError`]
 pub type TCResult<T> = Result<T, TCError>;
@@ -16,18 +18,54 @@ struct ErrorData {
     stack: Vec<String>,
 }
 
-impl<'en> en::ToStream<'en> for ErrorData {
-    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
-        if self.stack.is_empty() {
-            return en::ToStream::to_stream(&self.message, encoder);
-        }
+struct DataVisitor;
 
-        use en::EncodeMap;
+#[async_trait]
+impl de::Visitor for DataVisitor {
+    type Value = ErrorData;
 
-        let mut map = encoder.encode_map(Some(2))?;
-        map.encode_entry("message", &self.message)?;
-        map.encode_entry("stack", &self.stack)?;
-        map.end()
+    fn expecting() -> &'static str {
+        "an error message and optional stacktrace"
+    }
+
+    async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
+        let message = if let Some(key) = access.next_key::<String>(()).await? {
+            if key == "message" {
+                access.next_value(()).await
+            } else {
+                Err(de::Error::invalid_value(key, "message"))
+            }
+        } else {
+            Err(de::Error::invalid_length(0, Self::expecting()))
+        }?;
+
+        let stack = if let Some(key) = access.next_key::<String>(()).await? {
+            if key == "stack" {
+                access.next_value(()).await
+            } else {
+                Err(de::Error::invalid_value(key, "stack"))
+            }
+        } else {
+            Ok(Default::default())
+        }?;
+
+        Ok(ErrorData { message, stack })
+    }
+
+    fn visit_string<E: de::Error>(self, message: String) -> Result<Self::Value, E> {
+        Ok(ErrorData {
+            message,
+            stack: vec![],
+        })
+    }
+}
+
+#[async_trait]
+impl de::FromStream for ErrorData {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_any(DataVisitor).await
     }
 }
 
@@ -42,6 +80,20 @@ impl<'en> en::IntoStream<'en> for ErrorData {
         let mut map = encoder.encode_map(Some(2))?;
         map.encode_entry("message", self.message)?;
         map.encode_entry("stack", self.stack)?;
+        map.end()
+    }
+}
+
+impl<'en> en::ToStream<'en> for ErrorData {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        if self.stack.is_empty() {
+            return en::ToStream::to_stream(&self.message, encoder);
+        }
+
+        use en::EncodeMap;
+
+        let mut map = encoder.encode_map(Some(2))?;
+        map.encode_entry("message", &self.message)?;
         map.end()
     }
 }
@@ -74,48 +126,76 @@ pub enum ErrorKind {
     Unavailable,
 }
 
+impl ErrorKind {
+    pub fn is_conflict(&self) -> bool {
+        *self == Self::Conflict
+    }
+
+    pub fn is_retriable(&self) -> bool {
+        [Self::Timeout, Self::Unavailable]
+            .into_iter()
+            .any(|code| *self == code)
+    }
+}
+
+impl FromStr for ErrorKind {
+    type Err = TCError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "bad_gateway" => Ok(Self::BadGateway),
+            "bad_request" => Ok(Self::BadRequest),
+            "conflict" => Ok(Self::Conflict),
+            "forbidden" => Ok(Self::Forbidden),
+            "internal_error" => Ok(Self::Internal),
+            "method_not_allowed" => Ok(Self::MethodNotAllowed),
+            "not_found" => Ok(Self::NotFound),
+            "not_implemented" => Ok(Self::NotImplemented),
+            "request_timeout" => Ok(Self::Timeout),
+            "unauthorized" => Ok(Self::Unauthorized),
+            "temporarily_unavailable" => Ok(Self::Unavailable),
+            other => Err(bad_request!("unrecognized error code: {other}")),
+        }
+    }
+}
+
+#[async_trait]
+impl de::FromStream for ErrorKind {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(cxt: (), decoder: &mut D) -> Result<Self, D::Error> {
+        let code = String::from_stream(cxt, decoder).await?;
+        code.parse()
+            .map_err(|_| de::Error::invalid_value(code, "an error code"))
+    }
+}
+
 impl<'en> en::IntoStream<'en> for ErrorKind {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
-        format!(
-            "/error/{}",
-            match self {
-                Self::BadGateway => "bad_gateway",
-                Self::BadRequest => "bad_request",
-                Self::Conflict => "conflict",
-                Self::Forbidden => "forbidden",
-                Self::Internal => "internal",
-                Self::MethodNotAllowed => "method_not_allowed",
-                Self::NotFound => "not_found",
-                Self::NotImplemented => "not_implemented",
-                Self::Timeout => "timeout",
-                Self::Unauthorized => "unauthorized",
-                Self::Unavailable => "temporarily unavailable",
-            }
-        )
-        .into_stream(encoder)
+        self.to_string().into_stream(encoder)
     }
 }
 
 impl fmt::Debug for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(self, f)
+        write!(f, "{}", self.to_string().replace("_", " "))
     }
 }
 
 impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match self {
-            Self::BadGateway => "bad gateway",
-            Self::BadRequest => "bad request",
+            Self::BadGateway => "bad_gateway",
+            Self::BadRequest => "bad_request",
             Self::Conflict => "conflict",
             Self::Forbidden => "forbidden",
-            Self::Internal => "internal error",
-            Self::MethodNotAllowed => "method not allowed",
-            Self::NotFound => "not found",
-            Self::NotImplemented => "not implemented",
-            Self::Timeout => "request timeout",
+            Self::Internal => "internal_error",
+            Self::MethodNotAllowed => "method_not_allowed",
+            Self::NotFound => "not_found",
+            Self::NotImplemented => "not_implemented",
+            Self::Timeout => "request_timeout",
             Self::Unauthorized => "unauthorized",
-            Self::Unavailable => "temporarily unavailable",
+            Self::Unavailable => "temporarily_unavailable",
         })
     }
 }
@@ -144,7 +224,7 @@ impl TCError {
         }
     }
 
-    /// Reconstruct a [`TCError`] from its [`ErrorType`] and data.
+    /// Reconstruct a [`TCError`] from its [`ErrorKind`] and data.
     pub fn with_stack<I, S, SI>(code: ErrorKind, message: I, stack: S) -> Self
     where
         I: fmt::Display,
@@ -181,21 +261,31 @@ impl TCError {
     }
 
     /// Error to indicate that the requested resource is already locked
-    pub fn conflict<I: fmt::Display>(locator: I) -> Self {
-        Self::new(ErrorKind::Conflict, locator)
+    pub fn conflict<I: fmt::Display>(info: I) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("conflict: {info}");
+
+        #[cfg(not(debug_assertions))]
+        Self::new(ErrorKind::Conflict, info)
+    }
+
+    /// An internal error which should never occur.
+    pub fn internal<I: fmt::Display>(info: I) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("internal error: {info}");
+
+        #[cfg(not(debug_assertions))]
+        Self::new(ErrorKind::Internal, info)
     }
 
     /// Error to indicate that the requested resource exists but does not support the request method
-    pub fn method_not_allowed<M: fmt::Debug, S: fmt::Debug, P: fmt::Display>(
-        method: M,
-        subject: S,
-        path: P,
-    ) -> Self {
-        let message = format!(
-            "{:?} endpoint {} does not support {:?}",
-            subject, path, method
-        );
+    pub fn method_not_allowed<M: fmt::Debug, P: fmt::Display>(method: M, path: P) -> Self {
+        let message = format!("endpoint {} does not support {:?}", path, method);
 
+        #[cfg(debug_assertions)]
+        panic!("{message}");
+
+        #[cfg(not(debug_assertions))]
         Self::new(ErrorKind::MethodNotAllowed, message)
     }
 
@@ -244,14 +334,20 @@ impl From<pathlink::ParseError> for TCError {
     }
 }
 
+#[cfg(feature = "ha-ndarray")]
 impl From<ha_ndarray::Error> for TCError {
     fn from(err: ha_ndarray::Error) -> Self {
         Self::new(ErrorKind::Internal, err)
     }
 }
 
+#[cfg(feature = "rjwt")]
 impl From<rjwt::Error> for TCError {
     fn from(err: rjwt::Error) -> Self {
+        #[cfg(debug_assertions)]
+        panic!("rjwt error: {err}");
+
+        #[cfg(not(debug_assertions))]
         match err.into_inner() {
             (rjwt::ErrorKind::Auth | rjwt::ErrorKind::Time, msg) => Self::unauthorized(msg),
             (rjwt::ErrorKind::Base64 | rjwt::ErrorKind::Format | rjwt::ErrorKind::Json, msg) => {
@@ -262,37 +358,35 @@ impl From<rjwt::Error> for TCError {
     }
 }
 
+#[cfg(feature = "txn_lock")]
 impl From<txn_lock::Error> for TCError {
     fn from(err: txn_lock::Error) -> Self {
-        Self::new(ErrorKind::Conflict, err)
+        Self::conflict(err)
     }
 }
 
+#[cfg(feature = "txfs")]
 impl From<txfs::Error> for TCError {
     fn from(cause: txfs::Error) -> Self {
-        match cause.into_inner() {
-            (txfs::ErrorKind::NotFound, msg) => Self::not_found(msg),
-            (txfs::ErrorKind::Conflict, msg) => Self::conflict(msg),
-            (txfs::ErrorKind::IO, msg) => Self::bad_gateway(msg),
+        match cause {
+            txfs::Error::Conflict(cause) => Self::conflict(cause),
+            txfs::Error::IO(cause) => Self::from(cause),
+            txfs::Error::NotFound(cause) => Self::not_found(cause),
+            txfs::Error::Parse(cause) => Self::from(cause),
         }
     }
 }
 
-#[cfg(debug_assertions)]
-impl From<io::Error> for TCError {
-    fn from(cause: io::Error) -> Self {
-        panic!("IO error: {cause}");
-    }
-}
-
-#[cfg(not(debug_assertions))]
 impl From<io::Error> for TCError {
     fn from(cause: io::Error) -> Self {
         match cause.kind() {
-            io::ErrorKind::AlreadyExists => bad_request!(
-                "tried to create a filesystem entry that already exists: {}",
-                cause
-            ),
+            io::ErrorKind::AlreadyExists => {
+                #[cfg(debug_assertions)]
+                panic!("tried to create an entry that already exists: {}", cause);
+
+                #[cfg(not(debug_assertions))]
+                bad_request!("tried to create an entry that already exists").consume(cause)
+            }
             io::ErrorKind::InvalidInput => bad_request!("{}", cause),
             io::ErrorKind::NotFound => TCError::not_found(cause),
             io::ErrorKind::PermissionDenied => {
@@ -312,12 +406,32 @@ impl From<Infallible> for TCError {
     }
 }
 
-impl<'en> en::ToStream<'en> for TCError {
-    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
-        use en::EncodeMap;
-        let mut map = encoder.encode_map(Some(1))?;
-        map.encode_entry(self.kind, &self.data)?;
-        map.end()
+struct ErrorVisitor;
+
+#[async_trait]
+impl de::Visitor for ErrorVisitor {
+    type Value = TCError;
+
+    fn expecting() -> &'static str {
+        "an error code, message, and optional stacktrace"
+    }
+
+    async fn visit_map<A: de::MapAccess>(self, mut access: A) -> Result<Self::Value, A::Error> {
+        if let Some(kind) = access.next_key(()).await? {
+            let data = access.next_value(()).await?;
+            Ok(TCError { kind, data })
+        } else {
+            Err(de::Error::invalid_length(0, Self::expecting()))
+        }
+    }
+}
+
+#[async_trait]
+impl de::FromStream for TCError {
+    type Context = ();
+
+    async fn from_stream<D: de::Decoder>(_: (), decoder: &mut D) -> Result<Self, D::Error> {
+        decoder.decode_map(ErrorVisitor).await
     }
 }
 
@@ -326,6 +440,15 @@ impl<'en> en::IntoStream<'en> for TCError {
         use en::EncodeMap;
         let mut map = encoder.encode_map(Some(1))?;
         map.encode_entry(self.kind, self.data)?;
+        map.end()
+    }
+}
+
+impl<'en> en::ToStream<'en> for TCError {
+    fn to_stream<E: en::Encoder<'en>>(&'en self, encoder: E) -> Result<E::Ok, E::Error> {
+        use en::EncodeMap;
+        let mut map = encoder.encode_map(Some(1))?;
+        map.encode_entry(self.kind, &self.data)?;
         map.end()
     }
 }
@@ -362,7 +485,7 @@ macro_rules! bad_request {
 #[macro_export]
 macro_rules! conflict {
     ($($t:tt)*) => {{
-        $crate::TCError::new($crate::ErrorKind::Conflict, format!($($t)*))
+        $crate::TCError::conflict(format!($($t)*))
     }}
 }
 
@@ -370,7 +493,15 @@ macro_rules! conflict {
 #[macro_export]
 macro_rules! forbidden {
     ($($t:tt)*) => {{
-        $crate::TCError::new($crate::ErrorKind::Unavailable, format!($($t)*))
+        $crate::TCError::new($crate::ErrorKind::Unauthorized, format!($($t)*))
+    }}
+}
+
+/// Error to indicate that no resource exists at the requested path or key.
+#[macro_export]
+macro_rules! not_found {
+    ($($t:tt)*) => {{
+        $crate::TCError::not_found(format!($($t)*))
     }}
 }
 
@@ -394,7 +525,7 @@ macro_rules! timeout {
 #[macro_export]
 macro_rules! internal {
     ($($t:tt)*) => {{
-        $crate::TCError::new($crate::ErrorKind::Internal, format!($($t)*))
+        $crate::TCError::internal(format!($($t)*))
     }}
 }
 

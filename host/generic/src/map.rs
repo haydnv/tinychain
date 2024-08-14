@@ -1,10 +1,12 @@
 //! A generic map whose keys are [`Id`]s
 
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::{Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
@@ -17,7 +19,7 @@ use tc_error::*;
 
 use super::{Id, Tuple};
 
-/// A generic map whose keys are [`Id`]s, based on [`OrdHashMap`]
+/// A generic map whose keys are [`Id`]s, based on [`BTreeMap`]
 #[derive(Clone, GetSize)]
 pub struct Map<T> {
     inner: BTreeMap<Id, T>,
@@ -57,24 +59,28 @@ impl<T> Map<T> {
     }
 
     /// Remove and return the parameter with the given `name`, or the `default` if not present.
-    // TODO: accept a Borrow<Id>
-    pub fn option<P, D>(&mut self, name: &Id, default: D) -> TCResult<P>
+    pub fn option<N, P, D>(&mut self, name: &N, default: D) -> TCResult<P>
     where
+        Id: Borrow<N> + Ord,
+        N: Ord + fmt::Display + ?Sized,
         P: TryCastFrom<T>,
         D: FnOnce() -> P,
         T: fmt::Debug,
     {
         if let Some(param) = self.remove(name) {
-            P::try_cast_from(param, |p| TCError::unexpected(p, name.as_str()))
+            P::try_cast_from(param, |p| {
+                bad_request!("expected {} but found {p:?}", std::any::type_name::<P>())
+            })
         } else {
             Ok((default)())
         }
     }
 
     /// Remove and return the parameter with the given `name`, or it's type's [`Default`].
-    // TODO: accept a Borrow<Id>
-    pub fn or_default<P>(&mut self, name: &Id) -> TCResult<P>
+    pub fn or_default<N, P>(&mut self, name: &N) -> TCResult<P>
     where
+        Id: Borrow<N> + Ord,
+        N: Ord + fmt::Display + ?Sized,
         P: Default + TryCastFrom<T>,
         T: fmt::Debug,
     {
@@ -88,15 +94,18 @@ impl<T> Map<T> {
     }
 
     /// Remove and return the parameter with the given `name`, or a "not found" error.
-    // TODO: accept a Borrow<Id>
-    pub fn require<P>(&mut self, name: &Id) -> TCResult<P>
+    pub fn require<N, P>(&mut self, name: &N) -> TCResult<P>
     where
+        Id: Borrow<N> + Ord,
+        N: Ord + fmt::Display + ?Sized,
         P: TryCastFrom<T>,
         T: fmt::Debug,
     {
         let param = self.remove(name).ok_or_else(|| TCError::not_found(name))?;
 
-        P::try_cast_from(param, |p| TCError::unexpected(p, name.as_str()))
+        P::try_cast_from(param, |p| {
+            TCError::unexpected(p, std::any::type_name::<P>())
+        })
     }
 }
 
@@ -131,6 +140,26 @@ impl<T> Deref for Map<T> {
 impl<T> DerefMut for Map<T> {
     fn deref_mut(&'_ mut self) -> &'_ mut <Self as Deref>::Target {
         &mut self.inner
+    }
+}
+
+impl<D, T> Hash<D> for Map<T>
+where
+    D: Digest,
+    T: Hash<D>,
+{
+    fn hash(self) -> Output<D> {
+        self.inner.hash()
+    }
+}
+
+impl<'a, D, T> Hash<D> for &'a Map<T>
+where
+    D: Digest,
+    &'a T: Hash<D>,
+{
+    fn hash(self) -> Output<D> {
+        self.inner.hash()
     }
 }
 

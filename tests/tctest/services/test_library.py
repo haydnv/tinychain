@@ -1,7 +1,6 @@
-import unittest
-
-import rjwt
+import os
 import tinychain as tc
+import unittest
 
 from ..process import start_host
 
@@ -32,17 +31,18 @@ class TestLibV1(tc.service.Library):
 
 class LibraryVersionTests(unittest.TestCase):
     def testCreateLib(self):
-        actor = rjwt.Actor("/")
-
+        key = os.urandom(32)
         hosts = []
 
-        hosts.append(
-            start_host(NS, http_port=8702, public_key=actor.public_key, replicate=LEAD)
-        )
+        hosts.append(start_host(NS, http_port=8702, symmetric_key=key))
+        hosts.append(start_host(NS, http_port=8703, symmetric_key=key))
 
-        hosts.append(
-            start_host(NS, http_port=8703, public_key=actor.public_key, replicate=LEAD)
-        )
+        for i in range(len(hosts)):
+            print()
+            print(f"host {i} replicas", hosts[i].get("/lib/replicas"))
+            print()
+
+        hosts.append(start_host(NS, http_port=8704, symmetric_key=key))
 
         for i in range(len(hosts)):
             print()
@@ -50,82 +50,68 @@ class LibraryVersionTests(unittest.TestCase):
             print()
 
         print()
-        print("CREATE DIR")
-
-        hosts[0].create_namespace(actor, tc.URI(TestLibV0).path()[0], NS, LEAD)
-
-        for i in range(len(hosts)):
-            print()
-            print(f"host {i} replicas", hosts[i].get("/lib/test_library/replicas"))
-            print()
-
-        print()
-
-        hosts.append(
-            start_host(NS, http_port=8704, public_key=actor.public_key, replicate=LEAD)
-        )
-
-        print()
-
-        for i in range(len(hosts)):
-            print()
-            print(f"host {i} replicas", hosts[i].get("/lib/test_library/replicas"))
-            print()
-
-        print()
         print("INSTALL LIBRARY")
-        hosts[0].install(actor, TestLibV0())
+        hosts[1].install(TestLibV0())
         print()
+
+        for i in range(len(hosts)):
+            print()
+            print(f"host {i} library replicas", hosts[i].get("/lib/test_library/replicas"))
+            print()
 
         for host in hosts:
             print(host)
 
-            self.assertEqual(
-                host.get(tc.URI(TestLibV0).path() + "hello"), "Hello, World!"
-            )
+            self.assertEqual(host.get(tc.URI(TestLibV0).path() + "hello"), "Hello, World!")
 
         print()
 
-        hosts.append(
-            start_host(
-                NS,
-                [],
-                http_port=8705,
-                public_key=actor.public_key,
-                replicate=LEAD,
-                wait_time=2,
-            )
-        )
+        print("starting additional host...")
+        hosts.append(start_host(NS, [], http_port=8705, symmetric_key=key))
+        print("started")
+
+        for i in range(len(hosts)):
+            print()
+            print(f"host {i} replicas", hosts[i].get("/lib/test_library/replicas"))
+            print()
 
         endpoint = tc.URI(TestLibV0).path() + "hello"
 
         for i in range(len(hosts)):
             self.assertEqual(hosts[i].get(endpoint), "Hello, World!")
 
-        hosts[2].stop()
+        hosts[1].stop()
 
         print()
-        print("host stopped")
+        print(f"{hosts[1]} stopped")
         print()
 
-        hosts[1].update(actor, TestLibV1())
+        hosts[2].update(TestLibV1())
 
-        hosts[2].start(wait_time=2)
+        print()
+        print(f"restarting {hosts[1]}...")
+        print()
+
+        hosts[1].start(wait_time=10)
 
         print()
         print("host started")
         print()
 
-        for host in hosts:
-            self.assertEqual(host.get(endpoint), "Hello, World!")
+        endpoint = tc.URI(TestLibV1).path() + "hello"
 
-        hosts.append(
-            start_host(NS, http_port=8706, public_key=actor.public_key, replicate=LEAD)
-        )
+        for i in range(len(hosts)):
+            self.assertEqual(hosts[i].get(endpoint, "Test"), "Hello, Test!")
+
+        print()
+        print("starting additional host...")
+        hosts.append(start_host(NS, http_port=8706, symmetric_key=key))
+        print("started")
+        print()
 
         for host in hosts:
             self.assertEqual(
-                host.get(tc.URI(TestLibV1).path() + "hello", "Again"), "Hello, Again!"
+                host.get(endpoint, "Again"), "Hello, Again!"
             )
 
 

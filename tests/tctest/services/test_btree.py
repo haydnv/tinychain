@@ -9,7 +9,7 @@ LEAD = f"http://127.0.0.1:{DEFAULT_PORT}"
 NS = tc.URI("/test")
 NAME = "btree"
 SCHEMA = tc.btree.Schema(
-    (tc.Column("number", tc.Int), tc.Column("word", tc.String, 100))
+    (tc.Column("number", tc.Int), tc.Column("word", tc.String, 100)),
 )
 
 
@@ -29,7 +29,7 @@ class BTreeChainTests(PersistenceTest, unittest.TestCase):
 
         return Persistent()
 
-    def execute(self, _actor, hosts):
+    def execute(self, hosts):
         row1 = [1, "one"]
         row2 = [2, "two"]
 
@@ -43,10 +43,17 @@ class BTreeChainTests(PersistenceTest, unittest.TestCase):
 
         hosts[1].stop()
         hosts[2].put(endpoint, None, row2)
-        hosts[1].start()
+
+        actual = hosts[2].get(endpoint, (2,))
+        self.assertEqual(actual, expected([row2]))
+
+        hosts[1].start(wait_time=10)
 
         actual = hosts[1].get(endpoint, (1,))
         self.assertEqual(actual, expected([row1]))
+
+        actual = hosts[1].get(endpoint, (2,))
+        self.assertEqual(actual, expected([row2]))
 
         for host in hosts:
             actual = host.get(endpoint, (1,))
@@ -57,7 +64,7 @@ class BTreeChainTests(PersistenceTest, unittest.TestCase):
 
         hosts[2].stop()
         hosts[1].delete(endpoint, (1,))
-        hosts[2].start()
+        hosts[2].start(wait_time=10)
 
         actual = hosts[2].get(endpoint)
         self.assertEqual(actual, expected([row2]))

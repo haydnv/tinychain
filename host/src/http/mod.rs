@@ -1,4 +1,4 @@
-//! The HTTP interface for `Gateway`.
+//! HTTP client and server implementations.
 
 use std::fmt;
 use std::str::FromStr;

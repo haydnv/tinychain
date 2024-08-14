@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use destream::{de, en};
 use get_size::GetSize;
 use get_size_derive::*;
+use safecast::TryCastFrom;
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 
@@ -19,6 +20,16 @@ pub struct Version {
     major: u32,
     minor: u32,
     patch: u32,
+}
+
+impl Version {
+    /// Construct an [`Id`] from this [`Version`] number.
+    pub fn to_id(&self) -> Id {
+        Id::try_cast_from(self.to_string(), |_| {
+            unreachable!("number failed ID validation")
+        })
+        .unwrap()
+    }
 }
 
 impl PartialOrd for Version {
@@ -117,6 +128,26 @@ impl FromStr for Version {
             minor,
             patch: patch,
         })
+    }
+}
+
+impl TryCastFrom<&str> for Version {
+    fn can_cast_from(value: &&str) -> bool {
+        Self::from_str(value).is_ok()
+    }
+
+    fn opt_cast_from(value: &str) -> Option<Self> {
+        Self::from_str(value).ok()
+    }
+}
+
+impl TryCastFrom<Id> for Version {
+    fn can_cast_from(value: &Id) -> bool {
+        Self::from_str(value.as_str()).is_ok()
+    }
+
+    fn opt_cast_from(value: Id) -> Option<Self> {
+        Self::from_str(value.as_str()).ok()
     }
 }
 

@@ -1,8 +1,6 @@
 import numpy as np
 import unittest
 import time
-
-import rjwt
 import tinychain as tc
 
 from ..process import start_host
@@ -79,16 +77,10 @@ class OptimizerTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        actor = rjwt.Actor("/")
-
-        cls.host = start_host(NS, public_key=actor.public_key, request_ttl=60)
-
-        cls.host.create_namespace(actor, tc.URI(tc.service.Library), tc.ml.NS)
-        cls.host.install(actor, tc.ml.NeuralNets())
-        cls.host.install(actor, tc.ml.Optimizers())
-
-        cls.host.create_namespace(actor, cls.URI.path()[0], NS)
-        cls.host.install(actor, OptimizerTester())
+        cls.host = start_host(NS, request_ttl=10)
+        cls.host.install(tc.ml.NeuralNets())
+        cls.host.install(tc.ml.Optimizers())
+        cls.host.install(OptimizerTester())
 
     def testCNN(self):
         inputs = np.ones([BATCH_SIZE, 3, 5, 5])

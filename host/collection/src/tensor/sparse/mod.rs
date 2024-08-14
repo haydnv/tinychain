@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use b_table::Row;
 use collate::Collate;
 use destream::de;
+use freqfs::FileSave;
 use futures::{join, try_join, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ha_ndarray::*;
 use safecast::{AsType, CastFrom, CastInto};
@@ -1075,7 +1076,11 @@ impl<Txn, FE> Clone for SparseBase<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for SparseBase<Txn, FE> {
+impl<Txn, FE> Instance for SparseBase<Txn, FE>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+{
     type Class = TensorType;
 
     fn class(&self) -> Self::Class {
@@ -1343,7 +1348,7 @@ where
 impl<Txn, FE> fs::Persist<FE> for SparseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe + Clone,
+    FE: for<'a> FileSave<'a> + AsType<Node> + Clone,
 {
     type Txn = Txn;
     type Schema = TensorSchema;
@@ -1537,7 +1542,7 @@ where
 impl<Txn, FE> fs::CopyFrom<FE, SparseView<Txn, FE>> for SparseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<Node> + Clone,
 {
     async fn copy_from(
         txn: &Txn,
@@ -1631,7 +1636,7 @@ where
 impl<Txn, FE> fs::Restore<FE> for SparseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<Node> + Clone,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         match (self, backup) {
@@ -1662,7 +1667,7 @@ where
 impl<Txn, FE> de::FromStream for SparseBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe + Clone,
+    FE: for<'a> FileSave<'a> + AsType<Node> + Clone,
 {
     type Context = Txn;
 
@@ -1706,17 +1711,13 @@ impl<Txn, FE> From<SparseBase<Txn, FE>> for SparseView<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for SparseBase<Txn, FE> {
+impl<Txn, FE> fmt::Debug for SparseBase<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         base_dispatch!(
             self,
             this,
             this.fmt(f),
-            write!(
-                f,
-                "a complex transactional sparse tensor of type {:?}",
-                this.0.dtype()
-            ),
+            write!(f, "a complex tensor ({:?}, {:?})", this.0, this.1),
             this.fmt(f)
         )
     }
@@ -1739,7 +1740,7 @@ impl<Txn, FE> SparseVisitor<Txn, FE> {
 impl<Txn, FE> SparseVisitor<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe + Clone,
+    FE: for<'a> FileSave<'a> + AsType<Node> + Clone,
 {
     async fn create_base<E: de::Error>(
         &self,
@@ -1763,7 +1764,7 @@ where
 impl<Txn, FE> de::Visitor for SparseVisitor<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: AsType<Node> + ThreadSafe + Clone,
+    FE: for<'a> FileSave<'a> + AsType<Node> + Clone,
 {
     type Value = SparseBase<Txn, FE>;
 

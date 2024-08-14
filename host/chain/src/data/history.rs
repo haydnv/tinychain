@@ -1,32 +1,30 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::iter;
+use std::marker::PhantomData;
 
-use async_hash::generic_array::GenericArray;
-use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::{de, en};
-use freqfs::{DirLock, DirWriteGuard, FileLock, FileReadGuard, FileReadGuardOwned, FileWriteGuard};
+use freqfs::*;
 use futures::stream::{self, StreamExt};
 use futures::{try_join, TryFutureExt, TryStreamExt};
 use get_size::GetSize;
 use log::{debug, error, info, trace};
 use safecast::*;
 
-use tc_collection::btree::Node as BTreeNode;
-use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
 use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
 use tc_transact::fs;
+use tc_transact::hash::{AsyncHash, GenericArray, Output, Sha256};
 use tc_transact::lock::{TxnLock, TxnTaskQueue};
 use tc_transact::public::{Public, Route, StateInstance};
-use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
+use tc_transact::{IntoView, Transact, Transaction, TxnId};
 use tc_value::Value;
 use tcgeneric::{label, Label, Map, TCBoxStream, TCBoxTryStream, ThreadSafe, Tuple};
 
-use crate::{new_queue, null_hash, BLOCK_SIZE, CHAIN};
+use crate::{new_queue, null_hash, CacheBlock, BLOCK_SIZE, CHAIN};
 
 use super::block::{ChainBlock, MutationPending, MutationRecord};
 use super::store::{Store, StoreEntry, StoreEntryView};
@@ -34,15 +32,16 @@ use super::store::{Store, StoreEntry, StoreEntryView};
 const STORE: Label = label("store");
 const WRITE_AHEAD: &str = "write_ahead";
 
-pub struct History<State: StateInstance> {
-    queue: TxnTaskQueue<MutationPending<State::Txn, State::FE>, TCResult<MutationRecord>>,
-    file: DirLock<State::FE>,
-    store: Store<State::Txn, State::FE>,
+pub struct History<State, Txn, FE> {
+    queue: TxnTaskQueue<MutationPending<Txn, FE>, TCResult<MutationRecord>>,
+    file: DirLock<FE>,
+    store: Store<Txn, FE>,
     latest: TxnLock<u64>,
     cutoff: TxnLock<TxnId>,
+    state: PhantomData<State>,
 }
 
-impl<State: StateInstance> Clone for History<State> {
+impl<State, Txn, FE> Clone for History<State, Txn, FE> {
     fn clone(&self) -> Self {
         Self {
             queue: self.queue.clone(),
@@ -50,18 +49,15 @@ impl<State: StateInstance> Clone for History<State> {
             store: self.store.clone(),
             latest: self.latest.clone(),
             cutoff: self.cutoff.clone(),
+            state: self.state,
         }
     }
 }
 
-impl<State> History<State>
+impl<State> History<State, State::Txn, State::FE>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
 {
     fn new(
         file: DirLock<State::FE>,
@@ -79,17 +75,18 @@ where
             store,
             latest: TxnLock::new(latest),
             cutoff: TxnLock::new(cutoff),
+            state: PhantomData,
         }
     }
 }
 
-impl<State: StateInstance> History<State> {
-    pub fn store(&self) -> &Store<State::Txn, State::FE> {
+impl<State, Txn, FE> History<State, Txn, FE> {
+    pub fn store(&self) -> &Store<Txn, FE> {
         &self.store
     }
 }
 
-impl<State> History<State>
+impl<State> History<State, State::Txn, State::FE>
 where
     State: StateInstance,
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
@@ -166,14 +163,10 @@ where
     }
 }
 
-impl<State> History<State>
+impl<State> History<State, State::Txn, State::FE>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
 {
     pub fn append_put(&self, txn: State::Txn, key: Value, value: State) -> TCResult<()>
     where
@@ -319,14 +312,10 @@ where
 }
 
 #[async_trait]
-impl<State> fs::Persist<State::FE> for History<State>
+impl<State> fs::Persist<State::FE> for History<State, State::Txn, State::FE>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
 {
     type Txn = State::Txn;
     type Schema = ();
@@ -421,12 +410,12 @@ where
 }
 
 #[async_trait]
-impl<State> AsyncHash for History<State>
+impl<State> AsyncHash for History<State, State::Txn, State::FE>
 where
     State: StateInstance,
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         let latest_block_id = self.latest.read(txn_id).await?;
         let latest_block = self.read_block(*latest_block_id).await?;
 
@@ -497,7 +486,7 @@ where
 }
 
 #[async_trait]
-impl<State> Transact for History<State>
+impl<State> Transact for History<State, State::Txn, State::FE>
 where
     State: StateInstance,
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
@@ -610,10 +599,10 @@ where
 }
 
 #[async_trait]
-impl<'en, State> IntoView<'en, State::FE> for History<State>
+impl<'en, State> IntoView<'en, State::FE> for History<State, State::Txn, State::FE>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode>,
+    State::FE: CacheBlock + for<'a> FileSave<'a>,
 {
     type Txn = State::Txn;
     type View = HistoryView<'en>;
@@ -661,14 +650,10 @@ where
 }
 
 #[async_trait]
-impl<State> de::FromStream for History<State>
+impl<State> de::FromStream for History<State, State::Txn, State::FE>
 where
     State: StateInstance + de::FromStream<Context = State::Txn> + From<Scalar>,
-    State::FE: DenseCacheFile
-        + AsType<ChainBlock>
-        + AsType<BTreeNode>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -682,29 +667,31 @@ where
         txn: State::Txn,
         decoder: &mut D,
     ) -> Result<Self, D::Error> {
-        decoder.decode_seq(HistoryVisitor { txn }).await
+        decoder
+            .decode_seq(HistoryVisitor {
+                txn,
+                phantom: PhantomData,
+            })
+            .await
     }
 }
 
-impl<State: StateInstance> fmt::Debug for History<State> {
+impl<State: StateInstance> fmt::Debug for History<State, State::Txn, State::FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a chain history")
     }
 }
 
-struct HistoryVisitor<State: StateInstance> {
-    txn: State::Txn,
+struct HistoryVisitor<State, Txn> {
+    txn: Txn,
+    phantom: PhantomData<State>,
 }
 
 #[async_trait]
-impl<State> de::Visitor for HistoryVisitor<State>
+impl<State> de::Visitor for HistoryVisitor<State, State::Txn>
 where
     State: StateInstance + de::FromStream<Context = State::Txn> + From<Scalar>,
-    State::FE: DenseCacheFile
-        + AsType<ChainBlock>
-        + AsType<BTreeNode>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -712,7 +699,7 @@ where
     (Value,): TryCastFrom<State>,
     (Value, State): TryCastFrom<State>,
 {
-    type Value = History<State>;
+    type Value = History<State, State::Txn, State::FE>;
 
     fn expecting() -> &'static str {
         "Chain history"
@@ -802,9 +789,8 @@ async fn parse_block_state<State>(
     block_data: Map<Tuple<State>>,
 ) -> TCResult<BTreeMap<TxnId, Vec<MutationRecord>>>
 where
-    State: StateInstance,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
     State: StateInstance + From<Scalar>,
+    State::FE: for<'a> FileSave<'a> + CacheBlock,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
     Value: TryCastFrom<State>,
@@ -849,7 +835,7 @@ async fn replay_and_save<State, T>(
 ) -> TCResult<()>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Scalar>,
-    State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode>,
+    State::FE: CacheBlock + for<'a> FileSave<'a>,
     T: Route<State> + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
@@ -892,13 +878,13 @@ pub type HistoryView<'en> =
     en::SeqStream<TCResult<HistoryBlockView<'en>>, TCBoxTryStream<'en, HistoryBlockView<'en>>>;
 
 async fn load_history<'en, State>(
-    history: History<State>,
+    history: History<State, State::Txn, State::FE>,
     op: MutationRecord,
     txn: State::Txn,
 ) -> TCResult<MutationView<'en>>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<TensorNode>,
+    State::FE: for<'a> FileSave<'a> + CacheBlock,
 {
     match op {
         MutationRecord::Delete(key) => Ok(MutationView::Delete(key)),

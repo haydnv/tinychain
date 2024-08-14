@@ -5,10 +5,8 @@ import argparse
 import asyncio
 import inspect
 import logging
-import random
 import time
 
-import rjwt
 import tinychain_async as tc_async
 
 from .process import Local
@@ -87,7 +85,7 @@ class Benchmark(object):
         success = (len(responses) / len(requests)) * 100
         return responses, elapsed, success
 
-    async def start(self, actor, **flags):
+    async def start(self, **flags):
         pass
 
     def stop(self):
@@ -116,8 +114,6 @@ async def main(benchmarks):
     if os.path.exists(WORKSPACE):
         shutil.rmtree(WORKSPACE)
 
-    actor = rjwt.Actor('/')
-
     for benchmark in benchmarks:
         print(f"running {benchmark}")
 
@@ -125,7 +121,7 @@ async def main(benchmarks):
         for test in benchmark:
             if patterns is None or any(pattern in test.__name__ for pattern in patterns):
                 if not started:
-                    await benchmark.start(actor, cache_size=cache_size, workspace=workspace)
+                    await benchmark.start(cache_size=cache_size, workspace=workspace)
                     started = True
                     print()
 

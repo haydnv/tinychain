@@ -8,6 +8,7 @@ use std::fmt;
 use std::iter::FromIterator;
 use std::ops::{Deref, DerefMut};
 
+use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use destream::de::{Decoder, FromStream};
 use destream::en::{Encoder, IntoStream, ToStream};
@@ -18,7 +19,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use smallvec::SmallVec;
 
 /// A generic tuple type, based on [`Vec`]
-#[derive(Clone, Default, Eq, PartialEq, GetSize)]
+#[derive(Clone, Default, Eq, PartialEq, GetSize, Hash)]
 pub struct Tuple<T> {
     inner: Vec<T>,
 }
@@ -56,6 +57,26 @@ impl<T> Deref for Tuple<T> {
 impl<T> DerefMut for Tuple<T> {
     fn deref_mut(&'_ mut self) -> &'_ mut <Self as Deref>::Target {
         &mut self.inner
+    }
+}
+
+impl<D, T> Hash<D> for Tuple<T>
+where
+    D: Digest,
+    T: Hash<D>,
+{
+    fn hash(self) -> Output<D> {
+        self.inner.hash()
+    }
+}
+
+impl<'a, D, T> Hash<D> for &'a Tuple<T>
+where
+    D: Digest,
+    &'a T: Hash<D>,
+{
+    fn hash(self) -> Output<D> {
+        self.inner.hash()
     }
 }
 
@@ -123,9 +144,9 @@ impl<'a, T> IntoIterator for &'a Tuple<T> {
 }
 
 impl<const N: usize, F, T> TryCastFrom<Tuple<F>> for SmallVec<[T; N]>
-    where
-        T: TryCastFrom<F>,
-        [T; N]: smallvec::Array<Item = T>,
+where
+    T: TryCastFrom<F>,
+    [T; N]: smallvec::Array<Item = T>,
 {
     fn can_cast_from(tuple: &Tuple<F>) -> bool {
         tuple.iter().all(T::can_cast_from)
@@ -163,7 +184,6 @@ impl<F, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for Vec<T> {
         Some(cast)
     }
 }
-
 
 impl<F, T: TryCastFrom<F>> TryCastFrom<Tuple<F>> for (T,) {
     fn can_cast_from(source: &Tuple<F>) -> bool {

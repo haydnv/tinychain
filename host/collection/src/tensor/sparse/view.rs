@@ -1684,14 +1684,9 @@ impl<Txn, FE> From<SparseComplex<Txn, FE, f64>> for SparseView<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for SparseView<Txn, FE> {
+impl<Txn, FE> fmt::Debug for SparseView<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "sparse tensor of type {:?} with shape {:?}",
-            self.dtype(),
-            self.shape()
-        )
+        f.write_str("a view of a sparse tensor")
     }
 }
 

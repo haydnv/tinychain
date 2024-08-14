@@ -1,6 +1,6 @@
 [package]
 name = "tc-state"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "TinyChain's general state enum"
@@ -11,22 +11,32 @@ repository = "https://github.com/haydnv/tinychain.git"
 keywords = ["chain", "collection", "object", "scalar", "generic"]
 categories = ["data-structures"]
 
+[features]
+collection = ["tc-collection"]
+btree = ["tc-collection/btree", "tc-chain/btree", "collection"]
+table = ["tc-collection/btree", "tc-collection/table", "tc-chain/table", "collection"]
+tensor = ["tc-collection/tensor", "tc-chain/tensor", "collection"]
+chain = ["tc-chain", "collection"]
+opencl = ["tc-collection/opencl", "tc-chain/opencl"]
+
 [dependencies]
 async-hash = "0.5"
 async-trait = "0.1"
 bytes = "1.5"
-destream = "0.7"
+destream = "0.8"
 futures = "0.3"
 get-size = "0.1"
 get-size-derive = "0.1"
 log = "0.4"
 num_cpus = "1.16"
 safecast = "0.2"
-tc-chain = "0.4"
-tc-collection = "0.4"
-tc-error = "0.11"
-tc-fs = "0.4"
-tc-scalar = "0.4"
-tc-transact = "0.20"
-tc-value = "0.12"
-tcgeneric = "0.10"
+tbon = "0.6"
+tc-chain = { version = "0.5", optional = true }
+tc-collection = { version = "0.5", optional = true }
+tc-error = "0.12"
+tc-scalar = "0.5"
+tc-transact = "0.21"
+tc-value = "0.13"
+tcgeneric = "0.11"
+tokio = { version = "1.39", features = ["fs"] }
+tokio-util = "0.7"

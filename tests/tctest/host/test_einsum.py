@@ -7,8 +7,6 @@ import unittest
 
 from .base import HostTest
 
-ENDPOINT = "/transact/hypothetical"
-
 
 class EinsumTests(HostTest):
     def testExpandDims(self):
@@ -16,7 +14,7 @@ class EinsumTests(HostTest):
         cxt.dense = tc.tensor.Dense.arange([2, 3], 0, 6)
         cxt.result = cxt.dense.expand_dims(1)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = expect_dense(np.arange(0, 6).reshape([2, 1, 3]))
         self.assertEqual(actual, expected)
 
@@ -24,7 +22,7 @@ class EinsumTests(HostTest):
         cxt.dense = tc.tensor.Dense.arange([2, 3], 0, 6)
         cxt.result = cxt.dense.expand_dims(2)
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = expect_dense(np.arange(0, 6).reshape([2, 3, 1]))
         self.assertEqual(actual, expected)
 
@@ -33,7 +31,7 @@ class EinsumTests(HostTest):
         cxt.dense = tc.tensor.Dense.arange([3, 2], 0, 6)
         cxt.result = cxt.dense.transpose()
 
-        actual = self.host.post(ENDPOINT, cxt)
+        actual = self.host.hypothetical(cxt)
         expected = np.transpose(np.arange(0, 6).reshape([3, 2]))
         expected = expect_dense(expected)
         self.assertEqual(actual, expected)
@@ -134,7 +132,7 @@ class EinsumTests(HostTest):
 
         # tc.print_json(cxt)
 
-        result = self.host.post(ENDPOINT, cxt)
+        result = self.host.hypothetical(cxt)
 
         expected = np.einsum(fmt, *[np.array(t) for t in tensors])
         expected = expect_fn(expected) if expected.shape else expected

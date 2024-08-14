@@ -23,6 +23,10 @@ mod map;
 mod time;
 mod tuple;
 
+pub mod link {
+    pub use pathlink::{Address, Host, Link, Protocol, ToUrl};
+}
+
 /// A pinned future
 pub type TCBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 

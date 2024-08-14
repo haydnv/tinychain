@@ -2,10 +2,8 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use log::debug;
-use safecast::{AsType, TryCastFrom};
+use safecast::TryCastFrom;
 
-use tc_collection::btree::Node as BTreeNode;
-use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
 use tc_collection::Collection;
 use tc_scalar::Scalar;
 use tc_transact::fs;
@@ -13,7 +11,7 @@ use tc_transact::public::*;
 use tc_transact::Transaction;
 use tcgeneric::{PathSegment, TCPath};
 
-use super::{BlockChain, Chain, ChainBlock, ChainInstance, ChainType};
+use super::{BlockChain, CacheBlock, Chain, ChainInstance, ChainType};
 
 impl<State: StateInstance> Route<State> for ChainType {
     fn route<'a>(&'a self, _path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
@@ -40,7 +38,7 @@ where
     State: StateInstance,
     C: ChainInstance<State, T> + Send + Sync + 'a,
     T: Route<State> + fmt::Debug + 'a,
-    Chain<State, T>: ChainInstance<State, T>,
+    Chain<State, State::Txn, State::FE, T>: ChainInstance<State, T>,
 {
     fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
     where
@@ -59,8 +57,10 @@ where
                 Some(put_handler) => Some(Box::new(|txn, key, value| {
                     Box::pin(async move {
                         debug!("Chain::put {} <- {:?}", key, value);
+
                         self.chain
                             .append_put(txn.clone(), key.clone(), value.clone())?;
+
                         put_handler(txn, key, value).await
                     })
                 })),
@@ -98,7 +98,7 @@ where
     }
 }
 
-impl<State, T> Route<State> for Chain<State, T>
+impl<State, T> Route<State> for Chain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + Clone + fmt::Debug,
@@ -115,15 +115,10 @@ where
     }
 }
 
-impl<State, T> Route<State> for BlockChain<State, T>
+impl<State, T> Route<State> for BlockChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + Clone + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,

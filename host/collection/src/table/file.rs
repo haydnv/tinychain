@@ -760,7 +760,7 @@ where
                 panic!("cannot commit finalized version {}", txn_id);
             } else if !state.commits.insert(txn_id) {
                 // prevent any pending version being created at this txn
-                assert!(state.pending.contains_key(&txn_id));
+                assert!(!state.pending.contains_key(&txn_id));
                 log::warn!("duplicate commit at {}", txn_id);
                 None
             } else {
@@ -836,7 +836,7 @@ where
                 }
             }
 
-            while let Some(version_id) = state.commits.first().map(|id| **id) {
+            while let Some(version_id) = state.commits.first().map(|id| *id) {
                 if &version_id <= txn_id {
                     state.commits.pop_first();
                 } else {
@@ -1199,15 +1199,8 @@ where
     }
 }
 
-impl<Txn, FE> fmt::Debug for TableFile<Txn, FE>
-where
-    Self: TableInstance,
-{
+impl<Txn, FE> fmt::Debug for TableFile<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "a relational database table with schema {:?}",
-            self.schema()
-        )
+        f.write_str("a relational database table")
     }
 }

@@ -4,16 +4,17 @@ use std::marker::PhantomData;
 use std::ops::{Div, Rem};
 use std::{fmt, iter};
 
-use async_hash::{Digest, Hash, Output};
 use async_trait::async_trait;
 use collate::Collator;
 use destream::{de, en};
+use freqfs::FileSave;
 use futures::TryFutureExt;
 use log::debug;
 use safecast::{AsType, CastFrom, CastInto, TryCastFrom, TryCastInto};
 use smallvec::SmallVec;
 
 use tc_error::*;
+use tc_transact::hash::{Digest, Hash, Output};
 use tc_transact::lock::{PermitRead, PermitWrite};
 use tc_transact::{fs, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Number, NumberType, Value, ValueType};
@@ -594,7 +595,11 @@ impl<Txn, FE> Dense<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for Dense<Txn, FE> {
+impl<Txn, FE> Instance for Dense<Txn, FE>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+{
     type Class = TensorType;
 
     fn class(&self) -> Self::Class {
@@ -716,7 +721,7 @@ impl<Txn, FE> From<Dense<Txn, FE>> for DenseView<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Dense<Txn, FE> {
+impl<Txn, FE> fmt::Debug for Dense<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Base(base) => base.fmt(f),
@@ -746,7 +751,11 @@ impl<Txn, FE> Sparse<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for Sparse<Txn, FE> {
+impl<Txn, FE> Instance for Sparse<Txn, FE>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+{
     type Class = TensorType;
 
     fn class(&self) -> Self::Class {
@@ -843,7 +852,7 @@ impl<Txn, FE> From<Sparse<Txn, FE>> for SparseView<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Sparse<Txn, FE> {
+impl<Txn, FE> fmt::Debug for Sparse<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Base(base) => base.fmt(f),
@@ -867,7 +876,11 @@ impl<Txn, FE> Clone for Tensor<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for Tensor<Txn, FE> {
+impl<Txn, FE> Instance for Tensor<Txn, FE>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+{
     type Class = TensorType;
 
     fn class(&self) -> Self::Class {
@@ -1820,7 +1833,7 @@ impl<Txn, FE> From<Tensor<Txn, FE>> for TensorView<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> fmt::Debug for Tensor<Txn, FE> {
+impl<Txn, FE> fmt::Debug for Tensor<Txn, FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Dense(this) => this.fmt(f),
@@ -1843,7 +1856,11 @@ impl<Txn, FE> Clone for TensorBase<Txn, FE> {
     }
 }
 
-impl<Txn: ThreadSafe, FE: ThreadSafe> Instance for TensorBase<Txn, FE> {
+impl<Txn, FE> Instance for TensorBase<Txn, FE>
+where
+    Txn: Send + Sync,
+    FE: Send + Sync,
+{
     type Class = TensorType;
 
     fn class(&self) -> Self::Class {
@@ -1904,7 +1921,7 @@ where
 impl<Txn, FE> fs::Persist<FE> for TensorBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<Node> + Clone,
 {
     type Txn = Txn;
     type Schema = (TensorType, Schema);
@@ -1955,7 +1972,7 @@ where
 impl<Txn, FE> fs::CopyFrom<FE, TensorView<Txn, FE>> for TensorBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<Node> + Clone,
 {
     async fn copy_from(
         txn: &Txn,
@@ -1981,7 +1998,7 @@ where
 impl<Txn, FE> fs::Restore<FE> for TensorBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<Node> + Clone,
 {
     async fn restore(&self, txn_id: TxnId, backup: &Self) -> TCResult<()> {
         match (self, backup) {
@@ -1996,7 +2013,7 @@ where
 impl<Txn, FE> de::FromStream for TensorBase<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<Node> + Clone,
 {
     type Context = Txn;
 
@@ -2056,7 +2073,7 @@ impl<Txn, FE> TensorVisitor<Txn, FE> {
 impl<Txn, FE> de::Visitor for TensorVisitor<Txn, FE>
 where
     Txn: Transaction<FE>,
-    FE: DenseCacheFile + AsType<Node> + Clone,
+    FE: for<'a> FileSave<'a> + DenseCacheFile + AsType<Node> + Clone,
 {
     type Value = TensorBase<Txn, FE>;
 

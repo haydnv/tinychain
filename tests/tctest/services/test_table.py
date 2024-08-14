@@ -9,7 +9,7 @@ from ..process import DEFAULT_PORT
 LEAD = f"http://127.0.0.1:{DEFAULT_PORT}"
 NS = tc.URI("/test_table")
 SCHEMA = tc.table.Schema(
-    [tc.Column("name", tc.String, 512)], [tc.Column("views", tc.UInt)]
+    [tc.Column("name", tc.String, 512)], [tc.Column("views", tc.UInt)],
 ).create_index("views", ["views"])
 
 
@@ -27,7 +27,7 @@ class TableChainTests(PersistenceTest, unittest.TestCase):
 
         return Persistent()
 
-    def execute(self, _actor, hosts):
+    def execute(self, hosts):
         row1 = ["one", 1]
         row2 = ["two", 2]
 
@@ -40,7 +40,7 @@ class TableChainTests(PersistenceTest, unittest.TestCase):
 
         hosts[1].stop()
         hosts[2].put(endpoint, ["two"], [2])
-        hosts[1].start()
+        hosts[1].start(wait_time=10)
 
         for host in hosts:
             actual = host.get(endpoint, ["one"])
@@ -51,7 +51,7 @@ class TableChainTests(PersistenceTest, unittest.TestCase):
 
         hosts[2].stop()
         self.assertIsNone(hosts[1].delete(endpoint, ["one"]))
-        hosts[2].start()
+        hosts[2].start(wait_time=10)
 
         for i in range(len(hosts)):
             actual = hosts[i].get(endpoint)

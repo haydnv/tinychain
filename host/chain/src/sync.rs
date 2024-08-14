@@ -2,31 +2,30 @@
 //! event of a transaction failure.
 
 use std::fmt;
+use std::marker::PhantomData;
 
-use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use destream::{de, FromStream};
-use freqfs::{FileLock, FileWriteGuard};
+use freqfs::{FileLock, FileSave, FileWriteGuard};
 use futures::TryFutureExt;
 use get_size::GetSize;
 use log::{debug, trace};
 use safecast::{AsType, TryCastFrom, TryCastInto};
 
-use tc_collection::btree::Node as BTreeNode;
-use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
 use tc_collection::Collection;
 use tc_error::*;
 use tc_scalar::Scalar;
-use tc_transact::fs;
+use tc_transact::hash::{AsyncHash, Output, Sha256};
 use tc_transact::lock::TxnTaskQueue;
 use tc_transact::public::{Route, StateInstance};
-use tc_transact::{AsyncHash, IntoView, RPCClient, Transact, Transaction, TxnId};
+use tc_transact::{fs, Replicate};
+use tc_transact::{Gateway, IntoView, Transact, Transaction, TxnId};
 use tc_value::{Link, Value};
-use tcgeneric::{label, Label};
+use tcgeneric::{label, Id, Label};
 
 use crate::data::{MutationPending, MutationRecord, StoreEntry};
 
-use super::{new_queue, null_hash, ChainBlock, ChainInstance, Recover};
+use super::{new_queue, null_hash, CacheBlock, ChainBlock, ChainInstance, Recover};
 
 const BLOCKS: Label = label(".blocks");
 const COMMITTED: &str = "committed.chain_block";
@@ -34,15 +33,30 @@ const STORE: Label = label(".store");
 
 /// A [`super::Chain`] which keeps only the data needed to recover the state of its subject in the
 /// event of a transaction failure.
-#[derive(Clone)]
-pub struct SyncChain<State: StateInstance, T> {
-    committed: FileLock<State::FE>,
-    queue: TxnTaskQueue<MutationPending<State::Txn, State::FE>, TCResult<MutationRecord>>,
-    store: super::data::Store<State::Txn, State::FE>,
+pub struct SyncChain<State, Txn, FE, T> {
+    committed: FileLock<FE>,
+    queue: TxnTaskQueue<MutationPending<Txn, FE>, TCResult<MutationRecord>>,
+    store: super::data::Store<Txn, FE>,
     subject: T,
+    state: PhantomData<State>,
 }
 
-impl<State, T> SyncChain<State, T>
+impl<State, Txn, FE, T> Clone for SyncChain<State, Txn, FE, T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            committed: self.committed.clone(),
+            queue: self.queue.clone(),
+            store: self.store.clone(),
+            subject: self.subject.clone(),
+            state: self.state,
+        }
+    }
+}
+
+impl<State, T> SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
@@ -74,20 +88,21 @@ where
     }
 }
 
-impl<State, T> SyncChain<State, T>
+impl<State, T> SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: AsType<ChainBlock>,
     T: fs::Persist<State::FE, Txn = State::Txn> + fs::Restore<State::FE> + TryCastFrom<State>,
+    Self: TryCastFrom<State>,
 {
-    pub async fn restore_from(&self, txn: &State::Txn, source: Link) -> TCResult<()> {
+    pub async fn restore_from(&self, txn: &State::Txn, source: Link, attr: Id) -> TCResult<()> {
         debug!("restore {self:?} from {source}");
 
-        let backup = txn.get(source, Value::default()).await?;
-        let backup =
+        let backup = txn.get(source, attr).await?;
+        let backup: Self =
             backup.try_cast_into(|backup| bad_request!("{:?} is not a valid backup", backup))?;
 
-        self.subject.restore(*txn.id(), &backup).await?;
+        self.subject.restore(*txn.id(), &backup.subject).await?;
 
         let mut committed = self.committed.write().await?;
 
@@ -97,10 +112,10 @@ where
     }
 }
 
-impl<State, T> ChainInstance<State, T> for SyncChain<State, T>
+impl<State, T> ChainInstance<State, T> for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode>,
+    State::FE: CacheBlock,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
@@ -124,18 +139,43 @@ where
 }
 
 #[async_trait]
-impl<State, T> AsyncHash for SyncChain<State, T>
+impl<State, T> Replicate<State::Txn> for SyncChain<State, State::Txn, State::FE, T>
+where
+    State: StateInstance,
+    State::FE: AsType<ChainBlock>,
+    T: fs::Persist<State::FE, Txn = State::Txn>
+        + fs::Restore<State::FE>
+        + TryCastFrom<State>
+        + AsyncHash
+        + Send
+        + Sync,
+    Self: TryCastFrom<State>,
+{
+    async fn replicate(&self, txn: &State::Txn, mut source: Link) -> TCResult<Output<Sha256>> {
+        let attr = source
+            .path_mut()
+            .pop()
+            .ok_or_else(|| bad_request!("invalid replica link: {source}"))?;
+
+        self.restore_from(txn, source, attr).await?;
+
+        AsyncHash::hash(self, *txn.id()).await
+    }
+}
+
+#[async_trait]
+impl<State, T> AsyncHash for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     T: AsyncHash + Send + Sync,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         self.subject.hash(txn_id).await
     }
 }
 
 #[async_trait]
-impl<State, T> Transact for SyncChain<State, T>
+impl<State, T> Transact for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
@@ -181,14 +221,10 @@ where
 }
 
 #[async_trait]
-impl<State, T> fs::Persist<State::FE> for SyncChain<State, T>
+impl<State, T> fs::Persist<State::FE> for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Send + Sync,
 {
     type Txn = State::Txn;
@@ -229,6 +265,7 @@ where
             queue,
             committed,
             store,
+            state: PhantomData,
         })
     }
 
@@ -269,6 +306,7 @@ where
             queue,
             committed,
             store,
+            state: PhantomData,
         })
     }
 
@@ -278,18 +316,13 @@ where
 }
 
 #[async_trait]
-impl<State, T> Recover<State::FE> for SyncChain<State, T>
+impl<State, T> Recover<State::FE> for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Scalar>,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<TensorNode>
-        + AsType<ChainBlock>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: Route<State> + fmt::Debug + Send + Sync,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
-    BTreeNode: freqfs::FileLoad,
 {
     type Txn = State::Txn;
 
@@ -309,14 +342,10 @@ where
 }
 
 #[async_trait]
-impl<State, T> fs::CopyFrom<State::FE, Self> for SyncChain<State, T>
+impl<State, T> fs::CopyFrom<State::FE, Self> for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: fs::Persist<State::FE, Txn = State::Txn> + Route<State> + fmt::Debug,
 {
     async fn copy_from(
@@ -329,10 +358,10 @@ where
 }
 
 #[async_trait]
-impl<State, T> de::FromStream for SyncChain<State, T>
+impl<State, T> de::FromStream for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<BTreeNode> + AsType<ChainBlock> + AsType<TensorNode>,
+    State::FE: CacheBlock + for<'a> FileSave<'a>,
     T: FromStream<Context = State::Txn>,
 {
     type Context = State::Txn;
@@ -384,12 +413,13 @@ where
             queue,
             committed,
             store,
+            state: PhantomData,
         })
     }
 }
 
 #[async_trait]
-impl<'en, State, T> IntoView<'en, State::FE> for SyncChain<State, T>
+impl<'en, State, T> IntoView<'en, State::FE> for SyncChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     T: IntoView<'en, State::FE, Txn = State::Txn> + Send + Sync,
@@ -402,10 +432,7 @@ where
     }
 }
 
-impl<State, T> fmt::Debug for SyncChain<State, T>
-where
-    State: StateInstance,
-{
+impl<State, Txn, FE, T> fmt::Debug for SyncChain<State, Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "SyncChain<{}>", std::any::type_name::<T>())
     }

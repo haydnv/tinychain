@@ -17,7 +17,7 @@ use safecast::{CastFrom, CastInto, Match, TryCastFrom, TryCastInto};
 
 use tc_error::*;
 use tc_transact::public::{Public, StateInstance, ToState};
-use tc_transact::RPCClient;
+use tc_transact::Gateway;
 use tc_value::Value;
 use tcgeneric::*;
 
@@ -506,6 +506,7 @@ where
             Self::Post((subject, params)) => match subject {
                 Subject::Link(link) => {
                     let params = resolve(Scalar::Map(params), context, txn).await?;
+                    let params = Map::<State>::try_from(params)?;
                     txn.post(link, params).await
                 }
                 Subject::Ref(id_ref, path) => {

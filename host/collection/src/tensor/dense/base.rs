@@ -256,7 +256,9 @@ where
 
 impl<Txn, FE, T> Instance for DenseBase<Txn, FE, T>
 where
-    Self: Send + Sync,
+    Txn: Send + Sync,
+    FE: Send + Sync,
+    T: Send + Sync,
 {
     type Class = TensorType;
 
@@ -467,7 +469,7 @@ where
                 panic!("cannot commit finalized version {}", txn_id);
             } else if !state.commits.insert(txn_id) {
                 // prevent any pending version being created at this txn
-                assert!(state.pending.contains_key(&txn_id));
+                assert!(!state.pending.contains_key(&txn_id));
                 warn!("duplicate commit at {}", txn_id);
                 None
             } else {
@@ -542,7 +544,7 @@ where
                 }
             }
 
-            while let Some(version_id) = state.commits.first().map(|id| **id) {
+            while let Some(version_id) = state.commits.first().map(|id| *id) {
                 if &version_id <= txn_id {
                     state.commits.pop_first();
                 } else {
@@ -708,19 +710,9 @@ impl<Txn, FE, T: CType> From<DenseBase<Txn, FE, T>> for DenseAccess<Txn, FE, T> 
     }
 }
 
-impl<Txn, FE, T> fmt::Debug for DenseBase<Txn, FE, T>
-where
-    Txn: ThreadSafe,
-    FE: ThreadSafe,
-    T: CType + DType,
-{
+impl<Txn, FE, T> fmt::Debug for DenseBase<Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "transactional dense tensor with shape {:?} and type {:?}",
-            self.shape(),
-            self.dtype()
-        )
+        f.write_str("a transactional dense tensor")
     }
 }
 

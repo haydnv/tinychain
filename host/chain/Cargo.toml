@@ -1,29 +1,34 @@
 [package]
 name = "tc-chain"
 authors = ["code@tinychain.net"]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "TinyChain's BlockChain and SyncChain data structures"
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/haydnv/tinychain.git"
 
+[features]
+btree = ["tc-collection/btree"]
+table = ["tc-collection/table"]
+tensor = ["tc-collection/tensor"]
+opencl = ["tc-collection/opencl"]
+
 [dependencies]
-async-hash = "0.5"
 async-trait = "0.1"
-bytes = "1.3"
-destream = "0.7"
+bytes = "1.7"
+destream = "0.8"
 futures = "0.3"
-freqfs = "0.9"
+freqfs = "0.10"
 get-size = "0.1"
 hex = "0.4"
 log = { version = "0.4" }
 num_cpus = "1.16"
 safecast = "0.2"
-tbon = "0.5"
-tc-collection = "0.4"
-tc-error = "0.11"
-tc-scalar = "0.4"
-tc-transact = "0.20"
-tc-value = "0.12"
-tcgeneric = "0.10"
+tbon = "0.6"
+tc-collection = "0.5"
+tc-error = "0.12"
+tc-scalar = "0.5"
+tc-transact = "0.21"
+tc-value = "0.13"
+tcgeneric = "0.11"

@@ -5,39 +5,43 @@ use destream::{en, EncodeMap};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use futures::TryFutureExt;
 
-use tc_chain::ChainView;
-use tc_collection::CollectionView;
 use tc_error::*;
 use tc_scalar::{OpDef, Scalar};
-use tc_transact::IntoView;
+use tc_transact::{Gateway, IntoView, Transaction};
 use tcgeneric::{Id, NativeClass};
 
 use super::object::ObjectView;
-use super::{StateType, Txn};
+use super::{CacheBlock, StateType};
 
 use super::State;
 
-/// A view of a [`State`] within a single [`Txn`], used for serialization.
+/// A view of a [`State`] within a single transaction, used for serialization.
 pub enum StateView<'en> {
-    Chain(ChainView<'en, CollectionView<'en>>),
+    #[cfg(feature = "chain")]
+    Chain(tc_chain::ChainView<'en, tc_collection::CollectionView<'en>>),
     Closure((HashMap<Id, StateView<'en>>, OpDef)),
-    Collection(CollectionView<'en>),
+    #[cfg(feature = "collection")]
+    Collection(tc_collection::CollectionView<'en>),
     Map(HashMap<Id, StateView<'en>>),
-    Object(Box<ObjectView>),
+    Object(Box<ObjectView<'en>>),
     Scalar(Scalar),
-    // Stream(en::SeqStream<TCResult<StateView<'en>>, TCBoxTryStream<'en, StateView<'en>>>),
     Tuple(Vec<StateView<'en>>),
 }
 
 #[async_trait]
-impl<'en> IntoView<'en, tc_fs::CacheBlock> for State {
+impl<'en, Txn> IntoView<'en, CacheBlock> for State<Txn>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+{
     type Txn = Txn;
     type View = StateView<'en>;
 
     async fn into_view(self, txn: Self::Txn) -> TCResult<Self::View> {
         match self {
+            #[cfg(feature = "chain")]
             Self::Chain(chain) => chain.into_view(txn).map_ok(StateView::Chain).await,
             Self::Closure(closure) => closure.into_view(txn).map_ok(StateView::Closure).await,
+            #[cfg(feature = "collection")]
             Self::Collection(collection) => {
                 collection
                     .into_view(txn)
@@ -61,7 +65,6 @@ impl<'en> IntoView<'en, tc_fs::CacheBlock> for State {
                     .await
             }
             Self::Scalar(scalar) => Ok(StateView::Scalar(scalar)),
-            // Self::Stream(stream) => stream.into_view(txn).map_ok(StateView::Stream).await,
             Self::Tuple(tuple) => {
                 let tuple_view = stream::iter(tuple.into_iter())
                     .map(|state| state.into_view(txn.clone()))
@@ -78,6 +81,7 @@ impl<'en> IntoView<'en, tc_fs::CacheBlock> for State {
 impl<'en> en::IntoStream<'en> for StateView<'en> {
     fn into_stream<E: en::Encoder<'en>>(self, encoder: E) -> Result<E::Ok, E::Error> {
         match self {
+            #[cfg(feature = "chain")]
             Self::Chain(chain) => chain.into_stream(encoder),
             Self::Closure(closure) => {
                 let mut map = encoder.encode_map(Some(1))?;
@@ -85,11 +89,11 @@ impl<'en> en::IntoStream<'en> for StateView<'en> {
                 map.encode_value(closure)?;
                 map.end()
             }
+            #[cfg(feature = "collection")]
             Self::Collection(collection) => collection.into_stream(encoder),
             Self::Map(map) => map.into_stream(encoder),
             Self::Object(object) => object.into_stream(encoder),
             Self::Scalar(scalar) => scalar.into_stream(encoder),
-            // Self::Stream(stream) => stream.into_stream(encoder),
             Self::Tuple(tuple) => tuple.into_stream(encoder),
         }
     }

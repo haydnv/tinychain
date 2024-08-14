@@ -5,57 +5,60 @@
 use std::fmt;
 use std::marker::PhantomData;
 
-use async_hash::{Output, Sha256};
 use async_trait::async_trait;
 use bytes::Bytes;
 use destream::de;
+use freqfs::FileSave;
 use futures::future::TryFutureExt;
 use futures::join;
 use log::debug;
-use safecast::{AsType, TryCastFrom};
+use safecast::{AsType, TryCastFrom, TryCastInto};
 
-use tc_collection::btree::Node as BTreeNode;
-use tc_collection::tensor::{DenseCacheFile, Node as TensorNode};
-use tc_collection::Collection;
+use tc_collection::{Collection, CollectionBase};
 use tc_error::*;
 use tc_scalar::Scalar;
-use tc_transact::fs;
+use tc_transact::hash::{AsyncHash, Output, Sha256};
 use tc_transact::public::{Route, StateInstance};
-use tc_transact::{AsyncHash, IntoView, Transact, Transaction, TxnId};
-use tc_value::Value;
-use tcgeneric::{Map, ThreadSafe, Tuple};
+use tc_transact::{fs, Replicate};
+use tc_transact::{Gateway, IntoView, Transact, Transaction, TxnId};
+use tc_value::{Link, Value};
+use tcgeneric::{Map, Tuple};
 
 use super::data::{ChainBlock, History};
-use super::{ChainInstance, Recover, HISTORY};
+use super::{CacheBlock, ChainInstance, Recover, HISTORY};
 
 /// A `Chain` which stores every mutation of its subject in a series of `ChainBlock`s
-#[derive(Clone)]
-pub struct BlockChain<State: StateInstance, T> {
-    history: History<State>,
+pub struct BlockChain<State, Txn, FE, T> {
+    history: History<State, Txn, FE>,
     subject: T,
 }
 
-impl<State, T> BlockChain<State, T>
+impl<State, Txn, FE, T> Clone for BlockChain<State, Txn, FE, T>
 where
-    State: StateInstance,
+    T: Clone,
 {
-    fn new(subject: T, history: History<State>) -> Self {
+    fn clone(&self) -> Self {
+        Self {
+            history: self.history.clone(),
+            subject: self.subject.clone(),
+        }
+    }
+}
+
+impl<State, Txn, FE, T> BlockChain<State, Txn, FE, T> {
+    fn new(subject: T, history: History<State, Txn, FE>) -> Self {
         Self { subject, history }
     }
 
-    pub fn history(&self) -> &History<State> {
+    pub fn history(&self) -> &History<State, Txn, FE> {
         &self.history
     }
 }
 
-impl<State, T> ChainInstance<State, T> for BlockChain<State, T>
+impl<State, T> ChainInstance<State, T> for BlockChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: Route<State> + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
@@ -74,15 +77,41 @@ where
 }
 
 #[async_trait]
-impl<State, T> fs::Persist<State::FE> for BlockChain<State, T>
+impl<State> Replicate<State::Txn>
+    for BlockChain<State, State::Txn, State::FE, CollectionBase<State::Txn, State::FE>>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + ThreadSafe
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock,
+    State: From<Collection<State::Txn, State::FE>> + From<Scalar>,
+    Collection<State::Txn, State::FE>: TryCastFrom<State>,
+    CollectionBase<State::Txn, State::FE>: Route<State>,
+    Scalar: TryCastFrom<State>,
+    Self: TryCastFrom<State>,
+{
+    async fn replicate(&self, txn: &State::Txn, mut source: Link) -> TCResult<Output<Sha256>> {
+        let attr = source
+            .path_mut()
+            .pop()
+            .ok_or_else(|| bad_request!("invalid replica link: {source}"))?;
+
+        let chain = txn.get(source, attr).await?;
+        let chain: Self = chain.try_cast_into(|s| {
+            bad_request!("expected to replicate a chain of blocks but found {:?}", s,)
+        })?;
+
+        self.history()
+            .replicate(txn, self.subject(), chain.history().clone())
+            .await?;
+
+        AsyncHash::hash(self, *txn.id()).await
+    }
+}
+
+#[async_trait]
+impl<State, T> fs::Persist<State::FE> for BlockChain<State, State::Txn, State::FE, T>
+where
+    State: StateInstance,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: Route<State> + fs::Persist<State::FE, Txn = State::Txn> + fmt::Debug,
 {
     type Txn = State::Txn;
@@ -135,18 +164,13 @@ where
 }
 
 #[async_trait]
-impl<State, T> Recover<State::FE> for BlockChain<State, T>
+impl<State, T> Recover<State::FE> for BlockChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance + From<Collection<State::Txn, State::FE>> + From<Scalar>,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<TensorNode>
-        + AsType<ChainBlock>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: Route<State> + fmt::Debug,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
     Scalar: TryCastFrom<State>,
-    BTreeNode: freqfs::FileLoad,
 {
     type Txn = State::Txn;
 
@@ -169,14 +193,10 @@ where
 }
 
 #[async_trait]
-impl<State, T> fs::CopyFrom<State::FE, Self> for BlockChain<State, T>
+impl<State, T> fs::CopyFrom<State::FE, Self> for BlockChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile
-        + AsType<BTreeNode>
-        + AsType<ChainBlock>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: Route<State> + fs::Persist<State::FE, Txn = State::Txn> + fmt::Debug,
 {
     async fn copy_from(
@@ -189,19 +209,19 @@ where
 }
 
 #[async_trait]
-impl<State, T> AsyncHash for BlockChain<State, T>
+impl<State, T> AsyncHash for BlockChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
     T: Send + Sync,
 {
-    async fn hash(self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
+    async fn hash(&self, txn_id: TxnId) -> TCResult<Output<Sha256>> {
         self.history.hash(txn_id).await
     }
 }
 
 #[async_trait]
-impl<State, T> Transact for BlockChain<State, T>
+impl<State, T> Transact for BlockChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
     State::FE: AsType<ChainBlock> + for<'a> fs::FileSave<'a>,
@@ -230,17 +250,13 @@ where
 }
 
 #[async_trait]
-impl<State, T> de::FromStream for BlockChain<State, T>
+impl<State, T> de::FromStream for BlockChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance
         + de::FromStream<Context = State::Txn>
         + From<Collection<State::Txn, State::FE>>
         + From<Scalar>,
-    State::FE: DenseCacheFile
-        + AsType<ChainBlock>
-        + AsType<BTreeNode>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: Route<State> + de::FromStream<Context = State::Txn> + fmt::Debug,
     (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
@@ -260,10 +276,10 @@ where
 }
 
 #[async_trait]
-impl<'en, State, T> IntoView<'en, State::FE> for BlockChain<State, T>
+impl<'en, State, T> IntoView<'en, State::FE> for BlockChain<State, State::Txn, State::FE, T>
 where
     State: StateInstance,
-    State::FE: DenseCacheFile + AsType<ChainBlock> + AsType<BTreeNode> + AsType<TensorNode>,
+    State::FE: CacheBlock + for<'a> FileSave<'a>,
     T: IntoView<'en, State::FE, Txn = State::Txn> + Send + Sync,
 {
     type Txn = State::Txn;
@@ -276,44 +292,34 @@ where
     }
 }
 
-impl<State, T> fmt::Debug for BlockChain<State, T>
-where
-    State: StateInstance,
-{
+impl<State, Txn, FE, T> fmt::Debug for BlockChain<State, Txn, FE, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "BlockChain<{}>", std::any::type_name::<T>())
     }
 }
 
-struct ChainVisitor<State: StateInstance, T> {
-    txn: State::Txn,
-    subject: PhantomData<T>,
+struct ChainVisitor<State, Txn, T> {
+    txn: Txn,
+    phantom: PhantomData<(State, T)>,
 }
 
-impl<State, T> ChainVisitor<State, T>
-where
-    State: StateInstance,
-{
-    fn new(txn: State::Txn) -> Self {
+impl<State, Txn, T> ChainVisitor<State, Txn, T> {
+    fn new(txn: Txn) -> Self {
         Self {
             txn,
-            subject: PhantomData,
+            phantom: PhantomData,
         }
     }
 }
 
 #[async_trait]
-impl<State, T> de::Visitor for ChainVisitor<State, T>
+impl<State, T> de::Visitor for ChainVisitor<State, State::Txn, T>
 where
     State: StateInstance
         + de::FromStream<Context = State::Txn>
         + From<Collection<State::Txn, State::FE>>
         + From<Scalar>,
-    State::FE: DenseCacheFile
-        + AsType<ChainBlock>
-        + AsType<BTreeNode>
-        + AsType<TensorNode>
-        + for<'a> fs::FileSave<'a>,
+    State::FE: CacheBlock + for<'a> fs::FileSave<'a>,
     T: Route<State> + de::FromStream<Context = State::Txn> + fmt::Debug,
     (Bytes, Map<Tuple<State>>): TryCastFrom<State>,
     Collection<State::Txn, State::FE>: TryCastFrom<State>,
@@ -322,7 +328,7 @@ where
     (Value,): TryCastFrom<State>,
     (Value, State): TryCastFrom<State>,
 {
-    type Value = BlockChain<State, T>;
+    type Value = BlockChain<State, State::Txn, State::FE, T>;
 
     fn expecting() -> &'static str {
         "a BlockChain"
@@ -334,7 +340,10 @@ where
 
         let txn = self.txn.subcontext(HISTORY);
 
-        let history = seq.next_element::<History<State>>(txn).await?;
+        let history = seq
+            .next_element::<History<State, State::Txn, State::FE>>(txn)
+            .await?;
+
         let history =
             history.ok_or_else(|| de::Error::invalid_length(1, "a BlockChain history"))?;
 

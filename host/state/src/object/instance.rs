@@ -2,6 +2,7 @@
 
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::marker::PhantomData;
 use std::ops::Deref;
 
 use log::debug;
@@ -9,42 +10,62 @@ use safecast::TryCastFrom;
 
 use tc_scalar::Scalar;
 use tc_transact::public::ToState;
+use tc_transact::{Gateway, Transaction};
 use tc_value::Value;
 use tcgeneric::Map;
 
-use crate::State;
+use crate::{CacheBlock, State};
 
 use super::{InstanceClass, Object};
 
 /// A user-defined instance, subclassing `T`.
-#[derive(Clone)]
-pub struct InstanceExt<T: tcgeneric::Instance> {
+pub struct InstanceExt<Txn, T> {
     parent: Box<T>,
     class: InstanceClass,
-    members: Map<State>,
+    members: Map<State<Txn>>,
+    txn: PhantomData<Txn>, // needed to compile when the collection feature flag is off
 }
 
-impl<T: tcgeneric::Instance> InstanceExt<T> {
+impl<Txn, T> Clone for InstanceExt<Txn, T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            parent: self.parent.clone(),
+            class: self.class.clone(),
+            members: self.members.clone(),
+            txn: self.txn,
+        }
+    }
+}
+
+impl<Txn, T> InstanceExt<Txn, T>
+where
+    T: tcgeneric::Instance,
+{
     /// Construct a new instance of the given user-defined [`InstanceClass`].
-    pub fn new(parent: T, class: InstanceClass) -> InstanceExt<T> {
+    pub fn new(parent: T, class: InstanceClass) -> Self {
         InstanceExt {
             parent: Box::new(parent),
             class,
             members: Map::default(),
+            txn: PhantomData,
         }
     }
 
     /// Construct a new instance of an anonymous class.
-    pub fn anonymous(parent: T, class: InstanceClass, members: Map<State>) -> InstanceExt<T> {
+    pub fn anonymous(parent: T, class: InstanceClass, members: Map<State<Txn>>) -> Self {
         InstanceExt {
             parent: Box::new(parent),
             class,
             members,
+            txn: PhantomData,
         }
     }
 
     /// Borrow the members of this instance.
-    pub fn members(&self) -> &Map<State> {
+    pub fn members(&self) -> &Map<State<Txn>> {
         &self.members
     }
 
@@ -61,7 +82,7 @@ impl<T: tcgeneric::Instance> InstanceExt<T> {
     /// Convert the native type of this instance, if possible.
     pub fn try_into<E, O: tcgeneric::Instance + TryFrom<T, Error = E>>(
         self,
-    ) -> Result<InstanceExt<O>, E> {
+    ) -> Result<InstanceExt<Txn, O>, E> {
         let class = self.class;
         let parent = (*self.parent).try_into()?;
 
@@ -69,11 +90,16 @@ impl<T: tcgeneric::Instance> InstanceExt<T> {
             parent: Box::new(parent),
             class,
             members: self.members,
+            txn: self.txn,
         })
     }
 }
 
-impl<T: tcgeneric::Instance> tcgeneric::Instance for InstanceExt<T> {
+impl<Txn, T> tcgeneric::Instance for InstanceExt<Txn, T>
+where
+    Txn: Send + Sync,
+    T: tcgeneric::Instance,
+{
     type Class = InstanceClass;
 
     fn class(&self) -> Self::Class {
@@ -81,7 +107,10 @@ impl<T: tcgeneric::Instance> tcgeneric::Instance for InstanceExt<T> {
     }
 }
 
-impl<T: tcgeneric::Instance> Deref for InstanceExt<T> {
+impl<Txn, T> Deref for InstanceExt<Txn, T>
+where
+    T: tcgeneric::Instance,
+{
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -89,51 +118,55 @@ impl<T: tcgeneric::Instance> Deref for InstanceExt<T> {
     }
 }
 
-impl<T: tcgeneric::Instance + fmt::Debug> TryCastFrom<InstanceExt<T>> for Scalar
+impl<Txn, T> TryCastFrom<InstanceExt<Txn, T>> for Scalar
 where
+    T: fmt::Debug,
     Scalar: TryCastFrom<T>,
 {
-    fn can_cast_from(instance: &InstanceExt<T>) -> bool {
+    fn can_cast_from(instance: &InstanceExt<Txn, T>) -> bool {
         debug!("Scalar::can_cast_from {:?}?", instance);
         Self::can_cast_from(&(*instance).parent)
     }
 
-    fn opt_cast_from(instance: InstanceExt<T>) -> Option<Self> {
+    fn opt_cast_from(instance: InstanceExt<Txn, T>) -> Option<Self> {
         Self::opt_cast_from(*instance.parent)
     }
 }
 
-impl<T: tcgeneric::Instance + fmt::Debug> TryCastFrom<InstanceExt<T>> for Value
+impl<Txn, T> TryCastFrom<InstanceExt<Txn, T>> for Value
 where
+    T: fmt::Debug,
     Value: TryCastFrom<T>,
 {
-    fn can_cast_from(instance: &InstanceExt<T>) -> bool {
+    fn can_cast_from(instance: &InstanceExt<Txn, T>) -> bool {
         debug!("Value::can_cast_from {:?}?", instance);
         Self::can_cast_from(&(*instance).parent)
     }
 
-    fn opt_cast_from(instance: InstanceExt<T>) -> Option<Self> {
+    fn opt_cast_from(instance: InstanceExt<Txn, T>) -> Option<Self> {
         Self::opt_cast_from(*instance.parent)
     }
 }
 
-impl<T: tcgeneric::Instance + ToState<State>> ToState<State> for InstanceExt<T> {
-    fn to_state(&self) -> State {
-        let parent = Box::new(self.parent.to_state());
-        let class = self.class.clone();
-        let members = self.members.clone();
+impl<Txn, T> ToState<State<Txn>> for InstanceExt<Txn, T>
+where
+    Txn: Transaction<CacheBlock> + Gateway<State<Txn>>,
+    T: tcgeneric::Instance + ToState<State<Txn>>,
+{
+    fn to_state(&self) -> State<Txn> {
         let instance = InstanceExt {
-            parent,
-            class,
-            members,
+            parent: Box::new(self.parent.to_state()),
+            class: self.class.clone(),
+            members: self.members.clone(),
+            txn: self.txn,
         };
 
         State::Object(Object::Instance(instance))
     }
 }
 
-impl<T: tcgeneric::Instance + fmt::Debug> fmt::Debug for InstanceExt<T> {
+impl<Txn, T> fmt::Debug for InstanceExt<Txn, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?} instance", tcgeneric::Instance::class(self))
+        write!(f, "instance of {}", std::any::type_name::<T>())
     }
 }
