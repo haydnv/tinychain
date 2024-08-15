@@ -1,5 +1,5 @@
-FROM ubuntu:20.04
-LABEL Name=tinychain Version=0.0.2
+FROM ubuntu:24.04
+LABEL Name=tinychain Version=0.0.3
 ARG CRATE=""
 ARG TZ=America/New_York
 

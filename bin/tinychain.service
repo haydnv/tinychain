@@ -6,7 +6,7 @@ After=network.target
 
 [Service]
 User=tinychain  # change this as needed
-ExecStart=/usr/local/bin/tinychain  # change this as needed
+ExecStart=/usr/local/bin/tinychain --data_dir=/tmp/data  # change this as needed
 Restart=always
 
 [Install]

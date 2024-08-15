@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tc_error::*;
 use tc_value::uuid::Uuid;
-use tc_value::{Number, TCString, Value};
+use tc_value::{Number, TCString, Value, ValueType};
 use tcgeneric::{label, Id, Label, Map, PathSegment, Tuple};
 
 use super::helpers::SelfHandler;
@@ -103,13 +103,39 @@ impl<'a, State: StateInstance> Handler<'a, State> for UuidHandler<'a> {
     }
 }
 
+struct StaticHandler {
+    class: ValueType,
+}
+
+impl<'a, State: StateInstance> Handler<'a, State> for StaticHandler {
+    fn get<'b>(self: Box<Self>) -> Option<GetHandler<'a, 'b, State::Txn, State>>
+    where
+        'b: 'a,
+    {
+        Some(Box::new(|_txn, key| {
+            Box::pin(async move { self.class.try_cast(key).map(State::from) })
+        }))
+    }
+}
+
+impl<'a> From<ValueType> for StaticHandler {
+    fn from(class: ValueType) -> Self {
+        Self { class }
+    }
+}
+
 pub struct Static;
 
 impl<State: StateInstance> Route<State> for Static {
     fn route<'a>(&'a self, path: &'a [PathSegment]) -> Option<Box<dyn Handler<'a, State> + 'a>> {
-        if path.is_empty() {
-            return None;
+        if let Some(class) = ValueType::from_suffix(path) {
+            return Some(Box::new(StaticHandler::from(class)));
         }
+
+        assert!(
+            !path.is_empty(),
+            "failed to parse ValueType::Value from an empty path"
+        );
 
         match path[0].as_str() {
             "bytes" | "id" | "string" if path.len() == 2 => match path[1].as_str() {

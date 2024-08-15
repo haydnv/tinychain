@@ -20,7 +20,8 @@ use super::number::{ComplexType, FloatType, IntType, NumberClass, NumberType, UI
 use super::value::Value;
 use super::version::Version;
 
-const PREFIX: PathLabel = path_label(&["state", "scalar", "value"]);
+/// The path prefix of a [`ValueType`].
+pub const PREFIX: PathLabel = path_label(&["state", "scalar", "value"]);
 
 /// The class of a [`Value`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,6 +39,73 @@ pub enum ValueType {
 }
 
 impl ValueType {
+    /// Parse a [`ValueType`] from a path suffix.
+    pub fn from_suffix(suffix: &[PathSegment]) -> Option<Self> {
+        debug!("ValueType::from_suffix {}", TCPath::from(suffix));
+
+        use ComplexType as CT;
+        use FloatType as FT;
+        use IntType as IT;
+        use NumberType as NT;
+        use UIntType as UT;
+
+        if suffix.is_empty() {
+            Some(Self::default())
+        } else if suffix.len() == 1 {
+            match suffix[0].as_str() {
+                "bytes" => Some(Self::Bytes),
+                "email" => Some(Self::Email),
+                "id" => Some(Self::Id),
+                "link" => Some(Self::Link),
+                "number" => Some(Self::Number(NT::Number)),
+                "none" => Some(Self::None),
+                "string" => Some(Self::String),
+                "tuple" => Some(Self::Tuple),
+                "version" => Some(Self::Version),
+                _ => None,
+            }
+        } else if suffix.len() == 2 && &suffix[0] == "number" {
+            match suffix[1].as_str() {
+                "bool" => Some(Self::Number(NT::Bool)),
+                "complex" => Some(Self::Number(NT::Complex(CT::Complex))),
+                "float" => Some(Self::Number(NT::Float(FT::Float))),
+                "int" => Some(Self::Number(NT::Int(IT::Int))),
+                "uint" => Some(Self::Number(NT::UInt(UT::UInt))),
+                _ => None,
+            }
+        } else if suffix.len() == 3 && &suffix[0] == "number" {
+            match suffix[1].as_str() {
+                "complex" => match suffix[2].as_str() {
+                    "32" => Some(Self::Number(NT::Complex(CT::C32))),
+                    "64" => Some(Self::Number(NT::Complex(CT::C64))),
+                    _ => None,
+                },
+                "float" => match suffix[2].as_str() {
+                    "32" => Some(Self::Number(NT::Float(FT::F32))),
+                    "64" => Some(Self::Number(NT::Float(FT::F64))),
+                    _ => None,
+                },
+                "int" => match suffix[2].as_str() {
+                    "16" => Some(Self::Number(NT::Int(IT::I16))),
+                    "32" => Some(Self::Number(NT::Int(IT::I32))),
+                    "64" => Some(Self::Number(NT::Int(IT::I64))),
+                    _ => None,
+                },
+                "uint" => match suffix[2].as_str() {
+                    "8" => Some(Self::Number(NT::UInt(UT::U8))),
+                    "16" => Some(Self::Number(NT::UInt(UT::U16))),
+                    "32" => Some(Self::Number(NT::UInt(UT::U32))),
+                    "64" => Some(Self::Number(NT::UInt(UT::U64))),
+                    _ => None,
+                },
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Return the fixed size of this [`ValueType`] in memory, if it has a fixed size.
     pub fn size(&self) -> Option<usize> {
         match self {
             Self::Number(nt) => Some(nt.size()),
@@ -45,6 +113,7 @@ impl ValueType {
         }
     }
 
+    /// Try to cast the given `value` into this [`ValueType`].
     pub fn try_cast<V>(&self, value: V) -> TCResult<Value>
     where
         Value: From<V>,
@@ -120,67 +189,8 @@ impl NativeClass for ValueType {
     fn from_path(path: &[PathSegment]) -> Option<Self> {
         debug!("ValueType::from_path {}", TCPath::from(path));
 
-        use ComplexType as CT;
-        use FloatType as FT;
-        use IntType as IT;
-        use NumberType as NT;
-        use UIntType as UT;
-
         if path.len() >= 3 && &path[..3] == &PREFIX[..] {
-            if path.len() == 3 {
-                Some(Self::default())
-            } else if path.len() == 4 {
-                match path[3].as_str() {
-                    "bytes" => Some(Self::Bytes),
-                    "email" => Some(Self::Email),
-                    "id" => Some(Self::Id),
-                    "link" => Some(Self::Link),
-                    "number" => Some(Self::Number(NT::Number)),
-                    "none" => Some(Self::None),
-                    "string" => Some(Self::String),
-                    "tuple" => Some(Self::Tuple),
-                    "version" => Some(Self::Version),
-                    _ => None,
-                }
-            } else if path.len() == 5 && &path[3] == "number" {
-                match path[4].as_str() {
-                    "bool" => Some(Self::Number(NT::Bool)),
-                    "complex" => Some(Self::Number(NT::Complex(CT::Complex))),
-                    "float" => Some(Self::Number(NT::Float(FT::Float))),
-                    "int" => Some(Self::Number(NT::Int(IT::Int))),
-                    "uint" => Some(Self::Number(NT::UInt(UT::UInt))),
-                    _ => None,
-                }
-            } else if path.len() == 6 && &path[3] == "number" {
-                match path[4].as_str() {
-                    "complex" => match path[5].as_str() {
-                        "32" => Some(Self::Number(NT::Complex(CT::C32))),
-                        "64" => Some(Self::Number(NT::Complex(CT::C64))),
-                        _ => None,
-                    },
-                    "float" => match path[5].as_str() {
-                        "32" => Some(Self::Number(NT::Float(FT::F32))),
-                        "64" => Some(Self::Number(NT::Float(FT::F64))),
-                        _ => None,
-                    },
-                    "int" => match path[5].as_str() {
-                        "16" => Some(Self::Number(NT::Int(IT::I16))),
-                        "32" => Some(Self::Number(NT::Int(IT::I32))),
-                        "64" => Some(Self::Number(NT::Int(IT::I64))),
-                        _ => None,
-                    },
-                    "uint" => match path[5].as_str() {
-                        "8" => Some(Self::Number(NT::UInt(UT::U8))),
-                        "16" => Some(Self::Number(NT::UInt(UT::U16))),
-                        "32" => Some(Self::Number(NT::UInt(UT::U32))),
-                        "64" => Some(Self::Number(NT::UInt(UT::U64))),
-                        _ => None,
-                    },
-                    _ => None,
-                }
-            } else {
-                None
-            }
+            Self::from_suffix(&path[3..])
         } else {
             None
         }

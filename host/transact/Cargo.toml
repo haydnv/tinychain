@@ -1,6 +1,6 @@
 [package]
 name = "tc-transact"
-version = "0.21.0"
+version = "0.21.1"
 authors = ["code@tinychain.net"]
 edition = "2021"
 description = "Traits and locking utilities for a TinyChain transaction."
@@ -25,7 +25,7 @@ rand = "0.8"
 safecast = "0.2"
 sha2 = "0.10"
 tc-error = { version = "0.12", features = ["txn_lock", "txfs"] }
-tc-value = "0.13"
+tc-value = "~0.13.1"
 tcgeneric = "0.11"
 tokio = { version = "1.39", features = ["sync"] }
 txfs = { version = "0.4", features = ["logging"] }
