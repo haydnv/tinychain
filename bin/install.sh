@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# set default argument values
-af_prefix=${af_prefix:-/opt}
-
 # load UBUNTU_CODENAME by sourcing the os-release config file
 . /etc/os-release
 
@@ -54,16 +51,6 @@ do
     echo "installed cargo"
 done
 
-# make sure ArrayFire is installed
-while ! dpkg-query -l arrayfire > /dev/null 2>&1
-do
-    echo "installing ArrayFire (more info: https://arrayfire.org/)"
-    apt-get install -y gnupg2 ca-certificates apt-utils software-properties-common
-    apt-key adv --fetch-key https://repo.arrayfire.com/GPG-PUB-KEY-ARRAYFIRE-2020.PUB
-    echo "deb [arch=amd64] https://repo.arrayfire.com/ubuntu $UBUNTU_CODENAME main" | tee /etc/apt/sources.list.d/arrayfire.list
-    apt-get update && apt-get install -y arrayfire
-done
-
 # make sure the C linker is installed
 while ! dpkg-query -l build-essential > /dev/null 2>&1
 do
@@ -75,7 +62,7 @@ while ! command -v tinychain &> /dev/null
 do
     # install TinyChain
     echo "installing TinyChain"
-    cargo install tinychain --features=tensor
+    cargo install tinychain
 done
 
 echo 'TinyChain installed successfully--remember to run source $HOME/.cargo/env before running the tinychain command'
