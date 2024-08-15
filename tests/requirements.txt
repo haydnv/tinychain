@@ -10,7 +10,7 @@ num2words==0.5.10
 numpy==1.26
 pathspec==0.9.0
 platformdirs==2.5.2
-requests==2.31.0
+requests==2.32.2
 tomli==2.0.1
 torch==2.2.0
 typing_extensions==4.8.0
